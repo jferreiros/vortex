@@ -204,9 +204,10 @@ and the transport can run a whole call tonight.
 - Offline: `FakeClinicClient` answers from `vortex/clinic/fixtures.py`. It
   mirrors the traps in the docs (near-miss surnames, a provider on leave, two
   patients with the same name). Add fixtures when your lane needs a new shape.
-- Live: set `PLATFORM_API_KEY` and `PLATFORM_API_BASE_URL`. `vortex/clinic/client.py`
-  has a `TODO(clinic)` to align field names with `/api/openapi.json` once a
-  key exists; the docs' prose is the only source today.
+- Live: set `PLATFORM_API_KEY` and `PLATFORM_API_BASE_URL`. `vortex/clinic/client.py`,
+  `vortex/contract.py` and the fixtures follow `docs/api/openapi.json`, the
+  platform's own spec. `make try-api` hits every read endpoint and saves each
+  raw response under `api_results/`, so a field-name drift shows up in minutes.
 
 ## Tunnel and endpoint
 
