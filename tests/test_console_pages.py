@@ -46,6 +46,9 @@ async def test_call_page_explains_a_refusal(seeded: Path, user: User) -> None:
     await user.should_see("No action")
     await user.should_see("insurance does not cover")
     await user.should_see("Check the clinic's rules and the insurance matrix")
+    await user.should_see("Timeline")
+    await user.should_see("The socket closed.")
+    await user.should_see("GET /api/v1/availability + GET /api/v1/clinic")
 
 
 async def test_unknown_call_has_an_empty_state(seeded: Path, user: User) -> None:

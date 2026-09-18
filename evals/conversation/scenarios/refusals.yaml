@@ -28,6 +28,36 @@ scenarios:
       must_not_call: [prepare_booking]
       trajectory_contains: [find_patient, build_registration, submit_action]
 
+  - id: p4.new_patient_repeats_field_after_rejection
+    problem: 4
+    # build_registration's rejection is an "ask again" signal (see identity/tools.py
+    # docstring), not a reason to end the call. An unrecognised insurer must still end
+    # in REGISTER once the caller repeats it, never in a no-action hang-up.
+    caller:
+      - says: "Hola, no soy paciente todavía. Me llamo Ana García Pérez y quiero darme de alta."
+        means: {identify: {name: "Ana García Pérez"}, request: {intent: register}, register: {given_name: Ana, first_surname: García, second_surname: Pérez}}
+      - says: "Nací el dos de enero de mil novecientos noventa. DNI uno dos tres cuatro cinco seis siete ocho zeta."
+        means: {identify: {date_of_birth: "1990-01-02", national_id: "12345678Z"}, register: {date_of_birth: "1990-01-02", national_id: "12345678Z"}}
+      - says: "Teléfono seis uno dos cero cero cero uno uno uno. Correo ana punto garcia arroba gmail punto com. Tengo Mutua Madrileña."
+        means: {register: {phone: "+34612000111", email: "ana.garcia@gmail.com", insurer: "Mutua Madrileña"}}
+      - says: "Ah, perdón, no la aceptan. Es Adeslas entonces."
+        means: {register: {insurer: adeslas}}
+      - says: "No, cita no quiero todavía, gracias. Sólo el alta."
+        means: {decline: true, end: true}
+    expect:
+      actions:
+        - kind: register
+          given_name: Ana
+          first_surname: García
+          second_surname: Pérez
+          national_id: "12345678Z"
+          date_of_birth: "1990-01-02"
+          phone: "+34612000111"
+          email: "ana.garcia@gmail.com"
+          insurer: adeslas
+      must_not_call: [prepare_booking]
+      trajectory_contains: [find_patient, build_registration, submit_action]
+
   - id: p6.asisa_physio_refused_with_the_rule
     problem: 6
     caller:

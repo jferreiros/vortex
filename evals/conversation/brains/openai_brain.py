@@ -4,15 +4,20 @@ Text mode is pipecat's fast inner loop: no VAD, no STT, no TTS. The model gets
 the lane's system prompt, the lane's exposed tools and the caller's words, and
 its tool calls go through the real registry against the fake clinic.
 
+Any OpenAI-compatible endpoint plays. A ``ModelSpec`` (``vortex.models``)
+names the endpoint, the key and the request settings the runtime sends, so a
+scenario played through ``route("receptionist")`` measures the model the
+phone line runs, with the same temperature, token cap and reasoning switch.
+
 Interruptions are simulated the way the voice pipeline would leave the
 context: the agent's reply is cut after N words and the caller's next words
 follow it. Silence is a bracketed note the model can react to.
 
-A cassette (``evals/conversation/cassettes/<scenario>.json``) stores every
-model answer keyed by the exact request. ``replay`` mode answers from it and
-never calls the API. A request the cassette does not know means the prompt,
-the tools or the script changed since the recording: the scenario is reported
-*unverified*, never silently passed.
+A cassette (``evals/conversation/cassettes/<model slug>/<scenario>.json``)
+stores every model answer keyed by the exact request. ``replay`` mode answers
+from it and never calls the API. A request the cassette does not know means
+the prompt, the tools or the script changed since the recording: the scenario
+is reported *unverified*, never silently passed.
 """
 
 from __future__ import annotations
@@ -24,18 +29,17 @@ import time
 from pathlib import Path
 from typing import Any
 
-import yaml
-
+from evals.bench.pricing import cost_eur
 from evals.conversation.brains.base import Trace
 from evals.conversation.scenario import CallerTurn, Scenario
 from vortex import tools as registry
 from vortex.conversation.prompt import GREETING, initial_messages
 from vortex.conversation.turns import default_turn_settings
+from vortex.models import ModelSpec, resolve, route
 from vortex.tools import ToolError
 
 CASSETTES_DIR = Path(__file__).resolve().parent.parent / "cassettes"
-PRICING = Path(__file__).resolve().parent.parent.parent / "voice" / "pricing.yaml"
-DEFAULT_MODEL = os.environ.get("OPENAI_LLM_MODEL", "gpt-4.1-mini")
+DEFAULT_OPENAI_MODEL = os.environ.get("OPENAI_LLM_MODEL", "gpt-4.1-mini")
 MAX_TOOL_ROUNDS = 8  # per caller turn; the model must speak eventually
 
 
@@ -68,44 +72,55 @@ class Cassette:
         )
 
 
-def _llm_prices() -> dict[str, dict[str, float]]:
-    try:
-        doc = yaml.safe_load(PRICING.read_text())
-    except OSError:
-        return {}
-    return {k: v for k, v in (doc.get("llm") or {}).items()}
+def spec_for(model: str | None) -> ModelSpec:
+    """What ``--model`` means for the model brain.
+
+    Empty: the runtime's receptionist route. ``provider/model``: that model.
+    A bare name with no slash keeps the old behaviour and means an OpenAI
+    model, so ``--brain openai --model gpt-4.1`` still works.
+    """
+    if not model:
+        return route("receptionist")
+    if "/" in model:
+        return resolve(model)
+    return resolve(f"openai/{model}")
 
 
-def cost_eur(model: str, tokens_in: int, tokens_out: int) -> float:
-    prices = _llm_prices()
-    row = prices.get(model)
-    if not row or "usd_per_1m_input" not in row:
-        return 0.0
-    eur = float(yaml.safe_load(PRICING.read_text()).get("eur_per_usd", 0.92))
-    usd = tokens_in / 1e6 * row["usd_per_1m_input"] + tokens_out / 1e6 * row["usd_per_1m_output"]
-    return usd * eur
-
-
-class OpenAIBrain:
+class ModelBrain:
     def __init__(
-        self, *, model: str | None = None, replay_only: bool = False, record: bool = False
+        self,
+        *,
+        spec: ModelSpec | None = None,
+        model: str | None = None,
+        replay_only: bool = False,
+        record: bool = False,
+        openai_only: bool = False,
     ):
-        self.model = model or DEFAULT_MODEL
+        if spec is None:
+            spec = (
+                resolve(f"openai/{model or DEFAULT_OPENAI_MODEL}")
+                if openai_only
+                else spec_for(model)
+            )
+        self.spec = spec
+        self.model = spec.model
         self.replay_only = replay_only
         self.record = record
-        self.name = "replay" if replay_only else "openai"
+        self.name = "replay" if replay_only else ("openai" if openai_only else "model")
         self._client: Any = None
         self._messages: list[dict[str, Any]] = []
         self._tools: list[dict[str, Any]] = []
         self._cassette: Cassette | None = None
         if not replay_only:
-            if not os.environ.get("OPENAI_API_KEY"):
-                raise RuntimeError("OPENAI_API_KEY is not set; use --brain rules or --brain replay")
-            from openai import AsyncOpenAI
-
-            self._client = AsyncOpenAI()
+            if not spec.available:
+                raise RuntimeError(
+                    f"no key for {spec.id}; set the provider's key, or use --brain rules "
+                    "or --brain replay"
+                )
+            self._client = spec.client()
 
     async def start(self, scenario: Scenario, trace: Trace) -> None:
+        trace.model = self.spec.id
         self._messages = list(initial_messages(trace.ctx.now))
         self._messages.append({"role": "assistant", "content": GREETING})
         trace.say("assistant", GREETING)
@@ -113,13 +128,13 @@ class OpenAIBrain:
         self._tools = [
             {"type": "function", "function": fn} for fn in registry.function_schemas(exposed)
         ]
-        self._cassette = Cassette(CASSETTES_DIR / f"{scenario.id}.json")
+        self._cassette = Cassette(CASSETTES_DIR / self.spec.slug / f"{scenario.id}.json")
         if self.replay_only and not self._cassette.entries:
-            raise CassetteMiss(f"no cassette for {scenario.id}: run with --brain openai --record")
-        if self.replay_only:
-            self.model = self._cassette.model or self.model
-        else:
-            self._cassette.model = self.model
+            raise CassetteMiss(
+                f"no cassette for {scenario.id} and {self.spec.id}: "
+                f"run with --brain model --model {self.spec.id} --record"
+            )
+        self._cassette.model = self.spec.id
 
     async def hear(self, turn: CallerTurn, trace: Trace) -> str:
         if (
@@ -164,6 +179,7 @@ class OpenAIBrain:
                     args = json.loads(call["function"].get("arguments") or "{}")
                 except json.JSONDecodeError:
                     args = {}
+                    trace.notes.append(f"{name}: arguments were not valid JSON")
                 try:
                     result = await trace.call(name, args)
                     payload = json.dumps(result, ensure_ascii=False)
@@ -184,11 +200,14 @@ class OpenAIBrain:
 
     async def _complete(self, trace: Trace) -> dict[str, Any]:
         assert self._cassette is not None
-        key = Cassette.key(self.model, self._messages, self._tools)
+        key = Cassette.key(self.spec.id, self._messages, self._tools)
         hit = self._cassette.entries.get(key)
         if hit is not None:
-            trace.tokens_in += hit.get("usage", {}).get("prompt_tokens", 0)
-            trace.tokens_out += hit.get("usage", {}).get("completion_tokens", 0)
+            usage = hit.get("usage", {})
+            trace.tokens_in += usage.get("prompt_tokens", 0)
+            trace.tokens_out += usage.get("completion_tokens", 0)
+            if "ms" in hit:
+                trace.llm_ms.append(int(hit["ms"]))
             return hit["message"]
         if self.replay_only:
             raise CassetteMiss(
@@ -197,32 +216,37 @@ class OpenAIBrain:
             )
         started = time.monotonic()
         response = await self._client.chat.completions.create(
-            model=self.model,
             messages=self._messages,
             tools=self._tools or None,
-            temperature=0,
-            seed=7,
+            **self.spec.request_kwargs(),
         )
-        choice = response.choices[0].message
-        message: dict[str, Any] = {"content": choice.content}
-        if choice.tool_calls:
+        ms = int((time.monotonic() - started) * 1000)
+        choice = response.choices[0]
+        message: dict[str, Any] = {"content": choice.message.content}
+        if choice.message.tool_calls:
             message["tool_calls"] = [
                 {
-                    "id": tc.id,
+                    "id": tc.id or f"call_{len(self._messages)}_{i}",
                     "type": "function",
                     "function": {"name": tc.function.name, "arguments": tc.function.arguments},
                 }
-                for tc in choice.tool_calls
+                for i, tc in enumerate(choice.message.tool_calls)
             ]
+        if getattr(choice, "finish_reason", None) == "length":
+            trace.notes.append(f"reply cut by max_tokens={self.spec.max_tokens}")
         usage = {
             "prompt_tokens": getattr(response.usage, "prompt_tokens", 0) or 0,
             "completion_tokens": getattr(response.usage, "completion_tokens", 0) or 0,
         }
         trace.tokens_in += usage["prompt_tokens"]
         trace.tokens_out += usage["completion_tokens"]
-        trace.cost_eur += cost_eur(self.model, usage["prompt_tokens"], usage["completion_tokens"])
-        trace.notes.append(f"llm round trip {int((time.monotonic() - started) * 1000)} ms")
+        trace.cost_eur += cost_eur(self.spec.id, usage["prompt_tokens"], usage["completion_tokens"])
+        trace.llm_ms.append(ms)
         if self.record:
-            self._cassette.entries[key] = {"message": message, "usage": usage}
+            self._cassette.entries[key] = {"message": message, "usage": usage, "ms": ms}
             self._cassette.dirty = True
         return message
+
+
+# The old name. ``--brain openai`` still builds one of these against OpenAI.
+OpenAIBrain = ModelBrain

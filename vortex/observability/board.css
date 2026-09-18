@@ -211,19 +211,26 @@ body,
   overflow-wrap: anywhere;
 }
 
+/* Expansions open raw JSON under a step: keep them quiet, caption-sized.
+   Quasar sets the item metrics with its own rules, so these need !important. */
 .q-expansion-item.raw {
   margin-top: var(--space-xs);
 }
 
 .q-expansion-item.raw .q-item {
-  min-height: 28px;
-  padding: 0;
-  font: var(--text-caption-sm);
-  color: var(--body);
+  min-height: 28px !important;
+  padding: 0 !important;
+  font: var(--text-caption-sm) !important;
+  color: var(--body) !important;
 }
 
 .q-expansion-item.raw .q-item__section--side {
-  padding-left: var(--space-xs);
+  padding-left: var(--space-xs) !important;
+  min-width: 0 !important;
+}
+
+.q-expansion-item.raw .q-expansion-item__content {
+  padding: var(--space-xs) 0 var(--space-sm) !important;
 }
 
 /* Concurrent calls on the wall. */
