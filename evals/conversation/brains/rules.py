@@ -8,6 +8,10 @@ ones, so the *final* stated request wins by construction.
 What it proves: that the tools, threaded together the way the prompt tells the
 model to thread them, produce the accepted action for each script. What it
 cannot prove: that the model would have made those calls. The report says so.
+
+``means.ask`` is a question about the clinic (problem 16): its value is the
+``clinic_facts`` input, and a later ``request.location_id: as_told`` books at
+the one site that answer named.
 """
 
 from __future__ import annotations
@@ -42,6 +46,9 @@ class _State:
     accepted: bool = False
     record: dict[str, Any] | None = None  # the identified patient record
     decided: bool = False
+    #: The sites the last clinic_facts answer named, for a caller who then
+    #: says "book me there" (problem 16: they act on what we told them).
+    told_sites: list[str] = field(default_factory=list)
 
 
 class RulesBrain:
@@ -75,6 +82,9 @@ class RulesBrain:
         for key in ("identify", "patient", "request", "register"):
             if m.get(key):
                 getattr(s, "caller" if key == "identify" else key).update(m[key])
+        if s.request.get("location_id") == "as_told":
+            # "the one you said": the site named in the last clinic_facts answer.
+            s.request["location_id"] = s.told_sites[0] if len(s.told_sites) == 1 else None
         if m.get("clear"):
             for key in m["clear"]:
                 s.caller.pop(key, None)
@@ -92,6 +102,14 @@ class RulesBrain:
         if s.record is None and any(subject.get(f) for f in _ID_FIELDS):
             await self._identify(subject, trace)
 
+        if m.get("ask") is not None:
+            # A question about the clinic: the prompt's rule is to answer it
+            # from clinic_facts and never from memory. What it names is what
+            # the caller may then book at.
+            told = await trace.call("clinic_facts", dict(m["ask"]))
+            s.told_sites = [site["location_id"] for site in told["sites"]]
+            names = ", ".join(site["name"] for site in told["sites"]) or "no site"
+            return self._reply(trace, f"That would be {names}.")
         if s.record is None and not s.register and subject:
             missing = self._second_field(subject)
             if missing:

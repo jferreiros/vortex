@@ -159,6 +159,16 @@ TOOLS: dict[str, ToolSpec] = {
             contract.ProviderMatch,
             rules.find_provider,
         ),
+        ToolSpec(
+            "clinic_facts",
+            "rules",
+            "Answer a question about the clinic from its catalogue: which sites open on a "
+            "day, who consults at a site, whether there is a site in a town. Never answer "
+            "these from memory; the caller books on what you say.",
+            contract.ClinicFactsInput,
+            contract.ClinicFacts,
+            rules.clinic_facts,
+        ),
         # ---- line -------------------------------------------------------
         ToolSpec(
             "submit_action",

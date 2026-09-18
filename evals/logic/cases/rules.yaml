@@ -1,5 +1,6 @@
-# Rules lane: what the clinic refuses, provider matching, nearest site.
-# Sources: clinic-rules "Providers" / "Age" / "Insurance", problems 3, 6, 15, 17.
+# Rules lane: what the clinic refuses, provider matching, nearest site, and
+# the questions a caller asks before they commit.
+# Sources: clinic-rules "Providers" / "Age" / "Insurance", problems 3, 6, 15, 16, 17.
 group: rules
 now: "2026-09-18T09:00:00+02:00"
 
@@ -261,3 +262,134 @@ cases:
     tool: nearest_location
     args: {address: "12 Privet Drive, Little Whinging", specialty_id: general_practice}
     expect: {location_id: {$absent: true}, rejection: {reason: out_of_scope}}
+
+  # ---- problem 16: answer from the catalogue, never from memory -----------
+  # The caller acts on the answer. Each case pairs a question with the booking
+  # it leads to; a wrong site or day in the answer is an unbookable request.
+  - id: rules.facts.only_centro_opens_on_saturday
+    problem: 16
+    tool: clinic_facts
+    args: {weekday: saturday}
+    expect:
+      sites: {$len: 1}
+      rejection: {$absent: true}
+
+  - id: rules.facts.saturday_site_is_centro_with_its_hours
+    problem: 16
+    tool: clinic_facts
+    args: {weekday: saturday}
+    expect:
+      sites:
+        - location_id: centro
+          open_days: {$contains: saturday}
+          hours: {$contains: {weekday: 5}}
+
+  - id: rules.facts.no_site_opens_on_sunday
+    problem: 16
+    tool: clinic_facts
+    args: {weekday: sunday}
+    expect: {sites: {$len: 0}, rejection: {reason: clinic_closed}}
+
+  - id: rules.facts.norte_is_not_open_on_saturday
+    problem: 16
+    # The trap the problem names. Norte must not be in a Saturday answer.
+    tool: clinic_facts
+    args: {weekday: saturday, location_id: norte}
+    expect: {sites: {$len: 0}, rejection: {reason: clinic_closed}}
+
+  - id: rules.facts.who_sits_at_norte_including_the_leave
+    problem: 16
+    tool: clinic_facts
+    args: {location_id: norte}
+    expect:
+      sites:
+        - location_id: norte
+          providers:
+            $contains: {provider_id: PR07, on_leave_until: {$date: "2026-09-30"}}
+
+  - id: rules.facts.the_dermatologist_at_centro
+    problem: 16
+    tool: clinic_facts
+    args: {location_id: centro, specialty_id: dermatology}
+    expect:
+      sites:
+        - location_id: centro
+          providers: [{provider_id: PR04, name: "Dra. Iglesias"}]
+
+  - id: rules.facts.getafe_is_sur_and_shuts_friday_lunchtime
+    problem: 16
+    tool: clinic_facts
+    args: {town: Getafe}
+    expect:
+      sites:
+        - location_id: sur
+          hours: {$contains: {weekday: 4, closes: "14:00:00"}}
+
+  - id: rules.facts.paediatrics_is_only_at_centro
+    problem: 16
+    tool: clinic_facts
+    args: {specialty_id: paediatrics}
+    expect:
+      sites: [{location_id: centro}]
+      rejection: {$absent: true}
+
+  - id: rules.facts.a_town_with_no_site_is_an_empty_answer
+    problem: 16
+    tool: clinic_facts
+    args: {town: Cuenca}
+    expect: {sites: {$len: 0}, rejection: {$absent: true}}
+
+  - id: rules.facts.the_national_holiday_is_in_every_answer
+    problem: 16
+    tool: clinic_facts
+    args: {}
+    expect:
+      sites: {$len: 3}
+      closure_days: {$contains: "2026-10-12"}
+
+  - id: rules.facts.the_saturday_answer_is_bookable_and_the_wrong_one_is_not
+    problem: 16
+    # The whole point: the site the tool named has a Saturday slot; the site a
+    # memory might have named (Norte) has none and the diary says why.
+    from_number: "+34612345678"
+    steps:
+      - as: patient
+        tool: find_patient
+        args: {name: "Marta Ruiz", date_of_birth: "1985-03-12"}
+        expect: {status: found, patient: {patient_id: P00042}}
+      - as: told
+        tool: clinic_facts
+        args: {weekday: saturday}
+        expect: {sites: [{location_id: centro}]}
+      - as: wrong
+        tool: find_slots
+        args:
+          patient_id: "{{patient.patient.patient_id}}"
+          specialty_id: general_practice
+          location_id: norte
+          date_from: "2026-09-19"
+          date_to: "2026-09-19"
+        expect: {slots: {$len: 0}, rejection: {reason: clinic_closed}}
+      - as: slots
+        tool: find_slots
+        args:
+          patient_id: "{{patient.patient.patient_id}}"
+          specialty_id: general_practice
+          location_id: "{{told.sites[0].location_id}}"
+          date_from: "2026-09-19"
+          date_to: "2026-09-19"
+        expect: {slots: {$min_len: 1}, rejection: {$absent: true}}
+      - as: booking
+        tool: prepare_booking
+        args:
+          patient_id: "{{patient.patient.patient_id}}"
+          slot: "{{slots.slots[0]}}"
+          policy_id: "{{patient.patient.insurer}}"
+        expect: {rejection: {$absent: true}}
+      - tool: submit_action
+        args: {action: "{{booking.action}}"}
+    expect_actions:
+      - kind: book
+        patient_id: P00042
+        location_id: centro
+        slot: {$earliest_slot: {specialty_id: general_practice, location_id: centro, "on": "2026-09-19", patient_id: P00042}}
