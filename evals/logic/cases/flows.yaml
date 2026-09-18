@@ -223,6 +223,89 @@ cases:
         appointment_type_id: review
         slot: {$earliest_slot: {specialty_id: paediatrics, patient_id: P00107}}
 
+  - id: flow.p9.daughter_gives_her_details_first_then_books_her_father
+    problem: 9
+    from_number: "+34612345678"
+    steps:
+      # The daughter identifies herself first and is on file: P00042 is the caller, not the patient.
+      - as: caller
+        tool: find_patient
+        args: {name: "Marta Ruiz López", date_of_birth: "1985-03-12"}
+        expect: {status: found, patient: {patient_id: P00042}}
+      - as: father
+        tool: find_patient
+        args: {name: "Antonio Pérez Martín", date_of_birth: "1958-01-30"}
+        expect: {status: found, patient: {patient_id: P00200, insurer: dkv}}
+      - as: verdict
+        tool: check_eligibility
+        args:
+          patient_id: "{{father.patient.patient_id}}"
+          specialty_id: general_practice
+          insurer: "{{father.patient.insurer}}"
+        expect: {allowed: true}
+      - as: slots
+        tool: find_slots
+        args:
+          patient_id: "{{father.patient.patient_id}}"
+          specialty_id: general_practice
+          date_from: "{{ctx.today+1}}"
+          date_to: "{{ctx.today+7}}"
+        expect: {slots: {$min_len: 1}}
+      - as: booking
+        tool: prepare_booking
+        args:
+          patient_id: "{{father.patient.patient_id}}"
+          slot: "{{slots.slots[0]}}"
+          policy_id: "{{father.patient.insurer}}"
+        expect: {rejection: {$absent: true}}
+      - tool: submit_action
+        args: {action: "{{booking.action}}"}
+    expect_actions:
+      - kind: book
+        patient_id: P00200
+        provider_id: {$earliest_slot: {specialty_id: general_practice, patient_id: P00200, field: provider_id}}
+        appointment_type_id: review
+        slot: {$earliest_slot: {specialty_id: general_practice, patient_id: P00200}}
+        policy_id: dkv
+
+  - id: flow.p9.carer_on_file_but_never_seen_books_the_person_in_her_care
+    problem: 9
+    from_number: "+34699000111"
+    steps:
+      # The carer is on file too (P00043, never seen, Adeslas). Her chart must not
+      # leak into the booking: the type and the policy follow the patient's record.
+      - as: caller
+        tool: find_patient
+        args: {phone: "+34699000111", name: "Marta Ruiz García"}
+        expect: {status: found, patient: {patient_id: P00043, has_visited_before: false}}
+      - as: patient
+        tool: find_patient
+        args: {name: "Antonio Pérez Martín", date_of_birth: "1958-01-30"}
+        expect: {status: found, patient: {patient_id: P00200, has_visited_before: true}}
+      - as: slots
+        tool: find_slots
+        args:
+          patient_id: "{{patient.patient.patient_id}}"
+          specialty_id: general_practice
+          date_from: "{{ctx.today+1}}"
+          date_to: "{{ctx.today+7}}"
+        expect: {slots: {$min_len: 1}}
+      - as: booking
+        tool: prepare_booking
+        args:
+          patient_id: "{{patient.patient.patient_id}}"
+          slot: "{{slots.slots[0]}}"
+          policy_id: "{{patient.patient.insurer}}"
+        expect: {rejection: {$absent: true}}
+      - tool: submit_action
+        args: {action: "{{booking.action}}"}
+    expect_actions:
+      - kind: book
+        patient_id: P00200
+        appointment_type_id: review
+        slot: {$earliest_slot: {specialty_id: general_practice, patient_id: P00200}}
+        policy_id: dkv
+
   - id: flow.p10.red_flag_escalates_and_books_nothing
     problem: 10
     steps:
