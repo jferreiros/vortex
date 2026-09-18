@@ -1,4 +1,4 @@
-.PHONY: install run smoke test call try-api tunnel tail lint fmt board evals evals-logic evals-conversation evals-voice evals-report evals-accept evals-selftest evals-discord
+.PHONY: install run smoke test call try-api tunnel tail lint fmt board design-sync evals evals-logic evals-conversation evals-voice evals-report evals-accept evals-selftest evals-discord
 
 PORT ?= 7860
 BOARD_PORT ?= 8080
@@ -36,6 +36,9 @@ tail:
 
 lint:
 	uv run ruff check .
+
+design-sync:      ## copy the design tokens to docs/ (GitHub Pages serves only docs/); see DESIGN.md
+	cp vortex/observability/design.css docs/design.css
 
 fmt:
 	uv run ruff format . && uv run ruff check --fix .
