@@ -1,0 +1,267 @@
+# Flows: several tools in order, results threaded, the submitted actions
+# checked against what the platform would accept. Expected slots come from
+# the same fake availability the tools read ($earliest_slot), never by hand.
+group: flows
+now: "2026-09-18T09:00:00+02:00"
+
+cases:
+  - id: flow.p1.simple_booking_earliest_gp
+    problem: 1
+    from_number: "+34612345678"
+    steps:
+      - as: patient
+        tool: find_patient
+        args: {name: "Marta Ruiz", date_of_birth: "1985-03-12"}
+        expect: {status: found, patient: {patient_id: P00042}}
+      - as: slots
+        tool: find_slots
+        args:
+          patient_id: "{{patient.patient.patient_id}}"
+          specialty_id: general_practice
+          date_from: "{{ctx.today+1}}"
+          date_to: "{{ctx.today+7}}"
+        expect: {slots: {$min_len: 1}}
+      - as: booking
+        tool: prepare_booking
+        args:
+          patient_id: "{{patient.patient.patient_id}}"
+          slot: "{{slots.slots[0]}}"
+          policy_id: "{{patient.patient.insurer}}"
+        expect: {rejection: {$absent: true}}
+      - tool: submit_action
+        args: {action: "{{booking.action}}"}
+    expect_actions:
+      - kind: book
+        patient_id: P00042
+        provider_id: {$earliest_slot: {specialty_id: general_practice, patient_id: P00042, field: provider_id}}
+        appointment_type_id: review
+        slot: {$earliest_slot: {specialty_id: general_practice, patient_id: P00042}}
+        policy_id: sanitas
+
+  - id: flow.p1.morning_at_norte
+    problem: 1
+    steps:
+      - as: patient
+        tool: find_patient
+        args: {national_id: "12345678Z"}
+        expect: {status: found}
+      - as: window
+        tool: resolve_date
+        args: {phrase: "this coming Monday", part_of_day: morning}
+      - as: slots
+        tool: find_slots
+        args:
+          patient_id: "{{patient.patient.patient_id}}"
+          specialty_id: general_practice
+          location_id: norte
+          date_from: "{{window.date_from}}"
+          date_to: "{{window.date_to}}"
+          time_from: "{{window.time_from}}"
+          time_to: "{{window.time_to}}"
+        expect: {slots: {$min_len: 1}}
+      - as: booking
+        tool: prepare_booking
+        args:
+          patient_id: "{{patient.patient.patient_id}}"
+          slot: "{{slots.slots[0]}}"
+          policy_id: sanitas
+      - tool: submit_action
+        args: {action: "{{booking.action}}"}
+    expect_actions:
+      - kind: book
+        patient_id: P00042
+        location_id: norte
+        slot: {$earliest_slot: {specialty_id: general_practice, location_id: norte, on: "2026-09-21", part_of_day: morning, patient_id: P00042}}
+
+  - id: flow.p3.named_doctor_on_leave_is_no_action
+    problem: 3
+    steps:
+      - as: patient
+        tool: find_patient
+        args: {name: "Marta Ruiz", date_of_birth: "1985-03-12"}
+      - as: doctor
+        tool: find_provider
+        args: {spoken_name: "Dr. Requena"}
+        expect: {status: on_leave, rejection: {reason: provider_on_leave}}
+      - tool: submit_action
+        args: {action: {kind: no-action, reason: "{{doctor.rejection.reason}}"}}
+    expect_actions:
+      - {kind: no-action, reason: provider_on_leave}
+
+  - id: flow.p4.new_patient_registers_and_books_nothing
+    problem: 4
+    steps:
+      - as: patient
+        tool: find_patient
+        args: {name: "Ana García Pérez", date_of_birth: "1990-01-02"}
+        expect: {status: not_found}
+      - as: check
+        tool: validate_national_id
+        args: {value: "12345678Z"}
+        expect: {valid: true}
+      - as: reg
+        tool: build_registration
+        args:
+          given_name: Ana
+          first_surname: García
+          second_surname: Pérez
+          national_id: "{{check.normalized}}"
+          date_of_birth: "1990-01-02"
+          phone: "+34612000111"
+          email: "ana.garcia@gmail.com"
+          insurer: adeslas
+        expect: {rejection: {$absent: true}}
+      - tool: submit_action
+        args: {action: "{{reg.action}}"}
+    expect_actions:
+      - kind: register
+        given_name: Ana
+        first_surname: García
+        second_surname: Pérez
+        national_id: "12345678Z"
+        date_of_birth: "1990-01-02"
+        phone: "+34612000111"
+        email: "ana.garcia@gmail.com"
+        insurer: adeslas
+
+  - id: flow.p8.cancel_two_is_two_posts
+    problem: 8
+    from_number: "+34612345678"
+    steps:
+      - as: mother
+        tool: find_patient
+        args: {name: "Marta Ruiz", date_of_birth: "1985-03-12"}
+      - as: child
+        tool: find_patient
+        args: {name: "Lucas Ruiz", date_of_birth: "2018-06-20"}
+      - as: mine
+        tool: list_appointments
+        args: {patient_id: "{{mother.patient.patient_id}}"}
+        expect: {appointments: {$len: 1}}
+      - as: his
+        tool: list_appointments
+        args: {patient_id: "{{child.patient.patient_id}}"}
+        expect: {appointments: {$len: 1}}
+      - as: c1
+        tool: prepare_cancel
+        args: {appointment_id: "{{mine.appointments[0].appointment_id}}", patient_id: "{{mother.patient.patient_id}}"}
+      - tool: submit_action
+        args: {action: "{{c1.action}}"}
+      - as: c2
+        tool: prepare_cancel
+        args: {appointment_id: "{{his.appointments[0].appointment_id}}", patient_id: "{{child.patient.patient_id}}"}
+      - tool: submit_action
+        args: {action: "{{c2.action}}"}
+    expect_actions:
+      - {kind: cancel, appointment_id: A0001}
+      - {kind: cancel, appointment_id: A0002}
+
+  - id: flow.p8.reschedule_to_next_week
+    problem: 8
+    steps:
+      - as: patient
+        tool: find_patient
+        args: {name: "Marta Ruiz", date_of_birth: "1985-03-12"}
+      - as: diary
+        tool: list_appointments
+        args: {patient_id: "{{patient.patient.patient_id}}"}
+      - as: slots
+        tool: find_slots
+        args:
+          patient_id: "{{patient.patient.patient_id}}"
+          provider_id: "{{diary.appointments[0].provider_id}}"
+          date_from: "2026-10-05"
+          date_to: "2026-10-09"
+      - as: move
+        tool: prepare_reschedule
+        args:
+          appointment_id: "{{diary.appointments[0].appointment_id}}"
+          slot: "{{slots.slots[0]}}"
+          policy_id: sanitas
+      - tool: submit_action
+        args: {action: "{{move.action}}"}
+    expect_actions:
+      - kind: reschedule
+        appointment_id: A0001
+        provider_id: PR01
+        slot: {$earliest_slot: {provider_id: PR01, from: "2026-10-05", days: 5, patient_id: P00042}}
+
+  - id: flow.p9.third_party_books_the_child_not_the_caller
+    problem: 9
+    from_number: "+34612345678"
+    steps:
+      - as: caller
+        tool: find_patient
+        args: {phone: "+34612345678", name: "Marta Ruiz"}
+      - as: child
+        tool: find_patient
+        args: {name: "Lucas Ruiz López", date_of_birth: "2018-06-20"}
+        expect: {status: found, patient: {patient_id: P00107}}
+      - as: route
+        tool: triage
+        args: {complaint: "child with a cough for over a week, worse at night"}
+        expect: {specialty_id: paediatrics}
+      - as: slots
+        tool: find_slots
+        args:
+          patient_id: "{{child.patient.patient_id}}"
+          specialty_id: "{{route.specialty_id}}"
+          date_from: "{{ctx.today+1}}"
+          date_to: "{{ctx.today+7}}"
+      - as: booking
+        tool: prepare_booking
+        args:
+          patient_id: "{{child.patient.patient_id}}"
+          slot: "{{slots.slots[0]}}"
+          policy_id: "{{child.patient.insurer}}"
+      - tool: submit_action
+        args: {action: "{{booking.action}}"}
+    expect_actions:
+      - kind: book
+        patient_id: P00107
+        provider_id: PR03
+        appointment_type_id: review
+        slot: {$earliest_slot: {specialty_id: paediatrics, patient_id: P00107}}
+
+  - id: flow.p10.red_flag_escalates_and_books_nothing
+    problem: 10
+    steps:
+      - as: route
+        tool: triage
+        args: {complaint: "tight pain across the chest and struggling to catch my breath"}
+        expect: {emergency: true}
+      - tool: submit_action
+        args: {action: {kind: escalate, reason: "{{route.rejection.reason}}"}}
+    expect_actions:
+      - {kind: escalate, reason: medical_emergency}
+
+  - id: flow.p6.asisa_physio_is_refused_with_the_rule
+    problem: 6
+    steps:
+      - as: patient
+        tool: find_patient
+        args: {name: "Marta Ruiz", date_of_birth: "1985-03-12"}
+      - as: verdict
+        tool: check_eligibility
+        args: {patient_id: "{{patient.patient.patient_id}}", specialty_id: physiotherapy, location_id: sur, insurer: asisa}
+        expect: {allowed: false, rejection: {reason: location_not_covered}}
+      - tool: submit_action
+        args: {action: {kind: no-action, reason: "{{verdict.rejection.reason}}"}}
+    expect_actions:
+      - {kind: no-action, reason: location_not_covered}
+
+  - id: flow.p7.full_window_is_no_availability
+    problem: 7
+    steps:
+      - as: patient
+        tool: find_patient
+        args: {name: "Marta Ruiz", date_of_birth: "1985-03-12"}
+      - as: slots
+        tool: find_slots
+        # Sunday: no site opens. Empty slots and empty blocked means nothing to offer.
+        args: {patient_id: "{{patient.patient.patient_id}}", specialty_id: general_practice, date_from: "2026-09-20", date_to: "2026-09-20"}
+        expect: {slots: {$len: 0}, blocked: {$len: 0}}
+      - tool: submit_action
+        args: {action: {kind: no-action, reason: no_availability}}
+    expect_actions:
+      - {kind: no-action, reason: no_availability}

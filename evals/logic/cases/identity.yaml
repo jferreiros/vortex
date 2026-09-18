@@ -1,0 +1,170 @@
+# Identity lane: who is calling. Sources: clinic-api skill (traps 1, 2, 5),
+# clinic-rules "Identity", problems 1, 4 and 9.
+group: identity
+now: "2026-09-18T09:00:00+02:00"
+
+cases:
+  # ---- DNI / NIE check letter (problem 4: one character wrong fails) -------
+  - id: identity.dni.valid_letter
+    problem: 4
+    tool: validate_national_id
+    args: {value: "12345678z"}
+    expect: {normalized: "12345678Z", kind: dni, valid: true}
+
+  - id: identity.dni.spaces_and_dashes_normalise
+    problem: 4
+    tool: validate_national_id
+    args: {value: "12 345 678-Z"}
+    expect: {normalized: "12345678Z", kind: dni, valid: true}
+
+  - id: identity.dni.wrong_letter_is_invalid
+    problem: 4
+    tool: validate_national_id
+    args: {value: "12345678A"}
+    expect: {normalized: "12345678A", kind: dni, valid: false, expected_letter: "Z"}
+
+  - id: identity.nie.x_prefix_valid
+    problem: 4
+    tool: validate_national_id
+    args: {value: "X1234567L"}
+    expect: {normalized: "X1234567L", kind: nie, valid: true}
+
+  - id: identity.nie.y_prefix_counts_as_one
+    problem: 4
+    tool: validate_national_id
+    # Y1234567 -> 11234567 % 23 = 11 -> "TRWAGMYFPDXBNJZSQVHLCKE"[11] = "X"
+    args: {value: "Y1234567X"}
+    expect: {kind: nie, valid: true}
+
+  - id: identity.nie.z_prefix_counts_as_two
+    problem: 4
+    tool: validate_national_id
+    # Z1234567 -> 21234567 % 23 = 3 -> "A"
+    args: {value: "Z1234567A"}
+    expect: {kind: nie, valid: true}
+
+  - id: identity.id.garbage_is_invalid
+    problem: 4
+    tool: validate_national_id
+    args: {value: "hello"}
+    expect: {kind: invalid, valid: false}
+
+  # ---- Directory lookup: exact fields filter, never downrank ---------------
+  - id: identity.lookup.name_plus_dob_is_unique
+    problem: 1
+    tool: find_patient
+    args: {name: "Marta Ruiz", date_of_birth: "1985-03-12"}
+    expect: {status: found, patient: {patient_id: P00042}}
+
+  - id: identity.lookup.name_alone_is_ambiguous
+    problem: 1
+    tool: find_patient
+    args: {name: "Marta Ruiz"}
+    expect:
+      status: ambiguous
+      candidates: {$len: 2}
+      ask_for: {$in: [date_of_birth, national_id, phone]}
+
+  - id: identity.lookup.national_id_is_unique
+    problem: 1
+    tool: find_patient
+    args: {national_id: "87654321X"}
+    expect: {status: found, patient: {patient_id: P00043}}
+
+  - id: identity.lookup.misheard_id_finds_nobody
+    problem: 1
+    tool: find_patient
+    args: {name: "Marta Ruiz", national_id: "12345679Z"}
+    expect: {status: not_found, patient: {$absent: true}}
+
+  - id: identity.lookup.unknown_caller_not_found
+    problem: 4
+    tool: find_patient
+    args: {name: "Ana García Pérez", date_of_birth: "1990-01-02"}
+    expect: {status: not_found}
+
+  - id: identity.lookup.phone_folds_to_nine_digits
+    problem: 1
+    tool: find_patient
+    args: {phone: "0034 612 345 678", name: "Marta Ruiz López"}
+    expect: {status: found, patient: {patient_id: P00042}}
+
+  - id: identity.lookup.shared_line_is_ambiguous
+    problem: 9
+    tool: find_patient
+    # The mother's number is also the child's record. Phone alone cannot decide.
+    args: {phone: "+34612345678"}
+    expect: {status: ambiguous, candidates: {$len: 2}}
+
+  - id: identity.lookup.caller_id_hint_does_not_override_name
+    problem: 9
+    from_number: "+34612345678"
+    tool: find_patient
+    # Daughter's line, father's name: the record must be the father's.
+    args: {name: "Antonio Pérez Martín", date_of_birth: "1958-01-30"}
+    expect: {status: found, patient: {patient_id: P00200}}
+
+  - id: identity.lookup.child_by_name_and_dob
+    problem: 9
+    from_number: "+34612345678"
+    tool: find_patient
+    args: {name: "Lucas Ruiz", date_of_birth: "2018-06-20"}
+    expect: {status: found, patient: {patient_id: P00107, has_visited_before: true}}
+
+  # ---- Registration (problem 4) -------------------------------------------
+  - id: identity.register.builds_action
+    problem: 4
+    tool: build_registration
+    args:
+      given_name: Ana
+      first_surname: García
+      second_surname: Pérez
+      national_id: "12345678Z"
+      date_of_birth: "1990-01-02"
+      phone: "612 000 111"
+      email: "Ana.Garcia@Gmail.com"
+      insurer: adeslas
+    expect:
+      rejection: {$absent: true}
+      action:
+        kind: register
+        given_name: Ana
+        first_surname: García
+        second_surname: Pérez
+        national_id: "12345678Z"
+        date_of_birth: "1990-01-02"
+        phone: "+34612000111"
+        email: "ana.garcia@gmail.com"
+        insurer: adeslas
+
+  - id: identity.register.bad_check_letter_is_rejected
+    problem: 4
+    tool: build_registration
+    args:
+      given_name: Ana
+      first_surname: García
+      second_surname: Pérez
+      national_id: "12345678A"
+      date_of_birth: "1990-01-02"
+      phone: "+34612000111"
+      email: "ana@example.com"
+      insurer: adeslas
+    expect:
+      action: {$absent: true}
+      rejection: {$present: true}
+
+  - id: identity.register.unknown_insurer_is_rejected
+    problem: 4
+    tool: build_registration
+    args:
+      given_name: Ana
+      first_surname: García
+      second_surname: Pérez
+      national_id: "12345678Z"
+      date_of_birth: "1990-01-02"
+      phone: "+34612000111"
+      email: "ana@example.com"
+      insurer: mapfre_health
+    expect:
+      action: {$absent: true}
+      rejection: {$present: true}
