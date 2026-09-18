@@ -45,9 +45,10 @@ _TRUE = ("1", "true", "yes", "on")
 
 
 def enabled() -> bool:
-    if os.environ.get("PYTEST_CURRENT_TEST") and os.environ.get(
-        "LANGFUSE_TRACING_IN_TESTS", ""
-    ).strip().lower() not in _TRUE:
+    if (
+        os.environ.get("PYTEST_CURRENT_TEST")
+        and os.environ.get("LANGFUSE_TRACING_IN_TESTS", "").strip().lower() not in _TRUE
+    ):
         return False
     if os.environ.get("LANGFUSE_TRACING_ENABLED", "true").strip().lower() in (
         "0",
