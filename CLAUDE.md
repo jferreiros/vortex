@@ -1,7 +1,7 @@
 # Vortex — Prosper AI (HackSpain 2026)
 
 Voice AI agent for clinic scheduling calls. See `README.md` for the full setup, mode table, and
-lane ownership. API spec: `References/openapi.json` (Prosper platform API).
+lane ownership. API spec: `docs/api/openapi.json` (Prosper platform API).
 
 ## Platform API credentials
 
@@ -16,16 +16,11 @@ commit real values — see `.env.example` for the template):
 The HackSpain team identifier (not consumed by app code, kept for reference only) is noted as a
 comment at the top of `.env`.
 
-Manual test call against the live API:
+To try the live API from the console, use `scripts/api/try_api.py` (`make try-api`): it calls every
+readable endpoint, saves each raw JSON response under `api_results/<timestamp>/` (gitignored), and
+prints a status line per call. Read-only by design — it never calls `/api/v1/submit/*`. See the
+script's docstring for flags (`--specialty-id`, `--name`, `--patient-id`, ...).
 
-```bash
-set -a; source .env; set +a
-curl -s -G "$PLATFORM_API_BASE_URL/api/v1/availability" \
-  -H "X-Api-Key: $PLATFORM_API_KEY" \
-  --data-urlencode "date_from=2026-09-21" \
-  --data-urlencode "date_to=2026-09-22" \
-  --data-urlencode "specialty_id=general_practice"
-```
-
-Note: despite the OpenAPI spec marking `provider_id`/`specialty_id` as optional, the live API
-requires at least one of them (422 otherwise).
+Note: despite the OpenAPI spec marking `provider_id`/`specialty_id` as optional on
+`/api/v1/availability`, the live API requires at least one of them (422 otherwise) — `try_api.py`
+defaults to the first specialty from `/api/v1/specialties` so it works with zero flags.

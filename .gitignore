@@ -27,3 +27,4 @@ venv/
 # Runtime
 logs/*
 !logs/.gitkeep
+api_results/

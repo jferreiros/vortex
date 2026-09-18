@@ -1,4 +1,4 @@
-.PHONY: install run smoke test call tunnel tail lint fmt
+.PHONY: install run smoke test call try-api tunnel tail lint fmt
 
 PORT ?= 7860
 N ?= 1
@@ -20,6 +20,9 @@ test:
 
 call:
 	uv run python scripts/fake_caller.py --url ws://localhost:$(PORT)/ws --calls $(N)
+
+try-api:
+	uv run python scripts/api/try_api.py
 
 tunnel:
 	ngrok http $(PORT)
