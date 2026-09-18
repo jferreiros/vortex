@@ -33,7 +33,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.1.0  # no major tag published; pin the full version
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
@@ -46,7 +46,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.1.0  # no major tag published; pin the full version
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
@@ -59,7 +59,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.1.0  # no major tag published; pin the full version
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
@@ -82,7 +82,7 @@ jobs:
       pull-requests: write   # the PR comment
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.1.0  # no major tag published; pin the full version
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
@@ -108,7 +108,7 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.1.0  # no major tag published; pin the full version
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
