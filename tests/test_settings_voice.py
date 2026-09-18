@@ -64,7 +64,8 @@ def test_helmcode_is_the_default_preset(clean_env) -> None:
     s = _settings(clean_env)
     assert s.llm_provider == "helmcode"
     assert s.llm_base_url == "https://api.helmcode.com/v1"
-    assert s.llm_model == "qwen3.6"
+    # Not qwen3.6: it loops its tool calls and fails both problem-1 scenarios.
+    assert s.llm_model == "deepseek-v4-flash"
     assert s.llm_api_key == ""  # no key yet
 
 
