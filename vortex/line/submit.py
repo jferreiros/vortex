@@ -16,6 +16,7 @@ not a pass.
 
 from __future__ import annotations
 
+import json
 from typing import Protocol
 
 import httpx
@@ -28,6 +29,14 @@ from vortex.contract import (
     action_payload,
     action_route,
 )
+
+_SENT_KEY = "submit.fingerprints"
+
+
+def _fingerprint(action: Action) -> str:
+    payload = action_payload(action, call_id="")
+    payload.pop("call_id", None)
+    return json.dumps({"route": action_route(action), "body": payload}, sort_keys=True, default=str)
 
 
 class SubmitApi(Protocol):
@@ -87,6 +96,15 @@ async def submit_action(ctx: ToolContext, args: SubmitInput) -> SubmitResult:
     """The ``submit_action`` tool. Sends through the call's own submit client."""
     if ctx.submitter is None:
         return SubmitResult(status="error", detail="no submitter on this call context")
+    seen = ctx.state.setdefault(_SENT_KEY, [])
+    key = _fingerprint(args.action)
+    if key in seen:
+        result = SubmitResult(
+            status="duplicate", detail="already submitted this action this call"
+        )
+        ctx.log.event("submit.duplicate", route=action_route(args.action), detail=result.detail)
+        return result
+    seen.append(key)
     route = action_route(args.action)
     payload = action_payload(args.action, ctx.call_id)
     ctx.log.event("submit.sent", route=route, payload=payload)

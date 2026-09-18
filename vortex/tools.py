@@ -174,7 +174,8 @@ TOOLS: dict[str, ToolSpec] = {
             "submit_action",
             "line",
             "Send one prepared action to the platform. Call it once per thing done: "
-            "one booking, one cancellation, one registration, one refusal.",
+            "one booking, one cancellation, one registration, one refusal. "
+            "A second call with the same action is ignored.",
             contract.SubmitInput,
             contract.SubmitResult,
             line_submit.submit_action,

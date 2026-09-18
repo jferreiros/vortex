@@ -137,6 +137,7 @@ def test_prompt_names_every_rule_the_score_depends_on() -> None:
         "Never give medical advice",
         "ignore",  # the injection phrasing is quoted in the prompt
         "Every call ends with at least one submit_action",
+        "If they press, refuse in words and do not submit again",
         "out_of_scope",
         "patient_id from find_patient",
         "list_appointments",

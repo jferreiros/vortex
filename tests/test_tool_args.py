@@ -134,6 +134,16 @@ async def test_submit_action_accepts_a_stringified_action(tmp_path: Path) -> Non
     assert submitted_actions(ctx) == [{"kind": "no-action", "reason": "out_of_scope"}]
 
 
+async def test_a_second_identical_submit_is_not_sent(tmp_path: Path) -> None:
+    ctx = make_context(call_id="args-dup", now=NOW.isoformat(), log_dir=tmp_path)
+    action = {"kind": "no-action", "reason": "out_of_scope"}
+    first = await registry.call_tool("submit_action", ctx, {"action": action})
+    second = await registry.call_tool("submit_action", ctx, {"action": action})
+    assert first.status == "dry_run"
+    assert second.status == "duplicate"
+    assert submitted_actions(ctx) == [{"kind": "no-action", "reason": "out_of_scope"}]
+
+
 async def test_a_genuinely_bad_argument_still_fails(tmp_path: Path) -> None:
     """The coercion must not turn a real error into a silent pass."""
     ctx = make_context(call_id="args-bad", now=NOW.isoformat(), log_dir=tmp_path)
