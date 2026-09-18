@@ -30,21 +30,30 @@ services:
       - traefik.http.middlewares.vortex-gzip.compress=true
       - traefik.http.middlewares.vortex-https.redirectscheme.scheme=https
       - traefik.http.middlewares.vortex-headers.headers.stsSeconds=31536000
-      - traefik.http.middlewares.vortex-headers.headers.stsIncludeSubdomains=true
       - traefik.http.middlewares.vortex-headers.headers.framedeny=true
       - traefik.http.middlewares.vortex-headers.headers.browserxssfilter=true
       - traefik.http.middlewares.vortex-headers.headers.contenttypenosniff=true
       - traefik.http.middlewares.vortex-headers.headers.referrerpolicy=no-referrer
-      - traefik.http.routers.vortex-http.rule=Host(`vortex.jferreiros.com`) || Host(`vortex.167.233.80.47.sslip.io`)
+      - traefik.http.routers.vortex-http.rule=Host(`vortex.jferreiros.com`)
       - traefik.http.routers.vortex-http.entrypoints=http
       - traefik.http.routers.vortex-http.middlewares=vortex-https
       - traefik.http.routers.vortex-http.service=vortex-board
-      - traefik.http.routers.vortex-https.rule=Host(`vortex.jferreiros.com`) || Host(`vortex.167.233.80.47.sslip.io`)
+      - traefik.http.routers.vortex-https.rule=Host(`vortex.jferreiros.com`)
       - traefik.http.routers.vortex-https.entrypoints=https
       - traefik.http.routers.vortex-https.tls=true
       - traefik.http.routers.vortex-https.tls.certresolver=letsencrypt
       - traefik.http.routers.vortex-https.middlewares=vortex-gzip,vortex-headers
       - traefik.http.routers.vortex-https.service=vortex-board
+      - traefik.http.routers.vortex-sslip-http.rule=Host(`vortex.167.233.80.47.sslip.io`)
+      - traefik.http.routers.vortex-sslip-http.entrypoints=http
+      - traefik.http.routers.vortex-sslip-http.middlewares=vortex-https
+      - traefik.http.routers.vortex-sslip-http.service=vortex-board
+      - traefik.http.routers.vortex-sslip-https.rule=Host(`vortex.167.233.80.47.sslip.io`)
+      - traefik.http.routers.vortex-sslip-https.entrypoints=https
+      - traefik.http.routers.vortex-sslip-https.tls=true
+      - traefik.http.routers.vortex-sslip-https.tls.certresolver=letsencrypt
+      - traefik.http.routers.vortex-sslip-https.middlewares=vortex-gzip,vortex-headers
+      - traefik.http.routers.vortex-sslip-https.service=vortex-board
       - traefik.http.services.vortex-board.loadbalancer.server.port=8080
 
 volumes:
