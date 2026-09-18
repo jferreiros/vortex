@@ -1,0 +1,139 @@
+# Problem 5: the published "when exactly" cases, one scenario each.
+#
+# The organisers' answer key is not our fixture world: their provider and
+# location ids, their patients and their minutes are theirs. Each scenario
+# keeps the published persona, the published reference_time and the exact day
+# phrase, and recomputes the accepted slot through the same availability
+# endpoint our agent calls (the `$earliest_slot` oracle). That is the repo's
+# existing convention for a public case; see booking.yaml's p5 scenario.
+#
+# The call connects Friday 18 September 2026, 09:00 Europe/Madrid.
+group: when_exactly
+now: "2026-09-18T09:00:00+02:00"
+
+scenarios:
+  # "tomorrow" is Saturday. Only Centro opens on Saturday, so the earliest
+  # general practice slot is there.
+  - id: p5.published_tomorrow_general_practice
+    problem: 5
+    from_number: "+34711330529"
+    caller:
+      - says: "Hello. I'm Josefa Domínguez Navarro, I was born the nineteenth of September 2001. I'd like a General Practice appointment tomorrow, please. My hay fever is worse than usual this year and the usual pills aren't touching it."
+        means:
+          identify: {name: "Josefa Domínguez Navarro", date_of_birth: "2001-09-19"}
+          request: {intent: book, specialty_id: general_practice, when: "tomorrow"}
+      - says: "The earliest one you have is fine, thank you."
+        means: {accept: true}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00001
+          provider_id: {$earliest_slot: {specialty_id: general_practice, "on": "2026-09-19", patient_id: P00001, field: provider_id}}
+          location_id: {$earliest_slot: {specialty_id: general_practice, "on": "2026-09-19", patient_id: P00001, field: location_id}}
+          appointment_type_id: {$earliest_slot: {specialty_id: general_practice, "on": "2026-09-19", patient_id: P00001, field: appointment_type_id}}
+          slot: {$earliest_slot: {specialty_id: general_practice, "on": "2026-09-19", patient_id: P00001}}
+          policy_id: mapfre
+      trajectory_contains: [find_patient, find_slots, prepare_booking, submit_action]
+      must_not_call: [build_registration, prepare_cancel, prepare_reschedule]
+      privacy_of: [P00001]
+      max_tool_calls: 14
+
+  # "this coming Thursday" is seven days away, never today, never yesterday.
+  - id: p5.published_coming_thursday_orthopaedics
+    problem: 5
+    from_number: "+34731169716"
+    caller:
+      - says: "Good morning. My name is Ignacio Vázquez Moreno, born the ninth of December 1939. I need an Orthopaedics appointment this coming Thursday. My hip clicks and aches when I get out of a chair."
+        means:
+          identify: {name: "Ignacio Vázquez Moreno", date_of_birth: "1939-12-09"}
+          request: {intent: book, specialty_id: orthopaedics, when: "this coming Thursday"}
+      - says: "That's fine, the earliest you have is good."
+        means: {accept: true}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00005
+          provider_id: {$earliest_slot: {specialty_id: orthopaedics, "on": "2026-09-24", patient_id: P00005, field: provider_id}}
+          location_id: {$earliest_slot: {specialty_id: orthopaedics, "on": "2026-09-24", patient_id: P00005, field: location_id}}
+          appointment_type_id: {$earliest_slot: {specialty_id: orthopaedics, "on": "2026-09-24", patient_id: P00005, field: appointment_type_id}}
+          slot: {$earliest_slot: {specialty_id: orthopaedics, "on": "2026-09-24", patient_id: P00005}}
+          policy_id: cigna
+      trajectory_contains: [find_patient, find_slots, prepare_booking, submit_action]
+      must_not_call: [build_registration, prepare_cancel, prepare_reschedule]
+      privacy_of: [P00005]
+      max_tool_calls: 14
+
+  # "on Saturday morning" keeps the part of the day through the site closure.
+  - id: p5.published_saturday_morning_general_practice
+    problem: 5
+    from_number: "+34731169716"
+    caller:
+      - says: "Hello. Ignacio Vázquez Moreno here, born the ninth of December 1939. I'd like a General Practice appointment on Saturday morning, please. A cough has been hanging around for three weeks and it will not clear."
+        means:
+          identify: {name: "Ignacio Vázquez Moreno", date_of_birth: "1939-12-09"}
+          request: {intent: book, specialty_id: general_practice, when: "on Saturday morning", part_of_day: morning}
+      - says: "Yes, whichever is earliest is fine."
+        means: {accept: true}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00005
+          provider_id: {$earliest_slot: {specialty_id: general_practice, "on": "2026-09-19", part_of_day: morning, patient_id: P00005, field: provider_id}}
+          location_id: {$earliest_slot: {specialty_id: general_practice, "on": "2026-09-19", part_of_day: morning, patient_id: P00005, field: location_id}}
+          appointment_type_id: {$earliest_slot: {specialty_id: general_practice, "on": "2026-09-19", part_of_day: morning, patient_id: P00005, field: appointment_type_id}}
+          slot: {$earliest_slot: {specialty_id: general_practice, "on": "2026-09-19", part_of_day: morning, patient_id: P00005}}
+          policy_id: cigna
+      trajectory_contains: [find_patient, find_slots, prepare_booking, submit_action]
+      must_not_call: [build_registration, prepare_cancel, prepare_reschedule]
+      privacy_of: [P00005]
+      max_tool_calls: 14
+
+  # Sunday nothing opens: the booking moves to Monday, same site and part of day.
+  - id: p5.published_coming_sunday_moves_to_monday
+    problem: 5
+    from_number: "+34708729566"
+    caller:
+      - says: "Hi, this is Chloe Roberts Smith, born the first of September 1996. I need a General Practice appointment at Arenal Centro this coming Sunday. My repeat prescription is about to run out and needs renewing."
+        means:
+          identify: {name: "Chloe Roberts Smith", date_of_birth: "1996-09-01"}
+          request: {intent: book, specialty_id: general_practice, location_id: centro, when: "this coming Sunday"}
+      - says: "That sounds good, the first one you can offer is fine."
+        means: {accept: true}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00011
+          provider_id: {$earliest_slot: {specialty_id: general_practice, location_id: centro, "on": "2026-09-21", patient_id: P00011, field: provider_id}}
+          location_id: centro
+          appointment_type_id: {$earliest_slot: {specialty_id: general_practice, location_id: centro, "on": "2026-09-21", patient_id: P00011, field: appointment_type_id}}
+          slot: {$earliest_slot: {specialty_id: general_practice, location_id: centro, "on": "2026-09-21", patient_id: P00011}}
+          policy_id: mapfre
+      trajectory_contains: [find_patient, find_slots, prepare_booking, submit_action]
+      must_not_call: [build_registration, prepare_cancel, prepare_reschedule]
+      privacy_of: [P00011]
+      max_tool_calls: 16
+
+  # Monday 12 October is Fiesta Nacional: first thing rolls to Tuesday 13th.
+  - id: p5.published_first_thing_monday_fiesta
+    problem: 5
+    from_number: "+34712676131"
+    caller:
+      - says: "Hello. Amelia Hughes White, born the eighth of April 1981. I'd like a General Practice appointment at Arenal Centro first thing on Monday the twelfth of October. My blood pressure has been reading high on the pharmacy machine."
+        means:
+          identify: {name: "Amelia Hughes White", date_of_birth: "1981-04-08"}
+          request: {intent: book, specialty_id: general_practice, location_id: centro, when: "first thing on Monday the twelfth of October", part_of_day: morning}
+      - says: "Yes, the earliest is perfect."
+        means: {accept: true}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00012
+          provider_id: {$earliest_slot: {specialty_id: general_practice, location_id: centro, "on": "2026-10-13", part_of_day: morning, patient_id: P00012, field: provider_id}}
+          location_id: centro
+          appointment_type_id: {$earliest_slot: {specialty_id: general_practice, location_id: centro, "on": "2026-10-13", part_of_day: morning, patient_id: P00012, field: appointment_type_id}}
+          slot: {$earliest_slot: {specialty_id: general_practice, location_id: centro, "on": "2026-10-13", part_of_day: morning, patient_id: P00012}}
+          policy_id: sanitas
+      trajectory_contains: [find_patient, find_slots, prepare_booking, submit_action]
+      must_not_call: [build_registration, prepare_cancel, prepare_reschedule]
+      privacy_of: [P00012]
+      max_tool_calls: 16
