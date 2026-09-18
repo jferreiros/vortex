@@ -4,7 +4,7 @@
   "repo": "jferreiros/vortex",
   "board_url": "https://jferreiros.github.io/vortex/tasks.html",
   "updated": "2026-09-18",
-  "note": "Fuente de verdad del tablero. La pagina y las issues de GitHub salen de aqui. Si cambias una tarea, cambiala aqui y lanza `make tasks`. El campo `weight` es el peso del problema (1-5), no los puntos: cada Run All tira 4 casos privados por problema, asi que una tarea de peso w vale w x 4 en el marcador. El roster completo son 196 puntos.",
+  "note": "Fuente de verdad del tablero. La pagina y las issues de GitHub salen de aqui. Si cambias una tarea, cambiala aqui y lanza `make tasks`. El campo `weight` es el peso del problema (1-5), no los puntos: cada Run All tira 4 casos privados por problema, asi que una tarea de peso w vale w x 4 en el marcador. El roster completo son 196 puntos. No sumes esta columna: da 53, no 49, porque hay varias tareas por reto (tres para el reto 1, dos para el reto 3). El roster son 49 de peso sobre 17 retos puntuables, y 49 x 4 casos = 196 puntos. Los pesos de tarea sirven para priorizar una tarea contra otra, nunca para sumar.",
   "lanes": {
     "linea": {"name": "La Línea", "folder": "vortex/line/", "short": "Socket, audio, envío"},
     "conv": {"name": "La Conversación", "folder": "vortex/conversation/", "short": "Prompt, turnos, idiomas"},
