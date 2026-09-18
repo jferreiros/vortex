@@ -48,6 +48,74 @@ def test_which_clinics_see_children(catalogue):
     ]
 
 
+@pytest.mark.asyncio
+async def test_saturday_sites_agree_with_what_find_slots_actually_books(catalogue, tmp_path):
+    """Problem 16's own failure mode: an answer the caller books on and can't have.
+
+    If the fact sheet ever named a site ``find_slots`` disagrees with, telling
+    the caller "Centro" and then failing to book it there is exactly the case
+    this problem is scored on.
+    """
+    from datetime import date, datetime
+
+    from vortex.clinic.client import FakeClinicClient
+    from vortex.contract import MADRID, FindSlotsInput, ToolContext
+    from vortex.diary.tools import find_slots
+    from vortex.line.submit import DryRunSubmitClient
+    from vortex.observability.calllog import CallLog
+
+    ctx = ToolContext(
+        call_id="CA-facts",
+        now=datetime(2026, 9, 18, 9, 0, tzinfo=MADRID),
+        from_number="+34612345678",
+        clinic=FakeClinicClient(),
+        log=CallLog("CA-facts", tmp_path / "calls.jsonl"),
+        submitter=DryRunSubmitClient(),
+    )
+    answer = await find_slots(
+        ctx,
+        FindSlotsInput(
+            specialty_id="general_practice",
+            date_from=date(2026, 9, 19),
+            date_to=date(2026, 9, 19),
+        ),
+    )
+    bookable_saturday_sites = {s.location_id for s in answer.slots}
+    fact_sheet_saturday_sites = {s.location_id for s in facts.saturday_sites(catalogue)}
+    assert bookable_saturday_sites <= fact_sheet_saturday_sites
+
+
+@pytest.mark.asyncio
+async def test_sites_for_specialty_agree_with_what_find_slots_actually_books(catalogue, tmp_path):
+    from datetime import date, datetime
+
+    from vortex.clinic.client import FakeClinicClient
+    from vortex.contract import MADRID, FindSlotsInput, ToolContext
+    from vortex.diary.tools import find_slots
+    from vortex.line.submit import DryRunSubmitClient
+    from vortex.observability.calllog import CallLog
+
+    ctx = ToolContext(
+        call_id="CA-facts-2",
+        now=datetime(2026, 9, 18, 9, 0, tzinfo=MADRID),
+        from_number="+34612345678",
+        clinic=FakeClinicClient(),
+        log=CallLog("CA-facts-2", tmp_path / "calls.jsonl"),
+        submitter=DryRunSubmitClient(),
+    )
+    answer = await find_slots(
+        ctx,
+        FindSlotsInput(
+            specialty_id="paediatrics",
+            date_from=date(2026, 9, 21),
+            date_to=date(2026, 10, 2),
+        ),
+    )
+    bookable_sites = {s.location_id for s in answer.slots}
+    fact_sheet_sites = {s.location_id for s in facts.sites_for_specialty(catalogue, "paediatrics")}
+    assert bookable_sites <= fact_sheet_sites
+
+
 def test_which_dermatologist_consults_at_centro(catalogue):
     found = facts.providers_at(catalogue, "centro", "dermatology")
     assert [p.name for p in found] == ["Dra. Iglesias"]

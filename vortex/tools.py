@@ -257,6 +257,12 @@ async def call_tool(name: str, ctx: ToolContext, raw_args: dict[str, Any]) -> Ba
     if not isinstance(result, spec.output_model):
         result = spec.output_model.model_validate(result)
     ctx.log.tool_returned(name, result, (time.monotonic() - started) * 1000)
+
+    if name == "prepare_booking" and isinstance(result, contract.BookingResult) and result.action:
+        identity.note_target_patient(ctx, result.action.patient_id)
+    elif name == "prepare_cancel" and isinstance(result, contract.CancelResult) and result.action:
+        identity.note_target_patient(ctx, args.patient_id)
+
     return result
 
 
