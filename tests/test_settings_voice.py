@@ -17,6 +17,7 @@ VOICE_KEYS = (
     "LLM_API_KEY",
     "LLM_BASE_URL",
     "LLM_MODEL",
+    "LLM_MAX_TOKENS",
     "HELMCODE_BASE_URL",
     "HELMCODE_API_KEY",
     "CLOUDFLARE_ACCOUNT_ID",
@@ -28,6 +29,7 @@ VOICE_KEYS = (
     "ARBITER_MODEL",
     "GOOGLE_APPLICATION_CREDENTIALS",
     "GOOGLE_TTS_CREDENTIALS_JSON",
+    "GOOGLE_TTS_VOICE_EN",
     "ELEVENLABS_API_KEY",
     "ELEVENLABS_VOICE_ID_ES",
     "ELEVENLABS_MODEL",
@@ -35,6 +37,7 @@ VOICE_KEYS = (
     "VORTEX_TTS_PROVIDER",
     "VORTEX_TTS_PROVIDER_ALT",
     "VORTEX_VOICE_MODE",
+    "VORTEX_GEOCODER_URL",
 )
 
 
@@ -147,6 +150,15 @@ def test_the_arbiter_resolves_like_the_llm(clean_env) -> None:
     assert s.llm_provider == "helmcode"
 
 
+def test_llm_max_tokens_defaults_to_300(clean_env) -> None:
+    """120 cut off a nested-slot tool call mid-argument; 300 gives it room."""
+    s = _settings(clean_env)
+    assert s.llm_max_tokens == 300
+
+    s = _settings(clean_env, LLM_MAX_TOKENS="500")
+    assert s.llm_max_tokens == 500
+
+
 def test_the_arbiter_overrides_win_too(clean_env) -> None:
     s = _settings(
         clean_env,
@@ -239,7 +251,7 @@ def test_a_routed_pair_needs_both_keys(clean_env) -> None:
     s = _settings(clean_env, GOOGLE_APPLICATION_CREDENTIALS="google-tts.json")
     assert s.voice_is_pipecat is True
     assert s.tts_supports_language_switch is True
-    assert sorted(s.tts_covered_languages) == ["ca", "es", "eu", "gl"]
+    assert sorted(s.tts_covered_languages) == ["ca", "en", "es", "eu", "gl"]
 
 
 def test_an_unknown_provider_falls_back_to_google(clean_env) -> None:
@@ -286,13 +298,24 @@ def test_voice_mode_overrides_the_keys(clean_env) -> None:
     )
 
 
-def test_google_voice_defaults_cover_the_four_languages(clean_env) -> None:
+def test_google_voice_defaults_cover_the_five_languages(clean_env) -> None:
     s = _settings(clean_env)
+    assert s.google_tts_voice_en == "en-GB-Chirp3-HD-Aoede"
     assert s.google_tts_voice_es == "es-ES-Chirp3-HD-Aoede"
     assert s.google_tts_voice_ca == "ca-ES-Standard-B"
     assert s.google_tts_voice_gl == "gl-ES-Standard-A"
     assert s.google_tts_voice_eu == "eu-ES-Standard-A"
     assert s.tts_voice == s.google_tts_voice_es
+
+
+def test_google_speaks_english_and_it_can_be_overridden(clean_env) -> None:
+    """69 of 73 published cases are English; google must cover it out of the box."""
+    s = _settings(clean_env)
+    assert "en" in s.tts_languages("google")
+    assert s.tts_provider_for("en") == "google"
+
+    s = _settings(clean_env, GOOGLE_TTS_VOICE_EN="en-US-Chirp3-HD-Puck")
+    assert s.google_tts_voice_en == "en-US-Chirp3-HD-Puck"
 
 
 def test_elevenlabs_has_no_default_voice(clean_env) -> None:
@@ -305,6 +328,20 @@ def test_elevenlabs_has_no_default_voice(clean_env) -> None:
     s = _settings(clean_env, ELEVENLABS_VOICE_ID_ES="voice-1")
     assert s.tts_voice == "voice-1"
     assert s.tts_voices_missing == []
+
+
+# --- geocoder ----------------------------------------------------------------
+
+
+def test_geocoder_url_is_off_by_default(clean_env) -> None:
+    """Off by default: evals and offline work never depend on a network call."""
+    s = _settings(clean_env)
+    assert s.geocoder_url == ""
+
+
+def test_geocoder_url_reads_the_env_var(clean_env) -> None:
+    s = _settings(clean_env, VORTEX_GEOCODER_URL="https://nominatim.example.invalid/search")
+    assert s.geocoder_url == "https://nominatim.example.invalid/search"
 
 
 # --- describe() --------------------------------------------------------------
@@ -344,7 +381,7 @@ def test_describe_reports_google_without_the_credentials(clean_env) -> None:
     assert described["tts_voice"] == s.google_tts_voice_es
     assert described["has_google_tts_credentials"] is True
     assert described["tts_language_switch"] is True
-    assert described["tts_languages"] == ["ca", "es", "eu", "gl"]
+    assert described["tts_languages"] == ["ca", "en", "es", "eu", "gl"]
     text = repr(described)
     assert "google-secret" not in text
     assert "/secrets/google-tts.json" not in text
@@ -373,6 +410,9 @@ def test_google_voice_map_covers_es_ca_gl_eu(clean_env) -> None:
 
     assert tts_voice_for("en", s) == (DEFAULT_GOOGLE_VOICE_EN, Language.EN_GB)
     assert tts_voice_for("de", s) == (DEFAULT_GOOGLE_VOICE_EN, Language.EN_GB)
+    # A configured GOOGLE_TTS_VOICE_EN wins over the language module's fallback.
+    s = _settings(clean_env, GOOGLE_TTS_VOICE_EN="en-US-Chirp3-HD-Puck")
+    assert tts_voice_for("en", s) == ("en-US-Chirp3-HD-Puck", Language.EN_GB)
 
 
 def test_elevenlabs_says_english_and_spanish_with_one_voice(clean_env) -> None:
