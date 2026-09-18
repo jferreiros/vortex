@@ -295,3 +295,24 @@ def test_build_files_appends_to_the_index_and_dedupes() -> None:
     assert [e["path"] for e in again["runs"]] == [path, "runs/logic/old.json"]
     # The full run is intact on the branch.
     assert json.loads(files[path])["cases"][0]["id"] == "a::s1"
+
+
+# ---- the wire shape ----------------------------------------------------------------
+
+
+def test_wire_messages_flattens_parts_and_nulls() -> None:
+    from evals.conversation.brains.openai_brain import wire_messages
+
+    wire = wire_messages(
+        [
+            {
+                "role": "system",
+                "content": [{"type": "text", "text": "a"}, {"type": "text", "text": "b"}],
+            },
+            {"role": "assistant", "content": None, "tool_calls": [{"id": "1"}]},
+            {"role": "user", "content": "hola"},
+        ]
+    )
+    assert wire[0]["content"] == "a\nb"
+    assert wire[1]["content"] == "" and wire[1]["tool_calls"] == [{"id": "1"}]
+    assert wire[2] == {"role": "user", "content": "hola"}

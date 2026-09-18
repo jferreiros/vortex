@@ -86,6 +86,27 @@ def spec_for(model: str | None) -> ModelSpec:
     return resolve(f"openai/{model}")
 
 
+def wire_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The message list as the strictest host accepts it.
+
+    Cloudflare Workers AI validates against a schema where ``content`` is a
+    string, never a list of parts and never null. OpenAI, Helmcode and the
+    Vercel gateway accept both, so every request goes out in the strict
+    shape: text parts joined, ``None`` turned into ``""``.
+    """
+    out: list[dict[str, Any]] = []
+    for msg in messages:
+        content = msg.get("content")
+        if isinstance(content, list):
+            content = "\n".join(
+                part.get("text", "") if isinstance(part, dict) else str(part) for part in content
+            )
+        elif content is None:
+            content = ""
+        out.append({**msg, "content": content})
+    return out
+
+
 class ModelBrain:
     def __init__(
         self,
@@ -216,7 +237,7 @@ class ModelBrain:
             )
         started = time.monotonic()
         response = await self._client.chat.completions.create(
-            messages=self._messages,
+            messages=wire_messages(self._messages),
             tools=self._tools or None,
             **self.spec.request_kwargs(),
         )
