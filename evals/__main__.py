@@ -106,9 +106,8 @@ def cmd_corpus(args: argparse.Namespace) -> int:
 
 def cmd_ci(args: argparse.Namespace) -> int:
     from evals.conversation.runner import run_sync as run_conversation
-    from evals.logic.runner import run_sync as run_logic
-
     from evals.corpus.runner import run_sync as run_corpus
+    from evals.logic.runner import run_sync as run_logic
 
     logic = run_logic(results_dir=args.results_dir)
     save_run(logic, args.results_dir)
@@ -170,7 +169,9 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("corpus", help="layer 4: the published roster and its documented surface")
     p.add_argument("--only", help="substring filter on case or probe ids")
     p.add_argument("--judge-log", type=Path, default=None, help="score the calls in this JSONL log")
-    p.add_argument("--coverage", action="store_true", help="print the points-at-stake table and exit")
+    p.add_argument(
+        "--coverage", action="store_true", help="print the points-at-stake table and exit"
+    )
     p.set_defaults(fn=cmd_corpus)
 
     p = sub.add_parser("ci", help="layers 1 + 2 + 4, report, exit 1 on any failure")

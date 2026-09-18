@@ -117,9 +117,7 @@ def _adapt_catalogue(raw: dict[str, Any]) -> dict[str, Any]:
                 "appointment_type_ids": [
                     appt_type_by_name.get(n, n) for n in p.get("appointment_type_names", [])
                 ],
-                "location_ids": [
-                    location_by_name.get(n, n) for n in p.get("location_names", [])
-                ],
+                "location_ids": [location_by_name.get(n, n) for n in p.get("location_names", [])],
                 "insurer_ids_accepted": [i["id"] for i in p.get("accepted_insurers", [])],
                 "insurer_ids_refused": [i["id"] for i in p.get("refused_insurers", [])],
                 "leave": (
@@ -146,9 +144,7 @@ def _adapt_catalogue(raw: dict[str, Any]) -> dict[str, Any]:
                 "latitude": loc.get("latitude"),
                 "longitude": loc.get("longitude"),
                 "hours": _adapt_hours(loc.get("hours", [])),
-                "provider_ids": [
-                    provider_by_name.get(n, n) for n in loc.get("provider_names", [])
-                ],
+                "provider_ids": [provider_by_name.get(n, n) for n in loc.get("provider_names", [])],
                 "insurer_ids": [i["id"] for i in loc.get("covered_by", [])],
             }
         )

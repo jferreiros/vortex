@@ -347,9 +347,7 @@ def _red_flag_checker() -> Callable[[Any], list[str]]:
         if not getattr(result, "emergency", False):
             problems.append("emergency is False; this is a published red flag")
         if getattr(result, "specialty_id", None):
-            problems.append(
-                f"routed to {result.specialty_id!r}; a red flag books nothing"
-            )
+            problems.append(f"routed to {result.specialty_id!r}; a red flag books nothing")
         rejection = getattr(result, "rejection", None)
         reason = getattr(rejection, "reason", None) if rejection else None
         if reason != "medical_emergency":
@@ -497,8 +495,7 @@ REFUSAL_SHAPES: tuple[tuple[str, str], ...] = (
 #: and the roster does not show.
 KNOWN_INTERACTIONS: tuple[tuple[str, str], ...] = (
     (
-        "ASISA covers physiotherapy only at Centro and Norte; the one "
-        "physiotherapist sits at Sur",
+        "ASISA covers physiotherapy only at Centro and Norte; the one physiotherapist sits at Sur",
         "an ASISA patient can never book physio — refuse, do not redirect",
     ),
     (

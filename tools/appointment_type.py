@@ -7,8 +7,10 @@ own for that case falls back to the universal type (``specialty_id: null`` —
 e.g. gynaecology has no first-visit type, so a new patient there books the
 universal ``first_visit``).
 
-    uv run python tools/appointment_type.py --specialty-id dermatology --client '{"has_visited_before": false}'
-    uv run python tools/appointment_type.py --specialty-id gynaecology --client '{"has_visited_before": true}'
+    uv run python tools/appointment_type.py --specialty-id dermatology \
+        --client '{"has_visited_before": false}'
+    uv run python tools/appointment_type.py --specialty-id gynaecology \
+        --client '{"has_visited_before": true}'
 
     # Reuse a snapshot from `make try-api` instead of hitting the live API:
     uv run python tools/appointment_type.py --specialty-id paediatrics \
@@ -68,7 +70,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--specialty-id", required=True, help="e.g. dermatology")
     parser.add_argument(
-        "--client", required=True, help='patient JSON, e.g. \'{"has_visited_before": false}\''
+        "--client", required=True, help="patient JSON, e.g. '{\"has_visited_before\": false}'"
     )
     parser.add_argument(
         "--appointment-types-file",

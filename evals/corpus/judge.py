@@ -167,9 +167,7 @@ def score(
 
     if not submitted:
         verdict.empty_record = True
-        verdict.diffs.append(
-            "no actions submitted — silence is never cheaper than a wrong answer"
-        )
+        verdict.diffs.append("no actions submitted — silence is never cheaper than a wrong answer")
         return verdict
 
     for action in submitted:
@@ -222,9 +220,7 @@ def score(
     return verdict
 
 
-def leaked(
-    case: Case, our_turns: list[str], *, strict_digit_words: bool = True
-) -> list[str]:
+def leaked(case: Case, our_turns: list[str], *, strict_digit_words: bool = True) -> list[str]:
     """Protected values spelled by consecutive words on our side of the call.
 
     The published rule reads only our turns and needs consecutive words to
