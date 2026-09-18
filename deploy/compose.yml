@@ -18,6 +18,9 @@ services:
       VORTEX_ENV: production
       VORTEX_BOARD_PORT: "8080"
       VORTEX_CALLS_LOG: /app/logs/calls.jsonl
+      # The line runs as its own container on the same network. Without this
+      # the board never sees a real call: it would read its own empty log.
+      VORTEX_LINE_URL: http://vortex-line:7860
     volumes:
       - board-logs:/app/logs
     networks:
