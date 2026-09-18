@@ -69,6 +69,9 @@ class Candidate:
     paid: bool = False
     billing: str = ""
     notes: str = ""
+    # Scenarios in flight for this model; None takes the run's --concurrency.
+    # api.openai.com's 200k tokens-per-minute limit tolerates one.
+    concurrency: int | None = None
 
     @property
     def skip_reason(self) -> str:
@@ -106,6 +109,7 @@ def load_candidates(
                 paid=bool(row.get("paid", False)),
                 billing=str(row.get("billing") or ""),
                 notes=str(row.get("notes") or ""),
+                concurrency=row.get("concurrency"),
             )
         )
     return out
@@ -135,7 +139,7 @@ async def run_model(
     log_dir: Path,
     record: bool = False,
 ) -> list[CaseResult]:
-    gate = asyncio.Semaphore(max(1, concurrency))
+    gate = asyncio.Semaphore(max(1, cand.concurrency or concurrency))
 
     async def one(scenario: Scenario) -> CaseResult:
         async with gate:

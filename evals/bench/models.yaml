@@ -124,4 +124,5 @@ models:
     default: true
     usd_per_1m_input: 0.40
     usd_per_1m_output: 1.60
-    notes: "Needs OPENAI_API_KEY. The model the conversation cassettes were first recorded with."
+    concurrency: 1
+    notes: "Needs OPENAI_API_KEY. One scenario at a time: 200k tokens/min is four rounds of this prompt."

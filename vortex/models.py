@@ -78,15 +78,20 @@ class ModelSpec:
             **self.extra,
         }
 
-    def client(self, timeout: float = 60.0) -> Any:
+    def client(self, timeout: float = 60.0, max_retries: int = 6) -> Any:
         """An ``AsyncOpenAI`` pointed at this endpoint. Imported lazily: the
-        evals and the runtime both use it, the settings module must not."""
+        evals and the runtime both use it, the settings module must not.
+
+        Six retries with the SDK's backoff: a bench saturates a tokens-per-
+        minute limit within seconds, and a 429 is a wait, not a verdict.
+        """
         from openai import AsyncOpenAI
 
         return AsyncOpenAI(
             api_key=self.api_key or "missing",
             base_url=self.base_url or None,
             timeout=timeout,
+            max_retries=max_retries,
         )
 
     def describe(self) -> dict[str, Any]:
