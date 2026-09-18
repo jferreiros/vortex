@@ -133,8 +133,7 @@ PERSONAS: list[Persona] = [
             "Give your details one at a time, only as they are asked for. If "
             "they tell you they must register you first and cannot book "
             "anything today, accept that without arguing, give what they ask "
-            "for, and end the call politely once they say you are registered.\n\n"
-            + CALLER_STYLE
+            "for, and end the call politely once they say you are registered.\n\n" + CALLER_STYLE
         ),
         expect_kind="register",
         forbid_kinds=("book",),
@@ -407,9 +406,7 @@ def verdict(persona: Persona, outcome: dict[str, Any]) -> tuple[bool, str]:
 
 async def rehearse(persona: Persona, settings: Settings, args: Any) -> bool:
     print(f"\n{'=' * 72}\n{persona.key}  {persona.title}\n{'=' * 72}")
-    rehearsal = Rehearsal(
-        persona, settings, verbose=args.verbose, max_tokens=args.max_tokens
-    )
+    rehearsal = Rehearsal(persona, settings, verbose=args.verbose, max_tokens=args.max_tokens)
     outcome = await rehearsal.run(args.turns)
     if not args.verbose:
         for who, text in rehearsal.transcript:
