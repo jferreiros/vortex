@@ -1,0 +1,274 @@
+# Diary lane: dates, hours, closures, availability, appointment ids.
+# Sources: clinic-rules "Time and dates" / "Sites and hours", problems 5, 7, 8.
+# The call connects on Friday 18 September 2026 at 09:00 Europe/Madrid.
+group: diary
+now: "2026-09-18T09:00:00+02:00"
+
+cases:
+  # ---- resolve_date: the fixed vocabulary of problem 5 --------------------
+  - id: diary.date.tomorrow
+    problem: 5
+    tool: resolve_date
+    args: {phrase: "tomorrow"}
+    expect: {date_from: "2026-09-19", date_to: "2026-09-19", rejection: {$absent: true}}
+
+  - id: diary.date.day_after_tomorrow
+    problem: 5
+    tool: resolve_date
+    args: {phrase: "the day after tomorrow"}
+    # Sunday: nothing opens. The window moves to Monday and says so.
+    expect:
+      date_from: "2026-09-21"
+      date_to: "2026-09-21"
+      moved_from_closed_day: true
+
+  - id: diary.date.a_week_from_today
+    problem: 5
+    tool: resolve_date
+    args: {phrase: "a week from today"}
+    expect: {date_from: "2026-09-25", date_to: "2026-09-25"}
+
+  - id: diary.date.in_a_fortnight
+    problem: 5
+    tool: resolve_date
+    args: {phrase: "in a fortnight"}
+    expect: {date_from: "2026-10-02", date_to: "2026-10-02"}
+
+  - id: diary.date.saturday_morning
+    problem: 5
+    tool: resolve_date
+    args: {phrase: "on Saturday morning"}
+    expect:
+      date_from: "2026-09-19"
+      date_to: "2026-09-19"
+      time_to: {$regex: "^14:00"}
+
+  - id: diary.date.this_coming_friday_said_on_a_friday
+    problem: 5
+    tool: resolve_date
+    # Strictly after the day of the call: a week away, not today.
+    args: {phrase: "this coming Friday"}
+    expect: {date_from: "2026-09-25", date_to: "2026-09-25"}
+
+  - id: diary.date.this_coming_monday
+    problem: 5
+    tool: resolve_date
+    args: {phrase: "this coming Monday"}
+    expect: {date_from: "2026-09-21", date_to: "2026-09-21"}
+
+  - id: diary.date.first_thing_wednesday
+    problem: 5
+    tool: resolve_date
+    args: {phrase: "first thing Wednesday"}
+    expect:
+      date_from: "2026-09-23"
+      date_to: "2026-09-23"
+      time_to: {$regex: "^14:00"}
+
+  - id: diary.date.thursday_afternoon
+    problem: 5
+    tool: resolve_date
+    args: {phrase: "Thursday afternoon"}
+    expect:
+      date_from: "2026-09-24"
+      date_to: "2026-09-24"
+      time_from: {$regex: "^14:00"}
+
+  - id: diary.date.first_thing_monday_12_october_is_closed
+    problem: 5
+    tool: resolve_date
+    # Fiesta Nacional: the whole network is shut. Next open day, still first thing.
+    args: {phrase: "first thing on Monday the twelfth of October"}
+    expect:
+      date_from: "2026-10-13"
+      date_to: "2026-10-13"
+      moved_from_closed_day: true
+      time_to: {$regex: "^14:00"}
+
+  - id: diary.date.part_of_day_morning_ends_at_14
+    problem: 1
+    tool: resolve_date
+    args: {phrase: "tomorrow", part_of_day: morning}
+    expect: {time_to: {$regex: "^14:00"}}
+
+  - id: diary.date.part_of_day_afternoon_starts_at_14
+    problem: 1
+    tool: resolve_date
+    args: {phrase: "tomorrow", part_of_day: afternoon}
+    expect: {time_from: {$regex: "^14:00"}}
+
+  - id: diary.date.past_date_is_rejected
+    problem: 5
+    tool: resolve_date
+    args: {phrase: "last Monday"}
+    expect: {rejection: {$present: true}}
+
+  # ---- find_slots: real availability, filtered ----------------------------
+  - id: diary.slots.never_same_day
+    problem: 1
+    tool: find_slots
+    # The fake clinic lists today's free slots; the tool must drop them.
+    args: {specialty_id: general_practice, date_from: "2026-09-18", date_to: "2026-09-21"}
+    expect:
+      slots: {$all: {start: {$not: {$date: "2026-09-18"}}}}
+      rejection: {$absent: true}
+
+  - id: diary.slots.earliest_is_tomorrow_first_free_minute
+    problem: 1
+    tool: find_slots
+    args: {patient_id: P00042, specialty_id: general_practice, date_from: "2026-09-19", date_to: "2026-09-25"}
+    expect:
+      slots:
+        $min_len: 1
+      appointment_type: {appointment_type_id: review}
+
+  - id: diary.slots.carry_blocked_provider_through
+    problem: 6
+    tool: find_slots
+    args: {specialty_id: general_practice, date_from: "2026-09-21", date_to: "2026-09-25"}
+    expect:
+      blocked: {$contains: {provider_id: PR07, reason: provider_on_leave}}
+
+  - id: diary.slots.morning_filter_stops_at_14
+    problem: 1
+    tool: find_slots
+    args:
+      specialty_id: general_practice
+      date_from: "2026-09-21"
+      date_to: "2026-09-21"
+      time_to: "14:00"
+    expect:
+      # Every slot before 14:00 Madrid on that day.
+      slots: {$all: {start: {$regex: "T(0[0-9]|1[0-3]):"}}}
+
+  - id: diary.slots.language_filter_keeps_catalan_speakers
+    problem: 11
+    tool: find_slots
+    args: {specialty_id: general_practice, date_from: "2026-09-21", date_to: "2026-09-25", language: ca}
+    expect:
+      # Dr. Sáez (PR02) is the only Catalan-speaking GP in the fixtures.
+      slots: {$all: {provider_id: {$in: [PR02]}}}
+
+  - id: diary.slots.span_over_14_days_is_split_not_422
+    problem: 7
+    tool: find_slots
+    args: {specialty_id: general_practice, date_from: "2026-09-21", date_to: "2026-10-16"}
+    expect: {slots: {$min_len: 1}, rejection: {$absent: true}}
+
+  - id: diary.slots.sur_closes_friday_lunchtime
+    problem: 5
+    tool: find_slots
+    args: {location_id: sur, specialty_id: orthopaedics, date_from: "2026-09-25", date_to: "2026-09-25", time_from: "14:00"}
+    expect: {slots: {$len: 0}}
+
+  - id: diary.slots.only_centro_opens_saturday
+    problem: 5
+    tool: find_slots
+    args: {specialty_id: general_practice, date_from: "2026-09-19", date_to: "2026-09-19"}
+    expect:
+      slots: {$all: {location_id: centro}}
+
+  - id: diary.slots.closure_day_is_empty
+    problem: 5
+    tool: find_slots
+    args: {specialty_id: general_practice, date_from: "2026-10-12", date_to: "2026-10-12"}
+    expect: {slots: {$len: 0}}
+
+  # ---- list_appointments: the only source of an appointment_id ------------
+  - id: diary.appointments.upcoming_by_default
+    problem: 8
+    tool: list_appointments
+    args: {patient_id: P00042}
+    expect: {appointments: [{appointment_id: A0001, provider_id: PR01}]}
+
+  - id: diary.appointments.past_never_bookable
+    problem: 8
+    tool: list_appointments
+    args: {patient_id: P00042, when: past}
+    expect: {appointments: {$len: 2}}
+
+  - id: diary.appointments.child_has_its_own_diary
+    problem: 9
+    tool: list_appointments
+    args: {patient_id: P00107}
+    expect: {appointments: [{appointment_id: A0002}]}
+
+  # ---- prepare_*: guards before an action leaves ---------------------------
+  - id: diary.booking.same_day_slot_is_rejected
+    problem: 1
+    tool: prepare_booking
+    args:
+      patient_id: P00042
+      slot: {start: "2026-09-18T10:15:00+02:00", provider_id: PR01, location_id: centro, appointment_type_id: review}
+      policy_id: sanitas
+    expect: {action: {$absent: true}, rejection: {$present: true}}
+
+  - id: diary.booking.closure_day_slot_is_rejected
+    problem: 5
+    tool: prepare_booking
+    args:
+      patient_id: P00042
+      slot: {start: "2026-10-12T10:15:00+02:00", provider_id: PR01, location_id: centro, appointment_type_id: review}
+      policy_id: sanitas
+    expect: {action: {$absent: true}, rejection: {reason: clinic_closed}}
+
+  - id: diary.booking.builds_exact_payload
+    problem: 1
+    tool: prepare_booking
+    args:
+      patient_id: P00042
+      slot: {start: "2026-09-21T09:30:00+02:00", provider_id: PR01, location_id: centro, appointment_type_id: review}
+      policy_id: sanitas
+    expect:
+      rejection: {$absent: true}
+      action:
+        kind: book
+        patient_id: P00042
+        provider_id: PR01
+        location_id: centro
+        appointment_type_id: review
+        slot: "2026-09-21T09:30:00+02:00"
+        policy_id: sanitas
+
+  - id: diary.cancel.upcoming_builds_action
+    problem: 8
+    tool: prepare_cancel
+    args: {appointment_id: A0001, patient_id: P00042}
+    expect: {action: {kind: cancel, appointment_id: A0001}}
+
+  - id: diary.cancel.past_visit_is_rejected
+    problem: 8
+    tool: prepare_cancel
+    args: {appointment_id: A9001, patient_id: P00042}
+    expect: {action: {$absent: true}, rejection: {$present: true}}
+
+  - id: diary.cancel.someone_elses_appointment_is_rejected
+    problem: 8
+    tool: prepare_cancel
+    args: {appointment_id: A0002, patient_id: P00042}
+    expect: {action: {$absent: true}, rejection: {$present: true}}
+
+  - id: diary.reschedule.builds_action
+    problem: 8
+    tool: prepare_reschedule
+    args:
+      appointment_id: A0001
+      slot: {start: "2026-09-23T16:30:00+02:00", provider_id: PR01, location_id: centro, appointment_type_id: review}
+      policy_id: sanitas
+    expect:
+      action:
+        kind: reschedule
+        appointment_id: A0001
+        provider_id: PR01
+        location_id: centro
+        slot: "2026-09-23T16:30:00+02:00"
+        policy_id: sanitas
+
+  - id: diary.reschedule.past_visit_is_rejected
+    problem: 8
+    tool: prepare_reschedule
+    args:
+      appointment_id: A9002
+      slot: {start: "2026-09-23T16:30:00+02:00", provider_id: PR01, location_id: centro, appointment_type_id: review}
+      policy_id: sanitas
+    expect: {action: {$absent: true}, rejection: {$present: true}}
