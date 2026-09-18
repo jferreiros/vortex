@@ -277,9 +277,13 @@ def _llm_extra_body(settings: Any) -> dict[str, Any]:
     ``reasoning_effort`` ("none" skips the phase on qwen3.6/gemma4). Hosts
     ignore the one they do not know.
     """
+    # pipecat spreads this dict as keyword arguments of the SDK's
+    # ``chat.completions.create``: ``reasoning_effort`` is one of its
+    # parameters, ``chat_template_kwargs`` is not and has to travel in
+    # ``extra_body`` to reach the request JSON.
     extra: dict[str, Any] = {}
     if settings.llm_disable_thinking:
-        extra["chat_template_kwargs"] = {"enable_thinking": False}
+        extra["extra_body"] = {"chat_template_kwargs": {"enable_thinking": False}}
     if settings.llm_reasoning_effort:
         extra["reasoning_effort"] = settings.llm_reasoning_effort
     return extra

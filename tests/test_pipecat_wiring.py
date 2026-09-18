@@ -172,8 +172,9 @@ def test_service_settings_take_our_shape() -> None:
     )
     # Both dialects of "do not reason": vLLM's chat_template_kwargs and
     # Helmcode's reasoning_effort. Hosts ignore the one they do not know.
-    assert llm.extra["chat_template_kwargs"] == {"enable_thinking": False}
+    assert llm.extra["extra_body"] == {"chat_template_kwargs": {"enable_thinking": False}}
     assert llm.extra["reasoning_effort"] == "none"
+    assert "chat_template_kwargs" not in llm.extra  # not a create() kwarg
 
     google = GoogleHttpTTSService.Settings(voice="es-ES-Chirp3-HD-Aoede", language=Language.ES_ES)
     assert google.voice == "es-ES-Chirp3-HD-Aoede"
