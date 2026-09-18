@@ -26,7 +26,7 @@
 | vortex/observability/auth.py         |       33 |        6 |     82% |     26-31 |
 | vortex/observability/calllog.py      |       67 |       19 |     72% |42-44, 92, 111-121, 125-128 |
 | vortex/observability/demo.py         |       61 |       61 |      0% |     1-187 |
-| vortex/observability/live.py         |      285 |      285 |      0% |     1-412 |
+| vortex/observability/live.py         |      299 |      299 |      0% |     1-436 |
 | vortex/observability/view.py         |      228 |       28 |     88% |65, 67, 69, 71, 83, 85, 88, 109, 118, 128-129, 138, 148, 165, 179-180, 194-196, 198, 223-224, 248, 267-271 |
 | vortex/rules/eligibility.py          |      103 |       20 |     81% |84, 87, 114, 120, 138, 142, 153, 226, 231, 250, 261, 286, 302-315, 321, 324-326 |
 | vortex/rules/facts.py                |       59 |        2 |     97% |  118, 120 |
@@ -35,7 +35,7 @@
 | vortex/rules/triage.py               |       57 |        6 |     89% |63, 205-206, 217, 225, 230 |
 | vortex/settings.py                   |      169 |        1 |     99% |       235 |
 | vortex/tools.py                      |       51 |        9 |     82% |182, 185-187, 193-195, 197, 210 |
-| **TOTAL**                            | **3221** |  **879** | **73%** |           |
+| **TOTAL**                            | **3235** |  **893** | **72%** |           |
 
 6 empty files skipped.
 
