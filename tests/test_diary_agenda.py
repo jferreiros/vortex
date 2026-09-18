@@ -245,6 +245,90 @@ async def test_a_site_closed_that_afternoon_simply_has_nothing(ctx: ToolContext)
     assert answer.rejection.reason == "no_availability"  # the site opened that morning
 
 
+# ---- widen_days: problem 7, no slot free -----------------------------------
+
+
+async def test_widen_days_finds_the_nearest_alternative(ctx: ToolContext) -> None:
+    """The same empty Friday afternoon at Sur, but now free to look further out."""
+    answer = await find_slots(
+        ctx,
+        FindSlotsInput(
+            location_id="sur",
+            specialty_id="orthopaedics",
+            date_from=date(2026, 9, 25),
+            date_to=date(2026, 9, 25),
+            time_from=time(14, 0),
+            widen_days=7,
+        ),
+    )
+    assert answer.widened is True
+    assert answer.rejection is None
+    assert answer.slots  # a weekday afternoon further out is open
+    assert all(s.location_id == "sur" for s in answer.slots)
+    assert all(s.start.astimezone(MADRID).time() >= time(14, 0) for s in answer.slots)
+
+
+async def test_widen_days_still_says_no_availability_when_it_truly_isnt_there(
+    ctx: ToolContext,
+) -> None:
+    """No site is open past 20:00. Widening further out cannot invent a slot.
+
+    Dermatology (one provider, never on leave) keeps this a pure no_availability
+    case: nothing here comes from a blocked provider surviving the window.
+    """
+    answer = await find_slots(
+        ctx,
+        FindSlotsInput(
+            specialty_id="dermatology",
+            date_from=date(2026, 9, 21),
+            date_to=date(2026, 9, 25),
+            time_from=time(21, 0),
+            widen_days=30,
+        ),
+    )
+    assert answer.widened is True
+    assert answer.slots == []
+    assert answer.rejection is not None
+    assert answer.rejection.reason == "no_availability"
+
+
+async def test_widen_days_is_never_reached_for_a_real_rule_or_a_closure(
+    ctx: ToolContext,
+) -> None:
+    """Sunday is clinic_closed, not no_availability: widen_days must not fire on it."""
+    answer = await find_slots(
+        ctx,
+        FindSlotsInput(
+            specialty_id="general_practice",
+            date_from=date(2026, 9, 20),
+            date_to=date(2026, 9, 20),
+            widen_days=14,
+        ),
+    )
+    assert answer.widened is False
+    assert answer.rejection is not None
+    assert answer.rejection.reason == "clinic_closed"
+
+
+# ---- language filter: problem 11 -------------------------------------------
+
+
+async def test_language_filter_is_empty_rather_than_inventing_a_speaker(
+    ctx: ToolContext,
+) -> None:
+    """The fixtures' one dermatologist speaks Spanish and English, never Catalan."""
+    answer = await find_slots(
+        ctx,
+        FindSlotsInput(
+            specialty_id="dermatology",
+            date_from=date(2026, 9, 21),
+            date_to=date(2026, 10, 2),
+            language="ca",
+        ),
+    )
+    assert answer.slots == []
+
+
 # ---- list_appointments and the prepare_* guards --------------------------
 
 
@@ -289,6 +373,28 @@ async def test_the_childs_appointment_is_cancelled_under_the_childs_id(ctx: Tool
     assert result.rejection is None
     assert result.action is not None
     assert result.action.appointment_id == "A0002"
+
+
+async def test_two_cancellations_in_one_call_do_not_cross_contaminate(
+    ctx: ToolContext,
+) -> None:
+    """Problem 8: cancelling for two different patients in the same call, in turn."""
+    first = await prepare_cancel(
+        ctx, PrepareCancelInput(appointment_id="A0001", patient_id=PATIENT)
+    )
+    second = await prepare_cancel(
+        ctx, PrepareCancelInput(appointment_id="A0002", patient_id=CHILD)
+    )
+    assert first.rejection is None
+    assert first.action is not None
+    assert first.action.appointment_id == "A0001"
+    assert second.rejection is None
+    assert second.action is not None
+    assert second.action.appointment_id == "A0002"
+    # Neither cancellation borrowed the other patient's authorisation.
+    cross = await prepare_cancel(ctx, PrepareCancelInput(appointment_id="A0001", patient_id=CHILD))
+    assert cross.rejection is not None
+    assert cross.rejection.reason == "caller_not_authorised"
 
 
 async def test_a_past_visit_cannot_be_moved(ctx: ToolContext) -> None:

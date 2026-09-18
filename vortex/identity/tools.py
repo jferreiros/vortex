@@ -119,6 +119,10 @@ _EMAIL_SPOKEN: tuple[tuple[str, str], ...] = (
 PATIENT_POSTPROCESS_KEY = "patient_postprocess"
 PATIENT_PREFERENCES_KEY = "patient_preferences"
 IDENTITY_KEY = "identity"
+#: The first patient identified this call. Unlike IDENTITY_KEY, never
+#: overwritten by a later lookup, so a third-party booking (problem 9) can
+#: still tell who was on the line to begin with.
+CALLER_IDENTITY_KEY = "identity_caller"
 _MIN_SUPPORT = 2  # occurrences needed before a pattern is worth suggesting
 _MAX_NEAR_MISSES = 3  # more than this and a near-miss list is noise, not a hint
 
@@ -477,10 +481,12 @@ async def find_patient(ctx: ToolContext, args: FindPatientInput) -> FindPatientR
 
     if len(candidates) == 1:
         patient = candidates[0]
-        ctx.state[IDENTITY_KEY] = {
+        entry = {
             "patient_id": patient.patient_id,
             "matched_on": given or ["from_number"],
         }
+        ctx.state.setdefault(CALLER_IDENTITY_KEY, entry)
+        ctx.state[IDENTITY_KEY] = entry
         # Mine their visit history while the conversation carries on, so a
         # preference is already there by the time it is needed.
         _start_postprocess(ctx, patient)
@@ -518,3 +524,21 @@ async def find_patient(ctx: ToolContext, args: FindPatientInput) -> FindPatientR
         )
         return FindPatientResult(status="not_found", candidates=_line_owner_first(ctx, near))
     return FindPatientResult(status="not_found")
+
+
+def note_target_patient(ctx: ToolContext, target_patient_id: str) -> None:
+    """Log when a booking or cancellation names someone other than whoever this
+    call first identified (problem 9: the third party).
+
+    Not a guard: a parent booking for a child, or a carer for someone they look
+    after, is the correct outcome, never a failure to prevent. This only leaves
+    a trace on divergence, so the case is visible in the call log rather than
+    silent either way.
+    """
+    caller = ctx.state.get(CALLER_IDENTITY_KEY)
+    if caller and caller["patient_id"] != target_patient_id:
+        ctx.log.event(
+            "identity.third_party",
+            caller_patient_id=caller["patient_id"],
+            target_patient_id=target_patient_id,
+        )
