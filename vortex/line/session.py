@@ -301,9 +301,7 @@ class CallSession:
         ) as span:
             await self._send_fallback(branch, action, why, span)
 
-    async def _send_fallback(
-        self, branch: str, action: Action, why: str, span: Any = None
-    ) -> None:
+    async def _send_fallback(self, branch: str, action: Action, why: str, span: Any = None) -> None:
         # The call already sent this exact action (a dry run, or a send the
         # platform never acknowledged). Repeating it buys a 409 at best.
         repeat = action in self.sent_actions
