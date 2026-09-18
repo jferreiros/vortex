@@ -22,6 +22,7 @@
 | vortex/line/submit.py                |       47 |       22 |     53% |41, 48-66, 69, 89 |
 | vortex/line/twilio.py                |       77 |        3 |     96% |61, 153, 160 |
 | vortex/line/ulaw.py                  |       49 |       12 |     76% |22, 34-40, 53-56 |
+| vortex/models.py                     |       83 |        3 |     96% |88-90, 162 |
 | vortex/observability/\_\_init\_\_.py |        3 |        0 |    100% |           |
 | vortex/observability/auth.py         |       33 |        6 |     82% |     26-31 |
 | vortex/observability/calllog.py      |       67 |       19 |     72% |42-44, 92, 111-121, 125-128 |
@@ -35,7 +36,7 @@
 | vortex/rules/triage.py               |       57 |        6 |     89% |63, 205-206, 217, 225, 230 |
 | vortex/settings.py                   |      171 |        1 |     99% |       252 |
 | vortex/tools.py                      |       51 |        9 |     82% |182, 185-187, 193-195, 197, 210 |
-| **TOTAL**                            | **3456** | **1032** | **70%** |           |
+| **TOTAL**                            | **3539** | **1035** | **71%** |           |
 
 6 empty files skipped.
 
