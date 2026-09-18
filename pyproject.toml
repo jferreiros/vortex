@@ -12,6 +12,7 @@ dependencies = [
     "pydantic>=2.10",
     "python-dotenv>=1.0",
     "pipecat-ai[deepgram,websocket]>=1.11,<2",
+    "nicegui>=2.22",
 ]
 
 [dependency-groups]

@@ -13,6 +13,7 @@ no-action or escalate. Full brief: https://hackspain.app/tracks/prosper-ai
 uv sync --all-groups        # Python 3.12+, uv 0.9+
 cp .env.example .env        # every key is optional; see "Modes" below
 make run                    # http://localhost:7860  (ws://localhost:7860/ws)
+make board                  # http://localhost:8080  ops ·  http://localhost:8080/wall  jury
 make smoke                  # in-process WebSocket test: connected/start/media/stop
 make call                   # dial the running server with 1 fake call
 make call N=10              # ... with 10 concurrent fake calls
@@ -110,8 +111,13 @@ run: a Run All holds ten sockets open at once.
 `logs/calls.jsonl` gets one JSON line per event, every line tagged with
 `call_id`: `call.started`, `turn.user`, `turn.assistant`, `tool.called`,
 `tool.returned`, `submit.sent`, `submit.result`, `call.ended`, `call.summary`.
-`GET /calls` returns the recent events grouped by call. The live view for the
-jury builds on this.
+`GET /calls` returns the recent events grouped by call.
+
+`make board` is the live view (NiceGUI, port 8080). `/` is ops: Play dials
+`scripts/fake_caller.py` against `:7860`, Replay writes a scripted book/refuse
+into the JSONL so the wall moves without the voice pipeline. `/wall` is the
+jury screen: transcript, tools, chart. It tails `GET /calls` when line is up,
+otherwise the JSONL file.
 
 ## Team
 
