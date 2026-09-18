@@ -29,3 +29,10 @@ venv/
 # Runtime
 logs/*
 !logs/.gitkeep
+api_results/
+
+# Coverage (CI job `coverage`, and local `pytest --cov`)
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/

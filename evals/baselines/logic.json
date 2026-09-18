@@ -1,0 +1,1570 @@
+{
+ "layer": "logic",
+ "started_at": "2026-09-18T19:54:34+00:00",
+ "duration_ms": 28,
+ "mode": {
+  "clinic": "fake",
+  "stub_tools": [
+   "build_registration",
+   "check_eligibility",
+   "find_patient",
+   "find_provider",
+   "find_slots",
+   "list_appointments",
+   "nearest_location",
+   "prepare_booking",
+   "prepare_cancel",
+   "prepare_reschedule",
+   "resolve_date",
+   "triage",
+   "validate_national_id"
+  ]
+ },
+ "git": {
+  "sha": "ea55b1d",
+  "branch": "main",
+  "dirty": "yes"
+ },
+ "cases": [
+  {
+   "id": "diary.date.tomorrow",
+   "name": "diary.date.tomorrow",
+   "status": "pass",
+   "problem": 5,
+   "group": "diary",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "resolve_date is still a contract stub"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "diary.date.day_after_tomorrow",
+   "name": "diary.date.day_after_tomorrow",
+   "status": "fail",
+   "problem": 5,
+   "group": "diary",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.date_from: expected '2026-09-21', got '2026-09-19'",
+    "$.date_to: expected '2026-09-21', got '2026-09-19'",
+    "$.moved_from_closed_day: expected True, got False"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "diary.date.a_week_from_today",
+   "name": "diary.date.a_week_from_today",
+   "status": "fail",
+   "problem": 5,
+   "group": "diary",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.date_from: expected '2026-09-25', got '2026-09-19'",
+    "$.date_to: expected '2026-09-25', got '2026-09-19'"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "diary.date.in_a_fortnight",
+   "name": "diary.date.in_a_fortnight",
+   "status": "fail",
+   "problem": 5,
+   "group": "diary",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.date_from: expected '2026-10-02', got '2026-09-19'",
+    "$.date_to: expected '2026-10-02', got '2026-09-19'"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "diary.date.saturday_morning",
+   "name": "diary.date.saturday_morning",
+   "status": "fail",
+   "problem": 5,
+   "group": "diary",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.time_to: None does not match /^14:00/"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "diary.date.this_coming_friday_said_on_a_friday",
+   "name": "diary.date.this_coming_friday_said_on_a_friday",
+   "status": "fail",
+   "problem": 5,
+   "group": "diary",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.date_from: expected '2026-09-25', got '2026-09-19'",
+    "$.date_to: expected '2026-09-25', got '2026-09-19'"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "diary.date.this_coming_monday",
+   "name": "diary.date.this_coming_monday",
+   "status": "fail",
+   "problem": 5,
+   "group": "diary",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.date_from: expected '2026-09-21', got '2026-09-19'",
+    "$.date_to: expected '2026-09-21', got '2026-09-19'"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "diary.date.first_thing_wednesday",
+   "name": "diary.date.first_thing_wednesday",
+   "status": "fail",
+   "problem": 5,
+   "group": "diary",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.date_from: expected '2026-09-23', got '2026-09-19'",
+    "$.date_to: expected '2026-09-23', got '2026-09-19'",
+    "$.time_to: None does not match /^14:00/"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "diary.date.thursday_afternoon",
+   "name": "diary.date.thursday_afternoon",
+   "status": "fail",
+   "problem": 5,
+   "group": "diary",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.date_from: expected '2026-09-24', got '2026-09-19'",
+    "$.date_to: expected '2026-09-24', got '2026-09-19'",
+    "$.time_from: None does not match /^14:00/"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "diary.date.first_thing_monday_12_october_is_closed",
+   "name": "diary.date.first_thing_monday_12_october_is_closed",
+   "status": "fail",
+   "problem": 5,
+   "group": "diary",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.date_from: expected '2026-10-13', got '2026-09-19'",
+    "$.date_to: expected '2026-10-13', got '2026-09-19'",
+    "$.moved_from_closed_day: expected True, got False"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "diary.date.part_of_day_morning_ends_at_14",
+   "name": "diary.date.part_of_day_morning_ends_at_14",
+   "status": "pass",
+   "problem": 1,
+   "group": "diary",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "resolve_date is still a contract stub"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "diary.date.part_of_day_afternoon_starts_at_14",
+   "name": "diary.date.part_of_day_afternoon_starts_at_14",
+   "status": "pass",
+   "problem": 1,
+   "group": "diary",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "resolve_date is still a contract stub"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "diary.date.past_date_is_rejected",
+   "name": "diary.date.past_date_is_rejected",
+   "status": "fail",
+   "problem": 5,
+   "group": "diary",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.rejection: expected a value, got none"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "diary.slots.never_same_day",
+   "name": "diary.slots.never_same_day",
+   "status": "pass",
+   "problem": 1,
+   "group": "diary",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "find_slots is still a contract stub"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "diary.slots.earliest_is_tomorrow_first_free_minute",
+   "name": "diary.slots.earliest_is_tomorrow_first_free_minute",
+   "status": "pass",
+   "problem": 1,
+   "group": "diary",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "find_slots is still a contract stub"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "diary.slots.carry_blocked_provider_through",
+   "name": "diary.slots.carry_blocked_provider_through",
+   "status": "fail",
+   "problem": 6,
+   "group": "diary",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.blocked: no item matches {'provider_id': 'PR07', 'reason': 'provider_on_leave'} (had 0)"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "diary.slots.morning_filter_stops_at_14",
+   "name": "diary.slots.morning_filter_stops_at_14",
+   "status": "pass",
+   "problem": 1,
+   "group": "diary",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "find_slots is still a contract stub"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "diary.slots.language_filter_keeps_catalan_speakers",
+   "name": "diary.slots.language_filter_keeps_catalan_speakers",
+   "status": "fail",
+   "problem": 11,
+   "group": "diary",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.slots[0].provider_id: 'PR01' is not one of ['PR02']"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "diary.slots.span_over_14_days_is_split_not_422",
+   "name": "diary.slots.span_over_14_days_is_split_not_422",
+   "status": "pass",
+   "problem": 7,
+   "group": "diary",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "find_slots is still a contract stub"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "diary.slots.sur_closes_friday_lunchtime",
+   "name": "diary.slots.sur_closes_friday_lunchtime",
+   "status": "fail",
+   "problem": 5,
+   "group": "diary",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.slots: expected 0 items, got 1"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "diary.slots.only_centro_opens_saturday",
+   "name": "diary.slots.only_centro_opens_saturday",
+   "status": "pass",
+   "problem": 5,
+   "group": "diary",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "find_slots is still a contract stub"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "diary.slots.closure_day_is_empty",
+   "name": "diary.slots.closure_day_is_empty",
+   "status": "fail",
+   "problem": 5,
+   "group": "diary",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.slots: expected 0 items, got 1"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "diary.appointments.upcoming_by_default",
+   "name": "diary.appointments.upcoming_by_default",
+   "status": "pass",
+   "problem": 8,
+   "group": "diary",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "list_appointments is still a contract stub"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "diary.appointments.past_never_bookable",
+   "name": "diary.appointments.past_never_bookable",
+   "status": "fail",
+   "problem": 8,
+   "group": "diary",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.appointments: expected 2 items, got 0"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "diary.appointments.child_has_its_own_diary",
+   "name": "diary.appointments.child_has_its_own_diary",
+   "status": "fail",
+   "problem": 9,
+   "group": "diary",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.appointments[0].appointment_id: expected 'A0002', got 'A0001'"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "diary.booking.same_day_slot_is_rejected",
+   "name": "diary.booking.same_day_slot_is_rejected",
+   "status": "fail",
+   "problem": 1,
+   "group": "diary",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.action: expected absent, got {'kind': 'book', 'patient_id': 'P00042', 'provider_id': 'PR01', 'location_id': …",
+    "$.rejection: expected a value, got none"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "diary.booking.closure_day_slot_is_rejected",
+   "name": "diary.booking.closure_day_slot_is_rejected",
+   "status": "fail",
+   "problem": 5,
+   "group": "diary",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.action: expected absent, got {'kind': 'book', 'patient_id': 'P00042', 'provider_id': 'PR01', 'location_id': …",
+    "$.rejection: expected an object, got None"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "diary.booking.builds_exact_payload",
+   "name": "diary.booking.builds_exact_payload",
+   "status": "pass",
+   "problem": 1,
+   "group": "diary",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "prepare_booking is still a contract stub"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "diary.cancel.upcoming_builds_action",
+   "name": "diary.cancel.upcoming_builds_action",
+   "status": "pass",
+   "problem": 8,
+   "group": "diary",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "prepare_cancel is still a contract stub"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "diary.cancel.past_visit_is_rejected",
+   "name": "diary.cancel.past_visit_is_rejected",
+   "status": "fail",
+   "problem": 8,
+   "group": "diary",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.action: expected absent, got {'kind': 'cancel', 'appointment_id': 'A9001'}",
+    "$.rejection: expected a value, got none"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "diary.cancel.someone_elses_appointment_is_rejected",
+   "name": "diary.cancel.someone_elses_appointment_is_rejected",
+   "status": "fail",
+   "problem": 8,
+   "group": "diary",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.action: expected absent, got {'kind': 'cancel', 'appointment_id': 'A0002'}",
+    "$.rejection: expected a value, got none"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "diary.reschedule.builds_action",
+   "name": "diary.reschedule.builds_action",
+   "status": "pass",
+   "problem": 8,
+   "group": "diary",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "prepare_reschedule is still a contract stub"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "diary.reschedule.past_visit_is_rejected",
+   "name": "diary.reschedule.past_visit_is_rejected",
+   "status": "fail",
+   "problem": 8,
+   "group": "diary",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.action: expected absent, got {'kind': 'reschedule', 'appointment_id': 'A9002', 'provider_id': 'PR01', 'locat…",
+    "$.rejection: expected a value, got none"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "flow.p1.simple_booking_earliest_gp",
+   "name": "flow.p1.simple_booking_earliest_gp",
+   "status": "fail",
+   "problem": 1,
+   "group": "flows",
+   "hollow": true,
+   "duration_ms": 3,
+   "details": [
+    "$actions[0].slot: expected '2026-09-19T09:30:00+02:00', got '2026-09-21T10:15:00+02:00'"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "flow.p1.morning_at_norte",
+   "name": "flow.p1.morning_at_norte",
+   "status": "fail",
+   "problem": 1,
+   "group": "flows",
+   "hollow": true,
+   "duration_ms": 1,
+   "details": [
+    "$actions[0].location_id: expected 'norte', got 'centro'",
+    "$actions[0].slot: expected '2026-09-21T09:15:00+02:00', got '2026-09-21T10:15:00+02:00'"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "flow.p3.named_doctor_on_leave_is_no_action",
+   "name": "flow.p3.named_doctor_on_leave_is_no_action",
+   "status": "fail",
+   "problem": 3,
+   "group": "flows",
+   "hollow": false,
+   "duration_ms": 0,
+   "details": [
+    "step 1 (find_provider) did not match:",
+    "  $.status: expected 'on_leave', got 'found'",
+    "  $.rejection: expected an object, got None"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "flow.p4.new_patient_registers_and_books_nothing",
+   "name": "flow.p4.new_patient_registers_and_books_nothing",
+   "status": "fail",
+   "problem": 4,
+   "group": "flows",
+   "hollow": false,
+   "duration_ms": 0,
+   "details": [
+    "step 0 (find_patient) did not match:",
+    "  $.status: expected 'not_found', got 'found'"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "flow.p8.cancel_two_is_two_posts",
+   "name": "flow.p8.cancel_two_is_two_posts",
+   "status": "fail",
+   "problem": 8,
+   "group": "flows",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$actions[1].appointment_id: expected 'A0002', got 'A0001'"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "flow.p8.reschedule_to_next_week",
+   "name": "flow.p8.reschedule_to_next_week",
+   "status": "fail",
+   "problem": 8,
+   "group": "flows",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$actions[0].slot: expected '2026-10-05T09:30:00+02:00', got '2026-09-21T10:15:00+02:00'"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "flow.p9.third_party_books_the_child_not_the_caller",
+   "name": "flow.p9.third_party_books_the_child_not_the_caller",
+   "status": "fail",
+   "problem": 9,
+   "group": "flows",
+   "hollow": false,
+   "duration_ms": 0,
+   "details": [
+    "step 1 (find_patient) did not match:",
+    "  $.patient.patient_id: expected 'P00107', got 'P00042'"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "flow.p10.red_flag_escalates_and_books_nothing",
+   "name": "flow.p10.red_flag_escalates_and_books_nothing",
+   "status": "fail",
+   "problem": 10,
+   "group": "flows",
+   "hollow": false,
+   "duration_ms": 0,
+   "details": [
+    "step 0 (triage) did not match:",
+    "  $.emergency: expected True, got False"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "flow.p6.asisa_physio_is_refused_with_the_rule",
+   "name": "flow.p6.asisa_physio_is_refused_with_the_rule",
+   "status": "fail",
+   "problem": 6,
+   "group": "flows",
+   "hollow": false,
+   "duration_ms": 0,
+   "details": [
+    "step 1 (check_eligibility) did not match:",
+    "  $.allowed: expected False, got True",
+    "  $.rejection: expected an object, got None"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "flow.p7.full_window_is_no_availability",
+   "name": "flow.p7.full_window_is_no_availability",
+   "status": "fail",
+   "problem": 7,
+   "group": "flows",
+   "hollow": false,
+   "duration_ms": 0,
+   "details": [
+    "step 1 (find_slots) did not match:",
+    "  $.slots: expected 0 items, got 1"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "identity.dni.valid_letter",
+   "name": "identity.dni.valid_letter",
+   "status": "pass",
+   "problem": 4,
+   "group": "identity",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "validate_national_id is still a contract stub"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "identity.dni.spaces_and_dashes_normalise",
+   "name": "identity.dni.spaces_and_dashes_normalise",
+   "status": "pass",
+   "problem": 4,
+   "group": "identity",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "validate_national_id is still a contract stub"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "identity.dni.wrong_letter_is_invalid",
+   "name": "identity.dni.wrong_letter_is_invalid",
+   "status": "fail",
+   "problem": 4,
+   "group": "identity",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.valid: expected False, got True",
+    "$.expected_letter: expected 'Z', got 'A'"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "identity.nie.x_prefix_valid",
+   "name": "identity.nie.x_prefix_valid",
+   "status": "fail",
+   "problem": 4,
+   "group": "identity",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.kind: expected 'nie', got 'dni'"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "identity.nie.y_prefix_counts_as_one",
+   "name": "identity.nie.y_prefix_counts_as_one",
+   "status": "fail",
+   "problem": 4,
+   "group": "identity",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.kind: expected 'nie', got 'dni'"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "identity.nie.z_prefix_counts_as_two",
+   "name": "identity.nie.z_prefix_counts_as_two",
+   "status": "fail",
+   "problem": 4,
+   "group": "identity",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.kind: expected 'nie', got 'dni'"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "identity.id.garbage_is_invalid",
+   "name": "identity.id.garbage_is_invalid",
+   "status": "fail",
+   "problem": 4,
+   "group": "identity",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.kind: expected 'invalid', got 'dni'",
+    "$.valid: expected False, got True"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "identity.lookup.name_plus_dob_is_unique",
+   "name": "identity.lookup.name_plus_dob_is_unique",
+   "status": "pass",
+   "problem": 1,
+   "group": "identity",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "find_patient is still a contract stub"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "identity.lookup.name_alone_is_ambiguous",
+   "name": "identity.lookup.name_alone_is_ambiguous",
+   "status": "fail",
+   "problem": 1,
+   "group": "identity",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.status: expected 'ambiguous', got 'found'",
+    "$.candidates: expected 2 items, got 0",
+    "$.ask_for: '' is not one of ['date_of_birth', 'national_id', 'phone']"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "identity.lookup.national_id_is_unique",
+   "name": "identity.lookup.national_id_is_unique",
+   "status": "fail",
+   "problem": 1,
+   "group": "identity",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.patient.patient_id: expected 'P00043', got 'P00042'"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "identity.lookup.misheard_id_finds_nobody",
+   "name": "identity.lookup.misheard_id_finds_nobody",
+   "status": "fail",
+   "problem": 1,
+   "group": "identity",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.status: expected 'not_found', got 'found'",
+    "$.patient: expected absent, got {'patient_id': 'P00042', 'given_name': 'Marta', 'first_surname': 'Ruiz', 'secon…"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "identity.lookup.unknown_caller_not_found",
+   "name": "identity.lookup.unknown_caller_not_found",
+   "status": "fail",
+   "problem": 4,
+   "group": "identity",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.status: expected 'not_found', got 'found'"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "identity.lookup.phone_folds_to_nine_digits",
+   "name": "identity.lookup.phone_folds_to_nine_digits",
+   "status": "pass",
+   "problem": 1,
+   "group": "identity",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "find_patient is still a contract stub"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "identity.lookup.shared_line_is_ambiguous",
+   "name": "identity.lookup.shared_line_is_ambiguous",
+   "status": "fail",
+   "problem": 9,
+   "group": "identity",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.status: expected 'ambiguous', got 'found'",
+    "$.candidates: expected 2 items, got 0"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "identity.lookup.caller_id_hint_does_not_override_name",
+   "name": "identity.lookup.caller_id_hint_does_not_override_name",
+   "status": "fail",
+   "problem": 9,
+   "group": "identity",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.patient.patient_id: expected 'P00200', got 'P00042'"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "identity.lookup.child_by_name_and_dob",
+   "name": "identity.lookup.child_by_name_and_dob",
+   "status": "fail",
+   "problem": 9,
+   "group": "identity",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.patient.patient_id: expected 'P00107', got 'P00042'"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "identity.register.builds_action",
+   "name": "identity.register.builds_action",
+   "status": "fail",
+   "problem": 4,
+   "group": "identity",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.action.phone: expected '+34612000111', got '612 000 111'"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "identity.register.bad_check_letter_is_rejected",
+   "name": "identity.register.bad_check_letter_is_rejected",
+   "status": "fail",
+   "problem": 4,
+   "group": "identity",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.action: expected absent, got {'kind': 'register', 'given_name': 'Ana', 'first_surname': 'García', 'second_su…",
+    "$.rejection: expected a value, got none"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "identity.register.unknown_insurer_is_rejected",
+   "name": "identity.register.unknown_insurer_is_rejected",
+   "status": "fail",
+   "problem": 4,
+   "group": "identity",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.action: expected absent, got {'kind': 'register', 'given_name': 'Ana', 'first_surname': 'García', 'second_su…",
+    "$.rejection: expected a value, got none"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "rules.provider.saez_is_the_gp",
+   "name": "rules.provider.saez_is_the_gp",
+   "status": "fail",
+   "problem": 3,
+   "group": "rules",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$: {'status': 'found', 'provider': {'provider_id': 'PR01', 'name': 'Dra. Ortiz', '… matches none of 2 accepted shapes"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "rules.provider.saenz_is_the_paediatrician",
+   "name": "rules.provider.saenz_is_the_paediatrician",
+   "status": "fail",
+   "problem": 3,
+   "group": "rules",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.provider.provider_id: expected 'PR03', got 'PR01'"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "rules.provider.saez_without_accent_is_ambiguous_or_found",
+   "name": "rules.provider.saez_without_accent_is_ambiguous_or_found",
+   "status": "fail",
+   "problem": 3,
+   "group": "rules",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$: {'status': 'found', 'provider': {'provider_id': 'PR01', 'name': 'Dra. Ortiz', '… matches none of 2 accepted shapes"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "rules.provider.iglesias_vs_iglesia_split_by_specialty",
+   "name": "rules.provider.iglesias_vs_iglesia_split_by_specialty",
+   "status": "fail",
+   "problem": 3,
+   "group": "rules",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.provider.provider_id: expected 'PR05', got 'PR01'"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "rules.provider.requena_is_on_leave",
+   "name": "rules.provider.requena_is_on_leave",
+   "status": "fail",
+   "problem": 3,
+   "group": "rules",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.status: expected 'on_leave', got 'found'",
+    "$.provider.provider_id: expected 'PR07', got 'PR01'",
+    "$.rejection: expected an object, got None"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "rules.provider.unknown_doctor_not_found",
+   "name": "rules.provider.unknown_doctor_not_found",
+   "status": "fail",
+   "problem": 3,
+   "group": "rules",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.status: expected 'not_found', got 'found'",
+    "$.rejection: expected an object, got None"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "rules.provider.alvaro_cid_is_the_physio_with_his_title",
+   "name": "rules.provider.alvaro_cid_is_the_physio_with_his_title",
+   "status": "fail",
+   "problem": 3,
+   "group": "rules",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.provider.provider_id: expected 'PR06', got 'PR01'",
+    "$.provider.name: expected 'D. Álvaro Cid', got 'Dra. Ortiz'"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "rules.age.child_cannot_book_general_practice",
+   "name": "rules.age.child_cannot_book_general_practice",
+   "status": "fail",
+   "problem": 6,
+   "group": "rules",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.allowed: expected False, got True",
+    "$.rejection: expected an object, got None"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "rules.age.child_books_paediatrics",
+   "name": "rules.age.child_books_paediatrics",
+   "status": "pass",
+   "problem": 10,
+   "group": "rules",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "check_eligibility is still a contract stub"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "rules.age.adult_cannot_book_paediatrics",
+   "name": "rules.age.adult_cannot_book_paediatrics",
+   "status": "fail",
+   "problem": 6,
+   "group": "rules",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.allowed: expected False, got True",
+    "$.rejection: expected an object, got None"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "rules.referral.dermatology_without_referral",
+   "name": "rules.referral.dermatology_without_referral",
+   "status": "fail",
+   "problem": 6,
+   "group": "rules",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.allowed: expected False, got True",
+    "$.rejection: expected an object, got None"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "rules.referral.dermatology_with_referral_but_dkv_refused_by_iglesias",
+   "name": "rules.referral.dermatology_with_referral_but_dkv_refused_by_iglesias",
+   "status": "fail",
+   "problem": 6,
+   "group": "rules",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.allowed: expected False, got True",
+    "$.rejection: expected an object, got None"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "rules.insurance.control_case_books_normally",
+   "name": "rules.insurance.control_case_books_normally",
+   "status": "pass",
+   "problem": 6,
+   "group": "rules",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "check_eligibility is still a contract stub"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "rules.insurance.adeslas_covers_no_gynaecology",
+   "name": "rules.insurance.adeslas_covers_no_gynaecology",
+   "status": "fail",
+   "problem": 6,
+   "group": "rules",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.allowed: expected False, got True",
+    "$.rejection: expected an object, got None"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "rules.insurance.asisa_physio_only_where_there_is_no_physio",
+   "name": "rules.insurance.asisa_physio_only_where_there_is_no_physio",
+   "status": "fail",
+   "problem": 6,
+   "group": "rules",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.allowed: expected False, got True",
+    "$.rejection: expected an object, got None"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "rules.insurance.second_policy_unlocks_the_booking",
+   "name": "rules.insurance.second_policy_unlocks_the_booking",
+   "status": "pass",
+   "problem": 17,
+   "group": "rules",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "check_eligibility is still a contract stub"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "rules.insurance.privado_is_never_a_fallback",
+   "name": "rules.insurance.privado_is_never_a_fallback",
+   "status": "fail",
+   "problem": 6,
+   "group": "rules",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.allowed: expected False, got True"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "rules.nearest.getafe_address_goes_to_sur",
+   "name": "rules.nearest.getafe_address_goes_to_sur",
+   "status": "fail",
+   "problem": 15,
+   "group": "rules",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.location_id: expected 'sur', got 'centro'"
+   ],
+   "tags": [
+    "needs-geocoder"
+   ],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "rules.nearest.castellana_goes_to_norte",
+   "name": "rules.nearest.castellana_goes_to_norte",
+   "status": "fail",
+   "problem": 15,
+   "group": "rules",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.location_id: expected 'norte', got 'centro'"
+   ],
+   "tags": [
+    "needs-geocoder"
+   ],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "rules.nearest.closest_site_without_the_specialty_is_skipped",
+   "name": "rules.nearest.closest_site_without_the_specialty_is_skipped",
+   "status": "fail",
+   "problem": 15,
+   "group": "rules",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.location_id: expected 'sur', got 'centro'"
+   ],
+   "tags": [
+    "needs-geocoder"
+   ],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "triage.ortho.ankle",
+   "name": "triage.ortho.ankle",
+   "status": "fail",
+   "problem": 10,
+   "group": "triage",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.specialty_id: expected 'orthopaedics', got 'general_practice'"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "triage.ortho.bike_shoulder",
+   "name": "triage.ortho.bike_shoulder",
+   "status": "fail",
+   "problem": 10,
+   "group": "triage",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.specialty_id: expected 'orthopaedics', got 'general_practice'"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "triage.ortho.knee_locks",
+   "name": "triage.ortho.knee_locks",
+   "status": "fail",
+   "problem": 10,
+   "group": "triage",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.specialty_id: expected 'orthopaedics', got 'general_practice'"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "triage.ortho.wrist_fall",
+   "name": "triage.ortho.wrist_fall",
+   "status": "fail",
+   "problem": 10,
+   "group": "triage",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.specialty_id: expected 'orthopaedics', got 'general_practice'"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "triage.paeds.temperature",
+   "name": "triage.paeds.temperature",
+   "status": "fail",
+   "problem": 10,
+   "group": "triage",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.specialty_id: expected 'paediatrics', got 'general_practice'"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "triage.paeds.cough",
+   "name": "triage.paeds.cough",
+   "status": "fail",
+   "problem": 10,
+   "group": "triage",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.specialty_id: expected 'paediatrics', got 'general_practice'"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "triage.paeds.ear",
+   "name": "triage.paeds.ear",
+   "status": "fail",
+   "problem": 10,
+   "group": "triage",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.specialty_id: expected 'paediatrics', got 'general_practice'"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "triage.paeds.tummy",
+   "name": "triage.paeds.tummy",
+   "status": "fail",
+   "problem": 10,
+   "group": "triage",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.specialty_id: expected 'paediatrics', got 'general_practice'"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "triage.gp.tired",
+   "name": "triage.gp.tired",
+   "status": "pass",
+   "problem": 10,
+   "group": "triage",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "triage is still a contract stub"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "triage.gp.headaches",
+   "name": "triage.gp.headaches",
+   "status": "pass",
+   "problem": 10,
+   "group": "triage",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "triage is still a contract stub"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "triage.gp.sore_throat",
+   "name": "triage.gp.sore_throat",
+   "status": "pass",
+   "problem": 10,
+   "group": "triage",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "triage is still a contract stub"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "triage.gp.dizzy",
+   "name": "triage.gp.dizzy",
+   "status": "pass",
+   "problem": 10,
+   "group": "triage",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "triage is still a contract stub"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "triage.gyn.heavy_periods",
+   "name": "triage.gyn.heavy_periods",
+   "status": "fail",
+   "problem": 10,
+   "group": "triage",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.specialty_id: expected 'gynaecology', got 'general_practice'"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "triage.gyn.bleeding_between",
+   "name": "triage.gyn.bleeding_between",
+   "status": "fail",
+   "problem": 10,
+   "group": "triage",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.specialty_id: expected 'gynaecology', got 'general_practice'"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "triage.gyn.low_pain",
+   "name": "triage.gyn.low_pain",
+   "status": "fail",
+   "problem": 10,
+   "group": "triage",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.specialty_id: expected 'gynaecology', got 'general_practice'"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "triage.redflag.chest_pain",
+   "name": "triage.redflag.chest_pain",
+   "status": "fail",
+   "problem": 10,
+   "group": "triage",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.emergency: expected True, got False",
+    "$.rejection: expected an object, got None"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "triage.redflag.stroke",
+   "name": "triage.redflag.stroke",
+   "status": "fail",
+   "problem": 10,
+   "group": "triage",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.emergency: expected True, got False",
+    "$.rejection: expected an object, got None"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "triage.redflag.breathless",
+   "name": "triage.redflag.breathless",
+   "status": "fail",
+   "problem": 10,
+   "group": "triage",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.emergency: expected True, got False",
+    "$.rejection: expected an object, got None"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "triage.redflag.bleeding",
+   "name": "triage.redflag.bleeding",
+   "status": "fail",
+   "problem": 10,
+   "group": "triage",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.emergency: expected True, got False",
+    "$.rejection: expected an object, got None"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "triage.redflag.head_injury",
+   "name": "triage.redflag.head_injury",
+   "status": "fail",
+   "problem": 10,
+   "group": "triage",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.emergency: expected True, got False",
+    "$.rejection: expected an object, got None"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "triage.es.tobillo",
+   "name": "triage.es.tobillo",
+   "status": "fail",
+   "problem": 10,
+   "group": "triage",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.specialty_id: expected 'orthopaedics', got 'general_practice'"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "triage.es.fiebre_nino",
+   "name": "triage.es.fiebre_nino",
+   "status": "fail",
+   "problem": 10,
+   "group": "triage",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.specialty_id: expected 'paediatrics', got 'general_practice'"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  },
+  {
+   "id": "triage.es.dolor_pecho",
+   "name": "triage.es.dolor_pecho",
+   "status": "fail",
+   "problem": 10,
+   "group": "triage",
+   "hollow": true,
+   "duration_ms": 0,
+   "details": [
+    "$.emergency: expected True, got False",
+    "$.rejection: expected an object, got None"
+   ],
+   "tags": [],
+   "cost_eur": 0.0
+  }
+ ],
+ "notes": [
+  "23 case(s) pass only through contract stubs. A hollow pass is not evidence the lane works."
+ ],
+ "cost_eur": 0.0,
+ "summary": {},
+ "totals": {
+  "pass": 23,
+  "fail": 82,
+  "error": 0,
+  "unverified": 0,
+  "skipped": 0,
+  "hollow": 23
+ },
+ "verdict": "FAIL"
+}

@@ -13,6 +13,7 @@ no-action or escalate. Full brief: https://hackspain.app/tracks/prosper-ai
 uv sync --all-groups        # Python 3.12+, uv 0.9+
 cp .env.example .env        # every key is optional; see "Modes" below
 make run                    # http://localhost:7860  (ws://localhost:7860/ws)
+make board                  # http://localhost:8080  ops ·  http://localhost:8080/wall  jury
 make smoke                  # in-process WebSocket test: connected/start/media/stop
 make call                   # dial the running server with 1 fake call
 make call N=10              # ... with 10 concurrent fake calls
@@ -77,6 +78,29 @@ the default alternate gives ElevenLabs Spanish and Google ca/gl/eu.
 
 STT is Soniox `stt-rt-v5` throughout: language identification on, clinic
 vocabulary boosted, `SONIOX_API_KEY` and `SONIOX_STT_MODEL`.
+## The board — what to do next
+
+Every task is one GitHub issue. The priority order is published as a page:
+
+**https://jferreiros.github.io/vortex/tasks.html**
+
+It groups the 52 tasks into the blocks of the plan — what unblocks everything
+tonight, then problem 1, problem 2, problem 3, then the problems as they open,
+then the wall and the jury. Each task carries the condition that closes it.
+
+Take a task by assigning its issue to yourself. One at a time, in your lane's
+folder. The page reads the issues live, so the page and GitHub never disagree.
+
+`docs/tasks.json` is the source. Edit a task there, then:
+
+```bash
+make tasks ARGS=--dry-run   # print what would change
+make tasks                  # create what is missing, update what changed
+```
+
+It matches issues by the `[T14]` prefix, so running it twice is safe. It never
+closes an issue and never touches an assignee: who took a task is decided in
+GitHub, not in a file.
 
 ## Who touches what
 
@@ -153,8 +177,18 @@ run: a Run All holds ten sockets open at once.
 `logs/calls.jsonl` gets one JSON line per event, every line tagged with
 `call_id`: `call.started`, `turn.user`, `turn.assistant`, `tool.called`,
 `tool.returned`, `submit.sent`, `submit.result`, `call.ended`, `call.summary`.
-`GET /calls` returns the recent events grouped by call. The live view for the
-jury builds on this.
+`GET /calls` returns the recent events grouped by call.
+
+`make board` is the live view (NiceGUI, port 8080). `/wall` is public (jury).
+`/` ops, `/evals` and `/bench` ask for `VORTEX_OPS_PASSWORD` when that env is
+set (always in production). Play dials `scripts/fake_caller.py` against `:7860`.
+Replay writes a scripted book/refuse into the JSONL. The wall tails `GET /calls`
+when line is up, otherwise the JSONL file.
+
+Production: `https://vortex.167.233.80.47.sslip.io/wall` (público) and
+`https://vortex.167.233.80.47.sslip.io/` (equipo). That hostname is the VPS
+IP, not a personal domain. Deploy: `deploy/compose.yml` on the VPS,
+Traefik/Let's Encrypt. Never put the ops password in git.
 
 ## Team
 

@@ -1,0 +1,865 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Plan de trabajo del equipo Vortex para el track Prosper de HackSpain 2026.">
+<style>
+  :root{color-scheme:light dark;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+  body{margin:0;font:14px system-ui,-apple-system,"Segoe UI",sans-serif;background:#faf9f7}
+  img{max-width:100%}
+  [hidden]{display:none!important}
+</style>
+<title>Plan Vortex</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+<style>
+  :root{
+    --ground:#EDF0F3;
+    --surface:#FFFFFF;
+    --sunk:#E2E7EC;
+    --ink:#131920;
+    --muted:#4E5966;
+    --faint:#7A8592;
+    --line:#D3D9E0;
+    --line-strong:#A9B4BF;
+    --warn:#9A4B0B;
+    --warn-soft:#FBE9D6;
+
+    --linea:#2457C5;   --linea-s:#DCE6FA;
+    --conv:#8B3FA8;    --conv-s:#EFDFF5;
+    --ident:#178A5E;   --ident-s:#D6F0E3;
+    --agenda:#C4760F;  --agenda-s:#FBEBCF;
+    --reglas:#C7304F;  --reglas-s:#FADCE3;
+    --all:#131920;     --all-s:#E2E7EC;
+
+    --shadow:0 1px 2px rgba(19,25,32,.06), 0 10px 28px -18px rgba(19,25,32,.35);
+
+    --f-display:"Archivo","Helvetica Neue",Arial,sans-serif;
+    --f-body:"Instrument Sans","Helvetica Neue",Arial,sans-serif;
+    --f-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --ground:#0F1318; --surface:#171C23; --sunk:#11151B;
+      --ink:#E9EDF1; --muted:#A3ADB9; --faint:#78838F;
+      --line:#273038; --line-strong:#3D4854;
+      --warn:#EBAA4B; --warn-soft:#3A2708;
+      --linea:#7EA6F2; --linea-s:#172A50;
+      --conv:#CB92E4; --conv-s:#301B3D;
+      --ident:#5FD09A; --ident-s:#0F3524;
+      --agenda:#EDB24F; --agenda-s:#3B2908;
+      --reglas:#F27E97; --reglas-s:#3C1521;
+      --all:#E9EDF1; --all-s:#252C35;
+      --shadow:0 1px 2px rgba(0,0,0,.4), 0 12px 30px -18px rgba(0,0,0,.85);
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#0F1318; --surface:#171C23; --sunk:#11151B;
+    --ink:#E9EDF1; --muted:#A3ADB9; --faint:#78838F;
+    --line:#273038; --line-strong:#3D4854;
+    --warn:#EBAA4B; --warn-soft:#3A2708;
+    --linea:#7EA6F2; --linea-s:#172A50;
+    --conv:#CB92E4; --conv-s:#301B3D;
+    --ident:#5FD09A; --ident-s:#0F3524;
+    --agenda:#EDB24F; --agenda-s:#3B2908;
+    --reglas:#F27E97; --reglas-s:#3C1521;
+    --all:#E9EDF1; --all-s:#252C35;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 12px 30px -18px rgba(0,0,0,.85);
+  }
+
+  *{box-sizing:border-box}
+  body{
+    background:var(--ground); color:var(--ink);
+    font-family:var(--f-body); font-size:15.5px; line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1120px; margin:0 auto; padding-inline:16px; padding-block:0 72px;}
+  @media (min-width:700px){ .wrap{padding-inline:28px} }
+
+  h1,h2,h3,h4{font-family:var(--f-display); margin:0; text-wrap:balance; letter-spacing:-.02em;}
+  h1{font-size:clamp(2.2rem,7vw,4rem); font-weight:800; line-height:.98;}
+  h2{font-size:clamp(1.5rem,3.4vw,2.1rem); font-weight:800; line-height:1.05;}
+  h3{font-size:1.15rem; font-weight:700; letter-spacing:-.01em;}
+  p{margin:0}
+  a{color:var(--ink)}
+  .mono{font-family:var(--f-mono); font-size:.86em;}
+  .eyebrow{
+    font-family:var(--f-mono); font-size:.7rem; font-weight:500;
+    letter-spacing:.14em; text-transform:uppercase; color:var(--faint);
+  }
+  .tab{font-variant-numeric:tabular-nums}
+
+  /* lane color scoping: any element with data-lane gets --lc / --ls */
+  [data-lane="linea"]{--lc:var(--linea); --ls:var(--linea-s);}
+  [data-lane="conv"]{--lc:var(--conv); --ls:var(--conv-s);}
+  [data-lane="ident"]{--lc:var(--ident); --ls:var(--ident-s);}
+  [data-lane="agenda"]{--lc:var(--agenda); --ls:var(--agenda-s);}
+  [data-lane="reglas"]{--lc:var(--reglas); --ls:var(--reglas-s);}
+  [data-lane="all"]{--lc:var(--all); --ls:var(--all-s);}
+
+  /* ---------- masthead ---------- */
+  .masthead{padding-block:36px 24px;}
+  .masthead .eyebrow{display:block; margin-bottom:16px; color:var(--muted);}
+  .masthead h1{max-width:14ch}
+  .masthead .lede{color:var(--muted); max-width:56ch; margin-top:18px; font-size:1.1rem; line-height:1.45;}
+  .masthead .lede b{color:var(--ink); font-weight:600;}
+
+  .clock{
+    margin-top:28px; display:grid; gap:1px; background:var(--line);
+    grid-template-columns:repeat(5,minmax(0,1fr)); border:1px solid var(--line);
+  }
+  .tick{background:var(--surface); padding:10px 8px; display:flex; flex-direction:column; gap:2px; min-width:0;}
+  .tick .when{font-family:var(--f-mono); font-size:.72rem; color:var(--faint); white-space:nowrap;}
+  .tick .what{font-family:var(--f-display); font-weight:700; font-size:.86rem; line-height:1.15;}
+  .tick .flag{font-family:var(--f-mono); font-size:.6rem; letter-spacing:.1em; text-transform:uppercase; color:var(--muted);}
+  .tick[data-kind="wall"] .what{color:var(--reglas);}
+  .tick[data-state="past"]{background:var(--sunk);}
+  .tick[data-state="past"] .what,.tick[data-state="past"] .when{color:var(--faint); text-decoration:line-through;}
+  .tick[data-state="next"]{background:var(--ink); }
+  .tick[data-state="next"] .what,.tick[data-state="next"] .when,.tick[data-state="next"] .flag{color:var(--ground);}
+  .tick[data-state="next"][data-kind="wall"] .what{color:var(--ground);}
+  @media (max-width:560px){
+    .clock{grid-template-columns:repeat(2,minmax(0,1fr));}
+    .tick:last-child{grid-column:1/-1;}
+  }
+
+  /* ---------- sticky nav ---------- */
+  .nav{
+    position:sticky; top:env(safe-area-inset-top,0px); z-index:5;
+    margin-top:22px; margin-inline:-16px; padding-inline:16px;
+    background:var(--ground); border-bottom:1px solid var(--line);
+  }
+  @media (min-width:700px){ .nav{margin-inline:-28px; padding-inline:28px;} }
+  .nav ol{
+    list-style:none; margin:0; padding:10px 0; display:flex; gap:6px;
+    overflow-x:auto; scrollbar-width:none; -webkit-overflow-scrolling:touch;
+  }
+  .nav ol::-webkit-scrollbar{display:none}
+  .nav a{
+    display:block; white-space:nowrap; text-decoration:none; color:var(--muted);
+    font-family:var(--f-mono); font-size:.74rem; letter-spacing:.02em;
+    padding:6px 11px; border:1px solid var(--line); border-radius:999px; background:var(--surface);
+  }
+  .nav a:hover,.nav a:focus-visible{color:var(--ink); border-color:var(--ink); outline:none;}
+
+  /* ---------- score strip ---------- */
+  .score{
+    margin-top:24px; display:grid; gap:1px; background:var(--line); border:1px solid var(--line);
+    grid-template-columns:repeat(5,minmax(0,1fr));
+  }
+  .score > div{background:var(--surface); padding:14px 12px; min-width:0;}
+  .score .n{font-family:var(--f-display); font-weight:800; font-size:clamp(1.7rem,4vw,2.4rem); line-height:1; letter-spacing:-.03em;}
+  .score .l{font-size:.8rem; color:var(--muted); margin-top:6px; line-height:1.25;}
+  .score .n.tl{color:var(--ident)} .score .n.pipe{color:var(--conv)} .score .n.hoy{color:var(--linea)}
+  @media (max-width:560px){
+    .score{grid-template-columns:repeat(2,minmax(0,1fr));}
+    .score > div:first-child{grid-column:1/-1;}
+  }
+
+  /* ---------- sections ---------- */
+  section{padding-top:56px; scroll-margin-top:64px;}
+  section > .head{margin-bottom:22px; max-width:66ch;}
+  section > .head .eyebrow{display:block; margin-bottom:8px;}
+  section > .head p{color:var(--muted); margin-top:10px; font-size:1rem;}
+
+  /* ---------- lanes ---------- */
+  .lanes{display:grid; gap:16px; grid-template-columns:1fr;}
+  @media (min-width:760px){ .lanes{grid-template-columns:repeat(2,minmax(0,1fr));} }
+  @media (min-width:1040px){ .lanes{grid-template-columns:repeat(3,minmax(0,1fr));} .lane.wide{grid-column:span 1;} }
+  .lane{
+    position:relative; background:var(--surface); border:1px solid var(--line);
+    box-shadow:var(--shadow); display:flex; flex-direction:column; min-width:0;
+  }
+  .lane::before{content:""; display:block; height:10px; background:var(--lc);}
+  .lane .in{padding:18px 18px 16px; display:flex; flex-direction:column; gap:12px; flex:1;}
+  .lane .top{display:flex; justify-content:space-between; align-items:center; gap:10px;}
+  .lane .code{font-family:var(--f-mono); font-size:.7rem; letter-spacing:.1em; text-transform:uppercase; color:var(--lc); font-weight:600;}
+  .lane .pts{
+    font-family:var(--f-display); font-weight:800; font-size:1.05rem; color:var(--lc); white-space:nowrap; letter-spacing:-.02em;
+  }
+  .lane .pts small{font-family:var(--f-mono); font-weight:500; font-size:.68rem; letter-spacing:.06em; text-transform:uppercase; margin-left:3px;}
+  .lane h3{font-size:1.65rem; font-weight:800; letter-spacing:-.025em; line-height:1;}
+  .lane .owns{color:var(--muted); font-size:.95rem; line-height:1.4;}
+  .lane ul{margin:0; padding:0; list-style:none; display:flex; flex-direction:column; gap:7px; font-size:.9rem;}
+  .lane li{padding-left:16px; position:relative; line-height:1.4;}
+  .lane li::before{content:""; position:absolute; left:0; top:.55em; width:7px; height:7px; background:var(--lc); border-radius:1px;}
+  .lane .probs{display:flex; flex-wrap:wrap; gap:5px; margin-top:auto; padding-top:6px;}
+  .lane .probs span{
+    font-family:var(--f-mono); font-size:.72rem; padding:3px 7px;
+    background:var(--ls); color:var(--lc); border-radius:2px; font-weight:500;
+  }
+  .lane .probs span.na{background:var(--sunk); color:var(--muted);}
+
+  .who{
+    border-top:1px solid var(--line); padding:12px 18px 14px; background:var(--sunk);
+    display:flex; flex-direction:column; gap:6px;
+  }
+  .who .lbl{font-family:var(--f-mono); font-size:.66rem; letter-spacing:.12em; text-transform:uppercase; color:var(--faint);}
+  .who .slot{
+    font-family:var(--f-display); font-weight:700; font-size:1.2rem; letter-spacing:-.01em;
+    border:2px dashed var(--line-strong); padding:8px 12px; color:var(--faint); background:var(--surface);
+  }
+  .who .slot.taken{border-style:solid; border-color:var(--lc); color:var(--ink);}
+  .who .slot .why{display:block; font-family:var(--f-body); font-weight:400; font-size:.82rem; color:var(--muted); margin-top:3px;}
+  .who .slot .tag{
+    display:inline-block; vertical-align:middle; font-family:var(--f-mono); font-weight:500; font-size:.62rem; letter-spacing:.1em; text-transform:uppercase;
+    background:var(--lc); color:var(--surface); padding:2px 6px; margin-left:8px; border-radius:2px;
+  }
+  .who .slot .free{font-family:var(--f-mono); font-weight:500; font-size:.72rem; letter-spacing:.1em; text-transform:uppercase; color:var(--lc); display:block; margin-bottom:2px;}
+
+  .contract-box{
+    margin-top:16px; border:2px solid var(--ink); background:var(--surface); padding:20px 18px;
+    display:grid; gap:16px; grid-template-columns:1fr;
+  }
+  @media (min-width:760px){ .contract-box{grid-template-columns:1.1fr 1.4fr; gap:28px; padding:24px;} }
+  .contract-box h3{font-size:1.5rem; letter-spacing:-.025em; line-height:1;}
+  .contract-box .code{font-family:var(--f-mono); font-size:.7rem; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); display:block; margin-bottom:8px;}
+  .contract-box .warnline{
+    margin-top:12px; font-weight:600; font-size:.95rem; padding:10px 12px; background:var(--ink); color:var(--ground);
+  }
+  .contract-box ul{margin:0; padding:0; list-style:none; display:flex; flex-direction:column; gap:8px; font-size:.92rem;}
+  .contract-box li{padding-left:16px; position:relative;}
+  .contract-box li::before{content:""; position:absolute; left:0; top:.55em; width:7px; height:7px; background:var(--ink); border-radius:1px;}
+
+  /* ---------- call journey ---------- */
+  .journey{background:var(--surface); border:1px solid var(--line); padding:16px;}
+  @media (min-width:700px){ .journey{padding:22px;} }
+  .band{
+    display:flex; flex-wrap:wrap; align-items:baseline; gap:6px 14px;
+    border:2px solid var(--lc); background:var(--ls); padding:10px 14px; margin-bottom:14px;
+  }
+  .band b{font-family:var(--f-display); font-weight:800; color:var(--lc); font-size:1.05rem;}
+  .band span{font-size:.88rem; color:var(--muted);}
+  .steps{display:grid; gap:10px; grid-template-columns:1fr;}
+  @media (min-width:760px){ .steps{grid-template-columns:repeat(5,minmax(0,1fr)); gap:0;} }
+  .step{
+    position:relative; border:1px solid var(--line); background:var(--surface); padding:12px 14px 14px;
+    display:flex; flex-direction:column; gap:6px; min-width:0;
+  }
+  .step::before{content:""; display:block; height:6px; background:var(--lc); margin:-12px -14px 6px;}
+  .step .k{font-family:var(--f-mono); font-size:.66rem; letter-spacing:.1em; text-transform:uppercase; color:var(--lc); font-weight:600;}
+  .step .t{font-family:var(--f-display); font-weight:700; font-size:1.02rem; line-height:1.15; letter-spacing:-.01em;}
+  .step .d{font-size:.84rem; color:var(--muted); line-height:1.35;}
+  .step .d .mono{font-size:.8em}
+  /* arrows */
+  .step::after{
+    content:"↓"; position:absolute; left:50%; bottom:-14px; transform:translateX(-50%);
+    font-family:var(--f-mono); font-size:.9rem; color:var(--faint); line-height:1; background:var(--surface); padding:0 4px; z-index:1;
+  }
+  .step:last-child::after{content:none}
+  @media (min-width:760px){
+    .step{border-right:none;}
+    .step:last-child{border-right:1px solid var(--line);}
+    .step::after{content:"→"; left:auto; right:-9px; bottom:auto; top:44px; transform:none;}
+  }
+  .journey .foot{margin-top:14px; font-size:.86rem; color:var(--muted); display:flex; flex-wrap:wrap; gap:6px 18px;}
+  .journey .foot b{color:var(--ink); font-weight:600;}
+
+  /* ---------- problem map ---------- */
+  .legend{display:flex; flex-wrap:wrap; gap:8px 16px; margin-bottom:14px; font-size:.8rem; color:var(--muted); align-items:center;}
+  .legend .sw{display:inline-block; width:12px; height:12px; background:var(--lc); vertical-align:-1px; margin-right:5px; border-radius:2px;}
+  .legend .op{display:inline-block; width:12px; height:12px; border:2px solid var(--ink); vertical-align:-1px; margin-right:5px;}
+  .legend .cl{display:inline-block; width:12px; height:12px; border:2px dashed var(--line-strong); vertical-align:-1px; margin-right:5px;}
+  .map{display:grid; gap:10px; grid-template-columns:repeat(2,minmax(0,1fr));}
+  @media (min-width:560px){ .map{grid-template-columns:repeat(3,minmax(0,1fr));} }
+  @media (min-width:860px){ .map{grid-template-columns:repeat(6,minmax(0,1fr));} }
+  .prob{
+    background:var(--surface); border:2px dashed var(--line-strong); padding:10px 11px 11px;
+    display:flex; flex-direction:column; gap:6px; min-width:0; position:relative;
+  }
+  .prob[data-open="yes"]{border-style:solid; border-color:var(--ink); box-shadow:var(--shadow);}
+  .prob .row{display:flex; justify-content:space-between; align-items:center; gap:6px;}
+  .prob .num{font-family:var(--f-mono); font-size:.72rem; color:var(--faint); font-weight:500;}
+  .prob .st{font-family:var(--f-mono); font-size:.6rem; letter-spacing:.1em; text-transform:uppercase; color:var(--faint);}
+  .prob[data-open="yes"] .st{color:var(--surface); background:var(--ink); padding:2px 5px; border-radius:2px; font-weight:600;}
+  .prob .name{font-family:var(--f-display); font-weight:700; font-size:.98rem; line-height:1.1; letter-spacing:-.01em; min-height:2.2em; display:flex; flex-direction:column; gap:4px;}
+  .prob .name small{font-family:var(--f-mono); font-weight:400; font-size:.64rem; letter-spacing:.02em; color:var(--faint); overflow-wrap:anywhere;}
+  .prob .w{display:flex; align-items:center; gap:8px; margin-top:auto;}
+  .prob .w .big{font-family:var(--f-display); font-weight:800; font-size:1.7rem; line-height:1; letter-spacing:-.03em; color:var(--lc);}
+  .prob .w .dots{display:flex; gap:3px;}
+  .prob .w .dots i{width:8px; height:8px; border-radius:50%; border:1.5px solid var(--lc); display:block;}
+  .prob .w .dots i.on{background:var(--lc);}
+  .prob .w .unit{font-family:var(--f-mono); font-size:.62rem; letter-spacing:.08em; text-transform:uppercase; color:var(--faint);}
+  .prob .lane-chip{
+    font-family:var(--f-mono); font-size:.66rem; font-weight:600; letter-spacing:.04em;
+    background:var(--ls); color:var(--lc); padding:3px 6px; border-radius:2px; align-self:flex-start; max-width:100%;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .prob .pick{
+    border-top:1px dashed var(--line); padding-top:6px; font-family:var(--f-mono); font-size:.64rem; color:var(--faint); letter-spacing:.04em;
+  }
+  .prob .pick b{font-weight:500; color:var(--faint); border-bottom:1px dashed var(--line-strong); padding-right:34px;}
+  .prob.zero .w .big{font-size:1.1rem; color:var(--faint);}
+  .map-foot{margin-top:14px; display:flex; flex-wrap:wrap; gap:10px; align-items:center; font-size:.9rem; color:var(--muted);}
+  .map-foot .sum{font-family:var(--f-display); font-weight:800; font-size:1.3rem; color:var(--ink); letter-spacing:-.02em;}
+
+  /* ---------- callouts ---------- */
+  .call{
+    border-left:4px solid var(--ink); background:var(--surface); border-top:1px solid var(--line); border-bottom:1px solid var(--line); border-right:1px solid var(--line);
+    padding:13px 16px; margin-top:16px; font-size:.93rem;
+  }
+  .call b{font-family:var(--f-display); font-weight:700;}
+  .call[data-lane]{border-left-color:var(--lc); background:var(--ls); border-top-color:transparent; border-bottom-color:transparent; border-right-color:transparent;}
+  .call.warn{border-left-color:var(--warn); background:var(--warn-soft); border-top-color:transparent; border-bottom-color:transparent; border-right-color:transparent;}
+
+  /* ---------- verbs & reasons ---------- */
+  .verbs{display:grid; gap:10px; grid-template-columns:1fr;}
+  @media (min-width:700px){ .verbs{grid-template-columns:repeat(2,minmax(0,1fr));} }
+  @media (min-width:1000px){ .verbs{grid-template-columns:repeat(3,minmax(0,1fr));} }
+  .verb{background:var(--surface); border:1px solid var(--line); padding:12px 14px; display:flex; flex-direction:column; gap:6px; min-width:0;}
+  .verb .v{font-family:var(--f-mono); font-weight:600; font-size:1.05rem; letter-spacing:.02em;}
+  .verb .p{font-family:var(--f-mono); font-size:.74rem; color:var(--muted); line-height:1.5; overflow-wrap:anywhere;}
+  .verb .o{display:flex; flex-wrap:wrap; gap:4px; margin-top:auto; padding-top:4px;}
+  .verb .o span{font-family:var(--f-mono); font-size:.64rem; font-weight:600; padding:2px 6px; background:var(--ls); color:var(--lc); border-radius:2px;}
+  .reasons-head{margin-top:22px; font-size:.92rem; color:var(--muted); max-width:66ch;}
+  .reasons{display:flex; flex-wrap:wrap; gap:5px; margin-top:10px; font-family:var(--f-mono); font-size:.74rem;}
+  .reasons span{background:var(--surface); border:1px solid var(--line); padding:3px 8px; color:var(--muted);}
+  .reasons span.rule{color:var(--reglas); border-color:var(--reglas); background:var(--reglas-s); font-weight:500;}
+  .reasons-key{display:flex; flex-wrap:wrap; gap:14px; margin-top:8px; font-size:.78rem; color:var(--faint);}
+  .reasons-key i{display:inline-block; width:10px; height:10px; vertical-align:-1px; margin-right:5px; border:1px solid var(--line);}
+  .reasons-key i.r{background:var(--reglas-s); border-color:var(--reglas);}
+
+  /* ---------- blocks ---------- */
+  .blocks{display:grid; gap:14px; grid-template-columns:1fr;}
+  @media (min-width:960px){ .blocks{grid-template-columns:repeat(3,minmax(0,1fr));} }
+  .block{background:var(--surface); border:1px solid var(--line); display:flex; flex-direction:column; min-width:0;}
+  .block .bh{padding:16px 16px 14px; border-bottom:1px solid var(--line); display:flex; flex-direction:column; gap:6px;}
+  .block .bh .dl{
+    font-family:var(--f-display); font-weight:800; font-size:1.55rem; letter-spacing:-.03em; line-height:1; color:var(--warn);
+  }
+  .block .bh .dl small{font-family:var(--f-mono); font-weight:500; font-size:.68rem; letter-spacing:.1em; text-transform:uppercase; color:var(--faint); display:block; margin-bottom:6px;}
+  .block:last-child .bh .dl{color:var(--reglas);}
+  .block .bh h3{font-size:1.15rem; line-height:1.15;}
+  .block .bh .goal{font-size:.88rem; color:var(--muted);}
+  .block .bh .goal b{color:var(--ink); font-weight:600;}
+  .tasks{padding:6px 16px 14px; display:flex; flex-direction:column;}
+  .task{display:grid; grid-template-columns:14px 1fr; gap:10px; padding:10px 0; border-bottom:1px solid var(--line); align-items:start;}
+  .task:last-child{border-bottom:none}
+  .task .dot{width:12px; height:12px; background:var(--lc); border-radius:2px; margin-top:5px;}
+  .task .ln{font-family:var(--f-mono); font-size:.64rem; letter-spacing:.1em; text-transform:uppercase; color:var(--lc); font-weight:600;}
+  .task .t{font-weight:600; font-size:.93rem; line-height:1.3; margin-top:1px;}
+  .task .d{color:var(--muted); font-size:.85rem; margin-top:3px; line-height:1.4;}
+
+  .cycle{margin-top:18px; background:var(--surface); border:1px solid var(--line); padding:16px; display:grid; gap:14px; grid-template-columns:1fr;}
+  @media (min-width:760px){ .cycle{grid-template-columns:1.4fr 1fr; align-items:center; padding:20px;} }
+  .cycle svg{width:100%; height:auto; display:block; max-width:520px;}
+  .cycle .txt{font-size:.92rem; color:var(--muted);}
+  .cycle .txt b{color:var(--ink); font-weight:600;}
+  .cycle .n{font-family:var(--f-display); font-weight:800; font-size:1.6rem; color:var(--ink); letter-spacing:-.03em; line-height:1; margin-bottom:6px;}
+  .cyc-node{fill:var(--surface); stroke:var(--ink); stroke-width:2;}
+  .cyc-node.cool{stroke:var(--warn); stroke-dasharray:6 4;}
+  .cyc-text{font-family:var(--f-display); font-weight:700; font-size:15px; fill:var(--ink);}
+  .cyc-sub{font-family:var(--f-mono); font-size:11px; fill:var(--muted);}
+  .cyc-edge{stroke:var(--line-strong); stroke-width:2; fill:none;}
+  .cyc-arrow{fill:var(--line-strong);}
+
+  /* ---------- comms ---------- */
+  .tools{display:grid; gap:10px; grid-template-columns:1fr;}
+  @media (min-width:640px){ .tools{grid-template-columns:repeat(2,minmax(0,1fr));} }
+  @media (min-width:1000px){ .tools{grid-template-columns:repeat(3,minmax(0,1fr));} }
+  .tool{background:var(--surface); border:1px solid var(--line); padding:14px 15px; min-width:0;}
+  .tool h3{margin:8px 0 6px; font-size:1.08rem;}
+  .tool p{font-size:.88rem; color:var(--muted); line-height:1.4;}
+  .verd{font-family:var(--f-mono); font-size:.64rem; font-weight:600; letter-spacing:.12em; text-transform:uppercase; padding:3px 7px; display:inline-block; border-radius:2px;}
+  .verd.yes{color:var(--ident); background:var(--ident-s);}
+  .verd.no{color:var(--reglas); background:var(--reglas-s);}
+  .verd.once{color:var(--warn); background:var(--warn-soft);}
+
+  /* ---------- numbers ---------- */
+  .nums{display:grid; gap:10px; grid-template-columns:repeat(2,minmax(0,1fr));}
+  @media (min-width:760px){ .nums{grid-template-columns:repeat(4,minmax(0,1fr));} }
+  .numt{background:var(--surface); border:1px solid var(--line); padding:14px 14px 15px; display:flex; flex-direction:column; gap:5px; min-width:0;}
+  .numt .big{font-family:var(--f-display); font-weight:800; font-size:clamp(1.7rem,4.5vw,2.3rem); line-height:1; letter-spacing:-.03em; color:var(--ink);}
+  .numt .big.hot{color:var(--reglas)}
+  .numt .l{font-family:var(--f-mono); font-size:.66rem; letter-spacing:.1em; text-transform:uppercase; color:var(--faint);}
+  .numt .d{font-size:.84rem; color:var(--muted); line-height:1.35; margin-top:3px;}
+
+  footer{
+    margin-top:64px; padding-top:18px; border-top:1px solid var(--line);
+    color:var(--faint); font-size:.82rem; display:flex; flex-wrap:wrap; gap:10px 20px; justify-content:space-between;
+  }
+  :focus-visible{outline:2px solid var(--linea); outline-offset:2px;}
+  @media (prefers-reduced-motion:reduce){*{animation:none!important; transition:none!important; scroll-behavior:auto!important}}
+  html{scroll-behavior:smooth}
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <span class="eyebrow">Equipo Vortex · HackSpain 2026 · Madrid · Track Prosper AI</span>
+    <h1>Cinco personas, 49 puntos, un socket.</h1>
+    <p class="lede">Un agente de voz que coge las llamadas de una clínica y gestiona citas. <b>Esto es un menú, no un reparto.</b> Lee los cinco carriles, entiende qué hay dentro y pide el tuyo.</p>
+
+    <div class="clock" id="clock" aria-label="Los cinco momentos del fin de semana">
+      <div class="tick" data-at="2026-09-18T17:00"><span class="when">Vie 17:00</span><span class="what">Arranque</span><span class="flag">&nbsp;</span></div>
+      <div class="tick" data-at="2026-09-19T10:00"><span class="when">Sáb 10:00</span><span class="what">Checkpoint 1</span><span class="flag">premio</span></div>
+      <div class="tick" data-at="2026-09-19T23:00"><span class="when">Sáb 23:00</span><span class="what">Checkpoint 2</span><span class="flag">premio</span></div>
+      <div class="tick" data-at="2026-09-20T06:00" data-kind="wall"><span class="when">Dom 06:00</span><span class="what">Muro de puntuación</span><span class="flag">cierre duro</span></div>
+      <div class="tick" data-at="2026-09-20T11:00"><span class="when">Dom 11:00</span><span class="what">Jurado</span><span class="flag">premio</span></div>
+    </div>
+  </header>
+
+  <nav class="nav" aria-label="Secciones">
+    <ol>
+      <li><a href="#carriles">Carriles</a></li>
+      <li><a href="#llamada">La llamada</a></li>
+      <li><a href="#retos">18 retos</a></li>
+      <li><a href="#contrato">Contrato</a></li>
+      <li><a href="#bloques">3 bloques</a></li>
+      <li><a href="#hablar">Cómo hablamos</a></li>
+      <li><a href="tasks.html">Tareas</a></li>
+      <li><a href="#numeros">Números</a></li>
+    </ol>
+  </nav>
+
+  <div class="score" aria-label="Reparto de puntos">
+    <div><div class="n tab">49</div><div class="l">puntos en juego. 18 retos, 17 puntúan.</div></div>
+    <div><div class="n tab tl">30</div><div class="l">en tooling y dominio. 3 personas.</div></div>
+    <div><div class="n tab pipe">14</div><div class="l">en pipeline y voz. 2 personas.</div></div>
+    <div><div class="n tab">5</div><div class="l">La llamada real (#18). Necesita el sistema entero.</div></div>
+    <div><div class="n tab hoy">3</div><div class="l">retos abiertos hoy, 3 puntos en total.</div></div>
+  </div>
+
+  <div class="call" data-lane="linea">
+    <b>30 contra 14 es 3 contra 2.</b> Pero el pipeline tiene el cero: un socket que se cae, que emite silencio o que mezcla estado entre llamadas falla <em>todos</em> los casos del run a la vez. Quien coja La Línea protege los 49, no los 14 de su columna.
+  </div>
+
+  <!-- ===== CARRILES ===== -->
+  <section id="carriles">
+    <div class="head">
+      <span class="eyebrow">Elige tu carril</span>
+      <h2>Cinco carriles. Uno tiene nombre. Cuatro están libres.</h2>
+      <p>Cada carril cubre unos retos de punta a punta: las llamadas a la API, la lógica y el campo que pone en el JSON. Nadie ha repartido nada. Lee, y pide el que quieras.</p>
+    </div>
+
+    <div class="lanes">
+
+      <article class="lane" data-lane="linea">
+        <div class="in">
+          <div class="top"><span class="code">P1 · Pipeline</span><span class="pts">Protege los 49</span></div>
+          <h3>La Línea</h3>
+          <p class="owns">El socket, el audio y el envío. Si esto falla, nada más cuenta.</p>
+          <ul>
+            <li>Servidor WebSocket que habla Twilio Media Streams: <span class="mono">connected / start / media / stop</span></li>
+            <li>µ-law 8 kHz, tramas de 20 ms, base64, en los dos sentidos</li>
+            <li>Un pipeline nuevo por conexión. 20 a la vez, nada compartido</li>
+            <li>ngrok con dominio fijo, región europea, arriba todo el finde</li>
+            <li><span class="mono">POST /submit/*</span> dentro de la ventana de 30 s, con reintento seguro (el 409 es normal)</li>
+            <li>Una línea JSONL por <span class="mono">call_id</span>: será la vista en directo para el jurado</li>
+          </ul>
+          <div class="probs"><span>2 La centralita</span><span class="na">todos los casos, indirectamente</span></div>
+        </div>
+        <div class="who">
+          <span class="lbl">Quién lo coge</span>
+          <div class="slot taken">Joaquín <span class="tag">se recomienda</span><span class="why">Bloquea a los demás y tiene que existir esta noche.</span></div>
+        </div>
+      </article>
+
+      <article class="lane" data-lane="conv">
+        <div class="in">
+          <div class="top"><span class="code">P2 · Pipeline</span><span class="pts">14<small>pts</small></span></div>
+          <h3>La Conversación</h3>
+          <p class="owns">Cómo escucha el agente, cuándo calla y con qué no se deja liar.</p>
+          <ul>
+            <li>Turnos y barge-in. El harness no hace nada de esto por nosotros</li>
+            <li>Elegir STT / TTS, y aguantar con una línea mala</li>
+            <li>Español primero. Luego catalán, gallego y euskera</li>
+            <li>Nunca leer datos de un paciente a quien no se ha identificado</li>
+            <li>El techo de 3 minutos: llegar al registro antes de que caiga</li>
+          </ul>
+          <div class="probs"><span>11 Idiomas</span><span>12 Ruido</span><span>13 La llamada difícil</span><span>14 Manipulación y privacidad</span></div>
+        </div>
+        <div class="who">
+          <span class="lbl">Quién lo coge</span>
+          <div class="slot"><span class="free">Libre</span>Tu nombre aquí<span class="why">La otra mitad del pipeline. Trabaja pegado a La Línea.</span></div>
+        </div>
+      </article>
+
+      <article class="lane" data-lane="ident">
+        <div class="in">
+          <div class="top"><span class="code">T1 · Tooling</span><span class="pts">6<small>pts</small></span></div>
+          <h3>Identidad</h3>
+          <p class="owns">Quién llama, y para quién es la cita de verdad.</p>
+          <ul>
+            <li><span class="mono">GET /directory</span>: nombre, documento, teléfono, fecha de nacimiento</li>
+            <li>Un campo exacto que no cuadra <em>excluye</em> al paciente. Confirma siempre con un segundo campo</li>
+            <li>Letra de control del DNI/NIE: se calcula, no se fía. Un carácter mal pierde el caso</li>
+            <li>El <span class="mono">from_number</span> es una pista, nunca una identificación</li>
+            <li>Datos de registro para quien llama sin historial</li>
+            <li>Quien llama muchas veces no es el paciente</li>
+          </ul>
+          <div class="probs"><span>1 La cita simple</span><span>4 El paciente nuevo</span><span>9 Llama otra persona</span></div>
+        </div>
+        <div class="who">
+          <span class="lbl">Quién lo coge</span>
+          <div class="slot"><span class="free">Libre</span>Tu nombre aquí</div>
+        </div>
+      </article>
+
+      <article class="lane" data-lane="agenda">
+        <div class="in">
+          <div class="top"><span class="code">T2 · Tooling</span><span class="pts">11<small>pts</small></span></div>
+          <h3>La Agenda</h3>
+          <p class="owns">Disponibilidad real, y convertir lo que dice quien llama en un minuto exacto.</p>
+          <ul>
+            <li><span class="mono">GET /availability</span>: huecos, y los metadatos de restricción que van al lado</li>
+            <li>"El jueves que viene", "el lunes a primera hora": se resuelven contra el momento en que entra la llamada</li>
+            <li>Horarios: Sur cierra el viernes a mediodía, solo Centro abre el sábado, nada el domingo</li>
+            <li>La red entera cierra el lunes 12 de octubre</li>
+            <li>Nada se reserva el mismo día. "Lo antes posible" empieza mañana</li>
+            <li>Cambiar y cancelar: <span class="mono">appointment_id</span> tiene una única fuente</li>
+            <li>Sede más cercana por distancia en línea recta desde las coordenadas publicadas</li>
+          </ul>
+          <div class="probs"><span>3 El médico y la sede</span><span>5 Cuándo exactamente</span><span>7 Sin hueco libre</span><span>8 Cambiar y cancelar</span><span>15 La sede más cercana</span></div>
+        </div>
+        <div class="who">
+          <span class="lbl">Quién lo coge</span>
+          <div class="slot"><span class="free">Libre</span>Tu nombre aquí</div>
+        </div>
+      </article>
+
+      <article class="lane" data-lane="reglas">
+        <div class="in">
+          <div class="top"><span class="code">T3 · Tooling</span><span class="pts">13<small>pts</small></span></div>
+          <h3>Las Reglas</h3>
+          <p class="owns">Todo lo que la clínica no hace, y decirlo con la palabra exacta.</p>
+          <ul>
+            <li>Límite de edad en el 14.º cumpleaños, en meses, sin hueco y sin solape</li>
+            <li>Derivaciones, la matriz de aseguradoras, cobertura por médico y por sede</li>
+            <li>La segunda póliza no está en ningún dato. Solo preguntar en la llamada la saca</li>
+            <li>Síntoma → especialidad, más las banderas rojas publicadas que nunca se reservan</li>
+            <li>Lee la regla en <span class="mono">blocked</span>. Nunca adivines cuál ha saltado</li>
+          </ul>
+          <div class="probs"><span>6 Las normas</span><span>10 Triaje</span><span>16 Las preguntas</span><span>17 La segunda póliza</span></div>
+        </div>
+        <div class="who">
+          <span class="lbl">Quién lo coge</span>
+          <div class="slot"><span class="free">Libre</span>Tu nombre aquí</div>
+        </div>
+      </article>
+
+      <article class="lane" data-lane="all">
+        <div class="in">
+          <div class="top"><span class="code">18 · Todos</span><span class="pts">5<small>pts</small></span></div>
+          <h3>La llamada real</h3>
+          <p class="owns">El reto que necesita el sistema entero. No es un carril: es la suma de los cinco.</p>
+          <ul>
+            <li>Se abre el último. Solo pasa si La Línea aguanta, la voz entiende y las tres tools aciertan</li>
+            <li>Nadie lo coge solo. Lo coge el equipo cuando los otros cinco carriles funcionan</li>
+          </ul>
+          <div class="probs"><span>18 La llamada real</span></div>
+        </div>
+        <div class="who">
+          <span class="lbl">Quién lo coge</span>
+          <div class="slot taken">Los cinco<span class="why">Cuando lo demás esté en pie.</span></div>
+        </div>
+      </article>
+
+    </div>
+
+    <div class="contract-box" data-lane="all">
+      <div>
+        <span class="code">L0 · Los cinco · Primera hora</span>
+        <h3>El Contrato</h3>
+        <p style="color:var(--muted); margin-top:10px; font-size:.95rem;">El único artefacto que deja a cinco personas escribir código a la vez sin reunirse.</p>
+        <div class="warnline">Congela el contrato de tools en la primera hora. Sin eso, nos pisamos todo el fin de semana.</div>
+      </div>
+      <ul>
+        <li>Congela las firmas de las tools antes de que nadie implemente: qué recibe y qué devuelve cada función</li>
+        <li>Cada tool devuelve datos reales o un rechazo tipado. Nunca una frase para que el modelo la interprete</li>
+        <li>Haz un stub de cada tool la primera hora. Así La Línea y La Conversación corren una llamada entera con datos falsos esta noche</li>
+        <li>Los carriles de tooling prueban contra la API real de la clínica, sin voz en el circuito</li>
+        <li>Se escribe una vez, en el repo, antes de la primera línea de lógica</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ===== LA LLAMADA ===== -->
+  <section id="llamada">
+    <div class="head">
+      <span class="eyebrow">El recorrido</span>
+      <h2>Así pasa una llamada por los cinco carriles</h2>
+      <p>Cada paso tiene el color de quien lo cubre. La Conversación no es un paso: envuelve toda la llamada.</p>
+    </div>
+
+    <div class="journey">
+      <div class="band" data-lane="conv">
+        <b>La Conversación</b>
+        <span>Escucha, habla, corta cuando le interrumpen y no se deja liar. Durante toda la llamada. Techo: 3 minutos.</span>
+      </div>
+      <div class="steps">
+        <div class="step" data-lane="linea">
+          <span class="k">1 · La Línea</span>
+          <span class="t">Entra el socket</span>
+          <span class="d">Twilio abre el WebSocket. Un pipeline nuevo, nada compartido. Empieza la ventana de 30 s.</span>
+        </div>
+        <div class="step" data-lane="ident">
+          <span class="k">2 · Identidad</span>
+          <span class="t">Se identifica a quien llama</span>
+          <span class="d">Directorio, segundo campo, letra del DNI. ¿Para quién es la cita?</span>
+        </div>
+        <div class="step" data-lane="agenda">
+          <span class="k">3 · La Agenda</span>
+          <span class="t">Se busca en la agenda</span>
+          <span class="d">Fecha resuelta, hueco real desde mañana, sede correcta y abierta.</span>
+        </div>
+        <div class="step" data-lane="reglas">
+          <span class="k">4 · Las Reglas</span>
+          <span class="t">Se comprueban las reglas</span>
+          <span class="d">Edad, póliza, derivación, triaje. Se lee <span class="mono">blocked</span>, no se adivina.</span>
+        </div>
+        <div class="step" data-lane="linea">
+          <span class="k">5 · La Línea</span>
+          <span class="t">Se envía la acción</span>
+          <span class="d"><span class="mono">POST /submit</span> antes de que cierre la ventana. <span class="mono">BOOK</span>, o <span class="mono">NO_ACTION</span> con su <span class="mono">reason</span>.</span>
+        </div>
+      </div>
+      <div class="foot">
+        <span><b>Cada carril prueba solo.</b> Tooling contra la API real sin voz. Pipeline contra stubs.</span>
+        <span><b>Se juntan en el contrato</b>, no en una reunión.</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== 18 RETOS ===== -->
+  <section id="retos">
+    <div class="head">
+      <span class="eyebrow">El mapa</span>
+      <h2>Los 18 retos, de un vistazo</h2>
+      <p>Peso en puntos, si está abierto hoy, y qué carril lo cubre. Se abren en orden. Un reto suelto también se puede pedir: cada ficha tiene su hueco.</p>
+    </div>
+
+    <div class="legend">
+      <span><i class="op"></i>Abierto hoy</span>
+      <span><i class="cl"></i>Aún no abierto</span>
+      <span data-lane="linea"><i class="sw"></i>La Línea</span>
+      <span data-lane="conv"><i class="sw"></i>La Conversación</span>
+      <span data-lane="ident"><i class="sw"></i>Identidad</span>
+      <span data-lane="agenda"><i class="sw"></i>La Agenda</span>
+      <span data-lane="reglas"><i class="sw"></i>Las Reglas</span>
+      <span data-lane="all"><i class="sw"></i>Todos</span>
+    </div>
+
+    <div class="map">
+      <div class="prob" data-open="yes" data-lane="ident"><div class="row"><span class="num">#1</span><span class="st">Abierto</span></div><div class="name">La cita simple<small>simple_booking</small></div><div class="w"><span class="big">1</span><span class="dots"><i class="on"></i><i></i><i></i><i></i><i></i></span></div><span class="lane-chip">Identidad + Agenda</span><div class="pick">quién: <b>&nbsp;</b></div></div>
+      <div class="prob zero" data-open="yes" data-lane="linea"><div class="row"><span class="num">#2</span><span class="st">Abierto</span></div><div class="name">La centralita<small>switchboard</small></div><div class="w"><span class="big">0 pts</span><span class="unit">5 · 10 · 20 a la vez</span></div><span class="lane-chip">La Línea</span><div class="pick">quién: <b>&nbsp;</b></div></div>
+      <div class="prob" data-open="yes" data-lane="agenda"><div class="row"><span class="num">#3</span><span class="st">Abierto</span></div><div class="name">El médico y la sede<small>doctor_and_site</small></div><div class="w"><span class="big">2</span><span class="dots"><i class="on"></i><i class="on"></i><i></i><i></i><i></i></span></div><span class="lane-chip">La Agenda</span><div class="pick">quién: <b>&nbsp;</b></div></div>
+      <div class="prob" data-open="no" data-lane="ident"><div class="row"><span class="num">#4</span><span class="st">Aún no</span></div><div class="name">El paciente nuevo<small>the_new_patient</small></div><div class="w"><span class="big">2</span><span class="dots"><i class="on"></i><i class="on"></i><i></i><i></i><i></i></span></div><span class="lane-chip">Identidad</span><div class="pick">quién: <b>&nbsp;</b></div></div>
+      <div class="prob" data-open="no" data-lane="agenda"><div class="row"><span class="num">#5</span><span class="st">Aún no</span></div><div class="name">Cuándo exactamente<small>when_exactly</small></div><div class="w"><span class="big">2</span><span class="dots"><i class="on"></i><i class="on"></i><i></i><i></i><i></i></span></div><span class="lane-chip">La Agenda</span><div class="pick">quién: <b>&nbsp;</b></div></div>
+      <div class="prob" data-open="no" data-lane="reglas"><div class="row"><span class="num">#6</span><span class="st">Aún no</span></div><div class="name">Las normas<small>the_rules</small></div><div class="w"><span class="big">3</span><span class="dots"><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i></span></div><span class="lane-chip">Las Reglas</span><div class="pick">quién: <b>&nbsp;</b></div></div>
+      <div class="prob" data-open="no" data-lane="agenda"><div class="row"><span class="num">#7</span><span class="st">Aún no</span></div><div class="name">Sin hueco libre<small>no_slot_free</small></div><div class="w"><span class="big">2</span><span class="dots"><i class="on"></i><i class="on"></i><i></i><i></i><i></i></span></div><span class="lane-chip">La Agenda</span><div class="pick">quién: <b>&nbsp;</b></div></div>
+      <div class="prob" data-open="no" data-lane="agenda"><div class="row"><span class="num">#8</span><span class="st">Aún no</span></div><div class="name">Cambiar y cancelar<small>change_and_cancel</small></div><div class="w"><span class="big">2</span><span class="dots"><i class="on"></i><i class="on"></i><i></i><i></i><i></i></span></div><span class="lane-chip">La Agenda</span><div class="pick">quién: <b>&nbsp;</b></div></div>
+      <div class="prob" data-open="no" data-lane="ident"><div class="row"><span class="num">#9</span><span class="st">Aún no</span></div><div class="name">Llama otra persona<small>third_party</small></div><div class="w"><span class="big">3</span><span class="dots"><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i></span></div><span class="lane-chip">Identidad</span><div class="pick">quién: <b>&nbsp;</b></div></div>
+      <div class="prob" data-open="no" data-lane="reglas"><div class="row"><span class="num">#10</span><span class="st">Aún no</span></div><div class="name">Triaje<small>triage</small></div><div class="w"><span class="big">3</span><span class="dots"><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i></span></div><span class="lane-chip">Las Reglas</span><div class="pick">quién: <b>&nbsp;</b></div></div>
+      <div class="prob" data-open="no" data-lane="conv"><div class="row"><span class="num">#11</span><span class="st">Aún no</span></div><div class="name">Idiomas<small>languages</small></div><div class="w"><span class="big">3</span><span class="dots"><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i></span></div><span class="lane-chip">La Conversación</span><div class="pick">quién: <b>&nbsp;</b></div></div>
+      <div class="prob" data-open="no" data-lane="conv"><div class="row"><span class="num">#12</span><span class="st">Aún no</span></div><div class="name">Ruido<small>noise</small></div><div class="w"><span class="big">3</span><span class="dots"><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i></span></div><span class="lane-chip">La Conversación</span><div class="pick">quién: <b>&nbsp;</b></div></div>
+      <div class="prob" data-open="no" data-lane="conv"><div class="row"><span class="num">#13</span><span class="st">Aún no</span></div><div class="name">La llamada difícil<small>difficult_caller</small></div><div class="w"><span class="big">4</span><span class="dots"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i></span></div><span class="lane-chip">La Conversación</span><div class="pick">quién: <b>&nbsp;</b></div></div>
+      <div class="prob" data-open="no" data-lane="conv"><div class="row"><span class="num">#14</span><span class="st">Aún no</span></div><div class="name">Manipulación y privacidad<small>adversarial</small></div><div class="w"><span class="big">4</span><span class="dots"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i></span></div><span class="lane-chip">La Conversación</span><div class="pick">quién: <b>&nbsp;</b></div></div>
+      <div class="prob" data-open="no" data-lane="agenda"><div class="row"><span class="num">#15</span><span class="st">Aún no</span></div><div class="name">La sede más cercana<small>nearest_site</small></div><div class="w"><span class="big">3</span><span class="dots"><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i></span></div><span class="lane-chip">La Agenda</span><div class="pick">quién: <b>&nbsp;</b></div></div>
+      <div class="prob" data-open="no" data-lane="reglas"><div class="row"><span class="num">#16</span><span class="st">Aún no</span></div><div class="name">Las preguntas<small>the_questions</small></div><div class="w"><span class="big">3</span><span class="dots"><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i></span></div><span class="lane-chip">Las Reglas</span><div class="pick">quién: <b>&nbsp;</b></div></div>
+      <div class="prob" data-open="no" data-lane="reglas"><div class="row"><span class="num">#17</span><span class="st">Aún no</span></div><div class="name">La segunda póliza<small>second_policy</small></div><div class="w"><span class="big">4</span><span class="dots"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i></span></div><span class="lane-chip">Las Reglas</span><div class="pick">quién: <b>&nbsp;</b></div></div>
+      <div class="prob" data-open="no" data-lane="all"><div class="row"><span class="num">#18</span><span class="st">Aún no</span></div><div class="name">La llamada real<small>the_real_call</small></div><div class="w"><span class="big">5</span><span class="dots"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i></span></div><span class="lane-chip">Todos</span><div class="pick">quién: <b>&nbsp;</b></div></div>
+    </div>
+
+    <div class="map-foot">
+      <span class="sum tab">49 puntos</span>
+      <span>= 30 tooling + 14 pipeline + 5 de La llamada real. El #2 no puntúa: Run All no lo marca nunca. Es el test de concurrencia, y se lanza a mano.</span>
+    </div>
+
+    <div class="call" data-lane="conv">
+      <b>El #14 es el único que lee la transcripción.</b> En todos los demás la conversación no puntúa. Ahí, un dato de paciente filtrado falla el caso.
+    </div>
+    <div class="call warn">
+      <b>Un reto que nadie marca puntúa igual que uno que falla.</b> Lee el mapa por delante. El carril que cubre un reto empieza antes de que se abra.
+    </div>
+  </section>
+
+  <!-- ===== CONTRATO ===== -->
+  <section id="contrato">
+    <div class="head">
+      <span class="eyebrow">Lo que se envía</span>
+      <h2>Seis verbos, y un vocabulario cerrado para decir que no</h2>
+      <p>Cada llamada acaba en uno o más de estos. Nada más cuenta, y una lista vacía siempre pierde.</p>
+    </div>
+
+    <div class="verbs">
+      <div class="verb"><span class="v">BOOK</span><span class="p">patient_id · provider_id · location_id · appointment_type_id · slot · policy_id</span><div class="o"><span data-lane="ident">Identidad</span><span data-lane="agenda">La Agenda</span><span data-lane="reglas">Las Reglas</span></div></div>
+      <div class="verb"><span class="v">REGISTER</span><span class="p">dos apellidos · national_id · date_of_birth · phone · email · insurer</span><div class="o"><span data-lane="ident">Identidad</span></div></div>
+      <div class="verb"><span class="v">RESCHEDULE</span><span class="p">appointment_id · provider_id · location_id · slot · policy_id</span><div class="o"><span data-lane="agenda">La Agenda</span></div></div>
+      <div class="verb"><span class="v">CANCEL</span><span class="p">appointment_id</span><div class="o"><span data-lane="agenda">La Agenda</span></div></div>
+      <div class="verb"><span class="v">NO_ACTION</span><span class="p">reason</span><div class="o"><span data-lane="reglas">Las Reglas</span></div></div>
+      <div class="verb"><span class="v">ESCALATE</span><span class="p">reason</span><div class="o"><span data-lane="reglas">Las Reglas</span></div></div>
+    </div>
+
+    <p class="reasons-head">Los 18 valores de <span class="mono">reason</span> son una lista cerrada. Los once primeros son espejo de las restricciones de la clínica, uno a uno. Así, la regla que ha saltado siempre tiene nombre.</p>
+    <div class="reasons">
+      <span class="rule">not_eligible_age</span><span class="rule">referral_required</span><span class="rule">provider_not_in_network</span><span class="rule">specialty_not_covered</span><span class="rule">location_not_covered</span><span class="rule">insurer_referral_required</span><span class="rule">allowance_exhausted</span><span class="rule">provider_on_leave</span><span class="rule">location_hours</span><span class="rule">type_not_offered</span><span class="rule">patient_history</span>
+      <span>no_availability</span><span>clinic_closed</span><span>patient_not_found</span><span>provider_not_found</span><span>caller_not_authorised</span><span>out_of_scope</span><span>medical_emergency</span>
+    </div>
+    <div class="reasons-key"><span><i class="r"></i>Espejo de una restricción de la clínica (11)</span><span><i></i>Otros motivos (7)</span></div>
+
+    <div class="call warn">
+      <b>No hacer nada no es callarse.</b> Una llamada cuya respuesta correcta es "esto no se puede reservar" también envía <span class="mono">NO_ACTION</span> con su <span class="mono">reason</span>. Un agente caído y un rechazo correcto no pueden parecer lo mismo.
+    </div>
+  </section>
+
+  <!-- ===== BLOQUES ===== -->
+  <section id="bloques">
+    <div class="head">
+      <span class="eyebrow">El tiempo</span>
+      <h2>El fin de semana tiene tres plazos, no uno</h2>
+      <p>Hoy solo hay tres retos abiertos, 3 puntos. El ranking se congela el domingo a las 06:00, cinco horas antes de que llame el jurado. Planifica hacia atrás desde ahí.</p>
+    </div>
+
+    <div class="blocks">
+
+      <div class="block">
+        <div class="bh">
+          <div class="dl"><small>Bloque 1 → Checkpoint 1</small>Sáb 10:00</div>
+          <h3>Una llamada que contesta y reporta</h3>
+          <p class="goal"><b>Objetivo:</b> 3 de 3 puntos abiertos. Hoy solo están abiertos La cita simple y El médico y la sede.</p>
+        </div>
+        <div class="tasks">
+          <div class="task" data-lane="all"><span class="dot"></span><div><span class="ln">Todos</span><div class="t">Alguien va al mostrador. Ya.</div><div class="d">Clave de API, contraseña del panel y la tarjeta de 100 € se leen una vez, en una pantalla. Sin la clave, nada de lo de abajo existe.</div></div></div>
+          <div class="task" data-lane="all"><span class="dot"></span><div><span class="ln">Todos</span><div class="t">Congelar las firmas de las tools y hacer los stubs</div><div class="d">Una hora, los cinco. Después nadie espera a nadie.</div></div></div>
+          <div class="task" data-lane="linea"><span class="dot"></span><div><span class="ln">La Línea</span><div class="t">El socket contesta, habla y cuelga</div><div class="d">pipecat con el serializador de Twilio. Pruébalo con una llamada de práctica al reto 1.</div></div></div>
+          <div class="task" data-lane="linea"><span class="dot"></span><div><span class="ln">La Línea</span><div class="t">La fontanería del envío antes que la inteligencia</div><div class="d">Un <span class="mono">BOOK</span> a mano que llega dentro de la ventana vale más que una conversación brillante que no reporta nada.</div></div></div>
+          <div class="task" data-lane="conv"><span class="dot"></span><div><span class="ln">La Conversación</span><div class="t">Un prompt que llega a una respuesta en menos de 3 minutos</div><div class="d">El barge-in puede esperar al bloque 2. Terminar la llamada, no.</div></div></div>
+          <div class="task" data-lane="ident"><span class="dot"></span><div><span class="ln">Identidad</span><div class="t">Búsqueda en el directorio y confirmación con segundo campo</div><div class="d">Primero el teléfono del <span class="mono">from_number</span>. Luego nombre y fecha de nacimiento.</div></div></div>
+          <div class="task" data-lane="agenda"><span class="dot"></span><div><span class="ln">La Agenda</span><div class="t">El primer hueco real, minuto exacto, con offset</div><div class="d">Desde el día siguiente a la llamada. Europe/Madrid. Esto es casi todo el reto 1.</div></div></div>
+          <div class="task" data-lane="reglas"><span class="dot"></span><div><span class="ln">Las Reglas</span><div class="t">El tipo de cita sigue al historial</div><div class="d">Nunca visto aquí → primera visita. Ya visto → revisión. Nunca lo que pida quien llama.</div></div></div>
+          <div class="task" data-lane="linea"><span class="dot"></span><div><span class="ln">La Línea</span><div class="t">Lanza las ráfagas de 5 y 10 líneas del reto 2</div><div class="d">No puntúa y es el único test honesto de concurrencia. El viernes por la noche es cuando quieres enterarte.</div></div></div>
+        </div>
+      </div>
+
+      <div class="block">
+        <div class="bh">
+          <div class="dl"><small>Bloque 2 → Checkpoint 2</small>Sáb 23:00</div>
+          <h3>Amplitud, según se abren los retos</h3>
+          <p class="goal"><b>Objetivo:</b> intentar todo lo abierto. Un reto que nadie marca puntúa igual que uno que falla.</p>
+        </div>
+        <div class="tasks">
+          <div class="task" data-lane="ident"><span class="dot"></span><div><span class="ln">Identidad</span><div class="t">Registro, y la letra de control</div><div class="d">El reto 4 es el test de voz más duro del set. La letra se calcula a partir de los dígitos: un documento mal oído y uno inventado se distinguen. El email no: se dicta.</div></div></div>
+          <div class="task" data-lane="ident"><span class="dot"></span><div><span class="ln">Identidad</span><div class="t">Tercero: reserva para el paciente, no para quien llama</div><div class="d">Una madre para su hijo. Ella da sus datos primero. Reservarle a ella es el fallo.</div></div></div>
+          <div class="task" data-lane="agenda"><span class="dot"></span><div><span class="ln">La Agenda</span><div class="t">El vocabulario fijo de fechas</div><div class="d">Siete frases, todas publicadas. Un día de la semana es el primero estrictamente después de hoy. Día cerrado → el primer día abierto que cumpla el resto de la petición.</div></div></div>
+          <div class="task" data-lane="agenda"><span class="dot"></span><div><span class="ln">La Agenda</span><div class="t">Cancelar y cambiar, incluso los dos en una llamada</div><div class="d">Dos acciones, dos POST, una llamada.</div></div></div>
+          <div class="task" data-lane="reglas"><span class="dot"></span><div><span class="ln">Las Reglas</span><div class="t">Lee <span class="mono">blocked</span>, nunca adivines la regla</div><div class="d">Cinco formas de rechazo, cada una con una respuesta distinta. Un caso público es una reserva normal: el control que pilla al agente que aprendió a rechazarlo todo.</div></div></div>
+          <div class="task" data-lane="reglas"><span class="dot"></span><div><span class="ln">Las Reglas</span><div class="t">Triaje desde la lista de síntomas publicada</div><div class="d">Es una búsqueda, no juicio clínico. Las banderas rojas van a <span class="mono">ESCALATE</span>, nunca a un calendario.</div></div></div>
+          <div class="task" data-lane="conv"><span class="dot"></span><div><span class="ln">La Conversación</span><div class="t">Barge-in y las otras lenguas de España</div><div class="d">Los casos privados del reto 11 van más allá del español. Es el único reto cuyos casos públicos no representan el pool privado.</div></div></div>
+          <div class="task" data-lane="linea"><span class="dot"></span><div><span class="ln">La Línea</span><div class="t">La vista en directo</div><div class="d">Llamadas en curso, las tools que ha llamado cada una, el JSON que ha enviado. La mitad de la nota del jurado es lo que podemos ver y enseñar.</div></div></div>
+        </div>
+      </div>
+
+      <div class="block">
+        <div class="bh">
+          <div class="dl"><small>Bloque 3 → Muro · luego jurado 11:00</small>Dom 06:00</div>
+          <h3>Medir, y luego dejar de tocar</h3>
+          <p class="goal"><b>Objetivo:</b> el mejor Run All es el que cuenta. Pasa la noche midiendo, no refactorizando.</p>
+        </div>
+        <div class="tasks">
+          <div class="task" data-lane="all"><span class="dot"></span><div><span class="ln">Todos</span><div class="t">Run All en bucle, uno cada ~33 minutos</div><div class="d">18 minutos de ejecución, 15 de enfriamiento. El ranking guarda tu <em>mejor</em> run: más muestras es ganancia gratis.</div></div></div>
+          <div class="task" data-lane="all"><span class="dot"></span><div><span class="ln">Todos</span><div class="t">Congela el código mucho antes de las 06:00</div><div class="d">Un run tiene que estar completo en el muro, no empezado. El último lanzamiento útil es sobre las 05:30.</div></div></div>
+          <div class="task" data-lane="conv"><span class="dot"></span><div><span class="ln">La Conversación</span><div class="t">Que suene como si la clínica supiera quién llama</div><div class="d">Cada ficha tiene una nota y un historial de visitas. Leerlo no puntúa en el ranking y es casi toda la nota del jurado.</div></div></div>
+          <div class="task" data-lane="all"><span class="dot"></span><div><span class="ln">Todos</span><div class="t">Ensayar la demo con una llamada real</div><div class="d">El jurado nos llama. Quien conduzca tiene que enseñar la llamada entrando, las tools disparando y el registro que hemos enviado.</div></div></div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="cycle">
+      <svg viewBox="0 0 520 150" role="img" aria-label="Ciclo de Run All: 18 minutos de ejecución, 15 de enfriamiento, y vuelta a empezar. Un ciclo cada 33 minutos.">
+        <defs>
+          <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="cyc-arrow"/></marker>
+        </defs>
+        <rect x="10" y="30" width="150" height="70" rx="3" class="cyc-node"/>
+        <text x="85" y="60" text-anchor="middle" class="cyc-text">Run All</text>
+        <text x="85" y="80" text-anchor="middle" class="cyc-sub">~18 min · 68 llamadas</text>
+        <rect x="200" y="30" width="150" height="70" rx="3" class="cyc-node cool"/>
+        <text x="275" y="60" text-anchor="middle" class="cyc-text">Enfriamiento</text>
+        <text x="275" y="80" text-anchor="middle" class="cyc-sub">15 min · no se puede lanzar</text>
+        <rect x="390" y="30" width="120" height="70" rx="3" class="cyc-node"/>
+        <text x="450" y="60" text-anchor="middle" class="cyc-text">Leer y decidir</text>
+        <text x="450" y="80" text-anchor="middle" class="cyc-sub">standup de 5 min</text>
+        <line x1="160" y1="65" x2="198" y2="65" class="cyc-edge" marker-end="url(#arr)"/>
+        <line x1="350" y1="65" x2="388" y2="65" class="cyc-edge" marker-end="url(#arr)"/>
+        <path d="M450,100 L450,128 L85,128 L85,102" class="cyc-edge" marker-end="url(#arr)"/>
+        <text x="268" y="122" text-anchor="middle" class="cyc-sub">un ciclo cada ~33 min · solo un run a la vez</text>
+      </svg>
+      <div class="txt">
+        <div class="n">Una persona tiene el botón de Run All.</div>
+        El equipo tiene un run en cola o activo a la vez, y 15 minutos de enfriamiento después de cada uno. <b>Dos personas pulsando son dos personas bloqueándose.</b> Elige el nombre esta noche.
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== CÓMO HABLAMOS ===== -->
+  <section id="hablar">
+    <div class="head">
+      <span class="eyebrow">Con qué nos comunicamos</span>
+      <h2>Miro: veinte minutos, y se cierra</h2>
+      <p>Somos cinco en una mesa durante 48 horas. Casi todo se coordina hablando. Lo que hay que escribir es lo que evita que nos pisemos.</p>
+    </div>
+
+    <div class="tools">
+      <div class="tool"><span class="verd yes">La de verdad</span><h3>El contrato, en el repo</h3><p>Firmas congeladas más stubs. Esto, y no un chat, es lo que deja a cinco personas programar en paralelo. Una hora aquí compra el fin de semana entero.</p></div>
+      <div class="tool"><span class="verd yes">Tablero</span><h3><a href="tasks.html">Las 52 tareas</a></h3><p>Ya montado: una issue por tarea, una etiqueta por carril, un hito por bloque. <a href="tasks.html">El tablero</a> las ordena por prioridad y enseña quién ha cogido cada una. Se coge asignándote la issue. La fuente es <span class="mono">docs/tasks.json</span>.</p></div>
+      <div class="tool"><span class="verd once">Una vez</span><h3>Miro</h3><p>Sirve para una sola cosa: dibujar juntos el flujo de la llamada al principio, para que los cinco tengamos la misma imagen. Veinte minutos, un tablero, y nadie lo vuelve a abrir. No es un gestor de tareas y a las 3 de la mañana nadie lo mira.</p></div>
+      <div class="tool"><span class="verd yes">Avisos</span><h3>WhatsApp</h3><p>Para "subo a main", "el socket está caído", "quién tiene la clave". Ya lo tienes y todos lo leen. No estrenes una herramienta esta noche.</p></div>
+      <div class="tool"><span class="verd no">Ahora no</span><h3>Notion, Linear, un Slack nuevo</h3><p>Cualquier herramienta que necesite cinco cuentas y un esquema cuesta más de lo que devuelve en 48 horas.</p></div>
+      <div class="tool"><span class="verd yes">Ritual</span><h3>Cinco minutos cada cuatro horas</h3><p>De pie, anclados al ciclo de Run All: qué ha pasado, qué ha fallado, qué necesita cada carril de otro. Lo convoca quien lanza los runs.</p></div>
+    </div>
+
+    <div class="call">
+      <b>Push directo a main, pero cada uno en su carpeta.</b> Las pull requests en un hackathon cuestan más de lo que pillan. Una carpeta por carril, y la única superficie de choque es el contrato. Eso se resuelve hablando, en la mesa.
+    </div>
+  </section>
+
+  <!-- ===== NÚMEROS ===== -->
+  <section id="numeros">
+    <div class="head">
+      <span class="eyebrow">Los límites</span>
+      <h2>Los números que muerden</h2>
+      <p>Las constantes que merece la pena pegar en la mesa.</p>
+    </div>
+
+    <div class="nums">
+      <div class="numt"><span class="big tab">30 s</span><span class="l">Ventana de envío</span><span class="d">Se abre al abrir la llamada y se cierra 30 s después de que cierre el socket. Pronto nunca está mal. Tarde es un 410.</span></div>
+      <div class="numt"><span class="big tab">3 min</span><span class="l">Techo por llamada</span><span class="d">Un agente que no reserva en tres minutos ha fallado.</span></div>
+      <div class="numt"><span class="big tab">10 / 20</span><span class="l">Sockets simultáneos</span><span class="d">Run All abre 10. La ráfaga más grande del reto 2 abre 20.</span></div>
+      <div class="numt"><span class="big tab">~18 min</span><span class="l">Un Run All</span><span class="d">68 llamadas cuando todo el roster esté abierto.</span></div>
+      <div class="numt"><span class="big tab">15 min</span><span class="l">Enfriamiento de Run All</span><span class="d">Un run cada ~33 minutos, y solo uno a la vez.</span></div>
+      <div class="numt"><span class="big tab">30 s</span><span class="l">Enfriamiento de práctica</span><span class="d">Gratis, no puntúa, respuestas publicadas. Aquí se depura.</span></div>
+      <div class="numt"><span class="big tab">100 €</span><span class="l">Presupuesto del equipo</span><span class="d">Una tarjeta prepago para modelos, voz y túneles. No se recarga.</span></div>
+      <div class="numt"><span class="big tab hot">Dom 06:00</span><span class="l">Muro de puntuación</span><span class="d">Solo cuentan los runs <em>completados</em> antes de esa hora.</span></div>
+    </div>
+
+    <div class="call">
+      <b>El ranking guarda tu mejor run, no el último.</b> Experimentar tarde es gratis. No lanzar, no.
+    </div>
+  </section>
+
+  <footer>
+    <span>Equipo Vortex · HackSpain 2026 · Track Prosper AI</span>
+    <span class="mono"><a href="tasks.html">tareas</a> · github.com/jferreiros/vortex</span>
+  </footer>
+
+</div>
+
+<script>
+  (function () {
+    var ticks = document.querySelectorAll('#clock .tick');
+    // Event times are Europe/Madrid, UTC+2 in September.
+    var now = Date.now(), nextFound = false;
+    ticks.forEach(function (t) {
+      var at = Date.parse(t.getAttribute('data-at') + ':00+02:00');
+      if (isNaN(at)) return;
+      if (at < now) { t.setAttribute('data-state', 'past'); }
+      else if (!nextFound) { t.setAttribute('data-state', 'next'); nextFound = true; }
+    });
+  })();
+</script>
+
+</html>

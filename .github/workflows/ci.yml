@@ -1,0 +1,157 @@
+# Team CI. Runs on every pull request and on every push to main.
+#
+# Jobs run in parallel. `gate` is the only status check main requires
+# (see .github/scripts/protect-main.sh). It goes red when test, lint or
+# format fail. `coverage` and `quality` only report; they never block.
+# Docs: docs/ci.md
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# A new push to the same PR cancels the run that is still going.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # `uv sync` refuses to run when uv.lock is out of date with pyproject.toml.
+  # Fix: run `uv lock` locally and commit uv.lock.
+  UV_LOCKED: "1"
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.1.0  # no major tag published; pin the full version
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: make install
+      - run: make test
+
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.1.0  # no major tag published; pin the full version
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: make install
+      - run: make lint
+
+  format:
+    name: format
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.1.0  # no major tag published; pin the full version
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: make install
+      # The Makefile has no check-only target, so run the formatter and fail
+      # if it changed anything. The diff below is exactly what you must commit.
+      - run: make fmt
+      - name: Fail if `make fmt` changed any file
+        run: git diff --exit-code
+
+  # Reports only. Posts one comment on the PR with total and diff coverage,
+  # and keeps a badge on the `python-coverage-comment-action-data` branch.
+  # No threshold: the repo is still mostly stubs. Not part of `gate`.
+  coverage:
+    name: coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write        # data branch with badge + html report
+      pull-requests: write   # the PR comment
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.1.0  # no major tag published; pin the full version
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: make install
+      - name: Run the test suite under coverage
+        run: uv run --with pytest-cov pytest -q --cov=vortex --cov-report=term-missing:skip-covered
+      - name: Coverage table in the job summary
+        run: uv run --with coverage coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY"
+      - name: Coverage comment on the PR
+        uses: py-cov-action/python-coverage-comment-action@v4.3
+        with:
+          GITHUB_TOKEN: ${{ github.token }}
+          MINIMUM_GREEN: 80
+          MINIMUM_ORANGE: 60
+
+  # Advisory. The rule sets Code Climate would have flagged (simplification,
+  # naming, pathlib, pylint-style smells) on top of pyproject's own selection.
+  # Shows as inline annotations on the PR's "Files changed" tab. Never blocks.
+  quality:
+    name: quality (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.1.0  # no major tag published; pin the full version
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: make install
+      - name: Stricter ruff rules (annotations)
+        run: uv run ruff check . --extend-select SIM,C4,PIE,PTH,N,RUF,PL --ignore PLC0415,PLR2004 --output-format github
+      - name: Stricter ruff rules (summary)
+        if: always()
+        run: |
+          {
+            echo '## ruff, stricter rule sets (advisory)'
+            echo '```'
+            uv run ruff check . --extend-select SIM,C4,PIE,PTH,N,RUF,PL --ignore PLC0415,PLR2004 --statistics || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Reserved slot. The evals system is being built in evals/ by another lane.
+  # Skipped until the repository variable CI_EVALS_ENABLED is set to "true".
+  # When evals/ lands: put its make target here, set the variable, and decide
+  # on the call whether it joins `gate` (it probably should not, see docs/ci.md).
+  evals:
+    name: evals (not wired yet)
+    runs-on: ubuntu-latest
+    if: vars.CI_EVALS_ENABLED == 'true'
+    steps:
+      - run: echo "evals/ is not wired into CI yet"
+
+  # The single required status check for main.
+  #
+  # Only the test suite blocks a merge. Style does not. During the event a red
+  # `main` stops five people from merging at once, and a style rule is never
+  # worth that. `lint` and `format` still run and still show up here, so the
+  # drift stays visible and someone can clear it when the queue is calm.
+  # Restore them as blocking by adding their checks back below.
+  gate:
+    name: gate
+    runs-on: ubuntu-latest
+    needs: [test, lint, format]
+    if: always()
+    steps:
+      - name: Blocking job green?
+        run: |
+          echo "test:   ${{ needs.test.result }}   (blocking)"
+          echo "lint:   ${{ needs.lint.result }}   (advisory)"
+          echo "format: ${{ needs.format.result }}   (advisory)"
+          [ "${{ needs.test.result }}" = success ]

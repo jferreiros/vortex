@@ -167,9 +167,7 @@ def test_service_settings_take_our_shape() -> None:
     from vortex.settings import Settings
 
     extra = _llm_extra_body(Settings())
-    llm = OpenAILLMService.Settings(
-        model="qwen3.6", temperature=0.2, max_tokens=120, extra=extra
-    )
+    llm = OpenAILLMService.Settings(model="qwen3.6", temperature=0.2, max_tokens=120, extra=extra)
     # Both dialects of "do not reason": vLLM's chat_template_kwargs and
     # Helmcode's reasoning_effort. Hosts ignore the one they do not know.
     assert llm.extra["extra_body"] == {"chat_template_kwargs": {"enable_thinking": False}}

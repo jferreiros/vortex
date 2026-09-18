@@ -1,0 +1,128 @@
+# Triage: the published routing table and the five red flags (problems.md §10).
+# A lookup, not clinical judgement. Every row of the table is a case.
+group: triage
+now: "2026-09-18T09:00:00+02:00"
+
+cases:
+  - id: triage.ortho.ankle
+    problem: 10
+    tool: triage
+    args: {complaint: "I went over on my ankle, it is swollen and walking hurts"}
+    expect: {specialty_id: orthopaedics, emergency: false}
+  - id: triage.ortho.bike_shoulder
+    problem: 10
+    tool: triage
+    args: {complaint: "came off my bike and cannot lift the arm above the shoulder"}
+    expect: {specialty_id: orthopaedics, emergency: false}
+  - id: triage.ortho.knee_locks
+    problem: 10
+    tool: triage
+    args: {complaint: "my knee clicks and locks going up stairs, it gave way yesterday"}
+    expect: {specialty_id: orthopaedics, emergency: false}
+  - id: triage.ortho.wrist_fall
+    problem: 10
+    tool: triage
+    args: {complaint: "slipped onto an outstretched hand, the wrist is painful and weak"}
+    expect: {specialty_id: orthopaedics, emergency: false}
+
+  - id: triage.paeds.temperature
+    problem: 10
+    tool: triage
+    args: {complaint: "my child has had a temperature for two days and is off her food"}
+    expect: {specialty_id: paediatrics, emergency: false}
+  - id: triage.paeds.cough
+    problem: 10
+    tool: triage
+    args: {complaint: "child with a cough for over a week, worse at night"}
+    expect: {specialty_id: paediatrics, emergency: false}
+  - id: triage.paeds.ear
+    problem: 10
+    tool: triage
+    args: {complaint: "the little one is pulling at his ear and crying, barely slept"}
+    expect: {specialty_id: paediatrics, emergency: false}
+  - id: triage.paeds.tummy
+    problem: 10
+    tool: triage
+    args: {complaint: "child with a sore tummy on and off for a week"}
+    expect: {specialty_id: paediatrics, emergency: false}
+
+  - id: triage.gp.tired
+    problem: 10
+    tool: triage
+    args: {complaint: "tired and run down for a couple of weeks"}
+    expect: {specialty_id: general_practice, emergency: false}
+  - id: triage.gp.headaches
+    problem: 10
+    tool: triage
+    args: {complaint: "headaches most afternoons for a month"}
+    expect: {specialty_id: general_practice, emergency: false}
+  - id: triage.gp.sore_throat
+    problem: 10
+    tool: triage
+    args: {complaint: "sore throat and feverish since the weekend"}
+    expect: {specialty_id: general_practice, emergency: false}
+  - id: triage.gp.dizzy
+    problem: 10
+    tool: triage
+    args: {complaint: "dizzy on standing, more tired than usual"}
+    expect: {specialty_id: general_practice, emergency: false}
+
+  - id: triage.gyn.heavy_periods
+    problem: 10
+    tool: triage
+    args: {complaint: "very heavy, irregular periods for months"}
+    expect: {specialty_id: gynaecology, emergency: false}
+  - id: triage.gyn.bleeding_between
+    problem: 10
+    tool: triage
+    args: {complaint: "bleeding between periods, three cycles running"}
+    expect: {specialty_id: gynaecology, emergency: false}
+  - id: triage.gyn.low_pain
+    problem: 10
+    tool: triage
+    args: {complaint: "dull pain low down on one side for a couple of weeks"}
+    expect: {specialty_id: gynaecology, emergency: false}
+
+  # ---- red flags: ESCALATE(medical_emergency), book nothing ---------------
+  - id: triage.redflag.chest_pain
+    problem: 10
+    tool: triage
+    args: {complaint: "tight pain across the chest and struggling to catch my breath"}
+    expect: {emergency: true, rejection: {reason: medical_emergency}}
+  - id: triage.redflag.stroke
+    problem: 10
+    tool: triage
+    args: {complaint: "one side of his face has gone droopy and an arm gone weak all of a sudden, words slurred"}
+    expect: {emergency: true, rejection: {reason: medical_emergency}}
+  - id: triage.redflag.breathless
+    problem: 10
+    tool: triage
+    args: {complaint: "cannot get my breath at all, came on out of nowhere, stopping between words"}
+    expect: {emergency: true, rejection: {reason: medical_emergency}}
+  - id: triage.redflag.bleeding
+    problem: 10
+    tool: triage
+    args: {complaint: "a cut that is bleeding heavily and will not stop after ten minutes of pressure"}
+    expect: {emergency: true, rejection: {reason: medical_emergency}}
+  - id: triage.redflag.head_injury
+    problem: 10
+    tool: triage
+    args: {complaint: "banged her head an hour ago, confused and being sick since"}
+    expect: {emergency: true, rejection: {reason: medical_emergency}}
+
+  # ---- Spanish phrasing: the callers speak Spanish -------------------------
+  - id: triage.es.tobillo
+    problem: 10
+    tool: triage
+    args: {complaint: "me he torcido el tobillo, está hinchado y me duele al andar"}
+    expect: {specialty_id: orthopaedics, emergency: false}
+  - id: triage.es.fiebre_nino
+    problem: 10
+    tool: triage
+    args: {complaint: "mi hijo lleva dos días con fiebre y no come"}
+    expect: {specialty_id: paediatrics, emergency: false}
+  - id: triage.es.dolor_pecho
+    problem: 10
+    tool: triage
+    args: {complaint: "tengo un dolor fuerte en el pecho y me cuesta respirar"}
+    expect: {emergency: true, rejection: {reason: medical_emergency}}

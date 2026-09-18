@@ -1,0 +1,142 @@
+# Rules lane: what the clinic refuses, provider matching, nearest site.
+# Sources: clinic-rules "Providers" / "Age" / "Insurance", problems 3, 6, 15, 17.
+group: rules
+now: "2026-09-18T09:00:00+02:00"
+
+cases:
+  # ---- find_provider: near-miss pairs, leave, unknown ----------------------
+  - id: rules.provider.saez_is_the_gp
+    problem: 3
+    tool: find_provider
+    args: {spoken_name: "doctor Sáez"}
+    expect:
+      $one_of:
+        - {status: found, provider: {provider_id: PR02}}
+        - {status: ambiguous, candidates: {$contains: {provider_id: PR02}}}
+
+  - id: rules.provider.saenz_is_the_paediatrician
+    problem: 3
+    tool: find_provider
+    args: {spoken_name: "doctora Sáenz", specialty_id: paediatrics}
+    expect: {status: found, provider: {provider_id: PR03}}
+
+  - id: rules.provider.saez_without_accent_is_ambiguous_or_found
+    problem: 3
+    tool: find_provider
+    args: {spoken_name: "Saez"}
+    expect:
+      $one_of:
+        - {status: ambiguous, candidates: {$min_len: 2}}
+        - {status: found, provider: {provider_id: PR02}}
+
+  - id: rules.provider.iglesias_vs_iglesia_split_by_specialty
+    problem: 3
+    tool: find_provider
+    args: {spoken_name: "Iglesia", specialty_id: orthopaedics}
+    expect: {status: found, provider: {provider_id: PR05}}
+
+  - id: rules.provider.requena_is_on_leave
+    problem: 3
+    tool: find_provider
+    args: {spoken_name: "Dr. Requena"}
+    expect: {status: on_leave, provider: {provider_id: PR07}, rejection: {reason: provider_on_leave}}
+
+  - id: rules.provider.unknown_doctor_not_found
+    problem: 3
+    tool: find_provider
+    args: {spoken_name: "doctor Vilar"}
+    expect: {status: not_found, rejection: {reason: provider_not_found}}
+
+  - id: rules.provider.alvaro_cid_is_the_physio_with_his_title
+    problem: 3
+    tool: find_provider
+    args: {spoken_name: "Álvaro Cid"}
+    expect: {status: found, provider: {provider_id: PR06, name: "D. Álvaro Cid"}}
+
+  # ---- check_eligibility: age, referral, the insurance matrix --------------
+  - id: rules.age.child_cannot_book_general_practice
+    problem: 6
+    tool: check_eligibility
+    args: {patient_id: P00107, specialty_id: general_practice}
+    expect: {allowed: false, rejection: {reason: not_eligible_age}}
+
+  - id: rules.age.child_books_paediatrics
+    problem: 10
+    tool: check_eligibility
+    args: {patient_id: P00107, specialty_id: paediatrics}
+    expect: {allowed: true, rejection: {$absent: true}}
+
+  - id: rules.age.adult_cannot_book_paediatrics
+    problem: 6
+    tool: check_eligibility
+    args: {patient_id: P00042, specialty_id: paediatrics}
+    expect: {allowed: false, rejection: {reason: not_eligible_age}}
+
+  - id: rules.referral.dermatology_without_referral
+    problem: 6
+    tool: check_eligibility
+    args: {patient_id: P00042, specialty_id: dermatology}
+    expect: {allowed: false, rejection: {reason: referral_required}}
+
+  - id: rules.referral.dermatology_with_referral_but_dkv_refused_by_iglesias
+    problem: 6
+    tool: check_eligibility
+    # Antonio holds the referral and DKV. Dra. Iglesias refuses DKV: a redirect, not a refusal.
+    args: {patient_id: P00200, specialty_id: dermatology, provider_id: PR04}
+    expect: {allowed: false, rejection: {reason: provider_not_in_network}}
+
+  - id: rules.insurance.control_case_books_normally
+    problem: 6
+    tool: check_eligibility
+    args: {patient_id: P00042, specialty_id: general_practice, provider_id: PR01, insurer: sanitas}
+    expect: {allowed: true}
+
+  - id: rules.insurance.adeslas_covers_no_gynaecology
+    problem: 6
+    tool: check_eligibility
+    args: {patient_id: P00043, specialty_id: gynaecology, insurer: adeslas}
+    expect: {allowed: false, rejection: {reason: specialty_not_covered}}
+
+  - id: rules.insurance.asisa_physio_only_where_there_is_no_physio
+    problem: 6
+    tool: check_eligibility
+    args: {patient_id: P00042, specialty_id: physiotherapy, location_id: sur, insurer: asisa}
+    expect: {allowed: false, rejection: {reason: location_not_covered}}
+
+  - id: rules.insurance.second_policy_unlocks_the_booking
+    problem: 17
+    tool: check_eligibility
+    # DKV is refused by the dermatologist; naming Sanitas as the plan makes it bookable.
+    args: {patient_id: P00200, specialty_id: dermatology, provider_id: PR04, insurer: sanitas}
+    expect: {allowed: true}
+
+  - id: rules.insurance.privado_is_never_a_fallback
+    problem: 6
+    tool: check_eligibility
+    # Marta holds Sanitas only. Quoting self-pay for her is inventing a plan.
+    args: {patient_id: P00043, specialty_id: gynaecology, insurer: privado}
+    expect: {allowed: false}
+
+  # ---- nearest_location: needs a geocoder; fails offline until the lane
+  #      ships one (or a fixture table). Kept so the gap is visible. ----------
+  - id: rules.nearest.getafe_address_goes_to_sur
+    problem: 15
+    tags: [needs-geocoder]
+    tool: nearest_location
+    args: {address: "Calle de Madrid 54, Getafe", specialty_id: orthopaedics}
+    expect: {location_id: sur}
+
+  - id: rules.nearest.castellana_goes_to_norte
+    problem: 15
+    tags: [needs-geocoder]
+    tool: nearest_location
+    args: {address: "Paseo de la Castellana 180, Madrid", specialty_id: general_practice}
+    expect: {location_id: norte}
+
+  - id: rules.nearest.closest_site_without_the_specialty_is_skipped
+    problem: 15
+    tags: [needs-geocoder]
+    tool: nearest_location
+    # Physiotherapy sits only at Sur; a caller next to Centro still goes to Sur.
+    args: {address: "Calle del Arenal 3, Madrid", specialty_id: physiotherapy}
+    expect: {location_id: sur}
