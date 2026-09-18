@@ -125,16 +125,67 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-  # Reserved slot. The evals system is being built in evals/ by another lane.
-  # Skipped until the repository variable CI_EVALS_ENABLED is set to "true".
-  # When evals/ lands: put its make target here, set the variable, and decide
-  # on the call whether it joins `gate` (it probably should not, see docs/ci.md).
+  # Offline evals: layers 1 + 2 + 4. Reports on the PR and as an artifact.
+  # Never joins `gate`: a red board must not stop five people merging.
+  # continue-on-error keeps the workflow green so Discord's workflow_run
+  # hook does not scream "CI failed" when only evals are red.
   evals:
-    name: evals (not wired yet)
+    name: evals
     runs-on: ubuntu-latest
-    if: vars.CI_EVALS_ENABLED == 'true'
+    timeout-minutes: 15
+    continue-on-error: true
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
-      - run: echo "evals/ is not wired into CI yet"
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.1.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: make install
+      - name: Run evals (offline)
+        id: evals
+        run: make evals
+      - name: Job summary
+        if: always()
+        run: |
+          if [ -f evals/results/summary.md ]; then
+            cat evals/results/summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No evals/results/summary.md — make evals did not write a report." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload the HTML board
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evals-report
+          path: |
+            evals/results/summary.md
+            evals/results/summary.json
+            evals/results/report.html
+          if-no-files-found: ignore
+      - name: Comment the scoreboard on the PR
+        if: always() && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if [ ! -f evals/results/summary.json ]; then
+            echo "no summary.json; skip comment"
+            exit 0
+          fi
+          uv run python -m evals discord --pr > comment.md
+          existing=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --paginate \
+            --jq '.[] | select(.body | startswith("<!-- vortex-evals -->")) | .id' | head -1)
+          if [ -n "$existing" ]; then
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$existing" -F body=@comment.md > /dev/null
+            echo "Updated comment $existing"
+          else
+            gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -F body=@comment.md > /dev/null
+            echo "Posted a new comment"
+          fi
+
 
   # The single required status check for main.
   #

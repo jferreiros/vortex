@@ -12,10 +12,10 @@ every push to `main`. Its job is to answer one question fast: can this merge?
 | `format` | `make fmt` then `git diff --exit-code` | yes |
 | `coverage` | `pytest --cov=vortex`, then a comment on the PR | no, reports only |
 | `quality (advisory)` | ruff with stricter rule sets, inline annotations | no, `continue-on-error` |
-| `evals (not wired yet)` | placeholder, always skipped | no |
+| `evals` | `make evals` (layers 1+2+4, no keys) | no, reports on the PR; `continue-on-error` |
 | `gate` | green only if `test`, `lint` and `format` are green | this is the required check |
 
-The five real jobs run in parallel. `gate` is the single status check that
+The six jobs besides `gate` run in parallel. `gate` is the single status check that
 `main` requires, so renaming a job never silently un-protects the branch.
 
 Dependencies come from `uv.lock` with `UV_LOCKED=1`: if `pyproject.toml`
@@ -132,19 +132,31 @@ trace in the PR timeline.
 If CI itself is broken (an action outage, a runner problem) rather than the
 code: `--admin` too, and note it in the PR.
 
-## The evals slot
+## Evals on CI
 
-Another lane is building an evaluation system in `evals/`. The workflow has a
-job named `evals (not wired yet)`. It is skipped until the repository variable
-`CI_EVALS_ENABLED` is `true`. When `evals/` lands:
+`make evals` (layers 1 + 2 + 4, no keys) runs on every pull request and every
+push to `main`. The job is named `evals`. It never joins `gate`: a red
+scoreboard must not stop a merge. `continue-on-error` keeps the workflow
+green so the Discord `workflow_run` hook does not announce a CI failure when
+only evals are red. The job itself still shows as failed in the Actions list
+when the board is FAIL, so you can see it.
 
-1. Put its Makefile target in the job, then enable it once:
-   `gh variable set CI_EVALS_ENABLED --body true`.
-2. Decide on the call whether it joins `gate`. Evals talk to the platform,
-   take minutes and depend on `PLATFORM_API_KEY`, so the default answer is no:
-   let it report like `coverage` does, and keep `gate` to what runs offline in
-   seconds.
-3. If it needs the key, add it as a repository secret and never as a file.
+What it publishes:
+
+- the markdown table in the job summary
+- one PR comment (`<!-- vortex-evals -->`, updated in place) with solid /
+  hollow / fail / broke / fixed
+- artifact `evals-report` (`summary.md`, `summary.json`, `report.html`)
+
+Discord does not get this from GitHub Actions: Discord 403s those runner IPs.
+Post from a laptop or the VPS after a local run:
+
+```bash
+make evals
+make evals-discord    # needs DISCORD_WEBHOOK_URL in .env
+```
+
+Layer 3 (`make evals-voice REAL=1`) stays off CI: it spends money.
 
 ## Code Climate: what we found, and what we use instead
 
