@@ -8,9 +8,11 @@ Add a class from those files before you add an inline style here.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -176,6 +178,59 @@ def _json_preview(value: Any, limit: int = 88) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
+# Which clinic endpoint each tool hits. Same map as scripts/call_rundown.py.
+TOOL_ENDPOINTS = {
+    "find_patient": "GET /api/v1/directory · +GET /patients/{id}/appointments?when=past",
+    "validate_national_id": "local · DNI/NIE check letter",
+    "build_registration": "GET /api/v1/clinic",
+    "resolve_date": "GET /api/v1/clinic",
+    "find_slots": "GET /api/v1/availability",
+    "list_appointments": "GET /patients/{id}/appointments",
+    "prepare_booking": "GET /api/v1/clinic + GET /api/v1/availability",
+    "prepare_reschedule": "GET /patients/{id}/appointments + /availability",
+    "prepare_cancel": "GET /patients/{id}/appointments",
+    "check_eligibility": "GET /api/v1/availability + GET /api/v1/clinic",
+    "triage": "local · symptom rules",
+    "nearest_location": "local · site distances",
+    "find_provider": "GET /api/v1/clinic",
+    "submit_action": "POST /api/v1/submit/<route>",
+}
+
+
+def _json_block(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, indent=2, default=str)
+
+
+def _short_json(value: Any, limit: int = 110) -> str:
+    text = json.dumps(value, ensure_ascii=False, default=str, separators=(",", ":"))
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def _turn_time(card: CallCard, ts: str | None) -> str:
+    """'21:38:13 +12.3s' — wall clock and seconds since the call connected."""
+    if not ts:
+        return ""
+    try:
+        stamp = datetime.fromisoformat(str(ts))
+    except ValueError:
+        return ""
+    label = stamp.strftime("%H:%M:%S")
+    if card.started_at:
+        try:
+            delta = (stamp - datetime.fromisoformat(str(card.started_at))).total_seconds()
+            if 0 <= delta < 3600:
+                label += f" +{delta:.1f}s"
+        except ValueError:
+            pass
+    return label
+
+
+def _duration(card: CallCard) -> str:
+    if card.duration_ms is None:
+        return "—"
+    return f"{card.duration_ms / 1000:.1f}s"
+
+
 def _line_pill(health: dict[str, Any] | None, *, detail: bool = False) -> None:
     with ui.element("div").classes("pill mute"):
         _dot("ok" if health else "bad")
@@ -263,6 +318,9 @@ def _wall_body(card: CallCard | None, health: dict[str, Any] | None) -> None:
                 with ui.element("div").classes(f"turn {turn.role}"):
                     ui.label("Paciente" if turn.role == "user" else "Agente").classes("who")
                     ui.label(turn.text).classes("bubble")
+                    stamp = _turn_time(card, turn.ts) if card else ""
+                    if stamp:
+                        ui.label(stamp).classes("caption-sm mono")
 
         with ui.element("section").classes("col"):
             ui.label("Orquestación").classes("kicker")
@@ -277,9 +335,19 @@ def _wall_body(card: CallCard | None, health: dict[str, Any] | None) -> None:
                         _dot(_tool_dot(step.status))
                         with ui.element("div"):
                             ui.label(step.name).classes("name")
-                            detail = step.error or _json_preview(step.result or step.args)
-                            if detail:
-                                ui.label(detail).classes("meta")
+                            endpoint = TOOL_ENDPOINTS.get(step.name)
+                            if endpoint:
+                                ui.label(endpoint).classes("meta")
+                            if step.name == "submit_action" and step.args:
+                                route = (step.args or {}).get("route", "")
+                                ui.label(f"body → /api/v1/submit/{route}").classes("meta")
+                                ui.label(_short_json(step.args.get("body"))).classes("meta")
+                            elif step.args:
+                                ui.label(f"in {_short_json(step.args)}").classes("meta")
+                            if step.error:
+                                ui.label(f"error {step.error}").classes("meta")
+                            if step.result:
+                                ui.label(f"out {_short_json(step.result)}").classes("meta")
                         ms = f"{step.ms:.0f} ms" if step.ms is not None else step.status
                         ui.label(ms).classes("ms")
 
@@ -293,6 +361,7 @@ def _wall_body(card: CallCard | None, health: dict[str, Any] | None) -> None:
                 ("Acción", card.action_kind if card else "—"),
                 ("Submit", card.submit_status if card else "—"),
                 ("Regla", card.decline_reason if card else "—"),
+                ("Duración", _duration(card) if card else "—"),
             ]
             for label, value in rows:
                 with ui.element("div").classes("kv"):
@@ -309,13 +378,19 @@ def wall_page() -> None:
     _apply_chrome()
     ui.page_title("Vortex · wall")
     stage = ui.element("div").classes("shell")
+    rendered = {"sig": None}
 
     def redraw() -> None:
         events, health = _load_events()
         cards = build_calls(events)
+        card = _feature(cards)
+        sig = (repr(events), repr(health))
+        if sig == rendered["sig"]:
+            return
+        rendered["sig"] = sig
         stage.clear()
         with stage:
-            _wall_body(_feature(cards), health)
+            _wall_body(card, health)
 
     redraw()
     ui.timer(0.4, redraw)
@@ -332,11 +407,16 @@ def call_page(call_id: str) -> None:
     _apply_chrome()
     ui.page_title(f"Vortex · {call_id}")
     stage = ui.element("div").classes("shell")
+    rendered = {"sig": None}
 
     def redraw() -> None:
         events, health = _load_events()
         cards = build_calls(events)
         card = next((c for c in cards if c.call_id == call_id), None)
+        sig = (call_id, repr(events), repr(health))
+        if sig == rendered["sig"]:
+            return
+        rendered["sig"] = sig
         stage.clear()
         with stage:
             _wall_body(card, health)
@@ -360,27 +440,170 @@ def _ops_list(cards: list[CallCard], selected_id: str | None, on_pick) -> None:
             _dot(_status_dot(card.status))
             with ui.element("div"):
                 ui.label(card.patient_name or card.from_number or card.call_id).classes("title")
-                ui.label(f"{card.action_kind or 'sin acción'} · {len(card.tools)} tools").classes(
-                    "sub"
-                )
+                ui.label(
+                    f"{card.action_kind or 'sin acción'} · {len(card.tools)} tools · "
+                    f"{_duration(card)}"
+                ).classes("sub")
             ui.label(STATUS_LABEL.get(card.status, card.status)).classes("pill mute")
+
+
+def _replay_items(card: CallCard) -> list[tuple[str, dict[str, Any]]]:
+    """Merge each tool.called/submit.sent with its result into one item.
+
+    Turns keep their own kind so the caller can route them to the transcript
+    column; everything else stays in chronological order for the trace.
+    """
+    items: list[tuple[str, dict[str, Any]]] = []
+    open_tools: dict[str, dict[str, Any]] = {}
+    open_submit: dict[str, Any] | None = None
+    for ev in card.events:
+        kind = ev.get("kind", "")
+        if kind in {"turn.user", "turn.assistant"}:
+            items.append(("turn", ev))
+        elif kind == "tool.called":
+            open_tools[ev.get("tool", "")] = ev
+        elif kind in {"tool.returned", "tool.failed"}:
+            called = open_tools.pop(ev.get("tool", ""), None)
+            items.append(("tool", {"called": called, "result": ev}))
+        elif kind == "submit.sent":
+            open_submit = ev
+        elif kind == "submit.result":
+            items.append(("submit", {"sent": open_submit, "result": ev}))
+            open_submit = None
+        else:
+            items.append(("life", ev))
+    for ev in open_tools.values():
+        items.append(("tool", {"called": ev, "result": None}))
+    if open_submit:
+        items.append(("submit", {"sent": open_submit, "result": None}))
+    return items
+
+
+def _life_line(card: CallCard, ev: dict[str, Any]) -> None:
+    kind = ev.get("kind", "?")
+    bits = [kind]
+    for key in ("stream_sid", "voice", "clinic", "reason", "why", "key"):
+        if ev.get(key):
+            bits.append(f"{key}={ev[key]}")
+    if kind == "call.ended":
+        bits.append(f"frames={ev.get('frames_in', '?')}→{ev.get('frames_out', '?')}")
+    if kind == "call.crashed" and ev.get("error"):
+        bits.append(str(ev["error"])[:120])
+    with ui.element("div").classes("step"):
+        _dot("off")
+        with ui.element("div"):
+            ui.label(" ".join(bits)).classes("meta")
+        ui.label(_turn_time(card, ev.get("ts"))).classes("ms")
 
 
 def _ops_detail(card: CallCard | None) -> None:
     if card is None:
         ui.label("Elegí una llamada.").classes("empty")
         return
-    ui.label(card.call_id).classes("detail-id")
+    ui.label(f"{card.call_id} · {_duration(card)} · {card.status}").classes("detail-id")
     ui.label(card.patient_name or "Sin identificar").classes("detail-name")
-    for turn in card.turns:
-        with ui.element("div").classes("detail-turn"):
-            ui.html(f"<b>{'Paciente' if turn.role == 'user' else 'Agente'}</b>")
-            ui.label(turn.text)
-    ui.separator().style("margin:16px 0")
-    for step in card.tools:
-        with ui.element("div").classes("detail-tool row"):
-            _dot(_tool_dot(step.status))
-            ui.label(step.name)
+    with ui.element("div").classes("replay-grid"):
+        with ui.element("section").classes("col"):
+            ui.label("Transcripción").classes("kicker")
+            if not card.turns:
+                ui.label("Sin turnos.").classes("empty")
+            for turn in card.turns:
+                with ui.element("div").classes(f"turn {turn.role}"):
+                    ui.label("Paciente" if turn.role == "user" else "Agente").classes("who")
+                    ui.label(turn.text).classes("bubble")
+                    stamp = _turn_time(card, turn.ts)
+                    if stamp:
+                        ui.label(stamp).classes("caption-sm mono")
+
+        with ui.element("section").classes("col"):
+            ui.label("Orquestación").classes("kicker")
+            with ui.element("div").classes("terminal-card"):
+                seen = False
+                for kind, item in _replay_items(card):
+                    if kind == "turn":
+                        continue
+                    seen = True
+                    if kind == "tool":
+                        _ops_tool_step(card, item)
+                    elif kind == "submit":
+                        _ops_submit_step(card, item)
+                    else:
+                        _life_line(card, item)
+                if not seen:
+                    ui.label("Aún no hay tools.").classes("comment")
+
+        with ui.element("section").classes("col"):
+            ui.label("Ficha").classes("kicker")
+            rows = [
+                ("Paciente", card.patient_name),
+                ("Teléfono", card.from_number),
+                ("Médico", card.provider_name),
+                ("Hueco", card.slot),
+                ("Acción", card.action_kind),
+                ("Submit", card.submit_status),
+                ("Regla", card.decline_reason),
+                ("Duración", _duration(card)),
+            ]
+            for label, value in rows:
+                with ui.element("div").classes("kv"):
+                    ui.label(label)
+                    ui.label(value or "—").classes("mono")
+            with ui.element("div").classes("verdict"):
+                _dot(_status_dot(card.status))
+                ui.label(STATUS_LABEL.get(card.status, card.status))
+
+
+def _ops_tool_step(card: CallCard, item: dict[str, Any]) -> None:
+    called, res = item["called"], item["result"]
+    name = (called or res or {}).get("tool", "tool")
+    status = "ok" if res and res.get("kind") == "tool.returned" else ("bad" if res else "running")
+    args = (called or {}).get("args")
+    result = (res or {}).get("result")
+    with ui.element("div").classes("step"):
+        _dot(_tool_dot(status))
+        with ui.element("div"):
+            ui.label(name).classes("name")
+            endpoint = TOOL_ENDPOINTS.get(name)
+            if endpoint:
+                ui.label(endpoint).classes("meta")
+            if args:
+                ui.label(f"in {_short_json(args, 220)}").classes("meta")
+            if result is not None:
+                ui.label(f"out {_short_json(result, 220)}").classes("meta")
+            if res and res.get("error"):
+                ui.label(f"error {res['error']}").classes("meta")
+            if args or result is not None:
+                payload = _json_block({"in": args, "out": result})
+                with ui.expansion("json").props("dense").classes("caption-sm"):
+                    ui.html(f"<pre class='mono caption-sm'>{payload}</pre>")
+        ms = res.get("ms") if res else None
+        stamp = _turn_time(card, (res or called or {}).get("ts"))
+        ui.label(f"{ms:.0f} ms" if ms is not None else stamp or status).classes("ms")
+
+
+def _ops_submit_step(card: CallCard, item: dict[str, Any]) -> None:
+    sent, res = item["sent"], item["result"]
+    route = (sent or res or {}).get("route", "")
+    data = (res or {}).get("result")
+    data = data if isinstance(data, dict) else {}
+    status = data.get("status") or ("running" if res is None else str(data or ""))
+    with ui.element("div").classes("step"):
+        _dot("ok" if status == "submitted" else "warn" if status == "dry_run" else "bad")
+        with ui.element("div"):
+            ui.label(f"submit → /api/v1/submit/{route}").classes("name")
+            if res:
+                http_status = data.get("http_status")
+                detail = data.get("detail", "")
+                ui.label(
+                    f"{status}"
+                    + (f" · http {http_status}" if http_status else "")
+                    + (f" · {detail}" if detail else "")
+                ).classes("meta")
+            payload = (sent or res or {}).get("payload")
+            if payload is not None:
+                with ui.expansion("body").props("dense").classes("caption-sm"):
+                    ui.html(f"<pre class='mono caption-sm'>{_json_block(payload)}</pre>")
+        ui.label(_turn_time(card, (res or sent or {}).get("ts"))).classes("ms")
 
 
 def _nav(active: str) -> ui.element:
@@ -424,6 +647,8 @@ def ops_page() -> None:
             left = ui.element("div").classes("card card-compact")
             right = ui.element("div").classes("card card-compact")
 
+    rendered = {"sig": None}
+
     def pick(call_id: str) -> None:
         selected["id"] = call_id
         redraw()
@@ -436,6 +661,10 @@ def ops_page() -> None:
         if selected["id"] is None and cards:
             selected["id"] = cards[0].call_id
         card = next((c for c in cards if c.call_id == selected["id"]), cards[0] if cards else None)
+        sig = (selected["id"], repr(events), repr(health))
+        if sig == rendered["sig"]:
+            return
+        rendered["sig"] = sig
         line_pill.clear()
         with line_pill:
             _line_pill(health, detail=True)

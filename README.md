@@ -95,6 +95,27 @@ make test                   # tests/test_design.py fails when the copy is stale
 
 Before you add a colour, a font or a shadow, read `DESIGN.md`. The answer is no.
 
+## Which model for which job — the bench
+
+Every candidate model plays the same scripted calls through the real prompt
+and the real tools; every run is kept; the page shows the routing the line
+runs today next to what the numbers say.
+
+**https://jferreiros.github.io/vortex/bench.html**
+
+```bash
+make bench                     # every default model with a key (evals/bench/models.yaml)
+make bench K=3 ONLY=p4.        # pass^3 on one problem
+make bench-publish             # keep it: push the run to the bench-results branch
+make bench-discord             # tell the team
+```
+
+The routing is one variable per role: `LLM_PROVIDER`/`LLM_MODEL` for the
+receptionist, `ARBITER_PROVIDER`/`ARBITER_MODEL` for the arbiter,
+`LLM_<ROLE>_PROVIDER`/`LLM_<ROLE>_MODEL` for anything new. `vortex/models.py`
+resolves them; the bench measures through the same resolver. Details in
+`docs/evals.md`, "Layer 5".
+
 ## The board — what to do next
 
 Every task is one GitHub issue. The priority order is published as a page:

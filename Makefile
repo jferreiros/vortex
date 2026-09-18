@@ -86,6 +86,18 @@ evals-selftest:   ## the harness tests itself
 evals-discord:    ## post the latest summary.json to #github (needs DISCORD_WEBHOOK_URL)
 	scripts/notify-discord.sh --evals
 
+# ---- bench (layer 5, see docs/evals.md) ------------------------------------
+.PHONY: bench bench-publish bench-discord
+
+bench:            ## every candidate model on the layer-2 scenarios; MODELS=a,b K=repeats ONLY= MAX_EUR= PAID=1
+	uv run python -m evals bench $(if $(MODELS),--models $(MODELS),) --repeat $(or $(K),1) $(if $(ONLY),--only $(ONLY),) --max-eur $(or $(MAX_EUR),1.00) $(if $(PAID),--include-paid,) $(if $(C),--concurrency $(C),)
+
+bench-publish:    ## push the latest run of every layer to the bench-results branch; ARGS=--dry-run
+	uv run python -m evals publish $(ARGS)
+
+bench-discord:    ## post the latest bench run to Discord (needs DISCORD_WEBHOOK_URL)
+	scripts/notify-discord.sh --bench
+
 # ---- task board (see docs/tasks.json) --------------------------------------
 .PHONY: tasks
 

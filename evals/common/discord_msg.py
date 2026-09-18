@@ -84,6 +84,70 @@ def webhook_body(summary: dict[str, Any], *, wall: str = WALL) -> dict[str, Any]
     }
 
 
+BENCH_PAGE = "https://jferreiros.github.io/vortex/bench.html"
+
+_BENCH_QUIP = {
+    "change": "El bench dice que cambiemos de modelo. Discutidlo, no lo copiéis a ciegas.",
+    "keep": "El bench confirma el enrutado actual. Hoy el .env tiene razón.",
+    "empty": "Ningún modelo corrió. Falta una key.",
+}
+
+
+def _ms(ms: float) -> str:
+    return f"{ms / 1000:.1f} s" if ms >= 1000 else f"{ms:.0f} ms"
+
+
+def bench_webhook_body(run: Any, *, page: str | None = None) -> dict[str, Any]:
+    """One embed per bench run: a line per model, then the routing verdict."""
+    page = page or BENCH_PAGE
+    models = [m for m in (run.summary.get("models") or []) if m.get("status") == "ran"]
+    skipped = [m for m in (run.summary.get("models") or []) if m.get("status") != "ran"]
+    routing = run.summary.get("routing") or {}
+    rec = routing.get("recommended") or {}
+    cur = routing.get("current") or {}
+    lines = []
+    for m in models:
+        rate = m["weighted_pass_rate"]
+        mark = "🟢" if rate >= 0.8 else ("🟡" if rate >= 0.5 else "🔴")
+        cost = m.get("list_cost_per_call_eur")
+        cost_txt = "perk" if m.get("perk") else ("n/a" if cost is None else f"{cost:.3f} €/call")
+        lines.append(
+            f"{mark} **{m['id']}** · {m['pass']}/{m['scenarios']} ({rate * 100:.0f}% pond.) · "
+            f"p50 {_ms(m['llm_p50_ms'])} · p95 {_ms(m['llm_p95_ms'])} · {cost_txt}"
+        )
+    if skipped:
+        lines.append("⚪ sin key: " + ", ".join(m["id"] for m in skipped))
+    verdict = "empty"
+    if rec:
+        lines.append("")
+        for role, block in rec.items():
+            now = cur.get(role, "?")
+            if block["id"] != now:
+                verdict = "change" if verdict != "change" else verdict
+                lines.append(f"**{role}**: ahora `{now}` → bench dice `{block['id']}`")
+            else:
+                verdict = "keep" if verdict == "empty" else verdict
+                lines.append(f"**{role}**: `{now}` se queda")
+    sha = (run.git.get("sha") or "?")[:7]
+    branch = run.git.get("branch") or "?"
+    mode = run.mode or {}
+    colour = {"change": 0xEAB619, "keep": 0x3DDC84, "empty": 0xE23D4A}[verdict]
+    return {
+        "username": "Vortex bench",
+        "content": _BENCH_QUIP[verdict],
+        "embeds": [
+            {
+                "title": f"Bench · {len(models)} modelos · {mode.get('scenarios', '?')} escenarios"
+                + (f" · pass^{mode['repeat']}" if mode.get("repeat", 1) > 1 else ""),
+                "url": page,
+                "color": colour,
+                "description": "\n".join(lines)[:3900] or "Nada que contar.",
+                "footer": {"text": f"{sha} · {branch} · {page}"},
+            }
+        ],
+    }
+
+
 def pr_comment(summary: dict[str, Any]) -> str:
     """Markdown for the GitHub PR. Marker lets CI update in place."""
     verdict = overall_verdict(summary)

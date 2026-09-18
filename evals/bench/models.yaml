@@ -1,0 +1,128 @@
+# The candidates the bench compares. Ids are ``provider/model`` as
+# ``vortex.models.resolve`` reads them. A model runs only when its provider's
+# key is in the environment; otherwise the bench reports it as skipped.
+#
+# Prices are USD per 1M tokens, list price, read on 2026-09-19. ``null`` means
+# nobody has verified a price: the report shows "n/a" instead of a guess.
+# ``billing: perk`` means the hackathon allowance covers it, so the run costs
+# nothing today; the list price, when known, is still shown for the day the
+# perk ends.
+#
+# ``paid: true`` marks third-party models Helmcode bills from prepaid credit
+# (HTTP 402 without it). They run only with ``--include-paid``.
+#
+# ``default: true`` puts the model in the default run. Everything else needs
+# ``--models``.
+
+eur_per_usd: 0.92
+read_on: "2026-09-19"
+
+# What one scored call looks like, for €/call: the same profile the voice
+# layer uses (evals/voice/pricing.yaml).
+call_profile:
+  llm_input_tokens: 12000
+  llm_output_tokens: 600
+  calls_per_run_all: 68
+
+models:
+  - id: helmcode/qwen3.6
+    label: "Qwen 3.6 (Helmcode)"
+    default: true
+    billing: perk
+    usd_per_1m_input: null
+    usd_per_1m_output: null
+    notes: "35B MoE, 3B active. The runtime default. Tool calls, ~2 s round trip."
+
+  - id: helmcode/deepseek-v4-flash
+    label: "DeepSeek V4 Flash (Helmcode)"
+    default: true
+    billing: perk
+    usd_per_1m_input: null
+    usd_per_1m_output: null
+    notes: "The arbiter default. Reasoning off via reasoning_effort=none; ~2 s with it, 30 s without."
+
+  - id: helmcode/glm5.3-flash
+    label: "GLM 5.3 Flash (Helmcode)"
+    default: true
+    billing: perk
+    usd_per_1m_input: null
+    usd_per_1m_output: null
+    notes: "Tool calls. ~7 s round trip on the first probe."
+
+  - id: helmcode/glm5.3
+    label: "GLM 5.3 (Helmcode)"
+    default: false
+    billing: perk
+    usd_per_1m_input: null
+    usd_per_1m_output: null
+    notes: "Listed as a paid add-on in the perk docs; the perk key answered on 2026-09-19. ~8 s."
+
+  - id: helmcode/glm5.2
+    label: "GLM 5.2 (Helmcode)"
+    default: false
+    billing: perk
+    usd_per_1m_input: null
+    usd_per_1m_output: null
+    notes: "Older GLM. ~9 s round trip."
+
+  - id: helmcode/gemma4
+    label: "Gemma 4 (Helmcode)"
+    default: true
+    billing: perk
+    usd_per_1m_input: null
+    usd_per_1m_output: null
+    notes: "Answered the probe in prose and never called a tool. Expect it to fail the tool scenarios."
+
+  # --- third-party models behind Helmcode: prepaid credit, HTTP 402 without it
+  - id: helmcode/claude-haiku-4-5
+    label: "Claude Haiku 4.5 (via Helmcode)"
+    default: false
+    paid: true
+    usd_per_1m_input: 1.00
+    usd_per_1m_output: 5.00
+    notes: "Anthropic list price; Helmcode's markup unverified."
+
+  - id: helmcode/claude-sonnet-5
+    label: "Claude Sonnet 5 (via Helmcode)"
+    default: false
+    paid: true
+    usd_per_1m_input: null
+    usd_per_1m_output: null
+
+  - id: helmcode/gemini-3.6-flash
+    label: "Gemini 3.6 Flash (via Helmcode)"
+    default: false
+    paid: true
+    usd_per_1m_input: null
+    usd_per_1m_output: null
+
+  - id: helmcode/gpt-5.6-luna
+    label: "GPT-5.6 Luna (via Helmcode)"
+    default: false
+    paid: true
+    usd_per_1m_input: null
+    usd_per_1m_output: null
+
+  # --- other gateways from .env.example
+  - id: vercel/anthropic/claude-haiku-4.5
+    label: "Claude Haiku 4.5 (Vercel AI Gateway)"
+    default: true
+    usd_per_1m_input: 1.00
+    usd_per_1m_output: 5.00
+    notes: "Needs VERCEL_AI_GATEWAY_KEY. $50 perk."
+
+  - id: cloudflare/@cf/qwen/qwen3-30b-a3b-fp8
+    label: "Qwen3 30B (Cloudflare Workers AI)"
+    default: true
+    usd_per_1m_input: null
+    usd_per_1m_output: null
+    notes: "UNVERIFIED model id and endpoint. Needs CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN."
+
+  # --- the reference
+  - id: openai/gpt-4.1-mini
+    label: "GPT-4.1 mini (OpenAI)"
+    default: true
+    usd_per_1m_input: 0.40
+    usd_per_1m_output: 1.60
+    concurrency: 1
+    notes: "Needs OPENAI_API_KEY. One scenario at a time: 200k tokens/min is four rounds of this prompt."

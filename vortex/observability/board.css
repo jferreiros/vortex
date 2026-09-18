@@ -126,6 +126,23 @@ body,
   background: var(--hairline) !important;
 }
 
+/* Expansions open raw JSON under a step: keep them quiet, caption-sized. */
+.q-expansion-item .q-item {
+  min-height: 24px !important;
+  padding: 0 !important;
+  font: var(--text-caption-sm) !important;
+  color: var(--mute) !important;
+}
+
+.q-expansion-item .q-item__section--side {
+  padding-right: var(--space-xs) !important;
+  min-width: 0 !important;
+}
+
+.q-expansion-item__content {
+  padding: var(--space-xs) 0 var(--space-sm) !important;
+}
+
 /* ------------------------------------------------------------------ */
 /* Shared chrome                                                       */
 /* ------------------------------------------------------------------ */
@@ -314,6 +331,28 @@ body,
   font: var(--text-caption-sm);
   font-family: var(--font-mono);
   color: var(--body);
+}
+
+/* The ops detail pane replays a call in the wall's three columns,
+   inside the right-hand card. */
+.replay-grid {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr 0.9fr;
+  gap: var(--space-lg);
+}
+
+@media (max-width: 1100px) {
+  .replay-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.replay-grid .col {
+  min-width: 0;
+}
+
+.replay-grid .terminal-card {
+  height: 100%;
 }
 
 .detail-id {

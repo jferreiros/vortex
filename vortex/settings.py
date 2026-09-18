@@ -66,9 +66,12 @@ HELMCODE_BASE_URL = "https://api.helmcode.com/v1"
 LLM_PRESETS: dict[str, LlmPreset] = {
     # Bring your own endpoint: the three LLM_* variables and nothing else.
     "custom": LlmPreset("", "llm_api_key_env", "Qwen/Qwen3-30B-A3B-Instruct-2507"),
-    # Hackathon perk: 600M tokens. qwen3.6 = 35B MoE, 3B active, tool calling,
-    # fastest of their catalogue. Ids confirmed from helmcode.com/docs/models.
-    "helmcode": LlmPreset("", "helmcode_api_key", "qwen3.6"),
+    # Hackathon perk: 600M tokens. deepseek-v4-flash, not the faster qwen3.6:
+    # measured on 2026-09-19, qwen3.6 fails both problem-1 scenarios. It loops
+    # prepare_booking and submit_action for 20 tool calls against a cap of 12,
+    # submits nothing, and the session fallback sends no-action. deepseek-v4-flash
+    # passes both, in a third of the time and a quarter of the tokens.
+    "helmcode": LlmPreset("", "helmcode_api_key", "deepseek-v4-flash"),
     # Hackathon perk: $100 of AI Gateway. UNVERIFIED model id.
     "cloudflare": LlmPreset(
         CLOUDFLARE_LLM_BASE_URL, "cloudflare_api_token", "@cf/qwen/qwen3-30b-a3b-fp8"
@@ -98,10 +101,10 @@ def _llm_provider(var: str, default: str) -> str:
 TTS_PROVIDERS: tuple[str, ...] = ("google", "elevenlabs")
 DEFAULT_TTS_PROVIDER = "google"
 
-# Which languages each provider can actually say. Google is the only one with
+# Which languages each provider can actually say. Google carries English plus
 # the three co-official languages; ElevenLabs is here for Spanish.
 TTS_LANGUAGES: dict[str, frozenset[str]] = {
-    "google": frozenset({"es", "ca", "gl", "eu"}),
+    "google": frozenset({"en", "es", "ca", "gl", "eu"}),
     "elevenlabs": frozenset({"es"}),
 }
 
@@ -145,11 +148,13 @@ class Settings:
 
     llm_temperature: float = field(default_factory=lambda: float(_env("LLM_TEMPERATURE", "0.2")))
     # 120 was chosen for the spoken turn (one or two sentences) and silently
-    # capped the *tool call* as well, which is the same completion. A
+    # capped the *tool call* as well, which is the same completion: a
+    # prepare_booking/submit_action with a nested slot was cut off mid-argument,
+    # the tool call never closed and the call submitted nothing. A
     # ``submit_action`` carrying a ``BookAction`` measures 107 tokens on
     # qwen3.6 and ``prepare_booking`` with a full ``Slot`` measures 150, so at
-    # 120 the model could never emit a booking at all: it was cut off mid-JSON
-    # on every attempt. Measured with scripts/rehearse_text.py.
+    # 120 the model could never emit a booking at all. Measured with
+    # scripts/rehearse_text.py.
     llm_max_tokens: int = field(default_factory=lambda: int(_env("LLM_MAX_TOKENS", "320")))
     # Qwen3 hybrid builds think by default; a phone call cannot wait for that.
     llm_disable_thinking: bool = field(
@@ -187,6 +192,12 @@ class Settings:
     )
     google_tts_credentials_json: str = field(
         default_factory=lambda: _env("GOOGLE_TTS_CREDENTIALS_JSON")
+    )
+    # English is the clinic's default language (69 of 73 published cases).
+    # Same Chirp 3 HD family as Spanish; British, to match the conversation
+    # lane's own hardcoded fallback before this setting existed.
+    google_tts_voice_en: str = field(
+        default_factory=lambda: _env("GOOGLE_TTS_VOICE_EN", "en-GB-Chirp3-HD-Aoede")
     )
     # Spanish gets a Chirp 3 HD voice; ca/gl/eu only exist as Standard voices.
     google_tts_voice_es: str = field(
@@ -229,6 +240,11 @@ class Settings:
     calls_log_path: Path = field(
         default_factory=lambda: Path(_env("VORTEX_CALLS_LOG", str(REPO_ROOT / "logs/calls.jsonl")))
     )
+
+    # Optional Nominatim-compatible endpoint for problem 15's address lookup
+    # (vortex/rules/geo.py). Empty means the offline Madrid gazetteer only, so
+    # evals and offline work never depend on a network call by default.
+    geocoder_url: str = field(default_factory=lambda: _env("VORTEX_GEOCODER_URL"))
 
     # Submission window: the platform closes it 30 s after the socket closes.
     # We keep a margin so a late retry still lands inside it.

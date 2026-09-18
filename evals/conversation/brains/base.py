@@ -36,6 +36,10 @@ class Trace:
     tokens_in: int = 0
     tokens_out: int = 0
     notes: list[str] = field(default_factory=list)
+    # One entry per model round trip, milliseconds. Empty for the rules brain.
+    llm_ms: list[int] = field(default_factory=list)
+    # The model id (``provider/model``) that produced the answers, if any.
+    model: str = ""
 
     async def call(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
         """Run one tool through the registry and record it. Errors are recorded and re-raised."""
