@@ -11,6 +11,7 @@ from vortex.observability.explain import (
     payload_rows,
     stage_of,
     stats_for,
+    status_label,
     step_text,
     tool_endpoint,
 )
@@ -57,11 +58,17 @@ def test_outcome_sentences() -> None:
     assert outcome_title(card) == "Booked"
     assert "Marta Ruiz" in outcome_text(card)
     assert "Dra. Ortiz" in outcome_text(card)
-    refused = CallCard(call_id="r", ended=True, action_kind="no-action")
+    refused = CallCard(call_id="r", ended=True, action_kind="no-action", submit_status="dry_run")
     refused.decline_reason = "specialty_not_covered"
     assert outcome_title(refused) == "No action"
     assert "insurance" in outcome_text(refused)
     assert outcome_title(None) == "Waiting for a call"
+    # A prepared action that never reached the platform is not an outcome.
+    unsent = CallCard(call_id="u", ended=True, action_kind="book")
+    assert outcome_title(unsent) == "Ended without a submission"
+    assert "never" in outcome_text(unsent) or "before it was sent" in outcome_text(unsent)
+    assert status_label(unsent) == "Ended"
+    assert status_label(card) == "Booked"
 
 
 def test_step_text_reads_results() -> None:

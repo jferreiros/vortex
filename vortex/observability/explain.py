@@ -151,13 +151,26 @@ def reason_text(reason: str | None) -> str:
     return REASON_TEXT.get(reason, reason.replace("_", " ").capitalize() + ".")
 
 
+def submitted(card: CallCard) -> bool:
+    """True when the platform was actually sent something."""
+    return bool(card.submit_status or card.submit_route)
+
+
+def status_label(card: CallCard) -> str:
+    """The word for a call in a list or a pill. An action that was prepared
+    but never sent is not an outcome; it reads as Ended."""
+    if not card.live and card.action_kind and not submitted(card):
+        return "Ended"
+    return STATUS_LABEL.get(card.status, card.status)
+
+
 def outcome_title(card: CallCard | None) -> str:
     """The headline of the outcome card."""
     if card is None:
         return "Waiting for a call"
     if card.live:
         return "On a call"
-    if card.action_kind:
+    if card.action_kind and submitted(card):
         return ACTION_LABEL.get(card.action_kind, card.action_kind)
     return "Ended without a submission"
 
@@ -169,7 +182,9 @@ def outcome_text(card: CallCard | None) -> str:
     if card.live:
         stage = stage_of(card)
         return STAGES[max(stage - 1, 0)][2]
-    kind = card.action_kind
+    kind = card.action_kind if submitted(card) else None
+    if card.action_kind and kind is None:
+        return "The agent prepared an action but the socket closed before it was sent."
     if kind == "book":
         who = card.patient_name or "the patient"
         when = card.slot or "the requested slot"

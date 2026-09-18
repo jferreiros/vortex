@@ -41,6 +41,7 @@ class _State:
     declined: bool = False
     accepted: bool = False
     record: dict[str, Any] | None = None  # the identified patient record
+    record_of: str | None = None  # "caller" or "patient": whose details found the record
     decided: bool = False
 
 
@@ -75,6 +76,12 @@ class RulesBrain:
         for key in ("identify", "patient", "request", "register"):
             if m.get(key):
                 getattr(s, "caller" if key == "identify" else key).update(m[key])
+        if m.get("patient") and s.record_of == "caller":
+            # Problem 9: the caller gave their own details first and was found.
+            # Naming the person the call is for drops that record: the booking is
+            # for the patient, and the id must come from their own lookup.
+            s.record = None
+            s.record_of = None
         if m.get("clear"):
             for key in m["clear"]:
                 s.caller.pop(key, None)
@@ -133,6 +140,7 @@ class RulesBrain:
             return
         if res["status"] == "found":
             self._state.record = res["patient"]
+            self._state.record_of = "patient" if subject is self._state.patient else "caller"
         elif res["status"] == "ambiguous" and len(args) >= 2:
             # Nothing else to ask for in the script: keep the first candidate only if unique by dob.
             self._state.record = None

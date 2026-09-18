@@ -80,11 +80,21 @@ STT is Soniox `stt-rt-v5` throughout: language identification on, clinic
 vocabulary boosted, `SONIOX_API_KEY` and `SONIOX_STT_MODEL`.
 ## The console
 
-`make board` serves the console. `/wall` is public: every call on the line,
-the four stages it goes through, the transcript, each tool call in words, and
-the outcome with the rule that applied. `/call/<id>` is one call, shareable.
-`/`, `/evals` and `/bench` are for the team (`VORTEX_OPS_PASSWORD` in
-production). The board reads calls from the line at `VORTEX_LINE_URL`.
+`make board` serves the clinic console. Team pages (`VORTEX_OPS_PASSWORD` in
+production) sit behind a sidebar:
+
+| Page | What it shows |
+| --- | --- |
+| `/` Overview | today's numbers, agents on duty, what needs a person, recent calls |
+| `/agents`, `/agents/<slug>` | the Scheduling agent (real) and four roadmap agents marked Preview |
+| `/calls`, `/calls/live` | every call with "why not booked", and the call in progress |
+| `/patients` | everyone who called, with their last outcome |
+| `/insights` | refusal reasons, handle times, tool latency, calls by hour |
+| `/settings`, `/settings/rules`, `/settings/integrations`, `/settings/engineering` | sites, doctors, rules and the insurance matrix from the clinic API; providers; evals |
+
+Public pages for the jury: `/wall` (the projector view) and `/call/<id>` (one
+call, shareable). Phone numbers are masked there. The board reads calls from
+the line at `VORTEX_LINE_URL`. Every screen follows `DESIGN.md`.
 
 ## Design
 
@@ -147,6 +157,14 @@ make tasks                  # create what is missing, update what changed
 It matches issues by the `[T14]` prefix, so running it twice is safe. It never
 closes an issue and never touches an assignee: who took a task is decided in
 GitHub, not in a file.
+
+## Research
+
+`docs/research/` holds the September 2026 survey of the voice-agent market:
+noise filters, STT vendors, turn detection, industry launches, structured-data
+libraries and the Google/TTS stack. Start at
+[`docs/research/README.md`](docs/research/README.md): it ranks the moves by
+points per hour and says what the repo already has.
 
 ## Who touches what
 

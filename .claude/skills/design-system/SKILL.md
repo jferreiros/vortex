@@ -31,8 +31,10 @@ tells you where the pieces are and what to do, not what the system is.
 
 ## The console
 
-`vortex/observability/live.py` renders `/wall`, `/call/{id}`, `/`, `/evals`,
-`/bench`. The words come from `vortex/observability/explain.py`: one sentence
+`vortex/observability/live.py` renders the public pages (`/wall`, `/call/{id}`)
+and the call blocks; `console.py` renders the team pages inside `shell.py`'s
+sidebar (`console_page(active, title, sub, ...)`). Agents come from
+`agents.py`; Preview agents carry `preview=True` and the chip. The words come from `vortex/observability/explain.py`: one sentence
 per decline reason, one label per action, the four stages, the KPIs. Add a
 sentence there, with a test in `tests/test_explain.py`, before you write a new
 string in `live.py`. `tests/test_console_pages.py` renders every page with a
