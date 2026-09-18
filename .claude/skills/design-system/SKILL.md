@@ -29,6 +29,19 @@ tells you where the pieces are and what to do, not what the system is.
 7. Look at the result. Headless Chrome works without a session:
    `"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --screenshot=out.png --window-size=1440,900 <url>`
 
+## The console
+
+`vortex/observability/live.py` renders `/wall`, `/call/{id}`, `/`, `/evals`,
+`/bench`. The words come from `vortex/observability/explain.py`: one sentence
+per decline reason, one label per action, the four stages, the KPIs. Add a
+sentence there, with a test in `tests/test_explain.py`, before you write a new
+string in `live.py`. `tests/test_console_pages.py` renders every page with a
+seeded log; run it after any change.
+
+Quasar defines `.row`, `.col`, `.column` as flex helpers. Never put those class
+names on a `<tr>` or a grid child; use `.pick` for table rows and `.pane` for
+columns.
+
 ## NiceGUI specifics
 
 - `_apply_chrome()` in `live.py` sets `ui.dark_mode(False)`, `ui.colors(primary="#000000", ...)` and loads both stylesheets. Call it at the top of every page.
