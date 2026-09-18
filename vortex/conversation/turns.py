@@ -51,6 +51,7 @@ DEFAULT_EXPOSED_TOOLS: list[str] = [
     "triage",
     "nearest_location",
     "find_provider",
+    "clinic_facts",
     "submit_action",
 ]
 

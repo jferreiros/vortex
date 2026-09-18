@@ -152,8 +152,7 @@ def test_prompt_names_every_rule_the_score_depends_on() -> None:
         "no_availability",
         "Do not submit before the caller agrees",
         "Are you still there?",
-        "Saturday only Centro opens",
-        "Monday 12 October",
+        "clinic_facts and say only its answer, never memory",
     ):
         assert needle in text, needle
 
