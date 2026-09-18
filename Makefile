@@ -1,6 +1,7 @@
-.PHONY: install run smoke test call try-api tunnel tail lint fmt
+.PHONY: install run smoke test call try-api tunnel tail lint fmt board
 
 PORT ?= 7860
+BOARD_PORT ?= 8080
 N ?= 1
 
 install:
@@ -8,6 +9,9 @@ install:
 
 run:
 	uv run python -m vortex
+
+board:
+	uv run python -m vortex.observability.live
 
 dev:
 	uv run uvicorn vortex.line.server:app --host 0.0.0.0 --port $(PORT) --reload
