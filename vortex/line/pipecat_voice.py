@@ -46,7 +46,7 @@ from fastapi import WebSocket
 from vortex import tools as registry
 from vortex.conversation.language import DEFAULT_LANGUAGE, detect_language, tts_voice_for
 from vortex.conversation.prompt import GREETING, initial_messages
-from vortex.conversation.stt_context import stt_terms
+from vortex.conversation.stt_context import stt_context_text, stt_terms
 from vortex.conversation.turns import TurnSettings, default_turn_settings
 from vortex.line.session import CallSession
 
@@ -123,7 +123,7 @@ async def run_pipecat_call(
             model=settings.soniox_stt_model,
             language_hints=_language_hints(turns.stt_language_hints),
             enable_language_identification=True,
-            context=SonioxContextObject(terms=stt_terms(ctx)),
+            context=SonioxContextObject(text=stt_context_text(), terms=stt_terms(ctx)),
             max_endpoint_delay_ms=turns.stt_max_endpoint_delay_ms,
             endpoint_sensitivity=turns.stt_endpoint_sensitivity,
             endpoint_latency_adjustment_level=turns.stt_endpoint_latency_adjustment_level,
