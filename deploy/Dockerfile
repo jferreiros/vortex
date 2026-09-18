@@ -14,7 +14,10 @@
 # ---------------------------------------------------------------- build stage
 FROM python:3.12-slim-bookworm AS builder
 
-COPY --from=ghcr.io/astral-sh/uv:0.12-bookworm-slim /usr/local/bin/uv /usr/local/bin/uv
+# Pinned to the uv that wrote uv.lock: the lock is revision 3, which older uv
+# cannot read. The `*-bookworm-slim` variants stop before 0.12, so this is the
+# plain image, a static musl binary at /uv that runs fine on debian.
+COPY --from=ghcr.io/astral-sh/uv:0.12.17 /uv /usr/local/bin/uv
 
 # UV_PYTHON_DOWNLOADS=never keeps uv on the interpreter this image already has.
 # The repository's .python-version pins 3.14 for laptops; pyproject only asks
