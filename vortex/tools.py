@@ -13,6 +13,7 @@ Only add a row here when the contract grows a new tool.
 
 from __future__ import annotations
 
+import json
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -175,13 +176,46 @@ class ToolError(Exception):
     """Raised when a tool name is unknown or its input does not validate."""
 
 
+def _parse_stringified(raw_args: dict[str, Any]) -> dict[str, Any]:
+    """Parse a nested argument the model sent as a JSON *string*.
+
+    Small tool-calling models fill a nested schema with the right content in
+    the wrong type. qwen3.6 does it on both nested inputs in the contract —
+    ``prepare_booking.slot`` (a ``Slot``) and the ``submit_action.action``
+    union::
+
+        {"patient_id": "P00042", "slot": "{\\"start\\": \\"2026-09-19T09:30...\\"}"}
+
+    Pydantic rejects that, the model is told "validation error", and it retries
+    the identical shape until the call runs out of turns — measured on a text
+    rehearsal, it never submits a BOOK at all. Since the flat calls succeed,
+    the failure looks like a prompt problem and is not one.
+
+    No field of any contract input is a string that legitimately begins with
+    ``{`` or ``[``: names, ids, phrases and national ids are all plain text. So
+    a value of that shape is an encoding mistake, and parsing it is safe. A
+    value that does not parse is passed through untouched, to be rejected by
+    the model validation below with its real error.
+    """
+    out: dict[str, Any] = {}
+    for key, value in raw_args.items():
+        if isinstance(value, str) and value[:1] in ("{", "["):
+            try:
+                out[key] = json.loads(value)
+                continue
+            except json.JSONDecodeError:
+                pass
+        out[key] = value
+    return out
+
+
 async def call_tool(name: str, ctx: ToolContext, raw_args: dict[str, Any]) -> BaseModel:
     """Validate, run, validate, log. The one path every tool call goes through."""
     spec = TOOLS.get(name)
     if spec is None:
         raise ToolError(f"unknown tool: {name}")
     try:
-        args = spec.input_model.model_validate(raw_args)
+        args = spec.input_model.model_validate(_parse_stringified(raw_args))
     except ValidationError as exc:
         ctx.log.tool_failed(name, f"invalid input: {exc.errors()}")
         raise ToolError(f"invalid input for {name}: {exc}") from exc
