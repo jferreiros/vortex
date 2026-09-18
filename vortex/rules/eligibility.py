@@ -207,8 +207,16 @@ def check_patient_rules(
             )
 
     # 2. The specialty's own referral requirement, against the referrals the
-    #    directory record carries.
-    if specialty and specialty.referral_required and not holds_referral(patient, specialty_id):
+    #    directory record carries. No record is not the same as no referral:
+    #    without one this stands down and /availability answers, exactly as the
+    #    age rule above does. (``/directory`` has no lookup by id, so a record
+    #    is not always in hand.)
+    if (
+        specialty
+        and specialty.referral_required
+        and patient
+        and not holds_referral(patient, specialty_id)
+    ):
         return RuleVerdict(
             reason="referral_required",
             detail=f"{specialty.name} needs a referral and the record holds none",
