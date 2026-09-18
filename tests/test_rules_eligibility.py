@@ -7,12 +7,17 @@ self-pay rule that stops a refusal being talked around.
 
 from __future__ import annotations
 
-from datetime import date
+import json
+from datetime import date, datetime
 
 import pytest
 
 from vortex.clinic.client import FakeClinicClient
+from vortex.contract import MADRID, CheckEligibilityInput, FindPatientInput, ToolContext
+from vortex.identity.tools import find_patient
+from vortex.observability.calllog import CallLog
 from vortex.rules import eligibility
+from vortex.rules.tools import NO_RECORD_NOTE, check_eligibility
 
 
 @pytest.fixture
@@ -151,3 +156,152 @@ def test_a_provider_refusing_a_plan_redirects_to_one_who_takes_it(catalogue):
     assert verdict.reason == "provider_not_in_network"
     # The fixtures hold one dermatologist; live there is a second who takes DKV.
     assert all(p.provider_id != "PR04" for p in verdict.redirect_to)
+
+
+# ---------------------------------------------------------------------------
+# The lookup behind those rules: where the directory record comes from.
+#
+# ``GET /api/v1/directory`` searches on name, national_id, phone or
+# date_of_birth and on nothing else. A parameter-less call is a 422 live, which
+# is exactly what ``_patient`` used to make: the record came back ``None`` on
+# every real call and every rule above this line silently stood down.
+# ---------------------------------------------------------------------------
+
+
+class RecordingClinic(FakeClinicClient):
+    """A fake that remembers how each ``/directory`` query was asked."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.directory_calls: list[dict] = []
+
+    async def directory(self, **kwargs):
+        self.directory_calls.append(kwargs)
+        return await super().directory(**kwargs)
+
+
+def make_ctx(tmp_path, clinic: FakeClinicClient, from_number: str | None) -> ToolContext:
+    return ToolContext(
+        call_id="CA-rules",
+        now=datetime(2026, 9, 18, 9, 0, tzinfo=MADRID),
+        from_number=from_number,
+        clinic=clinic,
+        log=CallLog("CA-rules", tmp_path / "calls.jsonl"),
+    )
+
+
+def logged(ctx: ToolContext) -> list[dict]:
+    path = ctx.log.path
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+
+
+@pytest.mark.asyncio
+async def test_the_lookup_never_makes_a_parameter_less_directory_call(tmp_path):
+    """The bug itself: no query at all is a 422 live, not the whole directory."""
+    clinic = RecordingClinic()
+    ctx = make_ctx(tmp_path, clinic, from_number="+34612345678")
+
+    await check_eligibility(
+        ctx, CheckEligibilityInput(patient_id="P00042", specialty_id="dermatology")
+    )
+
+    assert clinic.directory_calls, "the record has to be looked up somehow"
+    for call in clinic.directory_calls:
+        given = {k: v for k, v in call.items() if v not in (None, "")}
+        assert given, "a directory query with nothing to search on is a 422 live"
+        # And it is the one query a bare patient_id can build: the calling line.
+        assert "phone" in given
+
+
+@pytest.mark.asyncio
+async def test_the_age_rule_fires_when_the_record_is_in_hand(tmp_path):
+    """Lucas is six. General practice takes fourteen and over."""
+    ctx = make_ctx(tmp_path, RecordingClinic(), from_number="+34612345678")
+
+    verdict = await check_eligibility(
+        ctx, CheckEligibilityInput(patient_id="P00107", specialty_id="general_practice")
+    )
+
+    assert verdict.allowed is False
+    assert verdict.rejection is not None
+    assert verdict.rejection.reason == "not_eligible_age"
+    assert verdict.note == ""
+    assert any(p.specialty_id == "paediatrics" for p in verdict.redirect_to)
+
+
+@pytest.mark.asyncio
+async def test_the_referral_rule_fires_when_the_record_is_in_hand(tmp_path):
+    """Marta holds no dermatology referral; Antonio does. Same query, two answers."""
+    without = make_ctx(tmp_path, RecordingClinic(), from_number="+34612345678")
+    refused = await check_eligibility(
+        without, CheckEligibilityInput(patient_id="P00042", specialty_id="dermatology")
+    )
+    assert refused.allowed is False
+    assert refused.rejection is not None
+    assert refused.rejection.reason == "referral_required"
+
+    holder = make_ctx(tmp_path, RecordingClinic(), from_number="+34655555555")
+    allowed = await check_eligibility(
+        holder,
+        CheckEligibilityInput(patient_id="P00200", specialty_id="dermatology", insurer="sanitas"),
+    )
+    assert allowed.allowed is True
+    assert allowed.rejection is None
+
+
+@pytest.mark.asyncio
+async def test_the_record_identity_already_fetched_costs_no_second_query(tmp_path):
+    """A real call has already looked the caller up. The rules reuse that record."""
+    clinic = RecordingClinic()
+    ctx = make_ctx(tmp_path, clinic, from_number="+34612345678")
+
+    found = await find_patient(
+        ctx, FindPatientInput(name="Marta Ruiz", date_of_birth=date(1985, 3, 12))
+    )
+    assert found.status == "found"
+    after_identity = len(clinic.directory_calls)
+
+    verdict = await check_eligibility(
+        ctx, CheckEligibilityInput(patient_id="P00042", specialty_id="dermatology")
+    )
+
+    assert len(clinic.directory_calls) == after_identity, "the rules re-fetched a record they had"
+    assert verdict.rejection is not None
+    assert verdict.rejection.reason == "referral_required"
+
+
+@pytest.mark.asyncio
+async def test_a_missing_record_is_logged_and_noted_rather_than_passed_over(tmp_path):
+    """Nothing to look the id up with: the rules stand down, and they say so."""
+    clinic = RecordingClinic()
+    ctx = make_ctx(tmp_path, clinic, from_number=None)
+
+    verdict = await check_eligibility(
+        ctx, CheckEligibilityInput(patient_id="P00042", specialty_id="dermatology")
+    )
+
+    assert clinic.directory_calls == [], "there is no legal query to make without a number"
+    # Standing down is not a refusal: /availability is the authority when the
+    # record is not in hand, and it applies the same rules server-side.
+    assert verdict.note == NO_RECORD_NOTE
+    events = [e for e in logged(ctx) if e["kind"] == "rules.patient_missing"]
+    assert events and events[0]["patient_id"] == "P00042"
+    assert events[0]["searched_phone"] is False
+
+
+@pytest.mark.asyncio
+async def test_an_id_that_cannot_be_placed_is_looked_up_once(tmp_path):
+    """One miss costs one query, however many times the rules ask."""
+    clinic = RecordingClinic()
+    ctx = make_ctx(tmp_path, clinic, from_number="+34612345678")
+    args = CheckEligibilityInput(patient_id="P99999", specialty_id="general_practice")
+
+    first = await check_eligibility(ctx, args)
+    calls_after_first = len(clinic.directory_calls)
+    second = await check_eligibility(ctx, args)
+
+    assert first.note == NO_RECORD_NOTE
+    assert second.note == NO_RECORD_NOTE
+    assert len(clinic.directory_calls) == calls_after_first == 1
