@@ -2,6 +2,1037 @@
  "runs": [
   {
    "layer": "bench",
+   "started_at": "2026-09-18T23:08:31+00:00",
+   "path": "runs/bench/20260918T230831Z-a7eb969.json",
+   "sha": "a7eb969",
+   "branch": "feat/bench-cloudflare",
+   "dirty": "yes",
+   "verdict": "FAIL",
+   "totals": {
+    "pass": 65,
+    "fail": 264,
+    "error": 47,
+    "unverified": 0,
+    "skipped": 0,
+    "hollow": 0
+   },
+   "duration_ms": 424256,
+   "cost_eur": 0.8692,
+   "mode": {
+    "models": [
+     "helmcode/qwen3.6",
+     "helmcode/deepseek-v4-flash",
+     "helmcode/glm5.3-flash",
+     "helmcode/gemma4",
+     "vercel/google/gemini-2.5-flash",
+     "cloudflare/@cf/qwen/qwen3-30b-a3b-fp8",
+     "cloudflare/@cf/meta/llama-4-scout-17b-16e-instruct",
+     "openai/gpt-4.1-mini"
+    ],
+    "repeat": 1,
+    "concurrency": 4,
+    "clinic": "fake",
+    "scenarios": 47,
+    "only": ""
+   },
+   "notes": [
+    "Best by weighted pass rate: helmcode/deepseek-v4-flash at 34% (16/47), p50 1.3 s."
+   ],
+   "models": [
+    {
+     "id": "helmcode/deepseek-v4-flash",
+     "label": "DeepSeek V4 Flash (Helmcode)",
+     "status": "ran",
+     "pass": 16,
+     "scenarios": 47,
+     "pass_rate": 0.3404,
+     "weighted_pass_rate": 0.3431,
+     "llm_p50_ms": 1312,
+     "llm_p95_ms": 1834,
+     "tokens_in_per_scenario": 77625,
+     "cost_eur": 0.0,
+     "list_cost_per_call_eur": null,
+     "perk": true,
+     "paid": false,
+     "fallback_rate": 0.4468,
+     "cut_by_max_tokens": 0,
+     "by_problem": {
+      "1": {
+       "pass": 1,
+       "total": 2,
+       "weight": 1
+      },
+      "3": {
+       "pass": 1,
+       "total": 5,
+       "weight": 2
+      },
+      "4": {
+       "pass": 0,
+       "total": 2,
+       "weight": 2
+      },
+      "5": {
+       "pass": 1,
+       "total": 6,
+       "weight": 2
+      },
+      "6": {
+       "pass": 0,
+       "total": 1,
+       "weight": 3
+      },
+      "7": {
+       "pass": 1,
+       "total": 1,
+       "weight": 2
+      },
+      "8": {
+       "pass": 1,
+       "total": 2,
+       "weight": 2
+      },
+      "9": {
+       "pass": 0,
+       "total": 1,
+       "weight": 3
+      },
+      "10": {
+       "pass": 0,
+       "total": 2,
+       "weight": 3
+      },
+      "11": {
+       "pass": 2,
+       "total": 6,
+       "weight": 3
+      },
+      "12": {
+       "pass": 4,
+       "total": 4,
+       "weight": 3
+      },
+      "13": {
+       "pass": 4,
+       "total": 7,
+       "weight": 4
+      },
+      "14": {
+       "pass": 1,
+       "total": 6,
+       "weight": 4
+      },
+      "17": {
+       "pass": 0,
+       "total": 1,
+       "weight": 4
+      },
+      "18": {
+       "pass": 0,
+       "total": 1,
+       "weight": 5
+      }
+     },
+     "by_group": {
+      "booking": {
+       "pass": 2,
+       "total": 8
+      },
+      "difficult": {
+       "pass": 5,
+       "total": 11
+      },
+      "languages": {
+       "pass": 2,
+       "total": 6
+      },
+      "noise": {
+       "pass": 4,
+       "total": 4
+      },
+      "refusals": {
+       "pass": 2,
+       "total": 13
+      },
+      "when_exactly": {
+       "pass": 1,
+       "total": 5
+      }
+     }
+    },
+    {
+     "id": "openai/gpt-4.1-mini",
+     "label": "GPT-4.1 mini (OpenAI)",
+     "status": "ran",
+     "pass": 13,
+     "scenarios": 47,
+     "pass_rate": 0.2766,
+     "weighted_pass_rate": 0.2847,
+     "llm_p50_ms": 1095,
+     "llm_p95_ms": 3976,
+     "tokens_in_per_scenario": 33820,
+     "cost_eur": 0.6012,
+     "list_cost_per_call_eur": 0.0052992000000000004,
+     "perk": false,
+     "paid": false,
+     "fallback_rate": 0.5957,
+     "cut_by_max_tokens": 3,
+     "by_problem": {
+      "1": {
+       "pass": 0,
+       "total": 2,
+       "weight": 1
+      },
+      "3": {
+       "pass": 1,
+       "total": 5,
+       "weight": 2
+      },
+      "4": {
+       "pass": 0,
+       "total": 2,
+       "weight": 2
+      },
+      "5": {
+       "pass": 3,
+       "total": 6,
+       "weight": 2
+      },
+      "6": {
+       "pass": 0,
+       "total": 1,
+       "weight": 3
+      },
+      "7": {
+       "pass": 1,
+       "total": 1,
+       "weight": 2
+      },
+      "8": {
+       "pass": 1,
+       "total": 2,
+       "weight": 2
+      },
+      "9": {
+       "pass": 0,
+       "total": 1,
+       "weight": 3
+      },
+      "10": {
+       "pass": 0,
+       "total": 2,
+       "weight": 3
+      },
+      "11": {
+       "pass": 1,
+       "total": 6,
+       "weight": 3
+      },
+      "12": {
+       "pass": 0,
+       "total": 4,
+       "weight": 3
+      },
+      "13": {
+       "pass": 1,
+       "total": 7,
+       "weight": 4
+      },
+      "14": {
+       "pass": 5,
+       "total": 6,
+       "weight": 4
+      },
+      "17": {
+       "pass": 0,
+       "total": 1,
+       "weight": 4
+      },
+      "18": {
+       "pass": 0,
+       "total": 1,
+       "weight": 5
+      }
+     },
+     "by_group": {
+      "booking": {
+       "pass": 1,
+       "total": 8
+      },
+      "difficult": {
+       "pass": 2,
+       "total": 11
+      },
+      "languages": {
+       "pass": 1,
+       "total": 6
+      },
+      "noise": {
+       "pass": 0,
+       "total": 4
+      },
+      "refusals": {
+       "pass": 6,
+       "total": 13
+      },
+      "when_exactly": {
+       "pass": 3,
+       "total": 5
+      }
+     }
+    },
+    {
+     "id": "helmcode/qwen3.6",
+     "label": "Qwen 3.6 (Helmcode)",
+     "status": "ran",
+     "pass": 8,
+     "scenarios": 47,
+     "pass_rate": 0.1702,
+     "weighted_pass_rate": 0.2044,
+     "llm_p50_ms": 1168,
+     "llm_p95_ms": 10960,
+     "tokens_in_per_scenario": 63312,
+     "cost_eur": 0.0,
+     "list_cost_per_call_eur": null,
+     "perk": true,
+     "paid": false,
+     "fallback_rate": 0.9149,
+     "cut_by_max_tokens": 0,
+     "by_problem": {
+      "1": {
+       "pass": 0,
+       "total": 2,
+       "weight": 1
+      },
+      "3": {
+       "pass": 1,
+       "total": 5,
+       "weight": 2
+      },
+      "4": {
+       "pass": 0,
+       "total": 2,
+       "weight": 2
+      },
+      "5": {
+       "pass": 0,
+       "total": 6,
+       "weight": 2
+      },
+      "6": {
+       "pass": 0,
+       "total": 1,
+       "weight": 3
+      },
+      "7": {
+       "pass": 0,
+       "total": 1,
+       "weight": 2
+      },
+      "8": {
+       "pass": 1,
+       "total": 2,
+       "weight": 2
+      },
+      "9": {
+       "pass": 0,
+       "total": 1,
+       "weight": 3
+      },
+      "10": {
+       "pass": 0,
+       "total": 2,
+       "weight": 3
+      },
+      "11": {
+       "pass": 0,
+       "total": 6,
+       "weight": 3
+      },
+      "12": {
+       "pass": 0,
+       "total": 4,
+       "weight": 3
+      },
+      "13": {
+       "pass": 0,
+       "total": 7,
+       "weight": 4
+      },
+      "14": {
+       "pass": 6,
+       "total": 6,
+       "weight": 4
+      },
+      "17": {
+       "pass": 0,
+       "total": 1,
+       "weight": 4
+      },
+      "18": {
+       "pass": 0,
+       "total": 1,
+       "weight": 5
+      }
+     },
+     "by_group": {
+      "booking": {
+       "pass": 1,
+       "total": 8
+      },
+      "difficult": {
+       "pass": 1,
+       "total": 11
+      },
+      "languages": {
+       "pass": 0,
+       "total": 6
+      },
+      "noise": {
+       "pass": 0,
+       "total": 4
+      },
+      "refusals": {
+       "pass": 6,
+       "total": 13
+      },
+      "when_exactly": {
+       "pass": 0,
+       "total": 5
+      }
+     }
+    },
+    {
+     "id": "helmcode/gemma4",
+     "label": "Gemma 4 (Helmcode)",
+     "status": "ran",
+     "pass": 8,
+     "scenarios": 47,
+     "pass_rate": 0.1702,
+     "weighted_pass_rate": 0.2044,
+     "llm_p50_ms": 764,
+     "llm_p95_ms": 2661,
+     "tokens_in_per_scenario": 45389,
+     "cost_eur": 0.0,
+     "list_cost_per_call_eur": null,
+     "perk": true,
+     "paid": false,
+     "fallback_rate": 0.7872,
+     "cut_by_max_tokens": 0,
+     "by_problem": {
+      "1": {
+       "pass": 0,
+       "total": 2,
+       "weight": 1
+      },
+      "3": {
+       "pass": 0,
+       "total": 5,
+       "weight": 2
+      },
+      "4": {
+       "pass": 0,
+       "total": 2,
+       "weight": 2
+      },
+      "5": {
+       "pass": 2,
+       "total": 6,
+       "weight": 2
+      },
+      "6": {
+       "pass": 0,
+       "total": 1,
+       "weight": 3
+      },
+      "7": {
+       "pass": 0,
+       "total": 1,
+       "weight": 2
+      },
+      "8": {
+       "pass": 0,
+       "total": 2,
+       "weight": 2
+      },
+      "9": {
+       "pass": 0,
+       "total": 1,
+       "weight": 3
+      },
+      "10": {
+       "pass": 0,
+       "total": 2,
+       "weight": 3
+      },
+      "11": {
+       "pass": 0,
+       "total": 6,
+       "weight": 3
+      },
+      "12": {
+       "pass": 0,
+       "total": 4,
+       "weight": 3
+      },
+      "13": {
+       "pass": 1,
+       "total": 7,
+       "weight": 4
+      },
+      "14": {
+       "pass": 5,
+       "total": 6,
+       "weight": 4
+      },
+      "17": {
+       "pass": 0,
+       "total": 1,
+       "weight": 4
+      },
+      "18": {
+       "pass": 0,
+       "total": 1,
+       "weight": 5
+      }
+     },
+     "by_group": {
+      "booking": {
+       "pass": 0,
+       "total": 8
+      },
+      "difficult": {
+       "pass": 1,
+       "total": 11
+      },
+      "languages": {
+       "pass": 0,
+       "total": 6
+      },
+      "noise": {
+       "pass": 0,
+       "total": 4
+      },
+      "refusals": {
+       "pass": 5,
+       "total": 13
+      },
+      "when_exactly": {
+       "pass": 2,
+       "total": 5
+      }
+     }
+    },
+    {
+     "id": "helmcode/glm5.3-flash",
+     "label": "GLM 5.3 Flash (Helmcode)",
+     "status": "ran",
+     "pass": 7,
+     "scenarios": 47,
+     "pass_rate": 0.1489,
+     "weighted_pass_rate": 0.1971,
+     "llm_p50_ms": 7750,
+     "llm_p95_ms": 9726,
+     "tokens_in_per_scenario": 17316,
+     "cost_eur": 0.0,
+     "list_cost_per_call_eur": null,
+     "perk": true,
+     "paid": false,
+     "fallback_rate": 0.9149,
+     "cut_by_max_tokens": 121,
+     "by_problem": {
+      "1": {
+       "pass": 0,
+       "total": 2,
+       "weight": 1
+      },
+      "3": {
+       "pass": 0,
+       "total": 5,
+       "weight": 2
+      },
+      "4": {
+       "pass": 0,
+       "total": 2,
+       "weight": 2
+      },
+      "5": {
+       "pass": 0,
+       "total": 6,
+       "weight": 2
+      },
+      "6": {
+       "pass": 0,
+       "total": 1,
+       "weight": 3
+      },
+      "7": {
+       "pass": 0,
+       "total": 1,
+       "weight": 2
+      },
+      "8": {
+       "pass": 0,
+       "total": 2,
+       "weight": 2
+      },
+      "9": {
+       "pass": 0,
+       "total": 1,
+       "weight": 3
+      },
+      "10": {
+       "pass": 1,
+       "total": 2,
+       "weight": 3
+      },
+      "11": {
+       "pass": 0,
+       "total": 6,
+       "weight": 3
+      },
+      "12": {
+       "pass": 0,
+       "total": 4,
+       "weight": 3
+      },
+      "13": {
+       "pass": 0,
+       "total": 7,
+       "weight": 4
+      },
+      "14": {
+       "pass": 6,
+       "total": 6,
+       "weight": 4
+      },
+      "17": {
+       "pass": 0,
+       "total": 1,
+       "weight": 4
+      },
+      "18": {
+       "pass": 0,
+       "total": 1,
+       "weight": 5
+      }
+     },
+     "by_group": {
+      "booking": {
+       "pass": 0,
+       "total": 8
+      },
+      "difficult": {
+       "pass": 0,
+       "total": 11
+      },
+      "languages": {
+       "pass": 0,
+       "total": 6
+      },
+      "noise": {
+       "pass": 0,
+       "total": 4
+      },
+      "refusals": {
+       "pass": 7,
+       "total": 13
+      },
+      "when_exactly": {
+       "pass": 0,
+       "total": 5
+      }
+     }
+    },
+    {
+     "id": "vercel/google/gemini-2.5-flash",
+     "label": "Gemini 2.5 Flash (Vercel AI Gateway)",
+     "status": "ran",
+     "pass": 7,
+     "scenarios": 47,
+     "pass_rate": 0.1489,
+     "weighted_pass_rate": 0.1898,
+     "llm_p50_ms": 881,
+     "llm_p95_ms": 1950,
+     "tokens_in_per_scenario": 19489,
+     "cost_eur": 0.2681,
+     "list_cost_per_call_eur": 0.004692,
+     "perk": false,
+     "paid": false,
+     "fallback_rate": 0.7021,
+     "cut_by_max_tokens": 0,
+     "by_problem": {
+      "1": {
+       "pass": 0,
+       "total": 2,
+       "weight": 1
+      },
+      "3": {
+       "pass": 0,
+       "total": 5,
+       "weight": 2
+      },
+      "4": {
+       "pass": 0,
+       "total": 2,
+       "weight": 2
+      },
+      "5": {
+       "pass": 0,
+       "total": 6,
+       "weight": 2
+      },
+      "6": {
+       "pass": 0,
+       "total": 1,
+       "weight": 3
+      },
+      "7": {
+       "pass": 0,
+       "total": 1,
+       "weight": 2
+      },
+      "8": {
+       "pass": 0,
+       "total": 2,
+       "weight": 2
+      },
+      "9": {
+       "pass": 0,
+       "total": 1,
+       "weight": 3
+      },
+      "10": {
+       "pass": 1,
+       "total": 2,
+       "weight": 3
+      },
+      "11": {
+       "pass": 0,
+       "total": 6,
+       "weight": 3
+      },
+      "12": {
+       "pass": 1,
+       "total": 4,
+       "weight": 3
+      },
+      "13": {
+       "pass": 0,
+       "total": 7,
+       "weight": 4
+      },
+      "14": {
+       "pass": 5,
+       "total": 6,
+       "weight": 4
+      },
+      "17": {
+       "pass": 0,
+       "total": 1,
+       "weight": 4
+      },
+      "18": {
+       "pass": 0,
+       "total": 1,
+       "weight": 5
+      }
+     },
+     "by_group": {
+      "booking": {
+       "pass": 0,
+       "total": 8
+      },
+      "difficult": {
+       "pass": 0,
+       "total": 11
+      },
+      "languages": {
+       "pass": 0,
+       "total": 6
+      },
+      "noise": {
+       "pass": 1,
+       "total": 4
+      },
+      "refusals": {
+       "pass": 6,
+       "total": 13
+      },
+      "when_exactly": {
+       "pass": 0,
+       "total": 5
+      }
+     }
+    },
+    {
+     "id": "cloudflare/@cf/meta/llama-4-scout-17b-16e-instruct",
+     "label": "Llama 4 Scout 17B (Cloudflare Workers AI)",
+     "status": "ran",
+     "pass": 6,
+     "scenarios": 47,
+     "pass_rate": 0.1277,
+     "weighted_pass_rate": 0.1752,
+     "llm_p50_ms": 877,
+     "llm_p95_ms": 1966,
+     "tokens_in_per_scenario": 21061,
+     "cost_eur": 0.0,
+     "list_cost_per_call_eur": null,
+     "perk": true,
+     "paid": false,
+     "fallback_rate": 1.0,
+     "cut_by_max_tokens": 4,
+     "by_problem": {
+      "1": {
+       "pass": 0,
+       "total": 2,
+       "weight": 1
+      },
+      "3": {
+       "pass": 0,
+       "total": 5,
+       "weight": 2
+      },
+      "4": {
+       "pass": 0,
+       "total": 2,
+       "weight": 2
+      },
+      "5": {
+       "pass": 0,
+       "total": 6,
+       "weight": 2
+      },
+      "6": {
+       "pass": 0,
+       "total": 1,
+       "weight": 3
+      },
+      "7": {
+       "pass": 0,
+       "total": 1,
+       "weight": 2
+      },
+      "8": {
+       "pass": 0,
+       "total": 2,
+       "weight": 2
+      },
+      "9": {
+       "pass": 0,
+       "total": 1,
+       "weight": 3
+      },
+      "10": {
+       "pass": 0,
+       "total": 2,
+       "weight": 3
+      },
+      "11": {
+       "pass": 0,
+       "total": 6,
+       "weight": 3
+      },
+      "12": {
+       "pass": 0,
+       "total": 4,
+       "weight": 3
+      },
+      "13": {
+       "pass": 0,
+       "total": 7,
+       "weight": 4
+      },
+      "14": {
+       "pass": 6,
+       "total": 6,
+       "weight": 4
+      },
+      "17": {
+       "pass": 0,
+       "total": 1,
+       "weight": 4
+      },
+      "18": {
+       "pass": 0,
+       "total": 1,
+       "weight": 5
+      }
+     },
+     "by_group": {
+      "booking": {
+       "pass": 0,
+       "total": 8
+      },
+      "difficult": {
+       "pass": 0,
+       "total": 11
+      },
+      "languages": {
+       "pass": 0,
+       "total": 6
+      },
+      "noise": {
+       "pass": 0,
+       "total": 4
+      },
+      "refusals": {
+       "pass": 6,
+       "total": 13
+      },
+      "when_exactly": {
+       "pass": 0,
+       "total": 5
+      }
+     }
+    },
+    {
+     "id": "cloudflare/@cf/qwen/qwen3-30b-a3b-fp8",
+     "label": "Qwen3 30B (Cloudflare Workers AI)",
+     "status": "ran",
+     "pass": 0,
+     "scenarios": 47,
+     "pass_rate": 0.0,
+     "weighted_pass_rate": 0.0,
+     "llm_p50_ms": 689,
+     "llm_p95_ms": 1457,
+     "tokens_in_per_scenario": 0,
+     "cost_eur": 0.0,
+     "list_cost_per_call_eur": null,
+     "perk": true,
+     "paid": false,
+     "fallback_rate": 0.0,
+     "cut_by_max_tokens": 0,
+     "by_problem": {
+      "1": {
+       "pass": 0,
+       "total": 2,
+       "weight": 1
+      },
+      "3": {
+       "pass": 0,
+       "total": 5,
+       "weight": 2
+      },
+      "4": {
+       "pass": 0,
+       "total": 2,
+       "weight": 2
+      },
+      "5": {
+       "pass": 0,
+       "total": 6,
+       "weight": 2
+      },
+      "6": {
+       "pass": 0,
+       "total": 1,
+       "weight": 3
+      },
+      "7": {
+       "pass": 0,
+       "total": 1,
+       "weight": 2
+      },
+      "8": {
+       "pass": 0,
+       "total": 2,
+       "weight": 2
+      },
+      "9": {
+       "pass": 0,
+       "total": 1,
+       "weight": 3
+      },
+      "10": {
+       "pass": 0,
+       "total": 2,
+       "weight": 3
+      },
+      "11": {
+       "pass": 0,
+       "total": 6,
+       "weight": 3
+      },
+      "12": {
+       "pass": 0,
+       "total": 4,
+       "weight": 3
+      },
+      "13": {
+       "pass": 0,
+       "total": 7,
+       "weight": 4
+      },
+      "14": {
+       "pass": 0,
+       "total": 6,
+       "weight": 4
+      },
+      "17": {
+       "pass": 0,
+       "total": 1,
+       "weight": 4
+      },
+      "18": {
+       "pass": 0,
+       "total": 1,
+       "weight": 5
+      }
+     },
+     "by_group": {
+      "booking": {
+       "pass": 0,
+       "total": 8
+      },
+      "difficult": {
+       "pass": 0,
+       "total": 11
+      },
+      "languages": {
+       "pass": 0,
+       "total": 6
+      },
+      "noise": {
+       "pass": 0,
+       "total": 4
+      },
+      "refusals": {
+       "pass": 0,
+       "total": 13
+      },
+      "when_exactly": {
+       "pass": 0,
+       "total": 5
+      }
+     }
+    }
+   ],
+   "routing": {
+    "current": {
+     "receptionist": "helmcode/deepseek-v4-flash",
+     "arbiter": "helmcode/deepseek-v4-flash"
+    },
+    "recommended": {
+     "receptionist": {
+      "id": "helmcode/deepseek-v4-flash",
+      "reason": "weighted pass 34% (16/47), p50 1.3 s, p95 1.8 s under the 4 s cap",
+      "runner_up": "openai/gpt-4.1-mini"
+     },
+     "arbiter": {
+      "id": "helmcode/deepseek-v4-flash",
+      "reason": "highest weighted pass 34% (16/47); latency does not count after the hangup",
+      "runner_up": "openai/gpt-4.1-mini"
+     }
+    },
+    "changes": {
+     "receptionist": false,
+     "arbiter": false
+    }
+   }
+  },
+  {
+   "layer": "bench",
    "started_at": "2026-09-18T22:56:25+00:00",
    "path": "runs/bench/20260918T225625Z-ea11d85.json",
    "sha": "ea11d85",
@@ -2273,7 +3304,7 @@
    "notes": []
   }
  ],
- "updated_at": "2026-09-18T23:03:41+00:00",
+ "updated_at": "2026-09-18T23:15:38+00:00",
  "layers": [
   "logic",
   "conversation",
