@@ -1,3 +1,10 @@
+"""The live view: ``/`` for the team, ``/wall`` for the jury.
+
+Every screen follows DESIGN.md. ``design.css`` carries the tokens and the
+components; ``board.css`` adds the Quasar overrides and the two layouts.
+Add a class from those files before you add an inline style here.
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -19,17 +26,21 @@ from vortex.settings import REPO_ROOT, get_settings
 LINE_URL = os.environ.get("VORTEX_LINE_URL", "http://127.0.0.1:7860").rstrip("/")
 BOARD_PORT = int(os.environ.get("VORTEX_BOARD_PORT", "8080"))
 PRESENCE: dict[str, float] = {}
-CSS = (Path(__file__).with_name("board.css")).read_text(encoding="utf-8")
+_HERE = Path(__file__).parent
+DESIGN_CSS = (_HERE / "design.css").read_text(encoding="utf-8")
+BOARD_CSS = (_HERE / "board.css").read_text(encoding="utf-8")
 
-STATUS_PILL = {
-    "live": "live",
-    "booked": "booked",
-    "registered": "registered",
-    "rescheduled": "rescheduled",
-    "cancelled": "cancelled",
-    "refused": "refused",
-    "escalated": "escalated",
-    "ended": "ended",
+NAV_LINKS = (("Ops", "/"), ("Wall", "/wall"), ("Evals", "/evals"), ("Bench", "/bench"))
+
+STATUS_LABEL = {
+    "live": "En llamada",
+    "booked": "Cita reservada",
+    "registered": "Paciente registrado",
+    "rescheduled": "Cita movida",
+    "cancelled": "Cita anulada",
+    "refused": "Sin acción",
+    "escalated": "Escalada",
+    "ended": "Terminada",
 }
 
 
@@ -110,15 +121,100 @@ def _ops_ok() -> bool:
     return bool(app.storage.user.get("ops"))
 
 
+# ---------------------------------------------------------------------------
+# Shared chrome
+# ---------------------------------------------------------------------------
+
+
+def _apply_chrome() -> None:
+    ui.dark_mode(False)
+    # Quasar paints its palette with !important inside a cascade layer, so the
+    # only clean way to make its buttons black is to make its palette black.
+    ui.colors(
+        primary="#000000",
+        secondary="#525252",
+        accent="#000000",
+        dark="#171717",
+        positive="#27c93f",
+        negative="#ff5f56",
+        warning="#ffbd2e",
+        info="#737373",
+    )
+    ui.add_css(DESIGN_CSS)
+    ui.add_css(BOARD_CSS)
+    ui.query("body").classes("shell")
+
+
+def _dot(kind: str) -> None:
+    ui.element("span").classes(f"dot {kind}")
+
+
+def _status_dot(status: str) -> str:
+    """Map a call status to a traffic-light dot. See DESIGN.md, Status."""
+    if status == "live":
+        return "live"
+    if status in {"booked", "registered", "rescheduled", "cancelled"}:
+        return "ok"
+    if status in {"refused", "escalated"}:
+        return "warn"
+    return "off"
+
+
+def _tool_dot(status: str) -> str:
+    if status == "running":
+        return "live"
+    if status == "ok":
+        return "ok"
+    return "bad"
+
+
+def _json_preview(value: Any, limit: int = 88) -> str:
+    text = "" if value is None else str(value)
+    if isinstance(value, dict):
+        keys = ", ".join(f"{k}" for k in list(value)[:4])
+        text = keys or "{}"
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def _line_pill(health: dict[str, Any] | None, *, detail: bool = False) -> None:
+    with ui.element("div").classes("pill mute"):
+        _dot("ok" if health else "bad")
+        if health and detail:
+            ui.label(f"line · {health.get('voice')}/{health.get('clinic')}")
+        else:
+            ui.label("line up" if health else "line down")
+
+
+def _status_pill(card: CallCard | None) -> None:
+    if card is None:
+        with ui.element("div").classes("pill mute"):
+            _dot("off")
+            ui.label("En espera")
+        return
+    if card.live:
+        with ui.element("div").classes("pill dark"):
+            _dot("live")
+            ui.label(STATUS_LABEL["live"])
+        return
+    with ui.element("div").classes("pill"):
+        _dot(_status_dot(card.status))
+        ui.label(STATUS_LABEL.get(card.status, card.status))
+
+
+# ---------------------------------------------------------------------------
+# Login
+# ---------------------------------------------------------------------------
+
+
 def _login_form() -> None:
     with ui.element("div").classes("ops"):
-        with ui.element("div").classes("card").style("max-width:360px;margin:12vh auto"):
-            ui.label("Vortex ops").classes("brand")
-            ui.label("Solo el equipo. El wall público está en /wall.").classes("empty")
-            password = ui.input(placeholder="contraseña", password=True).props(
-                "dense dark outlined"
-            )
-            status = ui.label("").style("color:var(--bad);font-size:12px;margin-top:8px")
+        with ui.element("div").classes("card login"):
+            ui.label("Vortex ops").classes("heading-lg")
+            ui.label("Solo el equipo. El wall público está en /wall.").classes("body-sm")
+            ui.element("div").style("height: 16px")
+            password = ui.input(placeholder="contraseña", password=True).props("dense outlined")
+            password.classes("w-full")
+            status = ui.label("").classes("error")
 
             def submit() -> None:
                 ip = _client_ip()
@@ -132,7 +228,9 @@ def _login_form() -> None:
                     return
                 status.set_text("No.")
 
-            ui.button("Entrar", on_click=submit).props("unelevated color=primary")
+            ui.button("Entrar", on_click=submit).props("unelevated no-caps").classes(
+                "button-primary"
+            )
             password.on("keydown.enter", submit)
 
 
@@ -141,63 +239,23 @@ def _logout() -> None:
     ui.navigate.to("/")
 
 
-def _apply_chrome() -> None:
-    ui.dark_mode(True)
-    ui.add_css(CSS)
-    ui.query("body").classes("shell")
+# ---------------------------------------------------------------------------
+# Wall
+# ---------------------------------------------------------------------------
 
 
-def _status_class(status: str) -> str:
-    if status == "live":
-        return "live"
-    if status in {"booked", "registered", "rescheduled", "cancelled"}:
-        return "ok"
-    if status in {"refused", "escalated"}:
-        return "warn"
-    return ""
-
-
-def _tool_dot(status: str) -> str:
-    if status == "running":
-        return "live"
-    if status == "ok":
-        return "up"
-    return "down"
-
-
-def _json_preview(value: Any, limit: int = 88) -> str:
-    text = "" if value is None else str(value)
-    if isinstance(value, dict):
-        keys = ", ".join(f"{k}" for k in list(value)[:4])
-        text = keys or "{}"
-    return text if len(text) <= limit else text[: limit - 1] + "…"
-
-
-def _wall_body(card: CallCard | None, line_up: bool) -> None:
-    with ui.element("div").classes("top"):
-        ui.label("Clínica Arenal").classes("brand")
-        if card and card.live:
-            with ui.element("div").classes("pill live"):
-                ui.element("span").classes("dot live")
-                ui.label("En llamada")
-        elif card:
-            with ui.element("div").classes(f"pill {STATUS_PILL.get(card.status, 'ended')}"):
-                ui.element("span").classes(f"dot {_tool_dot('ok')}")
-                ui.label(card.status)
-        else:
-            with ui.element("div").classes("pill"):
-                ui.element("span").classes("dot down")
-                ui.label("En espera")
-        ui.label("Vortex · Prosper AI").classes("pill")
-        ui.element("div").style("flex:1")
-        with ui.element("div").classes("pill"):
-            ui.element("span").classes(f"dot {'up' if line_up else 'down'}")
-            ui.label("line up" if line_up else "line down")
+def _wall_body(card: CallCard | None, health: dict[str, Any] | None) -> None:
+    with ui.element("header").classes("wall-head"):
+        ui.label("Clínica Arenal").classes("clinic")
+        _status_pill(card)
+        ui.element("div").classes("grow")
+        ui.label("Vortex · Prosper AI").classes("pill mute")
+        _line_pill(health)
         if card:
-            ui.label(card.call_id).classes("pill mono")
+            ui.label(card.call_id).classes("pill mute mono")
 
     with ui.element("div").classes("grid3"):
-        with ui.element("div").classes("col"):
+        with ui.element("section").classes("col"):
             ui.label("Transcripción").classes("kicker")
             if not card or not card.turns:
                 ui.label("Silencio. Play en /ops o una llamada real.").classes("empty")
@@ -206,22 +264,26 @@ def _wall_body(card: CallCard | None, line_up: bool) -> None:
                     ui.label("Paciente" if turn.role == "user" else "Agente").classes("who")
                     ui.label(turn.text).classes("bubble")
 
-        with ui.element("div").classes("col"):
+        with ui.element("section").classes("col"):
             ui.label("Orquestación").classes("kicker")
-            if not card or not card.tools:
-                ui.label("Aún no hay tools.").classes("empty")
-            for step in card.tools if card else []:
-                with ui.element("div").classes("step"):
-                    ui.element("span").classes(f"dot {_tool_dot(step.status)}")
-                    with ui.element("div"):
-                        ui.label(step.name).classes("name mono")
-                        detail = step.error or _json_preview(step.result or step.args)
-                        if detail:
-                            ui.label(detail).classes("meta mono")
-                    ms = f"{step.ms:.0f} ms" if step.ms is not None else step.status
-                    ui.label(ms).classes("mono").style("color: var(--muted); font-size: 11px")
+            with ui.element("div").classes("terminal-card"):
+                with ui.element("div").classes("terminal-traffic-lights"):
+                    for _ in range(3):
+                        ui.element("i")
+                if not card or not card.tools:
+                    ui.label("Aún no hay tools.").classes("comment")
+                for step in card.tools if card else []:
+                    with ui.element("div").classes("step"):
+                        _dot(_tool_dot(step.status))
+                        with ui.element("div"):
+                            ui.label(step.name).classes("name")
+                            detail = step.error or _json_preview(step.result or step.args)
+                            if detail:
+                                ui.label(detail).classes("meta")
+                        ms = f"{step.ms:.0f} ms" if step.ms is not None else step.status
+                        ui.label(ms).classes("ms")
 
-        with ui.element("div").classes("col"):
+        with ui.element("section").classes("col"):
             ui.label("Ficha").classes("kicker")
             rows = [
                 ("Paciente", card.patient_name if card else "—"),
@@ -233,46 +295,13 @@ def _wall_body(card: CallCard | None, line_up: bool) -> None:
                 ("Regla", card.decline_reason if card else "—"),
             ]
             for label, value in rows:
-                with ui.element("div").classes("chart-row"):
+                with ui.element("div").classes("kv"):
                     ui.label(label)
                     ui.label(value or "—").classes("mono")
             status = card.status if card else "ended"
-            ui.label(status.replace("-", " ")).classes(f"verdict {_status_class(status)}")
-
-
-def _ops_list(cards: list[CallCard], selected_id: str | None, on_pick) -> None:
-    if not cards:
-        ui.label("No hay llamadas. Play dispara fake_caller contra :7860.").classes("empty")
-        return
-    for card in cards[:40]:
-        classes = "call-row on" if card.call_id == selected_id else "call-row"
-        with ui.element("div").classes(classes).on("click", lambda c=card: on_pick(c.call_id)):
-            ui.element("span").classes(f"dot {_tool_dot('running' if card.live else 'ok')}")
-            with ui.element("div"):
-                ui.label(card.patient_name or card.from_number or card.call_id).style(
-                    "font-weight:600;font-size:13px"
-                )
-                ui.label(f"{card.action_kind or 'sin acción'} · {len(card.tools)} tools").classes(
-                    "mono"
-                ).style("color:var(--muted);font-size:11px")
-            ui.label(card.status).classes(f"pill {STATUS_PILL.get(card.status, 'ended')}")
-
-
-def _ops_detail(card: CallCard | None) -> None:
-    if card is None:
-        ui.label("Elegí una llamada.").classes("empty")
-        return
-    ui.label(card.call_id).classes("mono").style("font-size:12px;color:var(--muted)")
-    ui.label(card.patient_name or "Sin identificar").style(
-        "font-size:22px;font-weight:700;margin:6px 0 12px"
-    )
-    for turn in card.turns:
-        who = "PACIENTE" if turn.role == "user" else "AGENTE"
-        ui.label(f"{who}  {turn.text}").style("font-size:13px;margin:6px 0;line-height:1.4")
-    ui.separator().style("margin:12px 0;background:var(--line)")
-    for step in card.tools:
-        flag = {"running": "…", "ok": "ok", "fail": "fail"}[step.status]
-        ui.label(f"{flag}  {step.name}").classes("mono").style("font-size:12px;margin:4px 0")
+            with ui.element("div").classes("verdict"):
+                _dot(_status_dot(status))
+                ui.label(STATUS_LABEL.get(status, status))
 
 
 @ui.page("/wall")
@@ -286,7 +315,7 @@ def wall_page() -> None:
         cards = build_calls(events)
         stage.clear()
         with stage:
-            _wall_body(_feature(cards), health is not None)
+            _wall_body(_feature(cards), health)
 
     redraw()
     ui.timer(0.4, redraw)
@@ -310,10 +339,59 @@ def call_page(call_id: str) -> None:
         card = next((c for c in cards if c.call_id == call_id), None)
         stage.clear()
         with stage:
-            _wall_body(card, health is not None)
+            _wall_body(card, health)
 
     redraw()
     ui.timer(0.4, redraw)
+
+
+# ---------------------------------------------------------------------------
+# Ops
+# ---------------------------------------------------------------------------
+
+
+def _ops_list(cards: list[CallCard], selected_id: str | None, on_pick) -> None:
+    if not cards:
+        ui.label("No hay llamadas. Play dispara fake_caller contra :7860.").classes("empty")
+        return
+    for card in cards[:40]:
+        classes = "call-row on" if card.call_id == selected_id else "call-row"
+        with ui.element("div").classes(classes).on("click", lambda c=card: on_pick(c.call_id)):
+            _dot(_status_dot(card.status))
+            with ui.element("div"):
+                ui.label(card.patient_name or card.from_number or card.call_id).classes("title")
+                ui.label(f"{card.action_kind or 'sin acción'} · {len(card.tools)} tools").classes(
+                    "sub"
+                )
+            ui.label(STATUS_LABEL.get(card.status, card.status)).classes("pill mute")
+
+
+def _ops_detail(card: CallCard | None) -> None:
+    if card is None:
+        ui.label("Elegí una llamada.").classes("empty")
+        return
+    ui.label(card.call_id).classes("detail-id")
+    ui.label(card.patient_name or "Sin identificar").classes("detail-name")
+    for turn in card.turns:
+        with ui.element("div").classes("detail-turn"):
+            ui.html(f"<b>{'Paciente' if turn.role == 'user' else 'Agente'}</b>")
+            ui.label(turn.text)
+    ui.separator().style("margin:16px 0")
+    for step in card.tools:
+        with ui.element("div").classes("detail-tool row"):
+            _dot(_tool_dot(step.status))
+            ui.label(step.name)
+
+
+def _nav(active: str) -> ui.element:
+    """The team nav. Returns the right-hand slot for page controls."""
+    with ui.element("nav").classes("primary-nav"):
+        ui.link("Vortex", "/").classes("brand")
+        for label, path in NAV_LINKS:
+            ui.link(label, path).classes("pill" if path == active else "nav-mute")
+        ui.element("div").classes("grow")
+        slot = ui.element("div").classes("row")
+    return slot
 
 
 @ui.page("/")
@@ -326,28 +404,25 @@ def ops_page() -> None:
     selected = {"id": None}
     name_box = {"value": "joaquin"}
 
-    with ui.element("div").classes("top"):
-        ui.link("OPS", "/").classes("brand").style("text-decoration:none;color:inherit")
-        ui.link("WALL", "/wall").classes("pill").style("text-decoration:none")
-        ui.link("EVALS", "/evals").classes("pill").style("text-decoration:none")
-        ui.link("BENCH", "/bench").classes("pill").style("text-decoration:none")
-        line_pill = ui.element("div").classes("pill")
-        ui.element("div").style("flex:1")
-        name = ui.input(placeholder="tu nombre", value="joaquin").props("dense dark outlined")
-        name.classes("mono")
-        name.style("width:11rem")
-        ui.button("Play", on_click=_play_line).props("unelevated color=primary")
-        ui.button("Replay book", on_click=lambda: _replay("book")).props("outline")
-        ui.button("Replay refuse", on_click=lambda: _replay("refuse")).props("outline")
-        ui.button("Salir", on_click=_logout).props("flat")
+    slot = _nav("/")
+    with slot:
+        line_pill = ui.element("div")
+        name = ui.input(placeholder="tu nombre", value="joaquin").props("dense outlined")
+        name.classes("mono").style("width:11rem")
+        ui.button("Play", on_click=_play_line).props("unelevated no-caps").classes("button-primary")
+        ui.button("Replay book", on_click=lambda: _replay("book")).props("outline no-caps").classes(
+            "button-secondary"
+        )
+        ui.button("Replay refuse", on_click=lambda: _replay("refuse")).props(
+            "outline no-caps"
+        ).classes("button-secondary")
+        ui.button("Salir", on_click=_logout).props("flat no-caps").classes("button-quiet")
 
     with ui.element("div").classes("ops"):
-        people = (
-            ui.label().classes("mono").style("color:var(--muted);font-size:12px;margin-bottom:12px")
-        )
+        people = ui.label().classes("presence")
         with ui.element("div").classes("ops-grid"):
-            left = ui.element("div").classes("card")
-            right = ui.element("div").classes("card")
+            left = ui.element("div").classes("card card-compact")
+            right = ui.element("div").classes("card card-compact")
 
     def pick(call_id: str) -> None:
         selected["id"] = call_id
@@ -361,14 +436,9 @@ def ops_page() -> None:
         if selected["id"] is None and cards:
             selected["id"] = cards[0].call_id
         card = next((c for c in cards if c.call_id == selected["id"]), cards[0] if cards else None)
-        line_up = health is not None
         line_pill.clear()
         with line_pill:
-            mode = ""
-            if health:
-                mode = f" · {health.get('voice')}/{health.get('clinic')}"
-            ui.element("span").classes(f"dot {'up' if line_up else 'down'}")
-            ui.label(("line up" + mode) if line_up else "line down · JSONL")
+            _line_pill(health, detail=True)
         names = _prune_presence()
         people.set_text("en sala · " + (" · ".join(names) if names else "nadie"))
         left.clear()
@@ -384,26 +454,23 @@ def ops_page() -> None:
     ui.timer(0.45, redraw)
 
 
-def _private_stub(title: str, body: str) -> None:
+def _private_stub(path: str, title: str, body: str) -> None:
     _apply_chrome()
     ui.page_title(f"Vortex · {title}")
     if not _ops_ok():
         _login_form()
         return
-    with ui.element("div").classes("top"):
-        ui.link("OPS", "/").classes("brand").style("text-decoration:none;color:inherit")
-        ui.link("WALL", "/wall").classes("pill").style("text-decoration:none")
-        ui.link("EVALS", "/evals").classes("pill").style("text-decoration:none")
-        ui.link("BENCH", "/bench").classes("pill").style("text-decoration:none")
+    _nav(path)
     with ui.element("div").classes("ops"):
         with ui.element("div").classes("card"):
-            ui.label(title).classes("brand")
-            ui.label(body).classes("empty")
+            ui.label(title).classes("heading-lg")
+            ui.label(body).classes("body-md")
 
 
 @ui.page("/evals")
 def evals_page() -> None:
     _private_stub(
+        "/evals",
         "Evals",
         "Aquí van los casos del leaderboard cuando la plataforma abra el run. Privado del equipo.",
     )
@@ -412,6 +479,7 @@ def evals_page() -> None:
 @ui.page("/bench")
 def bench_page() -> None:
     _private_stub(
+        "/bench",
         "Bench",
         "Métricas de STT/LLM/TTS y tasa de submit. Se llena cuando line/ empiece a marcar timings.",
     )
@@ -424,7 +492,7 @@ def main() -> None:
         host="0.0.0.0",
         port=BOARD_PORT,
         title="Vortex",
-        dark=True,
+        dark=False,
         reload=False,
         show=False,
         favicon="◈",

@@ -22,6 +22,7 @@ Read the skill that matches your task before you write code:
 | `clinic-api` | Read-only endpoints, auth header, matching and availability traps |
 | `clinic-rules` | Dates, hours, closures, appointment type, provider/insurer traps, triage |
 | `rehearse-and-measure` | Practice calls vs `Run All`, cooldowns, the scoring wall |
+| `design-system` | Any HTML, CSS or NiceGUI change: the tokens, the components, the one-dark-surface rule |
 
 ## Layout and lane ownership
 
@@ -107,3 +108,5 @@ Each rule has a reason. The reason is the rule.
 - Every call is capped at three minutes. Get to a submission before the cap.
 - Log every event with its `call_id` to `logs/calls.jsonl`. The live view builds on it.
 - Write code, comments, docs and commit messages in English.
+- Every screen follows `DESIGN.md`. Load `vortex/observability/design.css` first, add
+  only layout, never a colour. Run `make design-sync` after you touch the tokens.

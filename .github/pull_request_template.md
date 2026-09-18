@@ -6,4 +6,5 @@
 - [ ] Every path through this change still ends in a submission: a refusal sends `NO_ACTION` with a typed `reason`, never nothing.
 - [ ] Every `patient_id`, `appointment_id` and `appointment_type_id` comes from the clinic API, never from the caller or the model.
 - [ ] Nothing is shared between sockets: no module-level session, conversation or in-flight `call_id`.
+- [ ] Any screen I touched (wall, ops, docs, mic, evals report) follows `DESIGN.md`: tokens from `design.css`, black pills, hairline cards, one dark surface per page, no new colour. `make design-sync` ran if the tokens changed.
 - [ ] No `.env`, API key or `logs/*.jsonl` in the diff. CI is green, or I explain below why it must merge red.
