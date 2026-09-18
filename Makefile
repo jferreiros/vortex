@@ -1,4 +1,4 @@
-.PHONY: install run smoke test call try-api tunnel tail lint fmt board
+.PHONY: install run smoke test call try-api tunnel tail lint fmt board rehearse
 
 PORT ?= 7860
 BOARD_PORT ?= 8080
@@ -33,6 +33,10 @@ tunnel:
 
 tail:
 	tail -f logs/calls.jsonl
+
+rehearse:         ## text rehearsal of the prompt against the real LLM: ONLY=p1|p4|p6, ARGS=--verbose
+	VORTEX_CLINIC_MODE=fake uv run python scripts/rehearse_text.py \
+	  $(if $(ONLY),--only $(ONLY),) $(ARGS)
 
 lint:
 	uv run ruff check .

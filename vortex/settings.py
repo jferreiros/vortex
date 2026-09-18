@@ -144,7 +144,13 @@ class Settings:
     vercel_ai_gateway_key: str = field(default_factory=lambda: _env("VERCEL_AI_GATEWAY_KEY"))
 
     llm_temperature: float = field(default_factory=lambda: float(_env("LLM_TEMPERATURE", "0.2")))
-    llm_max_tokens: int = field(default_factory=lambda: int(_env("LLM_MAX_TOKENS", "120")))
+    # 120 was chosen for the spoken turn (one or two sentences) and silently
+    # capped the *tool call* as well, which is the same completion. A
+    # ``submit_action`` carrying a ``BookAction`` measures 107 tokens on
+    # qwen3.6 and ``prepare_booking`` with a full ``Slot`` measures 150, so at
+    # 120 the model could never emit a booking at all: it was cut off mid-JSON
+    # on every attempt. Measured with scripts/rehearse_text.py.
+    llm_max_tokens: int = field(default_factory=lambda: int(_env("LLM_MAX_TOKENS", "320")))
     # Qwen3 hybrid builds think by default; a phone call cannot wait for that.
     llm_disable_thinking: bool = field(
         default_factory=lambda: (
