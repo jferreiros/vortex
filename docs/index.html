@@ -257,6 +257,20 @@
   }
   .journey .foot{margin-top:14px; font-size:.86rem; color:var(--muted); display:flex; flex-wrap:wrap; gap:6px 18px;}
   .journey .foot b{color:var(--ink); font-weight:600;}
+  .journey + .journey{margin-top:16px;}
+  @media (min-width:1100px){ .steps.wide{grid-template-columns:repeat(6,minmax(0,1fr));} }
+  .rulebox{display:grid; gap:8px; grid-template-columns:1fr; margin-top:14px;}
+  @media (min-width:760px){ .rulebox{grid-template-columns:repeat(2,minmax(0,1fr));} }
+  @media (min-width:1100px){ .rulebox{grid-template-columns:repeat(3,minmax(0,1fr));} }
+  .rulebox .verb .v{font-size:.95rem;}
+  .route{margin-top:16px; display:grid; gap:10px; grid-template-columns:1fr;}
+  @media (min-width:860px){ .route{grid-template-columns:1.2fr 1fr;} }
+  .route .col{background:var(--surface); border:1px solid var(--line); padding:14px 16px;}
+  .route h3{margin-bottom:8px;}
+  .route ul{margin:0; padding:0; list-style:none; display:flex; flex-direction:column; gap:7px; font-size:.9rem;}
+  .route li{padding-left:16px; position:relative; line-height:1.4; color:var(--muted);}
+  .route li::before{content:""; position:absolute; left:0; top:.55em; width:7px; height:7px; background:var(--lc, var(--ink)); border-radius:1px;}
+  .route .col b{color:var(--ink); font-weight:600;}
 
   /* ---------- problem map ---------- */
   .legend{display:flex; flex-wrap:wrap; gap:8px 16px; margin-bottom:14px; font-size:.8rem; color:var(--muted); align-items:center;}
@@ -581,7 +595,51 @@
     <div class="head">
       <span class="eyebrow">El recorrido</span>
       <h2>Así pasa una llamada por los cinco carriles</h2>
-      <p>Cada paso tiene el color de quien lo cubre. La Conversación no es un paso: envuelve toda la llamada.</p>
+      <p>Cada paso tiene el color de quien lo cubre. La Conversación no es un paso: envuelve toda la llamada. El dibujo se actualiza con cada tarea — la fuente es <span class="mono">docs/architecture.md</span>.</p>
+    </div>
+
+    <div class="journey">
+      <div class="band" data-lane="linea">
+        <b>La infraestructura</b>
+        <span>Ellos llaman. Nosotros no marcamos. Un pipeline nuevo por socket. Lo que POSTeamos es lo único que puntúa.</span>
+      </div>
+      <div class="steps wide">
+        <div class="step" data-lane="linea">
+          <span class="k">Dashboard</span>
+          <span class="t">La plataforma</span>
+          <span class="d">Settings → Integration. Esquema <span class="mono">wss://</span>, path <span class="mono">/ws</span>.</span>
+        </div>
+        <div class="step" data-lane="linea">
+          <span class="k">Borde</span>
+          <span class="t">Traefik · línea</span>
+          <span class="d">Prod: VPS, contenedor en :7860. Local: <span class="mono">make run</span> + túnel.</span>
+        </div>
+        <div class="step" data-lane="conv">
+          <span class="k">Por socket</span>
+          <span class="t">CallSession</span>
+          <span class="d">Voz stub o pipecat. Prompt y turnos. Nada compartido entre llamadas.</span>
+        </div>
+        <div class="step" data-lane="ident">
+          <span class="k">Tools</span>
+          <span class="t">identity · diary · rules</span>
+          <span class="d">Entran por <span class="mono">tools.py</span>. Datos tipados o un <span class="mono">Rejection</span>.</span>
+        </div>
+        <div class="step" data-lane="agenda">
+          <span class="k">Solo lectura</span>
+          <span class="t">API de la clínica</span>
+          <span class="d">Fixtures si no hay clave. Live con <span class="mono">PLATFORM_API_KEY</span>. Los ids salen de aquí.</span>
+        </div>
+        <div class="step" data-lane="linea">
+          <span class="k">Salida</span>
+          <span class="t">Submit + board</span>
+          <span class="d"><span class="mono">POST /submit/*</span> en 30 s. JSONL → <span class="mono">/wall</span> jurado, <span class="mono">/</span> equipo.</span>
+        </div>
+      </div>
+      <div class="foot">
+        <span><b>Endpoint prod:</b> <span class="mono">wss://line.203.0.113.20.sslip.io/ws</span></span>
+        <span><b>Wall:</b> <span class="mono">vortex.203.0.113.20.sslip.io/wall</span></span>
+        <span><b>Modo:</b> <span class="mono">GET /health</span> dice stub/fake o live.</span>
+      </div>
     </div>
 
     <div class="journey">
@@ -620,6 +678,15 @@
         <span><b>Cada carril prueba solo.</b> Tooling contra la API real sin voz. Pipeline contra stubs.</span>
         <span><b>Se juntan en el contrato</b>, no en una reunión.</span>
       </div>
+    </div>
+
+    <div class="rulebox">
+      <div class="verb"><span class="v">Nunca enviar nada</span><span class="p">Un rechazo correcto es NO_ACTION con su reason. Un agente caído y un no correcto no pueden parecer lo mismo.</span></div>
+      <div class="verb"><span class="v">Los ids salen de la API</span><span class="p">patient_id, appointment_id, appointment_type_id. Nunca de quien llama ni del modelo. Un carácter fuera falla el caso.</span></div>
+      <div class="verb"><span class="v">Nada compartido entre sockets</span><span class="p">Run All abre 10. El reto 2 abre 20. Un pipeline nuevo por conexión.</span></div>
+      <div class="verb"><span class="v">Europe/Madrid, desde mañana</span><span class="p">El reloj es el instante en que entra la llamada. Lo más pronto empieza el día siguiente. Sur cierra el viernes a mediodía; solo Centro el sábado; 12 de octubre toda la red.</span></div>
+      <div class="verb"><span class="v">La regla se lee, no se adivina</span><span class="p">blocked en el hueco es el reason que enviamos. El triaje es una tabla, no un juicio clínico. Cinco banderas rojas van a ESCALATE.</span></div>
+      <div class="verb"><span class="v">30 s · 3 min · un run</span><span class="p">Ventana de submit, techo de la llamada, un Run All a la vez. El ranking guarda el mejor, no el último.</span></div>
     </div>
   </section>
 
@@ -673,6 +740,29 @@
     </div>
     <div class="call warn">
       <b>Un reto que nadie marca puntúa igual que uno que falla.</b> Lee el mapa por delante. El carril que cubre un reto empieza antes de que se abra.
+    </div>
+
+    <div class="route">
+      <div class="col" data-lane="reglas">
+        <span class="eyebrow">Cómo se enruta</span>
+        <h3>El triaje es una búsqueda</h3>
+        <ul>
+          <li>Quien llama nombra un <b>síntoma</b>, no una especialidad. La tabla publicada decide. No es juicio clínico.</li>
+          <li>El tipo de cita sigue al historial (<span class="mono">first_visit</span> / <span class="mono">review</span>), no a la queja.</li>
+          <li>Cinco banderas rojas → <span class="mono">ESCALATE(medical_emergency)</span>. No se reserva nada: pecho + ahogo, cara caída / brazo / habla, no puede respirar, sangrado que no para, golpe en la cabeza + confusión y vómitos.</li>
+          <li>Las especialidades que piden derivación no entran en los casos de triaje.</li>
+        </ul>
+      </div>
+      <div class="col" data-lane="ident">
+        <span class="eyebrow">Lo que ya dimos por cerrado</span>
+        <h3>Identidad, póliza, sede</h3>
+        <ul>
+          <li>Un campo exacto que no cuadra <b>excluye</b>. Siempre un segundo campo. La letra del DNI se calcula.</li>
+          <li><span class="mono">from_number</span> es una pista. Quien llama muchas veces no es el paciente.</li>
+          <li>La primera póliza está en el directorio. La segunda solo existe si se pregunta. Se envía el <span class="mono">policy_id</span> contra el que se factura.</li>
+          <li>Sede más cercana: la más próxima que <b>pueda</b> atender. Si la más cerca no tiene hueco de esa especialidad, la siguiente.</li>
+        </ul>
+      </div>
     </div>
   </section>
 

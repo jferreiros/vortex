@@ -9,6 +9,10 @@ Every command below was run on 18 September against this repo. Python 3.12+
 and `uv` 0.9+ are the only prerequisites. `.python-version` pins 3.14; `uv`
 downloads it if missing.
 
+Read [`docs/architecture.md`](../../docs/architecture.md) once after clone:
+how the socket, the lanes, the routing and the 18 cases fit together. Update
+that file when you move the wiring.
+
 ## 1. Clone and install
 
 ```bash

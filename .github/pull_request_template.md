@@ -7,3 +7,4 @@
 - [ ] Every `patient_id`, `appointment_id` and `appointment_type_id` comes from the clinic API, never from the caller or the model.
 - [ ] Nothing is shared between sockets: no module-level session, conversation or in-flight `call_id`.
 - [ ] No `.env`, API key or `logs/*.jsonl` in the diff. CI is green, or I explain below why it must merge red.
+- [ ] If this change moves infra, routing, a case, a submit verb or a lane boundary, I updated `docs/architecture.md` and the diagrams in `docs/index.html` in this same diff.

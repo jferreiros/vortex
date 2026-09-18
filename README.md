@@ -76,6 +76,11 @@ platform ──ws──> line/server.py ── CallSession (per socket)
             observability/ logs/calls.jsonl (one JSON line per event, tagged call_id)
 ```
 
+The living picture — infra, routing, the 18 cases, the rules we already
+decided — is [`docs/architecture.md`](docs/architecture.md). Update it in the
+same change when the wiring moves. The team view of those diagrams is
+[`docs/index.html`](docs/index.html).
+
 Every lane function has this shape and is `async`:
 
 ```python

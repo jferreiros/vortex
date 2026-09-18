@@ -16,6 +16,7 @@ Read the skill that matches your task before you write code:
 | Skill | When |
 | --- | --- |
 | `setup` | Fresh clone: install, `.env`, smoke test, server, tunnel, endpoint, first practice call. Also `/setup` |
+| **`docs/architecture.md`** | **Always.** How the system is wired, how a call is routed, the 18 cases, the rules we already decided. If you move infra, routing, a case, a submit verb or a lane boundary, update that file and the diagrams in `docs/index.html` in the same change |
 | `the-challenge` | What is scored, the 18 problems, weights, `problem_id`, which are open |
 | `call-contract` | The WebSocket protocol, audio format, `call_id`, concurrency, time caps |
 | `submit-action` | The six submit routes, exact fields, the 18 `reason` values, response codes |
@@ -97,6 +98,10 @@ Each rule has a reason. The reason is the rule.
 7. **The API key belongs to the team and is never committed.** It is shown once at
    the desk and is not stored anywhere readable. A leaked key is a rotation at the
    desk for all five of us. `.env` is git-ignored. Keep it that way.
+8. **Keep the architecture picture true.** `docs/architecture.md` is the source.
+   The Spanish drawings live in `docs/index.html` (`#llamada`, the callouts on
+   `#retos`). Move a box, a rule, a case or a submit verb → update both in the
+   same change. A picture that lies is worse than no picture.
 
 ## Other things every lane shares
 
