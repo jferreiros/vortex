@@ -292,6 +292,30 @@ def wall_page() -> None:
     ui.timer(0.4, redraw)
 
 
+@ui.page("/call/{call_id}")
+def call_page(call_id: str) -> None:
+    """One call, by id — public, same chrome and body as /wall.
+
+    Unlike /wall (always the live/most-recent call), this looks up a specific
+    call_id. An id that matches nothing yet renders _wall_body's own empty
+    state — that *is* the placeholder, no separate one needed.
+    """
+    _apply_chrome()
+    ui.page_title(f"Vortex · {call_id}")
+    stage = ui.element("div").classes("shell")
+
+    def redraw() -> None:
+        events, health = _load_events()
+        cards = build_calls(events)
+        card = next((c for c in cards if c.call_id == call_id), None)
+        stage.clear()
+        with stage:
+            _wall_body(card, health is not None)
+
+    redraw()
+    ui.timer(0.4, redraw)
+
+
 @ui.page("/")
 def ops_page() -> None:
     _apply_chrome()
