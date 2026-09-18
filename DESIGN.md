@@ -275,7 +275,7 @@ looks different from the others, it is wrong, not different.
 | Surface | Who sees it | Code | How it loads the tokens |
 | --- | --- | --- | --- |
 | Jury wall, `/wall` | the jury, on a projector | `vortex/observability/live.py`, `board.css` | `ui.add_css(design.css)` then `board.css` |
-| Ops board, `/` (Calls), `/evals`, `/bench` | the team | same | same |
+| Console: `/` Overview, `/agents`, `/calls`, `/calls/live`, `/patients`, `/insights`, `/settings/*` | the team | `console.py`, `shell.py`, `live.py` | same |
 | One call, `/call/{id}` | the jury, a shared link | same | same |
 | Mic test, `/mic` on the line server | the team | `vortex/line/mic.html` | `<link href="/design.css">`, served by `server.py` |
 | Evals report | the team, CI artifact | `evals/common/report.py` | inlines `design.css` at render time |
@@ -506,6 +506,24 @@ The console (`live.py`) is built from these. Reuse them before you draw a new on
 - `.empty-state` with `.t` and `.d`: what will appear here and how to make it.
 - `.section-title` with `.t` and `.m`: a heading and a quiet count at the right.
 - `.facts`: the trust strip. Plain facts, bold values, no icons.
+
+### App shell
+
+Team pages live inside a sidebar shell (`shell.py`); public pages keep the
+top nav because a projector has no room for a sidebar.
+
+- `.app`: 240px sidebar plus content. Under 850px the sidebar becomes a
+  wrapping row and hides the clinic switcher, sub-items and the foot.
+- `.sidebar` with `.brand`, `.clinic-switcher`, `.nav-item` / `.on`,
+  `.nav-sub`, `.foot`. The active item is the page's black pill.
+- `.chip-preview` and `.preview-note`: the label for a roadmap or sample
+  surface. Never show sample data without one.
+- `.agent-card` / `.live` with `.role`, `.name`, `.summary`, `.kpis`.
+- `.bars` / `.bar-row` and `.hours`: Insights charts. A hairline track, an ink
+  fill, the count at the right. No chart library, no colour.
+- `.attn`: a "needs attention" row: dot, title and detail, time at the right.
+- `.def`: a definition list for settings. `.matrix td.yes` / `.no`.
+- `.cols-2`, `.cols-3`: section columns that stack under 1024px.
 
 ## Words
 
