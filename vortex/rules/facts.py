@@ -12,17 +12,28 @@ weekdays an individual doctor consults, which is a property of their diary and
 only ``/availability`` knows it. ``consulting_weekdays`` derives that from real
 slots when the caller has asked for it.
 
-The conversation lane is the consumer: ``fact_sheet()`` renders the whole thing
-compactly enough to sit in the system prompt for the length of a call.
+The ``clinic_facts`` tool is the consumer: ``answer()`` turns one question into
+a typed ``ClinicFacts`` the model reads back and then books against. The prompt
+carries no site facts of its own, so the only way to say "Centro opens on
+Saturday" is to have asked the catalogue. ``fact_sheet()`` renders the same
+data as prose for a screen or a log; it is not sent to the model.
 """
 
 from __future__ import annotations
 
+from datetime import date
+
 from vortex.contract import (
+    WEEKDAY_IDS,
     AvailabilityResponse,
     Catalogue,
+    ClinicFacts,
+    ClinicFactsInput,
     LocationRecord,
+    ProviderFact,
     ProviderRecord,
+    Rejection,
+    SiteFact,
     SpecialtyRecord,
 )
 
@@ -98,6 +109,77 @@ def consulting_weekdays(availability: AvailabilityResponse, provider_id: str) ->
     """
     return sorted(
         {slot.start.weekday() for slot in availability.slots if slot.provider_id == provider_id}
+    )
+
+
+def _provider_fact(provider: ProviderRecord, today: date) -> ProviderFact:
+    away = next((lv for lv in provider.leave if lv.date_from <= today <= lv.date_to), None)
+    return ProviderFact(
+        provider_id=provider.provider_id,
+        name=provider.name,
+        specialty_id=provider.specialty_id,
+        location_ids=list(provider.location_ids),
+        on_leave_until=away.date_to if away else None,
+    )
+
+
+def _site_fact(
+    catalogue: Catalogue, site: LocationRecord, specialty_id: str | None, today: date
+) -> SiteFact:
+    return SiteFact(
+        location_id=site.location_id,
+        name=site.name,
+        address=site.address,
+        open_days=[WEEKDAY_IDS[day] for day in open_weekdays(site)],
+        hours=sorted(site.hours, key=lambda h: (h.weekday, h.opens)),
+        providers=[
+            _provider_fact(p, today)
+            for p in providers_at(catalogue, site.location_id, specialty_id)
+        ],
+    )
+
+
+def answer(catalogue: Catalogue, args: ClinicFactsInput, today: date) -> ClinicFacts:
+    """One catalogue question, answered as typed data.
+
+    Each filter the caller gave narrows the sites: the one they named, the town
+    they said, the specialty they want, the day they can come. What is left is
+    the answer, with the people who sit at each site. Nothing is inferred: a
+    site is "open on Saturday" only if the catalogue lists Saturday hours for
+    it, and a doctor is "at Norte" only if their schedule says so.
+
+    The rejection is for the two filters that name a rule when they empty the
+    list: no site opens that day (``clinic_closed``) and no site has anybody in
+    that specialty (``type_not_offered``). A town or a site id that matches
+    nothing is simply an empty answer - no rule bit, the caller picks another.
+    """
+    sites = list(catalogue.locations)
+    if args.location_id:
+        sites = [s for s in sites if s.location_id == args.location_id]
+    if args.town:
+        found = site_by_town(catalogue, args.town)
+        sites = [s for s in sites if found is not None and s.location_id == found.location_id]
+    rejection: Rejection | None = None
+    if args.specialty_id:
+        serving = {s.location_id for s in sites_for_specialty(catalogue, args.specialty_id)}
+        sites = [s for s in sites if s.location_id in serving]
+        if not sites and not serving:
+            rejection = Rejection(
+                reason="type_not_offered",
+                detail=f"no site has anybody in {args.specialty_id}",
+            )
+    if args.weekday:
+        weekday = WEEKDAY_IDS.index(args.weekday)
+        sites = [s for s in sites if opens_on(s, weekday)]
+        if not sites and rejection is None:
+            rejection = Rejection(
+                reason="clinic_closed",
+                detail=f"no site matching the question opens on a {args.weekday}",
+            )
+    return ClinicFacts(
+        sites=[_site_fact(catalogue, s, args.specialty_id, today) for s in sites],
+        closure_days=list(catalogue.closure_days),
+        rejection=rejection,
     )
 
 

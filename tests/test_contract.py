@@ -123,6 +123,7 @@ SAMPLE_ARGS: dict[str, dict] = {
     "triage": {"complaint": "went over on my ankle"},
     "nearest_location": {"address": "Calle de Madrid 54, Getafe", "specialty_id": "orthopaedics"},
     "find_provider": {"spoken_name": "Sáez"},
+    "clinic_facts": {"weekday": "saturday"},
     "submit_action": {"action": {"kind": "no-action", "reason": "out_of_scope"}},
 }
 
