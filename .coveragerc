@@ -1,0 +1,9 @@
+# coverage.py settings. Read by `pytest --cov` and by the CI coverage job.
+# Kept outside pyproject.toml on purpose: tool config only, no build impact.
+[run]
+source = vortex
+# Paths relative to the repo root, so CI and the PR-comment action agree.
+relative_files = true
+
+[report]
+skip_empty = true
