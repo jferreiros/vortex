@@ -540,3 +540,107 @@ async def test_the_watcher_moves_the_state_before_the_voice_update(voice_setting
         settings.google_tts_voice_gl,
         "voice-1",
     ]
+
+
+async def test_a_short_ambiguous_turn_keeps_the_call_language(voice_settings) -> None:
+    """A turn with no hint and no markers must not flip the language mid-call.
+
+    The detector only has a memory of the call's language when the watcher
+    passes ``current=``. Without it an "ok" re-detects English and the voice
+    jumps back, mid-call, to the clinic's default.
+    """
+    pytest.importorskip("pipecat")
+    from pipecat.frames.frames import TranscriptionFrame
+    from pipecat.processors.frame_processor import FrameDirection
+
+    from vortex.line.pipecat_voice import _LanguageState, _LanguageWatcher
+
+    settings = voice_settings()
+    events: list[tuple[str, dict]] = []
+    pushed: list[object] = []
+    state = _LanguageState("es")
+    watcher = _LanguageWatcher(_session(settings, events), state)
+
+    async def capture(frame: object, direction: object = FrameDirection.DOWNSTREAM) -> None:
+        pushed.append(frame)
+
+    watcher.push_frame = capture  # type: ignore[method-assign]
+
+    def transcript(text: str) -> TranscriptionFrame:
+        # No ``language``: an untagged token, so the STT hint is absent.
+        return TranscriptionFrame(text=text, user_id="u", timestamp="t")
+
+    # "ok" votes for nothing: the call stays in Spanish, and nothing is pushed.
+    await watcher._maybe_switch(transcript("ok"))
+    assert state.language == "es"
+    assert events == []
+    assert pushed == []
+
+    # A real marker still switches: ``current`` is a fallback, not a lock.
+    await watcher._maybe_switch(transcript("bon dia"))
+    assert state.language == "ca"
+    assert [kind for kind, _ in events] == ["voice.language_switch"]
+    assert pushed[0].delta.voice == settings.google_tts_voice_ca
+
+
+async def test_the_idle_handler_speaks_the_prompt_in_the_call_language(voice_settings) -> None:
+    """A silent caller hears "are you still there?" in the language of the call.
+
+    The platform cuts a call that goes quiet, so the idle event has to speak.
+    The prompt is read at fire time, so a mid-call language switch moves it.
+    """
+    pytest.importorskip("pipecat")
+
+    from vortex.conversation.prompt import idle_prompt_for
+    from vortex.line.pipecat_voice import _LanguageState, _make_idle_speaker
+
+    settings = voice_settings()
+    events: list[tuple[str, dict]] = []
+    queued: list[object] = []
+
+    class Task:
+        async def queue_frames(self, frames: list[object]) -> None:
+            queued.extend(frames)
+
+    state = _LanguageState("es")
+    handler = _make_idle_speaker(_session(settings, events), state, Task())
+
+    await handler(None)
+    assert [kind for kind, _ in events] == ["voice.user_idle"]
+    assert [frame.text for frame in queued] == [idle_prompt_for("es")]
+
+    state.language = "ca"
+    await handler(None)
+    assert queued[-1].text == idle_prompt_for("ca")
+    assert [kind for kind, _ in events] == ["voice.user_idle"] * 2
+
+
+def test_vad_mode_wires_our_turn_strategies() -> None:
+    """In VAD mode the aggregator gets the conversation lane's strategies.
+
+    Without them it falls back to its defaults, which load the smart-turn v3
+    model and ignore ``enable_interruptions``. In Soniox mode the STT service
+    installs ``ExternalUserTurnStrategies`` itself, so nothing is passed.
+    """
+    pytest.importorskip("pipecat")
+    from pipecat.processors.aggregators.llm_response_universal import LLMUserAggregatorParams
+    from pipecat.turns.user_start import MinWordsUserTurnStartStrategy, VADUserTurnStartStrategy
+    from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
+    from pipecat.turns.user_turn_strategies import UserTurnStrategies
+
+    from vortex.conversation.turns import TurnSettings
+    from vortex.line.pipecat_voice import _user_aggregator_params
+
+    params = _user_aggregator_params(TurnSettings(soniox_turn_detection=False))
+    assert isinstance(params, LLMUserAggregatorParams)
+    assert isinstance(params.user_turn_strategies, UserTurnStrategies)
+    assert [type(s) for s in params.user_turn_strategies.start] == [
+        VADUserTurnStartStrategy,
+        MinWordsUserTurnStartStrategy,
+    ]
+    assert [type(s) for s in params.user_turn_strategies.stop] == [
+        SpeechTimeoutUserTurnStopStrategy
+    ]
+
+    soniox_params = _user_aggregator_params(TurnSettings())
+    assert soniox_params.user_turn_strategies is None
