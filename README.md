@@ -148,6 +148,14 @@ It matches issues by the `[T14]` prefix, so running it twice is safe. It never
 closes an issue and never touches an assignee: who took a task is decided in
 GitHub, not in a file.
 
+## Research
+
+`docs/research/` holds the September 2026 survey of the voice-agent market:
+noise filters, STT vendors, turn detection, industry launches, structured-data
+libraries and the Google/TTS stack. Start at
+[`docs/research/README.md`](docs/research/README.md): it ranks the moves by
+points per hour and says what the repo already has.
+
 ## Who touches what
 
 One folder per person. Touch your folder; ask before you touch another.
