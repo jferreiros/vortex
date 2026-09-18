@@ -1,0 +1,122 @@
+# Problem 15: the caller names a street address and needs the nearest site
+# that can actually serve the request. The call connects Friday 18 September
+# 2026, 09:00 Europe/Madrid.
+#
+# The four published cases (problem_id nearest_site) each come from a different
+# corner of Madrid and land on a different site: Puerta del Sol -> Centro,
+# Getafe -> Sur, Plaza de Castilla -> Norte, and Getafe again for the case where
+# the closest site cannot serve the specialty and the next one can -> Centro.
+# The organizers' live clinic has a different provider roster from our offline
+# fixtures, so each case keeps its published origin and its published winning
+# site, and picks the fixture specialty that site can actually serve.
+group: nearest_site
+now: "2026-09-18T09:00:00+02:00"
+
+scenarios:
+  - id: p15.sol_general_practice_centro
+    problem: 15
+    from_number: "+34612345678"
+    caller:
+      - says: "Hello. I'm right in the centre, at Calle de Preciados 3, by Puerta del Sol. Which of your clinics is closest to me?"
+        means: {request: {intent: book, specialty_id: general_practice, address: "Calle de Preciados 3, by Puerta del Sol"}}
+      - says: "It's Marta Ruiz. My date of birth is the twelfth of March, nineteen eighty-five."
+        means: {identify: {name: "Marta Ruiz", date_of_birth: "1985-03-12"}}
+      - says: "I'd like the earliest general practice appointment at whichever clinic is closest. It's to go over some blood test results."
+        means: {request: {intent: book, specialty_id: general_practice, complaint: "blood test results to go over"}}
+      - says: "Yes, that's fine."
+        means: {accept: true}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00042
+          provider_id: PR01
+          location_id: centro
+          appointment_type_id: review
+          policy_id: sanitas
+          slot: {$earliest_slot: {specialty_id: general_practice, location_id: centro, patient_id: P00042}}
+      # The action is what the leaderboard scores; require the tool that decides
+      # the site, and submit last. Otherwise leave the model room to order its calls.
+      trajectory_contains: [nearest_location, submit_action]
+      privacy_of: [P00042]
+      max_tool_calls: 16
+
+  - id: p15.getafe_physiotherapy_sur
+    problem: 15
+    from_number: "+34655555555"
+    caller:
+      - says: "Hello. I'm in Getafe, at Calle de Madrid 54. Which of your clinics is closest to me?"
+        means: {request: {intent: book, specialty_id: physiotherapy, address: "Calle de Madrid 54, Getafe"}}
+      - says: "It's Antonio Pérez Martín, born the thirtieth of January nineteen fifty-eight."
+        means: {identify: {name: "Antonio Pérez Martín", date_of_birth: "1958-01-30"}}
+      - says: "I'd like the earliest physiotherapy appointment at whichever of your clinics is closest, please."
+        means: {request: {intent: book, specialty_id: physiotherapy}}
+      - says: "Yes, that works."
+        means: {accept: true}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00200
+          location_id: sur
+          provider_id: PR06
+          appointment_type_id: review
+          policy_id: dkv
+          slot: {$earliest_slot: {specialty_id: physiotherapy, location_id: sur, patient_id: P00200}}
+      # Physiotherapy sits at Sur only, so availability decides the site even
+      # without nearest_location. The action still has to land at Sur.
+      trajectory_contains: [find_slots, submit_action]
+      privacy_of: [P00200]
+      max_tool_calls: 16
+
+  - id: p15.castellana_general_practice_norte
+    problem: 15
+    from_number: "+34612345678"
+    caller:
+      - says: "Hello. I'm at Paseo de la Castellana 189, at Plaza de Castilla. Which of your clinics is closest to me?"
+        means: {request: {intent: book, specialty_id: general_practice, address: "Paseo de la Castellana 189, at Plaza de Castilla"}}
+      - says: "It's Marta Ruiz, born the twelfth of March nineteen eighty-five."
+        means: {identify: {name: "Marta Ruiz", date_of_birth: "1985-03-12"}}
+      - says: "I'd like the earliest general practice appointment at whichever of your clinics is closest."
+        means: {request: {intent: book, specialty_id: general_practice}}
+      - says: "Yes, please."
+        means: {accept: true}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00042
+          provider_id: PR02
+          location_id: norte
+          appointment_type_id: review
+          policy_id: sanitas
+          slot: {$earliest_slot: {specialty_id: general_practice, location_id: norte, patient_id: P00042}}
+      # The action is what the leaderboard scores; require the tool that decides
+      # the site, and submit last. Otherwise leave the model room to order its calls.
+      trajectory_contains: [nearest_location, submit_action]
+      privacy_of: [P00042]
+      max_tool_calls: 16
+
+  - id: p15.getafe_paediatrics_skips_sur
+    problem: 15
+    from_number: "+34612345678"
+    caller:
+      - says: "Hello. We're in Getafe, at Calle de Madrid 54. Which of your clinics is closest to me? I need to book something for my son."
+        means: {request: {intent: book, specialty_id: paediatrics, address: "Calle de Madrid 54, Getafe"}}
+      - says: "My son is Lucas Ruiz López, born the twentieth of June two thousand and eighteen."
+        means: {identify: {name: "Lucas Ruiz López", date_of_birth: "2018-06-20"}}
+      - says: "The earliest paediatrics appointment at whichever of your clinics is closest, please."
+        means: {request: {intent: book, specialty_id: paediatrics}}
+      - says: "Yes, that's fine."
+        means: {accept: true}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00107
+          location_id: centro
+          provider_id: PR03
+          appointment_type_id: review
+          policy_id: sanitas
+          slot: {$earliest_slot: {specialty_id: paediatrics, location_id: centro, patient_id: P00107}}
+      # Paediatrics sits at Centro only. Sur is closer to Getafe but has nobody
+      # who sees children, so the booking has to land at Centro.
+      trajectory_contains: [find_slots, submit_action]
+      privacy_of: [P00107]
+      max_tool_calls: 18
