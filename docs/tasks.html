@@ -260,7 +260,7 @@
     const closed = it && it.state === "closed";
     const who = it && (it.assignees || [])[0];
     const href = it ? it.html_url : "https://github.com/" + REPO + "/issues?q=" + encodeURIComponent(t.id);
-    const probs = (t.problems || []).map(p => "#" + p).join(" · ");
+    const probs = (t.problems || []).join(" · ");  // no "#": it reads as an issue number
     const deps = (t.blocked_by || []).length ? '<span class="dep">espera a ' + t.blocked_by.join(", ") + "</span>" : "";
     const files = (t.files || []).length ? '<span class="files">' + esc(t.files.join("  ")) + "</span>" : "";
 
@@ -269,7 +269,7 @@
         + '<span class="id">' + t.id + "</span>"
         + '<span class="lane">' + esc(DATA.lanes[t.lane].name) + "</span>"
         + (t.kind === "infra" ? '<span class="infra">infra</span>' : "")
-        + (probs ? '<span class="size">reto ' + probs + "</span>" : "")
+        + (probs ? '<span class="size">' + (t.problems.length > 1 ? "retos " : "reto ") + probs + "</span>" : "")
         + (t.points ? '<span class="pts">+' + t.points + " pts</span>" : "")
         + '<span class="size">' + esc(t.size) + "</span>"
       + "</div>"
