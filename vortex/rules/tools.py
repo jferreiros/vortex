@@ -128,7 +128,7 @@ async def _patient(ctx: ToolContext, patient_id: str) -> PatientRecord | None:
         try:
             for match in await ctx.clinic.directory(phone=ctx.from_number):
                 remember_patient(ctx, match)
-        except Exception as exc:  # noqa: BLE001 - a directory hiccup must not lose the call
+        except Exception as exc:  # a directory hiccup must not lose the call
             ctx.log.event("rules.patient_lookup_failed", patient_id=patient_id, error=str(exc))
         record = recall_patient(ctx, patient_id)
 
@@ -147,7 +147,7 @@ async def _visits_this_year(ctx: ToolContext, patient_id: str) -> int | None:
     """Visits billed this calendar year, for a plan with a yearly allowance."""
     try:
         appointments = await ctx.clinic.appointments(patient_id, when="all")
-    except Exception:  # noqa: BLE001
+    except Exception:
         return None
     year = ctx.now.astimezone(MADRID).year
     return sum(1 for a in appointments if a.start.astimezone(MADRID).year == year)

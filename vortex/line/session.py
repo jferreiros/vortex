@@ -14,6 +14,7 @@ once the socket is gone. ``close()`` runs the 30-second-window logic.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -230,10 +231,8 @@ class CallSession:
         result = await registry.call_tool(name, self.ctx, raw_args)
         if name == SUBMIT_TOOL and isinstance(result, SubmitResult):
             self.submitted.append(result)
-            try:
+            with contextlib.suppress(ValidationError):  # pragma: no cover - already validated
                 self.sent_actions.append(SubmitInput.model_validate(raw_args).action)
-            except ValidationError:  # pragma: no cover - the registry validated it already
-                pass
         else:
             self.memory.observe(name, result)
         return result

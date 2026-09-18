@@ -215,7 +215,7 @@ async def geocode_live(
             if response.status_code >= 400:
                 return None
             hits = response.json()
-    except Exception:  # noqa: BLE001 - a geocoder outage must not lose the call
+    except Exception:  # a geocoder outage must not lose the call
         return None
     if not hits:
         return None

@@ -289,7 +289,7 @@ EVENT_TEXT: dict[str, str] = {
 def is_lifecycle(event: dict[str, Any]) -> bool:
     """True for the socket, submission and summary lines; false for turns and tools."""
     kind = str(event.get("kind") or "")
-    return not (kind.startswith("turn.") or kind.startswith("tool."))
+    return not kind.startswith(("turn.", "tool."))
 
 
 def event_text(event: dict[str, Any]) -> str:
