@@ -18,8 +18,10 @@ def offline_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> setting
         "SONIOX_API_KEY",
         "LLM_API_KEY",
         "LLM_BASE_URL",
-        "AZURE_SPEECH_KEY",
-        "DEEPGRAM_API_KEY",
+        "HELMCODE_API_KEY",
+        "CLOUDFLARE_API_TOKEN",
+        "VERCEL_AI_GATEWAY_KEY",
+        "ELEVENLABS_API_KEY",
     ):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("VORTEX_VOICE_MODE", "stub")
@@ -42,8 +44,10 @@ def _unset_dotenv_keys() -> None:
         "SONIOX_API_KEY",
         "LLM_API_KEY",
         "LLM_BASE_URL",
-        "AZURE_SPEECH_KEY",
-        "DEEPGRAM_API_KEY",
+        "HELMCODE_API_KEY",
+        "CLOUDFLARE_API_TOKEN",
+        "VERCEL_AI_GATEWAY_KEY",
+        "ELEVENLABS_API_KEY",
     ):
         os.environ.pop(key, None)
 

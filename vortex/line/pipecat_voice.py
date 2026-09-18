@@ -5,12 +5,15 @@
                     -> TTS (Google Cloud, Azure Neural or Deepgram Aura-2)
                     -> transport.output -> assistant aggregator
 
-Every provider is EU-hosted: Soniox for transcription, an OpenAI-compatible
-endpoint (IONOS / Nebius / Groq EU) running a small non-thinking Qwen for the
-model, and Google Cloud Text-to-Speech for the voice — the only one with
-Catalan, Galician *and* Basque. ``VORTEX_TTS_PROVIDER=azure`` swaps it for
-Azure Neural (es/ca), ``=deepgram`` for Aura-2 on Deepgram's EU endpoint
-(es only, no mid-call switch).
+Soniox transcribes, an OpenAI-compatible endpoint named by ``LLM_PROVIDER``
+answers, and the voice is Google Cloud Text-to-Speech — the only provider here
+with Catalan, Galician *and* Basque.
+
+Two TTS services can run at once. ``VORTEX_TTS_PROVIDER`` speaks Spanish and
+``VORTEX_TTS_PROVIDER_ALT`` speaks what the primary cannot, so
+``VORTEX_TTS_PROVIDER=elevenlabs`` with the default ``_ALT=google`` gives
+ElevenLabs Spanish and Google ca/gl/eu. When the two are the same (the
+default, google/google) there is one service and one voice-swap path.
 
 One pipeline per socket. The serializer takes the ``stream_sid`` of this call,
 the context takes this call's prompt, and every tool handler closes over this
@@ -25,8 +28,8 @@ smoke test runs, with the stub pipeline when the keys are missing.
 TODO(line):
 - Run one real call end to end once the four keys exist.
 - Confirm the 8 kHz µ-law path: serializer ``twilio_sample_rate=8000`` in, and
-  the TTS asked for 8 kHz PCM out (Google LINEAR16 @ 8000, Azure
-  Raw8Khz16BitMonoPcm). Check for choppy audio.
+  the TTS asked for 8 kHz PCM out (Google LINEAR16 @ 8000, ElevenLabs
+  ``pcm_8000``). Check for choppy audio.
 - Decide the idle policy: the platform cuts a call that goes quiet. Keep a
   user-idle prompt so the agent is never silent for long.
 - Hang up from our side when the agent says goodbye (send EndFrame, let the
@@ -146,7 +149,10 @@ async def run_pipecat_call(
         settings=llm_settings,
     )
 
-    tts = _make_tts(settings)
+    # The language this call is in, shared by the watcher that updates it and
+    # the router that reads it. Per call: a closure, never a module global.
+    language_state = _LanguageState()
+    tts = _make_tts_stage(settings, language_state)
 
     # ---- tools: every registry entry becomes a function the model can call ----
     def make_handler(tool_name: str):
@@ -194,9 +200,9 @@ async def run_pipecat_call(
 
     stages: list[Any] = [transport.input(), stt]
     if settings.tts_supports_language_switch:
-        # Google (es/ca/gl/eu) and Azure (es/ca) have a voice to switch to.
-        # Deepgram has one Spanish voice, so the watcher would be a no-op.
-        stages.append(_LanguageWatcher(session))
+        # Only worth a processor when the pair can say more than one language.
+        # ElevenLabs alone is Spanish-only, so the watcher would be a no-op.
+        stages.append(_LanguageWatcher(session, language_state))
     stages += [
         aggregators.user(),
         llm,
@@ -240,75 +246,148 @@ def _providers(settings: Any) -> dict[str, object]:
         "stt": f"soniox/{settings.soniox_stt_model}",
         "llm": settings.llm_model,
         "tts": settings.tts_provider,
+        "tts_alt": settings.tts_provider_alt,
     }
 
 
-def _make_tts(settings: Any) -> Any:
-    """Google Cloud by default; Azure Neural or Deepgram Aura-2 on request.
+class _LanguageState:
+    """The language this call is being spoken in, right now.
 
-    All three are asked for 8 kHz PCM: Google encodes LINEAR16 at that rate,
-    Azure maps it to ``Raw8Khz16BitMonoPcm``, and the Twilio serializer does
-    the µ-law companding on the way out.
+    One instance per call. The watcher writes it as the caller switches; the
+    router reads it to decide which TTS branch the next text frame belongs to.
+    Frames cross the pipeline in order, so a write from the watcher is always
+    visible to the router by the time the matching text arrives.
     """
-    if settings.tts_provider == "google":
-        # The HTTP service, not the streaming ``GoogleTTSService``: streaming
-        # only speaks Chirp 3 HD / Journey, and ca/gl/eu exist solely as
-        # Standard voices. The HTTP one takes both families, so a single
-        # service covers every language through a voice swap.
-        from pipecat.services.google.tts import GoogleHttpTTSService
 
-        voice, language = tts_voice_for(DEFAULT_LANGUAGE, settings)
-        return GoogleHttpTTSService(
-            # Inline JSON wins when both are set, matching pipecat's own order.
-            credentials=settings.google_tts_credentials_json or None,
-            credentials_path=settings.google_application_credentials or None,
+    __slots__ = ("language",)
+
+    def __init__(self, language: str = DEFAULT_LANGUAGE) -> None:
+        self.language = language
+
+
+def _make_tts_stage(settings: Any, state: _LanguageState) -> Any:
+    """One TTS service, or a router over two when primary and alternate differ."""
+    primary = _make_tts(settings, settings.tts_provider)
+    if not settings.tts_is_routed:
+        return primary
+    return _TTSRouter(settings, state, primary, _make_tts(settings, settings.tts_provider_alt))
+
+
+def _make_tts(settings: Any, provider: str | None = None) -> Any:
+    """Build one TTS service, asked for 8 kHz PCM.
+
+    Google encodes LINEAR16 at 8000; ElevenLabs maps the same rate to its
+    ``pcm_8000`` output format. The Twilio serializer does the µ-law companding
+    on the way out either way, so the wire format never changes with the
+    provider.
+    """
+    name = provider or settings.tts_provider
+    voice, language = tts_voice_for(DEFAULT_LANGUAGE, settings, name)
+    if not voice:
+        # Builds fine, then fails on every utterance. Say so once, loudly.
+        log.warning("TTS provider %s has no Spanish voice configured", name)
+
+    if name == "elevenlabs":
+        from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
+
+        return ElevenLabsTTSService(
+            api_key=settings.elevenlabs_api_key,
+            # A WebSocket origin, so an AI Gateway in front of ElevenLabs goes
+            # here. Empty keeps the service's own default.
+            **({"url": settings.elevenlabs_base_url} if settings.elevenlabs_base_url else {}),
             sample_rate=LINE_SAMPLE_RATE,
-            settings=GoogleHttpTTSService.Settings(voice=voice, language=language),
-        )
-
-    if settings.tts_provider == "azure":
-        from pipecat.services.azure.tts import AzureTTSService
-        from pipecat.transcriptions.language import Language
-
-        return AzureTTSService(
-            api_key=settings.azure_speech_key,
-            region=settings.azure_speech_region,
-            sample_rate=LINE_SAMPLE_RATE,
-            settings=AzureTTSService.Settings(
-                voice=settings.azure_tts_voice_es,
-                language=Language.ES_ES,
+            settings=ElevenLabsTTSService.Settings(
+                voice=voice,
+                model=settings.elevenlabs_model,
+                language=language,
             ),
         )
 
-    from pipecat.services.deepgram.tts import DeepgramTTSService
+    # The HTTP service, not the streaming ``GoogleTTSService``: streaming only
+    # speaks Chirp 3 HD / Journey, and ca/gl/eu exist solely as Standard
+    # voices. The HTTP one takes both families, so a single service covers
+    # every language through a voice swap.
+    from pipecat.services.google.tts import GoogleHttpTTSService
 
-    return DeepgramTTSService(
-        api_key=settings.deepgram_api_key,
-        # The streaming service wants a WebSocket origin; the env var holds the
-        # HTTP one so it reads like every other base URL.
-        base_url=_as_websocket_url(settings.deepgram_base_url),
+    return GoogleHttpTTSService(
+        # Inline JSON wins when both are set, matching pipecat's own order.
+        credentials=settings.google_tts_credentials_json or None,
+        credentials_path=settings.google_application_credentials or None,
         sample_rate=LINE_SAMPLE_RATE,
-        settings=DeepgramTTSService.Settings(voice=settings.deepgram_tts_model),
+        settings=GoogleHttpTTSService.Settings(voice=voice, language=language),
     )
 
 
-def _as_websocket_url(url: str) -> str:
-    if url.startswith("https://"):
-        return "wss://" + url[len("https://") :]
-    if url.startswith("http://"):
-        return "ws://" + url[len("http://") :]
-    return url
+def _TTSRouter(  # noqa: N802 - factory that returns a processor
+    settings: Any, state: _LanguageState, primary: Any, alternate: Any
+) -> Any:
+    """Route each spoken language to the service that can say it.
+
+    A ``ParallelPipeline`` with two branches, each fronted by a
+    ``FunctionFilter`` keyed on ``state.language``: the primary branch takes
+    every language in its capability set, the alternate branch takes the rest.
+    Only one branch is ever fed text, so only one branch produces audio.
+
+    Why the filters are shaped this way:
+
+    - ``FunctionFilter`` lets ``StartFrame``/``EndFrame``/``CancelFrame``
+      through unconditionally, so both services start, stop and cancel with the
+      pipeline even while idle.
+    - System frames are left unfiltered (``filter_system_frames`` off), so an
+      interruption reaches both services and neither is left mid-utterance.
+      ``ParallelPipeline`` de-duplicates by frame id on the way out, so a frame
+      that crossed both branches still leaves once.
+    - Everything that makes a TTS speak — ``TextFrame``, ``TTSSpeakFrame``, the
+      ``LLMFullResponse*`` brackets — is a data or control frame, so it is
+      gated, and the idle branch stays silent.
+    - ``TTSUpdateSettingsFrame`` is gated too, which is what makes the watcher
+      work unchanged: it writes the language first, so its voice update lands
+      on whichever branch is about to speak.
+
+    This is the same construction pipecat's own ``ServiceSwitcher`` uses
+    (``ParallelPipeline`` of filter + service). We key the filters on the
+    detected language directly instead of driving a switcher with
+    ``ManuallySwitchServiceFrame``: routing is a pure function of the language,
+    so a second source of truth about which service is "active" would only be
+    something else to keep in sync.
+    """
+    from pipecat.pipeline.parallel_pipeline import ParallelPipeline
+    from pipecat.processors.filters.function_filter import FunctionFilter
+    from pipecat.processors.frame_processor import FrameDirection
+
+    primary_languages = settings.tts_languages(settings.tts_provider)
+
+    async def to_primary(_frame: Any) -> bool:
+        return state.language in primary_languages
+
+    async def to_alternate(_frame: Any) -> bool:
+        return state.language not in primary_languages
+
+    def gate(fn: Any) -> Any:
+        # enable_direct_mode: the predicate is a set lookup, not worth a task.
+        return FunctionFilter(
+            filter=fn, direction=FrameDirection.DOWNSTREAM, enable_direct_mode=True
+        )
+
+    return ParallelPipeline([gate(to_primary), primary], [gate(to_alternate), alternate])
 
 
-def _LanguageWatcher(session: CallSession):  # noqa: N802 - factory that returns a processor
+def _LanguageWatcher(  # noqa: N802 - factory that returns a processor
+    session: CallSession, state: _LanguageState | None = None
+):
     """Switch the voice when the caller switches language.
 
     Soniox tags each transcription frame with the language it heard. When that
-    flips (es <-> ca / gl / eu on Google, es <-> ca on Azure) we push a
-    ``TTSUpdateSettingsFrame`` downstream; the TTS service applies the delta in
-    place, so the voice changes without rebuilding the pipeline. There is no
+    flips we write the new language into the shared ``_LanguageState`` and push
+    a ``TTSUpdateSettingsFrame`` downstream; the TTS service applies the delta
+    in place, so the voice changes without rebuilding the pipeline. There is no
     public ``update_settings()`` coroutine on ``TTSService`` in pipecat 1.11 —
     the control frame is the supported way in.
+
+    The voice comes from the provider that serves the new language, which is
+    the primary unless the alternate is the one that covers it. The state is
+    written *before* the frame is pushed, so when a router is in the pipeline
+    the update travels down the branch that is about to speak.
 
     ``TTSService._update_settings`` converts the pipecat ``Language`` we send
     into the provider's own code before storing it, which is what
@@ -321,10 +400,12 @@ def _LanguageWatcher(session: CallSession):  # noqa: N802 - factory that returns
     from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
     from pipecat.services.settings import TTSSettings
 
+    language_state = state if state is not None else _LanguageState()
+
     class LanguageWatcher(FrameProcessor):
         def __init__(self) -> None:
             super().__init__()
-            self._language = "es"
+            self._state = language_state
 
         async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
             await super().process_frame(frame, direction)
@@ -334,13 +415,19 @@ def _LanguageWatcher(session: CallSession):  # noqa: N802 - factory that returns
 
         async def _maybe_switch(self, frame: TranscriptionFrame) -> None:
             try:
+                settings = session.settings
                 language = detect_language(frame.text, hint=frame.language)
-                if language == self._language:
+                if language == self._state.language:
                     return
-                voice, tts_language = tts_voice_for(language, session.settings)
-                previous, self._language = self._language, language
+                provider = settings.tts_provider_for(language)
+                voice, tts_language = tts_voice_for(language, settings, provider)
+                previous, self._state.language = self._state.language, language
                 session.ctx.log.event(
-                    "voice.language_switch", was=previous, now=language, voice=voice
+                    "voice.language_switch",
+                    was=previous,
+                    now=language,
+                    voice=voice,
+                    provider=provider,
                 )
                 await self.push_frame(
                     TTSUpdateSettingsFrame(delta=TTSSettings(voice=voice, language=tts_language)),
