@@ -1,0 +1,277 @@
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap");
+
+:root {
+  --bg: #0b0d10;
+  --bg-2: #12151a;
+  --line: #262b33;
+  --ink: #e8eaed;
+  --muted: #8b939e;
+  --live: #3d8bfd;
+  --ok: #3dd68c;
+  --warn: #f5a524;
+  --bad: #ff5c5c;
+  --accent: #7aa2ff;
+}
+
+html,
+body,
+#app,
+.q-layout,
+.nicegui-content {
+  background: var(--bg) !important;
+  color: var(--ink);
+}
+
+body,
+.q-page,
+.nicegui-content {
+  font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif !important;
+  margin: 0;
+  padding: 0 !important;
+}
+
+.mono {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+}
+
+.shell {
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+.top {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-2);
+}
+
+.brand {
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 13px;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 6px;
+}
+
+.dot.live {
+  background: var(--live);
+  box-shadow: 0 0 0 4px #3d8bfd33;
+}
+
+.dot.up {
+  background: var(--ok);
+}
+
+.dot.down {
+  background: var(--bad);
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border: 1px solid var(--line);
+  padding: 4px 8px;
+  border-radius: 4px;
+  color: var(--muted);
+}
+
+.pill.live {
+  color: var(--live);
+  border-color: #3d8bfd66;
+}
+
+.pill.booked,
+.pill.registered,
+.pill.rescheduled,
+.pill.cancelled {
+  color: var(--ok);
+  border-color: #3dd68c55;
+}
+
+.pill.refused,
+.pill.escalated {
+  color: var(--warn);
+  border-color: #f5a52466;
+}
+
+.pill.ended {
+  color: var(--muted);
+}
+
+.grid3 {
+  display: grid;
+  grid-template-columns: 1.1fr 1.2fr 0.9fr;
+  gap: 1px;
+  background: var(--line);
+  min-height: calc(100vh - 58px);
+}
+
+.col {
+  background: var(--bg);
+  padding: 18px 20px;
+  overflow: auto;
+}
+
+.kicker {
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+.turn {
+  margin: 0 0 12px;
+  max-width: 36ch;
+}
+
+.turn.user {
+  margin-left: auto;
+}
+
+.bubble {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 14px;
+  line-height: 1.45;
+  background: var(--bg-2);
+}
+
+.turn.user .bubble {
+  background: #182033;
+  border-color: #2a3a5a;
+}
+
+.who {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.step {
+  display: grid;
+  grid-template-columns: 14px 1fr auto;
+  gap: 10px;
+  align-items: start;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.step:last-child {
+  border-bottom: 0;
+}
+
+.step .name {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.step .meta {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.chart-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 14px;
+}
+
+.chart-row span {
+  color: var(--muted);
+}
+
+.verdict {
+  margin-top: 18px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.verdict.live {
+  border-color: #3d8bfd88;
+  color: var(--live);
+}
+
+.verdict.ok {
+  border-color: #3dd68c88;
+  color: var(--ok);
+}
+
+.verdict.warn {
+  border-color: #f5a52488;
+  color: var(--warn);
+}
+
+.ops {
+  padding: 18px 20px 40px;
+}
+
+.ops-grid {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 16px;
+}
+
+.card {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 14px;
+}
+
+.call-row {
+  display: grid;
+  grid-template-columns: 16px 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+
+.call-row:hover {
+  background: #181c24;
+}
+
+.call-row.on {
+  background: #182033;
+}
+
+.empty {
+  color: var(--muted);
+  padding: 24px 0;
+}
+
+.q-btn {
+  border-radius: 4px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.04em;
+}
