@@ -24,9 +24,12 @@ What the docs say this lane must get right (clinic docs, "Calendar"):
 from __future__ import annotations
 
 from vortex import contract
+from vortex.clinic.client import ClinicApiError
 from vortex.contract import (
+    MADRID,
     AppointmentList,
     AvailabilityResult,
+    BookAction,
     BookingResult,
     CancelResult,
     FindSlotsInput,
@@ -34,6 +37,7 @@ from vortex.contract import (
     PrepareBookingInput,
     PrepareCancelInput,
     PrepareRescheduleInput,
+    Rejection,
     RescheduleResult,
     ResolveDateInput,
     ResolvedWindow,
@@ -75,11 +79,102 @@ async def list_appointments(ctx: ToolContext, args: ListAppointmentsInput) -> Ap
 async def prepare_booking(ctx: ToolContext, args: PrepareBookingInput) -> BookingResult:
     """Build the ``BookAction`` for a chosen slot, or reject it.
 
-    TODO(diary): reject a same-day slot, a slot outside the bookable window,
-    and a slot whose provider/location/type do not match the availability
-    answer that offered it.
+    Every id on the action is copied verbatim from the slot ``/availability``
+    offered: ``provider_id``, ``location_id``, ``appointment_type_id`` and the
+    ``slot`` timestamp itself. Nothing is renamed and nothing is rebuilt by
+    hand - the API compares ids exactly, so a hand-made type id fails even
+    when time and duration match.
+
+    Guards before building the action:
+
+    - Nothing is booked on the day of the call. "Earliest" starts tomorrow,
+      measured against ``ctx.now`` in Europe/Madrid, never the machine clock.
+    - The slot must sit inside the catalogue's bookable window and not on a
+      closure day.
+    - The exact slot (provider, location, type, start) must still appear in
+      the availability answer for that day and patient. A slot that is not
+      there was never offered, so booking it would report ids the clinic
+      does not recognise.
     """
-    return await contract.stub_prepare_booking(ctx, args)
+    today = ctx.now.astimezone(MADRID).date()
+    day = args.slot.start.astimezone(MADRID).date()
+    if day <= today:
+        return BookingResult(
+            rejection=Rejection(
+                reason="no_availability",
+                detail=f"same-day booking: slot {day} is not after the call day {today}",
+            )
+        )
+
+    catalogue = await ctx.clinic.catalogue()
+    if catalogue.bookable_from and day < catalogue.bookable_from:
+        return BookingResult(
+            rejection=Rejection(
+                reason="no_availability",
+                detail=f"slot {day} is before the bookable window opens "
+                f"({catalogue.bookable_from})",
+            )
+        )
+    if catalogue.bookable_to and day > catalogue.bookable_to:
+        return BookingResult(
+            rejection=Rejection(
+                reason="no_availability",
+                detail=f"slot {day} is after the bookable window closes ({catalogue.bookable_to})",
+            )
+        )
+    if day in catalogue.closure_days:
+        return BookingResult(
+            rejection=Rejection(
+                reason="clinic_closed",
+                detail=f"slot {day} falls on a closure day",
+            )
+        )
+
+    try:
+        availability = await ctx.clinic.availability(
+            date_from=day,
+            date_to=day,
+            provider_id=args.slot.provider_id,
+            location_id=args.slot.location_id,
+            patient_id=args.patient_id,
+        )
+    except ClinicApiError as exc:
+        return BookingResult(
+            rejection=Rejection(
+                reason="no_availability",
+                detail=f"availability re-check failed: {exc}",
+            )
+        )
+    offered = any(
+        slot.start == args.slot.start
+        and slot.provider_id == args.slot.provider_id
+        and slot.location_id == args.slot.location_id
+        and slot.appointment_type_id == args.slot.appointment_type_id
+        for slot in availability.slots
+    )
+    if not offered:
+        return BookingResult(
+            rejection=Rejection(
+                reason="no_availability",
+                detail=(
+                    f"slot {args.slot.start.isoformat()} with provider "
+                    f"{args.slot.provider_id} at {args.slot.location_id} "
+                    f"({args.slot.appointment_type_id}) is not in the "
+                    "availability answer for that day"
+                ),
+            )
+        )
+
+    return BookingResult(
+        action=BookAction(
+            patient_id=args.patient_id,
+            provider_id=args.slot.provider_id,
+            location_id=args.slot.location_id,
+            appointment_type_id=args.slot.appointment_type_id,
+            slot=args.slot.start,
+            policy_id=args.policy_id,
+        )
+    )
 
 
 async def prepare_reschedule(ctx: ToolContext, args: PrepareRescheduleInput) -> RescheduleResult:
