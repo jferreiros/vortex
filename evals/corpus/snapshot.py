@@ -37,7 +37,7 @@ from typing import Any
 
 from evals.corpus.catalogue import load
 from vortex.clinic.client import ClinicApiError, ClinicClient
-from vortex.settings import settings
+from vortex.settings import get_settings
 
 WORLD_DIR = Path(__file__).resolve().parent / "world"
 
@@ -51,7 +51,13 @@ CALENDAR_TO = date(2026, 10, 16)
 def _dump(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=1, default=str))
-    print(f"  {path.relative_to(WORLD_DIR.parent)}  ({path.stat().st_size // 1024} KiB)")
+    # --out may point anywhere, so fall back to the name when it is not under the
+    # default directory. A snapshot must never fail on its own progress line.
+    try:
+        shown: Path | str = path.relative_to(WORLD_DIR.parent)
+    except ValueError:
+        shown = path
+    print(f"  {shown}  ({path.stat().st_size // 1024} KiB)")
 
 
 def _named_patients() -> list[str]:
@@ -90,10 +96,12 @@ def _persona_lookups() -> list[dict[str, str]]:
 
 
 async def take(out_dir: Path = WORLD_DIR) -> int:
-    if not settings.has_platform_key:
+    settings = get_settings()
+    if not settings.clinic_is_live:
         print(
-            "PLATFORM_API_KEY is not set. The desk issues it once; put it in .env.\n"
-            "Without it this script cannot run and nothing else here needs it.",
+            "The clinic is not live. The desk issues PLATFORM_API_KEY once; put it and\n"
+            "PLATFORM_API_BASE_URL in .env. VORTEX_CLINIC_MODE=fake also forces this.\n"
+            "Without a live clinic this script cannot run; nothing else in evals needs it.",
             file=sys.stderr,
         )
         return 2

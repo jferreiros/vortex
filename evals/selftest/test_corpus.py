@@ -8,6 +8,7 @@ correction, change the table there and this test together.
 
 from __future__ import annotations
 
+import json
 from datetime import date, datetime
 
 import pytest
@@ -329,3 +330,58 @@ def test_the_probe_set_is_larger_than_the_published_roster() -> None:
     """The point of the layer: the private pool is drawn from a bigger space."""
     total = len(probes.date_probes()) + len(probes.triage_probes()) + len(probes.id_probes([]))
     assert total > 150
+
+
+# ---- the snapshot ------------------------------------------------------------
+
+
+def test_the_snapshot_refuses_without_a_live_clinic(monkeypatch) -> None:
+    """The refusal path is the one that runs on every machine but one."""
+    import asyncio
+
+    from evals.corpus import snapshot
+    from vortex.settings import reset_settings
+
+    monkeypatch.setenv("PLATFORM_API_KEY", "")
+    monkeypatch.setenv("VORTEX_CLINIC_MODE", "fake")
+    reset_settings()
+    try:
+        assert asyncio.run(snapshot.take()) == 2
+    finally:
+        reset_settings()
+
+
+def test_the_snapshot_writes_every_file_it_promises(monkeypatch, tmp_path) -> None:
+    """Run the whole body once against fake data.
+
+    The snapshot runs for real exactly once, at the desk, minutes after the key
+    arrives. Nothing else in the suite executes this file, so without this test
+    a typo in it is found at the worst possible moment.
+    """
+    import asyncio
+
+    from evals.corpus import snapshot
+    from vortex.clinic.client import FakeClinicClient
+    from vortex.settings import reset_settings
+
+    class Fake(FakeClinicClient):
+        def __init__(self, base_url: str, api_key: str, **kwargs: object) -> None:
+            super().__init__()
+
+    monkeypatch.setenv("PLATFORM_API_KEY", "pk-test")
+    monkeypatch.setenv("PLATFORM_API_BASE_URL", "http://fake.invalid")
+    monkeypatch.setenv("VORTEX_CLINIC_MODE", "live")
+    monkeypatch.setattr(snapshot, "ClinicClient", Fake)
+    reset_settings()
+    out = tmp_path / "world"
+    try:
+        assert asyncio.run(snapshot.take(out)) == 0
+    finally:
+        reset_settings()
+
+    for name in ("catalogue.json", "patients.json", "appointments.json", "manifest.json"):
+        assert (out / name).exists(), name
+    assert list((out / "availability").glob("*.json")), "no availability windows written"
+    manifest = json.loads((out / "manifest.json").read_text())
+    assert manifest["roster_sha256"] == load().sha256
+    assert manifest["specialties"], "the manifest names no specialties"
