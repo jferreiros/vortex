@@ -14,8 +14,6 @@ from nicegui.testing import User
 
 from vortex.observability.demo import write_scripted_call
 
-pytest_plugins = ["nicegui.testing.user_plugin"]
-
 
 @pytest.fixture
 def seeded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -61,3 +59,28 @@ async def test_calls_page_lists_and_filters(seeded: Path, user: User) -> None:
     await user.should_see("Calls")
     await user.should_see("Why not booked")
     await user.should_see("Andrés Ruiz")
+
+
+async def test_console_routes_render(seeded: Path, user: User) -> None:
+    for path, text in (
+        ("/", "Overview"),
+        ("/agents", "Scheduling"),
+        ("/agents/scheduling", "Tools it can call"),
+        ("/agents/reminders", "Preview"),
+        ("/agents/nope", "No agent with this name"),
+        ("/calls", "Why not booked"),
+        ("/calls/live", "Transcript"),
+        ("/patients", "Marta Ruiz López"),
+        ("/insights", "Why not booked"),
+        ("/settings", "Sites"),
+        ("/settings/rules", "Refusal reasons"),
+        ("/settings/integrations", "Telephony"),
+        ("/settings/engineering", "Evals"),
+    ):
+        await user.open(path)
+        await user.should_see(text)
+
+
+async def test_public_pages_mask_the_phone(seeded: Path, user: User) -> None:
+    await user.open("/wall")
+    await user.should_not_see("+34612345678")
