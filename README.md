@@ -27,7 +27,7 @@
 | vortex/observability/auth.py         |       33 |        6 |     82% |     26-31 |
 | vortex/observability/calllog.py      |       67 |       19 |     72% |42-44, 92, 111-121, 125-128 |
 | vortex/observability/demo.py         |       61 |       61 |      0% |     1-187 |
-| vortex/observability/live.py         |      487 |      487 |      0% |     8-737 |
+| vortex/observability/live.py         |      487 |      487 |      0% |     8-733 |
 | vortex/observability/view.py         |      230 |       28 |     88% |67, 69, 71, 73, 85, 87, 90, 111, 120, 130-131, 140, 150, 167, 181-182, 196-198, 200, 225-226, 250, 269-273 |
 | vortex/rules/eligibility.py          |      103 |       17 |     83% |84, 87, 120, 138, 142, 153, 231, 250, 261, 302-315, 321, 324-326 |
 | vortex/rules/facts.py                |       59 |        2 |     97% |  118, 120 |
