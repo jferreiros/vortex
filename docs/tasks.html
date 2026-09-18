@@ -270,7 +270,7 @@
         + '<span class="lane">' + esc(DATA.lanes[t.lane].name) + "</span>"
         + (t.kind === "infra" ? '<span class="infra">infra</span>' : "")
         + (probs ? '<span class="size">' + (t.problems.length > 1 ? "retos " : "reto ") + probs + "</span>" : "")
-        + (t.points ? '<span class="pts">+' + t.points + " pts</span>" : "")
+        + (t.weight ? '<span class="pts" title="peso ' + t.weight + ' x 4 casos privados por corrida">+' + (t.weight * (DATA.cases_per_run || 4)) + " pts</span>" : "")
         + '<span class="size">' + esc(t.size) + "</span>"
       + "</div>"
       + '<h3 class="title">' + esc(t.title) + "</h3>"
