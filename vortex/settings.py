@@ -60,15 +60,15 @@ class LlmPreset:
 # UNVERIFIED: Cloudflare's OpenAI-compatible path for Workers AI. The account id
 # is the one from the dashboard URL.
 CLOUDFLARE_LLM_BASE_URL = "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1"
-# UNVERIFIED: the Helmcode base URL. Confirm against
-# https://helmcode.com/docs/integrations before a real call.
+# Confirmed from https://helmcode.com/docs/integrations (18 Sep 2026).
 HELMCODE_BASE_URL = "https://api.helmcode.com/v1"
 
 LLM_PRESETS: dict[str, LlmPreset] = {
     # Bring your own endpoint: the three LLM_* variables and nothing else.
     "custom": LlmPreset("", "llm_api_key_env", "Qwen/Qwen3-30B-A3B-Instruct-2507"),
-    # Hackathon perk: 600M tokens. UNVERIFIED model id.
-    "helmcode": LlmPreset("", "helmcode_api_key", "glm-5.3"),
+    # Hackathon perk: 600M tokens. qwen3.6 = 35B MoE, 3B active, tool calling,
+    # fastest of their catalogue. Ids confirmed from helmcode.com/docs/models.
+    "helmcode": LlmPreset("", "helmcode_api_key", "qwen3.6"),
     # Hackathon perk: $100 of AI Gateway. UNVERIFIED model id.
     "cloudflare": LlmPreset(
         CLOUDFLARE_LLM_BASE_URL, "cloudflare_api_token", "@cf/qwen/qwen3-30b-a3b-fp8"
@@ -81,9 +81,10 @@ LLM_PRESETS: dict[str, LlmPreset] = {
 
 DEFAULT_LLM_PROVIDER = "helmcode"
 # The arbiter reads the whole call after the hangup, so it can afford a bigger
-# model than the one answering the phone. UNVERIFIED model id.
+# model than the one answering the phone. deepseek-v4-flash reasons on its own
+# schedule (cannot be switched off), which is fine after the hangup.
 DEFAULT_ARBITER_PROVIDER = "helmcode"
-DEFAULT_ARBITER_MODEL = "deepseek-v4"
+DEFAULT_ARBITER_MODEL = "deepseek-v4-flash"
 
 
 def _llm_provider(var: str, default: str) -> str:
@@ -149,6 +150,11 @@ class Settings:
         default_factory=lambda: (
             _env("LLM_DISABLE_THINKING", "true").lower() not in ("0", "false", "no")
         )
+    )
+    # Helmcode (and other OpenAI-style hosts) take ``reasoning_effort`` instead:
+    # "none" skips the reasoning phase on qwen3.6/gemma4. Empty sends nothing.
+    llm_reasoning_effort: str = field(
+        default_factory=lambda: _env("LLM_REASONING_EFFORT", "none").lower()
     )
 
     # --- Arbiter: the post-hangup submission judge ----------------------------

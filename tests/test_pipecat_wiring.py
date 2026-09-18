@@ -163,13 +163,17 @@ def test_service_settings_take_our_shape() -> None:
     )
     assert stt.language_hints == [Language.ES, Language.CA]
 
+    from vortex.line.pipecat_voice import _llm_extra_body
+    from vortex.settings import Settings
+
+    extra = _llm_extra_body(Settings())
     llm = OpenAILLMService.Settings(
-        model="glm-5.3",
-        temperature=0.2,
-        max_tokens=120,
-        extra={"chat_template_kwargs": {"enable_thinking": False}},
+        model="qwen3.6", temperature=0.2, max_tokens=120, extra=extra
     )
+    # Both dialects of "do not reason": vLLM's chat_template_kwargs and
+    # Helmcode's reasoning_effort. Hosts ignore the one they do not know.
     assert llm.extra["chat_template_kwargs"] == {"enable_thinking": False}
+    assert llm.extra["reasoning_effort"] == "none"
 
     google = GoogleHttpTTSService.Settings(voice="es-ES-Chirp3-HD-Aoede", language=Language.ES_ES)
     assert google.voice == "es-ES-Chirp3-HD-Aoede"

@@ -46,18 +46,19 @@ Every provider is picked with an environment variable, so swapping one is a
 the model id. `LLM_BASE_URL`, `LLM_API_KEY` and `LLM_MODEL` override it
 whenever they are set. Each preset reads its own key variable, so several can
 live in one `.env` and the switch is one line. `ARBITER_PROVIDER` (default
-`helmcode`, model `deepseek-v4`) resolves the same way for the post-hangup
+`helmcode`, model `deepseek-v4-flash`) resolves the same way for the post-hangup
 submission arbiter; nothing consumes it yet.
 
 | `LLM_PROVIDER` | Base URL | Key | Default model |
 | --- | --- | --- | --- |
 | `custom` | `LLM_BASE_URL` | `LLM_API_KEY` | `Qwen/Qwen3-30B-A3B-Instruct-2507` |
-| `helmcode` (default) | `HELMCODE_BASE_URL`, default `https://api.helmcode.com/v1` (UNVERIFIED) | `HELMCODE_API_KEY` | `glm-5.3` (UNVERIFIED) |
+| `helmcode` (default) | `HELMCODE_BASE_URL`, default `https://api.helmcode.com/v1` | `HELMCODE_API_KEY` | `qwen3.6` (also `deepseek-v4-flash`, `gemma4`, `glm5.3` add-on) |
 | `cloudflare` | `https://api.cloudflare.com/client/v4/accounts/<CLOUDFLARE_ACCOUNT_ID>/ai/v1` | `CLOUDFLARE_API_TOKEN` | `@cf/qwen/qwen3-30b-a3b-fp8` (UNVERIFIED) |
 | `vercel` | `https://ai-gateway.vercel.sh/v1` | `VERCEL_AI_GATEWAY_KEY` | `anthropic/claude-haiku-4.5` |
 
 UNVERIFIED means nobody has called that URL or model id yet. `LLM_TEMPERATURE`,
-`LLM_MAX_TOKENS` and `LLM_DISABLE_THINKING` apply to every preset.
+`LLM_MAX_TOKENS`, `LLM_DISABLE_THINKING` and `LLM_REASONING_EFFORT` (default
+`none`; Helmcode models reason by default otherwise) apply to every preset.
 
 ### TTS: a primary and an alternate
 

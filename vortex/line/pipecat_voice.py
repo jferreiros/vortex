@@ -138,10 +138,7 @@ async def run_pipecat_call(
         model=settings.llm_model,
         temperature=settings.llm_temperature,
         max_tokens=settings.llm_max_tokens,
-        # vLLM/SGLang read this off the request and skip the reasoning block.
-        extra={"chat_template_kwargs": {"enable_thinking": False}}
-        if settings.llm_disable_thinking
-        else {},
+        extra=_llm_extra_body(settings),
     )
     llm = OpenAILLMService(
         api_key=settings.llm_api_key,
@@ -271,6 +268,21 @@ def _make_tts_stage(settings: Any, state: _LanguageState) -> Any:
     if not settings.tts_is_routed:
         return primary
     return _TTSRouter(settings, state, primary, _make_tts(settings, settings.tts_provider_alt))
+
+
+def _llm_extra_body(settings: Any) -> dict[str, Any]:
+    """Request fields that turn reasoning off, for every host we might hit.
+
+    vLLM/SGLang read ``chat_template_kwargs.enable_thinking``; Helmcode reads
+    ``reasoning_effort`` ("none" skips the phase on qwen3.6/gemma4). Hosts
+    ignore the one they do not know.
+    """
+    extra: dict[str, Any] = {}
+    if settings.llm_disable_thinking:
+        extra["chat_template_kwargs"] = {"enable_thinking": False}
+    if settings.llm_reasoning_effort:
+        extra["reasoning_effort"] = settings.llm_reasoning_effort
+    return extra
 
 
 def _make_tts(settings: Any, provider: str | None = None) -> Any:

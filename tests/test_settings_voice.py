@@ -61,7 +61,7 @@ def test_helmcode_is_the_default_preset(clean_env) -> None:
     s = _settings(clean_env)
     assert s.llm_provider == "helmcode"
     assert s.llm_base_url == "https://api.helmcode.com/v1"
-    assert s.llm_model == "glm-5.3"
+    assert s.llm_model == "qwen3.6"
     assert s.llm_api_key == ""  # no key yet
 
 
@@ -131,7 +131,7 @@ def test_the_arbiter_resolves_like_the_llm(clean_env) -> None:
     assert s.arbiter_provider == "helmcode"
     assert s.arbiter_base_url == "https://api.helmcode.com/v1"
     assert s.arbiter_api_key == "helm-x"
-    assert s.arbiter_model == "deepseek-v4"
+    assert s.arbiter_model == "deepseek-v4-flash"
 
     s = _settings(
         clean_env,
