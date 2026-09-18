@@ -33,10 +33,16 @@ from evals.common.stubs import is_stub
 from evals.common.templating import render
 from evals.conversation.brains import make_brain, pick_brain
 from evals.conversation.brains.base import Trace
+from evals.conversation.brains.openai_brain import (
+    DEFAULT_OPENAI_MODEL,
+    CassetteMiss,
+    spec_for,
+)
 from evals.conversation.scenario import SCENARIOS_DIR, Scenario, load_scenarios
 from vortex.clinic.client import FakeClinicClient
 from vortex.contract import NoAction, SubmitInput
 from vortex.line.submit import submit_action
+from vortex.models import ModelSpec
 
 FALLBACK = NoAction(reason="out_of_scope")
 
@@ -69,8 +75,6 @@ async def play_once(
             await brain.hear(turn, trace)
         await brain.hangup(trace)
     except Exception as exc:
-        from evals.conversation.brains.openai_brain import CassetteMiss
-
         if isinstance(exc, CassetteMiss):
             result.status = "unverified"
             result.details.append(str(exc))
@@ -79,7 +83,13 @@ async def play_once(
             result.details.append(f"{type(exc).__name__}: {exc}")
             result.details.append(traceback.format_exc().strip().splitlines()[-1])
         result.duration_ms = int((time.monotonic() - started) * 1000)
-        result.extra = {"trajectory": trace.trajectory, "transcript": trace.transcript}
+        result.extra = {
+            "brain": brain_name,
+            "model": trace.model,
+            "trajectory": trace.trajectory,
+            "transcript": trace.transcript,
+            "llm_ms": trace.llm_ms,
+        }
         return result
 
     fallback_used = False
@@ -159,11 +169,14 @@ async def play_once(
     result.duration_ms = int((time.monotonic() - started) * 1000)
     result.extra = {
         "brain": brain_name,
+        "model": trace.model,
         "actions": actions,
         "trajectory": traj,
         "transcript": trace.transcript,
         "tool_calls": len(traj),
         "tokens": {"in": trace.tokens_in, "out": trace.tokens_out},
+        "llm_ms": trace.llm_ms,
+        "notes": trace.notes,
         "fallback_used": fallback_used,
     }
     return result
@@ -184,6 +197,7 @@ async def play(
     worst.cost_eur = sum(r.cost_eur for r in runs)
     worst.duration_ms = sum(r.duration_ms for r in runs)
     worst.extra["runs"] = [r.status for r in runs]
+    worst.extra["llm_ms"] = [ms for r in runs for ms in r.extra.get("llm_ms", [])]
     return worst
 
 
@@ -196,18 +210,27 @@ async def run_all(
     record: bool = False,
     results_dir: Path = RESULTS_DIR,
     scenarios_dir: Path = SCENARIOS_DIR,
+    spec: ModelSpec | None = None,
 ) -> RunResult:
     brain_name = pick_brain(brain)
     scenarios = load_scenarios(scenarios_dir, only=only)
+    kwargs: dict[str, Any] = {}
+    model_id = ""
+    if brain_name in ("openai", "replay", "model"):
+        kwargs = {"model": model, "record": record}
+        if spec is not None:
+            kwargs["spec"] = spec
+            model_id = spec.id
+        elif brain_name != "openai":
+            model_id = spec_for(model).id
+        else:
+            model_id = f"openai/{model or DEFAULT_OPENAI_MODEL}"
     run = RunResult(
         layer="conversation",
         started_at=now_stamp(),
-        mode={"brain": brain_name, "model": model or "", "repeat": repeat, "clinic": "fake"},
+        mode={"brain": brain_name, "model": model_id, "repeat": repeat, "clinic": "fake"},
         git=git_info(),
     )
-    kwargs: dict[str, Any] = {}
-    if brain_name in ("openai", "replay"):
-        kwargs = {"model": model, "record": record}
     started = time.monotonic()
     log_dir = results_dir / "conversation" / "calls"
     for scenario in scenarios:
@@ -217,7 +240,7 @@ async def run_all(
     if brain_name == "rules":
         run.notes.append(
             "Brain: rules (offline reference). This verifies the tools and the harness, "
-            "not the model. Set OPENAI_API_KEY or use --brain replay to test the model."
+            "not the model. Use --brain model for the runtime's model, or --brain replay."
         )
     if brain_name == "replay":
         run.notes.append(

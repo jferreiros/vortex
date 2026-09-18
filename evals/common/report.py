@@ -25,11 +25,13 @@ from evals.common.results import (
     load_previous,
 )
 
-LAYERS = ("logic", "conversation", "voice", "corpus")
+LAYERS = ("logic", "conversation", "voice", "corpus", "bench")
 LAYER_TITLES = {
     "logic": "Layer 1 · Logic (tools, no voice)",
     "conversation": "Layer 2 · Conversation (scripted callers, text)",
     "voice": "Layer 3 · Voice providers (latency, WER, cost)",
+    "corpus": "Layer 4 · Corpus (the organisers' roster and its surface)",
+    "bench": "Layer 5 · Model bench (same scenarios, every model)",
 }
 
 BADGE = {
@@ -157,8 +159,10 @@ def _md_layer(run: RunResult, prev: Diff, base: Diff) -> list[str]:
     lines.extend(_md_diff(prev))
     lines.extend(_md_diff(base))
     lines.append("")
+    if run.layer == "bench":
+        lines.extend(_md_bench(run))
     groups = _by_group(run)
-    if len(groups) > 1 and run.layer != "voice":
+    if len(groups) > 1 and run.layer not in ("voice", "bench"):
         lines.append("| group | pass | hollow | fail | other |")
         lines.append("| --- | ---: | ---: | ---: | ---: |")
         for g, ok, hol, bad, other in groups:
@@ -222,6 +226,78 @@ def _md_voice_table(run: RunResult) -> list[str]:
             "> **SIMULATED.** These numbers come from the fake provider. "
             "They prove the benchmark runs; they say nothing about real vendors."
         )
+    return lines
+
+
+def _fmt_ms(ms: float) -> str:
+    return f"{ms / 1000:.1f} s" if ms >= 1000 else f"{ms:.0f} ms"
+
+
+def _fmt_call_cost(block: dict[str, Any]) -> str:
+    value = block.get("list_cost_per_call_eur")
+    if value is None:
+        return "n/a"
+    text = f"{value:.3f} €"
+    return f"{text} (perk)" if block.get("perk") else text
+
+
+def bench_table(run: RunResult) -> str:
+    """The per-model matrix as markdown. The CLI prints it; the job summary carries it."""
+    models = run.summary.get("models") or []
+    lines = [
+        "| model | pass | weighted | p50 | p95 | rounds/scn | tokens in/scn "
+        "| no submit | cut | €/call (list) |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+    ]
+    for m in models:
+        if m.get("status") != "ran":
+            lines.append(f"| `{m['id']}` | skipped: {m.get('skip_reason', '')} | | | | | | | | |")
+            continue
+        lines.append(
+            f"| `{m['id']}` | {m['pass']}/{m['scenarios']} ({m['pass_rate'] * 100:.0f}%) "
+            f"| {m['weighted_pass_rate'] * 100:.0f}% | {_fmt_ms(m['llm_p50_ms'])} "
+            f"| {_fmt_ms(m['llm_p95_ms'])} | {m['llm_rounds_per_scenario']} "
+            f"| {m['tokens_in_per_scenario']:,} | {m['fallback_rate'] * 100:.0f}% "
+            f"| {m['cut_by_max_tokens']} | {_fmt_call_cost(m)} |"
+        )
+    return "\n".join(lines)
+
+
+def _md_bench(run: RunResult) -> list[str]:
+    lines = [bench_table(run), ""]
+    routing = run.summary.get("routing") or {}
+    rec = routing.get("recommended") or {}
+    cur = routing.get("current") or {}
+    if rec:
+        lines.append("| role | routed now (.env) | bench says | why |")
+        lines.append("| --- | --- | --- | --- |")
+        for role, block in rec.items():
+            now = cur.get(role, "?")
+            mark = "**change**" if block["id"] != now else "keep"
+            lines.append(f"| {role} | `{now}` | `{block['id']}` ({mark}) | {block['reason']} |")
+        lines.append("")
+    ran = [m for m in run.summary.get("models") or [] if m.get("status") == "ran"]
+    problems = sorted({p for m in ran for p in (m.get("by_problem") or {})}, key=int)
+    if ran and problems:
+        lines.append("Passes per problem (weight in the header):")
+        lines.append("")
+        head = " | ".join(
+            f"p{p} ·w{ran[0]['by_problem'][p]['weight']}" if p in ran[0]["by_problem"] else f"p{p}"
+            for p in problems
+        )
+        lines.append(f"| model | {head} |")
+        lines.append("| --- |" + " ---: |" * len(problems))
+        for m in ran:
+            cells = []
+            for p in problems:
+                row = (m.get("by_problem") or {}).get(p)
+                cells.append(f"{row['pass']}/{row['total']}" if row else "·")
+            lines.append(f"| `{m['id']}` | " + " | ".join(cells) + " |")
+        lines.append("")
+    note = run.summary.get("latency_note")
+    if note:
+        lines.append(f"> {note}")
+        lines.append("")
     return lines
 
 
@@ -369,9 +445,79 @@ def _html_diff(diff: Diff) -> str:
     return "".join(parts)
 
 
+def _html_bench(run: RunResult) -> str:
+    models = run.summary.get("models") or []
+    if not models:
+        return ""
+    head = (
+        "<tr><th>model</th><th>pass</th><th>weighted</th><th>p50</th><th>p95</th>"
+        "<th>rounds/scn</th><th>tokens in/scn</th><th>no submit</th><th>cut</th>"
+        "<th>€/call (list)</th></tr>"
+    )
+    rows = []
+    for m in models:
+        if m.get("status") != "ran":
+            rows.append(
+                f"<tr><td><b>{_h(m['id'])}</b><br><span class='detail'>{_h(m.get('label', ''))}"
+                f"</span></td><td colspan='9' class='detail'>skipped: "
+                f"{_h(m.get('skip_reason', ''))}</td></tr>"
+            )
+            continue
+        rows.append(
+            f"<tr><td><b>{_h(m['id'])}</b><br><span class='detail'>{_h(m.get('label', ''))}"
+            f"</span></td>"
+            f"<td class='num'>{m['pass']}/{m['scenarios']} ({m['pass_rate'] * 100:.0f}%)</td>"
+            f"<td class='num'>{m['weighted_pass_rate'] * 100:.0f}%</td>"
+            f"<td class='num'>{_fmt_ms(m['llm_p50_ms'])}</td>"
+            f"<td class='num'>{_fmt_ms(m['llm_p95_ms'])}</td>"
+            f"<td class='num'>{m['llm_rounds_per_scenario']}</td>"
+            f"<td class='num'>{m['tokens_in_per_scenario']:,}</td>"
+            f"<td class='num'>{m['fallback_rate'] * 100:.0f}%</td>"
+            f"<td class='num'>{m['cut_by_max_tokens']}</td>"
+            f"<td class='num'>{_h(_fmt_call_cost(m))}</td></tr>"
+        )
+    out = f"<h3>Model matrix</h3><table>{head}{''.join(rows)}</table>"
+    routing = run.summary.get("routing") or {}
+    rec = routing.get("recommended") or {}
+    cur = routing.get("current") or {}
+    if rec:
+        cells = []
+        for role, block in rec.items():
+            now = cur.get(role, "?")
+            verdict = "change" if block["id"] != now else "keep"
+            cells.append(
+                f"<div><b>{_h(role)}</b><br>now <code>{_h(now)}</code><br>"
+                f"bench says <code>{_h(block['id'])}</code> · {verdict}"
+                f"<br><span class='detail'>{_h(block['reason'])}</span></div>"
+            )
+        out += "<h3>Routing</h3><div class='diff'>" + "".join(cells) + "</div>"
+    ran = [m for m in models if m.get("status") == "ran"]
+    problems = sorted({p for m in ran for p in (m.get("by_problem") or {})}, key=int)
+    if ran and problems:
+        head = "<tr><th>model</th>" + "".join(f"<th>p{_h(p)}</th>" for p in problems) + "</tr>"
+        rows = []
+        for m in ran:
+            cells = []
+            for p in problems:
+                row = (m.get("by_problem") or {}).get(p)
+                if not row:
+                    cells.append("<td class='num detail'>·</td>")
+                    continue
+                cls = "ok" if row["pass"] == row["total"] else ("warn" if row["pass"] else "bad")
+                cells.append(
+                    f"<td class='num'><span class='{cls}'></span>{row['pass']}/{row['total']}</td>"
+                )
+            rows.append(f"<tr><td><code>{_h(m['id'])}</code></td>{''.join(cells)}</tr>")
+        out += f"<h3>Passes per problem</h3><table>{head}{''.join(rows)}</table>"
+    note = run.summary.get("latency_note")
+    if note:
+        out += f"<p class='detail'>{_h(note)}</p>"
+    return out
+
+
 def _html_groups(run: RunResult) -> str:
     groups = _by_group(run)
-    if len(groups) < 2 or run.layer == "voice":
+    if len(groups) < 2 or run.layer in ("voice", "bench"):
         return ""
     cells = []
     for g, ok, hol, bad, other in groups:
@@ -480,6 +626,7 @@ def _html_layer(run: RunResult, prev: Diff, base: Diff) -> str:
         f"<div class='diff'>{_html_diff(prev)}{_html_diff(base)}</div>"
         f"{_html_groups(run)}"
         f"{_html_voice(run) if run.layer == 'voice' else ''}"
+        f"{_html_bench(run) if run.layer == 'bench' else ''}"
         f"{failing_html}{table}"
     )
 
