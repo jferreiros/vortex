@@ -15,6 +15,7 @@ Event kinds written by the base:
 - ``tool.failed``      tool, error
 - ``submit.sent``      route, payload
 - ``submit.result``    status, http_status, detail
+- ``submit.fallback``  branch, why, route, skipped (the end-of-call fallback)
 - ``call.ended``       reason, media_frames_in, media_frames_out
 - ``call.summary``     turns, tools, actions, duration_ms
 
@@ -51,6 +52,9 @@ class CallLog:
         self.path = path
         self._started = time.monotonic()
         self.turns = 0
+        # Turns the caller took. The end-of-call fallback reads it to tell a
+        # call that said nothing from one that talked and resolved nothing.
+        self.user_turns = 0
         self.tool_calls = 0
         self.actions: list[dict[str, Any]] = []
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -70,6 +74,7 @@ class CallLog:
 
     def user_turn(self, text: str) -> None:
         self.turns += 1
+        self.user_turns += 1
         self.event("turn.user", text=text)
 
     def assistant_turn(self, text: str) -> None:
