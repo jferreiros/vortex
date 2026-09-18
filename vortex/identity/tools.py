@@ -49,6 +49,7 @@ from vortex.contract import (
     Rejection,
     ToolContext,
     ValidateNationalIdInput,
+    remember_patient,
 )
 
 _CHECK_LETTERS = "TRWAGMYFPDXBNJZSQVHLCKE"
@@ -438,9 +439,18 @@ async def _lookup(
     phone: str | None,
     date_of_birth: date | None,
 ) -> list[PatientRecord]:
-    return await ctx.clinic.directory(
+    """Every ``/directory`` query this lane makes, and the one place they land.
+
+    Whatever comes back is kept on the context: ``/directory`` has no lookup by
+    id, so this is the only way another lane holding a bare ``patient_id`` (the
+    rules lane, checking age and referrals) can get at the record.
+    """
+    found = await ctx.clinic.directory(
         name=name, national_id=national_id, phone=phone, date_of_birth=date_of_birth
     )
+    for record in found:
+        remember_patient(ctx, record)
+    return found
 
 
 async def find_patient(ctx: ToolContext, args: FindPatientInput) -> FindPatientResult:

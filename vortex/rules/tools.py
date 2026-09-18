@@ -53,6 +53,8 @@ from vortex.contract import (
     ToolContext,
     TriageInput,
     TriageResult,
+    recall_patient,
+    remember_patient,
 )
 from vortex.rules import eligibility, geo
 from vortex.rules import triage as triage_table
@@ -85,32 +87,59 @@ def _name_tokens(name: str) -> set[str]:
     return tokens - _TITLES
 
 
-#: Where this lane keeps the directory records it has already fetched. Per
-#: call, like everything on ``ToolContext``; never shared between sockets.
-PATIENT_CACHE_KEY = "rules.patients"
+#: Ids this call has already failed to place, so one miss costs one query and
+#: not one per rule. Per call, like everything on ``ToolContext``.
+PATIENT_MISSES_KEY = "rules.patient_misses"
+
+#: What rides on the verdict when the record never turned up. The refusal, if
+#: there is one, still comes from ``/availability``; this says which rules did
+#: not get a chance to speak.
+NO_RECORD_NOTE = (
+    "no directory record for this patient on this call: age, referral and "
+    "allowance rules stood down and /availability answered alone"
+)
 
 
 async def _patient(ctx: ToolContext, patient_id: str) -> PatientRecord | None:
     """The directory record behind a ``patient_id``. Age and referrals live on it.
 
-    ``/directory`` searches on what the caller said, not on an id, so there is
-    no lookup-by-id to call: the whole directory is asked for and the id picked
-    out of it. Returning ``None`` is safe — the derived patient rules simply
-    stand down and ``/availability`` answers on its own, which is what happens
-    live anyway because the availability query carries ``patient_id``.
+    ``GET /api/v1/directory`` takes ``name``, ``national_id``, ``phone`` or
+    ``date_of_birth`` and nothing else: there is no lookup by id, and a
+    parameter-less call is a ``422``, not the whole directory. So the record is
+    got from a query somebody already made — identity's ``find_patient``, which
+    every call runs before there is a ``patient_id`` to pass here at all, and
+    which stashes what it fetched on the context.
 
-    TODO(identity): ``find_patient`` already holds this record. Stashing it in
-    ``ctx.state`` would save this call; see the lane report.
+    Failing that (a tool called cold, an id from somewhere else), the one query
+    this lane can build from call context alone is the number that dialled in.
+    It is exact, so a hit is the record for *this* id or nothing.
+
+    ``None`` is safe, never fatal: the rules read off the record stand down and
+    ``/availability?patient_id=`` answers on its own — it applies the same age
+    and referral rules server-side and names them in ``blocked``. It is logged
+    and noted on the verdict so a stood-down rule is visible, not silent.
     """
-    cache = ctx.state.setdefault(PATIENT_CACHE_KEY, {})
-    if patient_id in cache:
-        return cache[patient_id]
-    try:
-        matches = await ctx.clinic.directory()
-    except Exception:  # noqa: BLE001 - a directory hiccup must not lose the call
-        return None
-    record = next((p for p in matches if p.patient_id == patient_id), None)
-    cache[patient_id] = record
+    record = recall_patient(ctx, patient_id)
+    if record is not None:
+        return record
+
+    misses: list[str] = ctx.state.setdefault(PATIENT_MISSES_KEY, [])
+    if patient_id not in misses and ctx.from_number:
+        try:
+            for match in await ctx.clinic.directory(phone=ctx.from_number):
+                remember_patient(ctx, match)
+        except Exception as exc:  # noqa: BLE001 - a directory hiccup must not lose the call
+            ctx.log.event("rules.patient_lookup_failed", patient_id=patient_id, error=str(exc))
+        record = recall_patient(ctx, patient_id)
+
+    if record is None:
+        if patient_id not in misses:
+            misses.append(patient_id)
+        ctx.log.event(
+            "rules.patient_missing",
+            patient_id=patient_id,
+            searched_phone=bool(ctx.from_number),
+        )
     return record
 
 
@@ -170,6 +199,11 @@ def _refuse(reason: DeclineReason, detail: str, redirect_to=None) -> Eligibility
     )
 
 
+def _noted(verdict: EligibilityVerdict, note: str) -> EligibilityVerdict:
+    """Carry what the verdict could not check out to the caller."""
+    return verdict.model_copy(update={"note": note}) if note else verdict
+
+
 async def check_eligibility(ctx: ToolContext, args: CheckEligibilityInput) -> EligibilityVerdict:
     """Can this patient book this specialty/provider/site under this plan?
 
@@ -194,6 +228,9 @@ async def check_eligibility(ctx: ToolContext, args: CheckEligibilityInput) -> El
     today = ctx.now.astimezone(MADRID).date()
     catalogue = await ctx.clinic.catalogue()
     patient = await _patient(ctx, args.patient_id)
+    # A missing record is not a refusal — it is a verdict with a hole in it, and
+    # every answer below says so rather than passing quietly.
+    note = "" if patient else NO_RECORD_NOTE
     plan = eligibility.resolve_plan(catalogue, patient, args.insurer)
 
     visits = None
@@ -210,7 +247,7 @@ async def check_eligibility(ctx: ToolContext, args: CheckEligibilityInput) -> El
         visits_this_year=visits,
     )
     if verdict:
-        return _refuse(verdict.reason, verdict.detail, verdict.redirect_to)
+        return _noted(_refuse(verdict.reason, verdict.detail, verdict.redirect_to), note)
 
     availability = await ctx.clinic.availability(
         date_from=today + timedelta(days=1),
@@ -224,10 +261,13 @@ async def check_eligibility(ctx: ToolContext, args: CheckEligibilityInput) -> El
 
     blocked = _blocked_reason(availability, args.provider_id)
     if blocked is not None:
-        return _refuse(
-            blocked.reason,
-            blocked.detail or "the clinic's availability named this rule",
-            _redirect(catalogue, args, blocked, plan),
+        return _noted(
+            _refuse(
+                blocked.reason,
+                blocked.detail or "the clinic's availability named this rule",
+                _redirect(catalogue, args, blocked, plan),
+            ),
+            note,
         )
 
     provider = next((p for p in catalogue.providers if p.provider_id == args.provider_id), None)
@@ -240,11 +280,11 @@ async def check_eligibility(ctx: ToolContext, args: CheckEligibilityInput) -> El
         today=today,
     )
     if verdict:
-        return _refuse(verdict.reason, verdict.detail, verdict.redirect_to)
+        return _noted(_refuse(verdict.reason, verdict.detail, verdict.redirect_to), note)
 
     if availability.slots:
-        return EligibilityVerdict(allowed=True)
-    return _refuse("no_availability", "nothing free in the window the clinic offers")
+        return _noted(EligibilityVerdict(allowed=True), note)
+    return _noted(_refuse("no_availability", "nothing free in the window the clinic offers"), note)
 
 
 async def triage(ctx: ToolContext, args: TriageInput) -> TriageResult:

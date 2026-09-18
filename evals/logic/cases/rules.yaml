@@ -54,33 +54,46 @@ cases:
     expect: {status: found, provider: {provider_id: PR06, name: "D. Álvaro Cid"}}
 
   # ---- check_eligibility: age, referral, the insurance matrix --------------
+  # Each of these carries the ``from_number`` the patient would be calling
+  # from. It is not decoration: ``/directory`` has no lookup by id, so a bare
+  # ``patient_id`` with no call behind it cannot be placed, and the rules that
+  # read the record (age, referral, allowance) have nothing to read. On a real
+  # call identity has already fetched the record and left it on the context;
+  # here the line is what stands in for it. A case run without one exercises
+  # the missing-record path instead, which is what live behaviour was before
+  # the lookup was fixed.
   - id: rules.age.child_cannot_book_general_practice
     problem: 6
     tool: check_eligibility
+    from_number: "+34612345678"
     args: {patient_id: P00107, specialty_id: general_practice}
     expect: {allowed: false, rejection: {reason: not_eligible_age}}
 
   - id: rules.age.child_books_paediatrics
     problem: 10
     tool: check_eligibility
+    from_number: "+34612345678"
     args: {patient_id: P00107, specialty_id: paediatrics}
     expect: {allowed: true, rejection: {$absent: true}}
 
   - id: rules.age.adult_cannot_book_paediatrics
     problem: 6
     tool: check_eligibility
+    from_number: "+34612345678"
     args: {patient_id: P00042, specialty_id: paediatrics}
     expect: {allowed: false, rejection: {reason: not_eligible_age}}
 
   - id: rules.referral.dermatology_without_referral
     problem: 6
     tool: check_eligibility
+    from_number: "+34612345678"
     args: {patient_id: P00042, specialty_id: dermatology}
     expect: {allowed: false, rejection: {reason: referral_required}}
 
   - id: rules.referral.dermatology_with_referral_but_dkv_refused_by_iglesias
     problem: 6
     tool: check_eligibility
+    from_number: "+34655555555"
     # Antonio holds the referral and DKV. Dra. Iglesias refuses DKV: a redirect, not a refusal.
     args: {patient_id: P00200, specialty_id: dermatology, provider_id: PR04}
     expect: {allowed: false, rejection: {reason: provider_not_in_network}}
@@ -88,24 +101,28 @@ cases:
   - id: rules.insurance.control_case_books_normally
     problem: 6
     tool: check_eligibility
+    from_number: "+34612345678"
     args: {patient_id: P00042, specialty_id: general_practice, provider_id: PR01, insurer: sanitas}
     expect: {allowed: true}
 
   - id: rules.insurance.adeslas_covers_no_gynaecology
     problem: 6
     tool: check_eligibility
+    from_number: "+34699000111"
     args: {patient_id: P00043, specialty_id: gynaecology, insurer: adeslas}
     expect: {allowed: false, rejection: {reason: specialty_not_covered}}
 
   - id: rules.insurance.asisa_physio_only_where_there_is_no_physio
     problem: 6
     tool: check_eligibility
+    from_number: "+34612345678"
     args: {patient_id: P00042, specialty_id: physiotherapy, location_id: sur, insurer: asisa}
     expect: {allowed: false, rejection: {reason: location_not_covered}}
 
   - id: rules.insurance.second_policy_unlocks_the_booking
     problem: 17
     tool: check_eligibility
+    from_number: "+34655555555"
     # DKV is refused by the dermatologist; naming Sanitas as the plan makes it bookable.
     args: {patient_id: P00200, specialty_id: dermatology, provider_id: PR04, insurer: sanitas}
     expect: {allowed: true}
@@ -113,6 +130,7 @@ cases:
   - id: rules.insurance.privado_is_never_a_fallback
     problem: 6
     tool: check_eligibility
+    from_number: "+34699000111"
     # Marta holds Sanitas only. Quoting self-pay for her is inventing a plan.
     args: {patient_id: P00043, specialty_id: gynaecology, insurer: privado}
     expect: {allowed: false}
@@ -147,6 +165,7 @@ cases:
     # The five insurance reasons are the cue to ask for a second policy. This
     # one must be one of them, never a bare no_availability.
     tool: check_eligibility
+    from_number: "+34699000111"
     args: {patient_id: P00043, specialty_id: gynaecology}
     expect:
       allowed: false
@@ -160,6 +179,7 @@ cases:
     # Marta's own plan covers this. Naming a second one must not be needed,
     # and the verdict must not be a refusal waiting for one.
     tool: check_eligibility
+    from_number: "+34612345678"
     args: {patient_id: P00042, specialty_id: general_practice, insurer: sanitas}
     expect: {allowed: true, rejection: {$absent: true}}
 
@@ -168,6 +188,7 @@ cases:
     problem: 6
     # The child case is a redirect, not a dead end: paediatrics can see him.
     tool: check_eligibility
+    from_number: "+34612345678"
     args: {patient_id: P00107, specialty_id: general_practice}
     expect:
       allowed: false
@@ -177,6 +198,7 @@ cases:
   - id: rules.redirect.provider_on_leave_offers_the_rest_of_his_site
     problem: 3
     tool: check_eligibility
+    from_number: "+34612345678"
     args: {patient_id: P00042, specialty_id: general_practice, provider_id: PR07}
     expect:
       allowed: false
@@ -187,6 +209,7 @@ cases:
   - id: rules.control.adult_books_general_practice_at_any_site
     problem: 6
     tool: check_eligibility
+    from_number: "+34612345678"
     args: {patient_id: P00042, specialty_id: general_practice}
     expect: {allowed: true, rejection: {$absent: true}}
 
@@ -195,6 +218,7 @@ cases:
     # Antonio holds the dermatology referral. Quoting a plan the dermatologist
     # takes leaves nothing to refuse.
     tool: check_eligibility
+    from_number: "+34655555555"
     args: {patient_id: P00200, specialty_id: dermatology, insurer: sanitas}
     expect: {allowed: true, rejection: {$absent: true}}
 
@@ -203,6 +227,7 @@ cases:
     # ASISA covers Centro. No physiotherapist sits there, so this is an empty
     # calendar, not an insurance refusal.
     tool: check_eligibility
+    from_number: "+34612345678"
     args: {patient_id: P00042, specialty_id: physiotherapy, location_id: centro, insurer: asisa}
     expect: {allowed: false, rejection: {reason: no_availability}}
 
@@ -211,6 +236,7 @@ cases:
     # The catalogue has ten plans; the fixtures have five. A plan we do not
     # hold a record for must not be turned into a refusal we invented.
     tool: check_eligibility
+    from_number: "+34612345678"
     args: {patient_id: P00042, specialty_id: general_practice, insurer: mapfre}
     expect: {allowed: true}
 

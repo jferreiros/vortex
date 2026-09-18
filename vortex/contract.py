@@ -461,6 +461,26 @@ class ToolContext:
     state: dict[str, Any] = field(default_factory=dict)
 
 
+#: Where every lane keeps the directory records this call has already fetched,
+#: keyed by ``patient_id``. ``GET /api/v1/directory`` searches on ``name``,
+#: ``national_id``, ``phone`` or ``date_of_birth`` and on nothing else — there
+#: is no lookup by id — so a record can only come from a query somebody already
+#: made. Identity's is the one every call makes, which is why it fills this.
+PATIENT_RECORDS_KEY = "patients.by_id"
+
+
+def remember_patient(ctx: ToolContext, record: PatientRecord) -> None:
+    """Keep a directory record for the rest of this call. JSON-safe, per socket."""
+    known = ctx.state.setdefault(PATIENT_RECORDS_KEY, {})
+    known[record.patient_id] = record.model_dump(mode="json")
+
+
+def recall_patient(ctx: ToolContext, patient_id: str) -> PatientRecord | None:
+    """The record behind an id, if this call has already seen it."""
+    raw = ctx.state.get(PATIENT_RECORDS_KEY, {}).get(patient_id)
+    return PatientRecord.model_validate(raw) if raw else None
+
+
 # ---------------------------------------------------------------------------
 # 5. Tool inputs and outputs, lane by lane
 # ---------------------------------------------------------------------------
@@ -609,6 +629,10 @@ class EligibilityVerdict(BaseModel):
     rejection: Rejection | None = None
     # Providers that can serve the same request when the named one cannot.
     redirect_to: list[ProviderRecord] = Field(default_factory=list)
+    # What the verdict could not be sure of. Set when the directory record was
+    # not in hand, so the rules read off it (age, referral, allowance) stood
+    # down and only /availability answered. Never a refusal on its own.
+    note: str = ""
 
 
 class TriageInput(BaseModel):
