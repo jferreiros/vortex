@@ -23,8 +23,15 @@ from pathlib import Path
 # The CLI paints its output and links each finding with an OSC-8 escape.
 ANSI = re.compile(r"(?:\x1B|\^)\[[0-9;?]*[A-Za-z]|(?:\x1B|\^)\]8;;[^\x07\a]*(?:\x07|\a|\^G)")
 HEAD = re.compile(r"^\s{2}(critical|major|minor)\s+\[([^\]]+)\]\s*$")
-# The link holds the only unescaped copy of the path: .../vortex/vortex/<path>:<line>
-LOC = re.compile(r"vortex/vortex/(.+?):(\d+)")
+# Two shapes, because the workflow strips the colour codes before we read the
+# file. With the OSC-8 link intact the path lives in the vscode:// target; once
+# it is stripped only the plain arrow line is left. Match either, link first.
+LOC_LINK = re.compile(r"vortex/vortex/(.+?):(\d+)")
+LOC_ARROW = re.compile(r"^\s*\u2192\s*(\S+?):(\d+(?:-\d+)?)\s*$")
+
+# A finding against a fragment inside a design note is not a defect in the
+# product. Filing those buries the real ones.
+SKIP_PREFIXES = ("docs/",)
 LABEL = "coderabbit"
 WANTED = ("major", "critical")
 
@@ -44,13 +51,14 @@ def parse(text: str) -> list[dict[str, str]]:
         while i < len(lines) and not HEAD.match(lines[i]):
             if lines[i].strip().startswith("Review complete"):
                 break
-            found = LOC.search(lines[i])
-            if found and location is None:
-                location = f"{found.group(1)}:{found.group(2)}"
+            found = LOC_LINK.search(lines[i]) or LOC_ARROW.match(lines[i])
+            if found:
+                if location is None:
+                    location = f"{found.group(1)}:{found.group(2)}"
             elif lines[i].strip() and "vscode://" not in lines[i]:
                 body.append(lines[i].strip())
             i += 1
-        if severity in WANTED:
+        if severity in WANTED and not (location or "").startswith(SKIP_PREFIXES):
             out.append(
                 {
                     "severity": severity,
