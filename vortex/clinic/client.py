@@ -531,14 +531,20 @@ class FakeClinicClient:
         date_of_birth: date | None = None,
     ) -> list[PatientRecord]:
         # NOT enforcing ``check_directory_query`` here is deliberate, and it is
-        # the one place this client is more permissive than the platform.
-        # ``rules._patient()`` looks a record up by id with a parameter-less
-        # ``directory()``, which the platform answers with 422 -- there is no
-        # lookup by id. Offline that call returns the whole set; live it raises
-        # and the caller reads ``None``, so every rule derived from the record
-        # (age, referral, allowance) stands down on a live call and
-        # ``/availability?patient_id=`` is what actually answers. Enforcing the
-        # rule here would only hide that behind green tests. See the PR.
+        # the one place this client is more permissive than the platform: a
+        # parameter-less ``directory()`` is answered with the whole set offline
+        # and with a 422 live.
+        #
+        # ``rules._patient()`` used to rely on that, so every rule read off the
+        # record (age, referral, allowance) stood down on a live call while the
+        # offline suite stayed green. It now looks a record up the way the
+        # platform allows -- see ``vortex/rules/tools.py``.
+        #
+        # What still calls it bare is ``diary._find_appointment``'s last-resort
+        # walk, which already catches the live 422 and whose contract leaves it
+        # no ``patient_id`` to search on. Tightening this would turn that lane's
+        # offline fallback off without giving it a replacement, so the
+        # divergence stays, documented, until that lane picks it up.
         # Exact-field filter, like the live API: a field that does not match excludes.
         found = []
         for p in self._patients:
