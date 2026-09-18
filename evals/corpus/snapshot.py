@@ -225,8 +225,7 @@ async def take(out_dir: Path = WORLD_DIR) -> int:
         }
         pairs = sorted(_patient_specialty_pairs(provider_specialty))
         print(
-            f"availability per patient ({len(pairs)} patient/specialty/plan keys "
-            "the answers need)"
+            f"availability per patient ({len(pairs)} patient/specialty/plan keys the answers need)"
         )
         per_patient: dict[str, Any] = {}
         for patient_id, specialty, policy in pairs:
