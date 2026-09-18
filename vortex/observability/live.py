@@ -15,12 +15,14 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from fastapi.responses import HTMLResponse, JSONResponse
 from nicegui import app, ui
 
 from vortex.observability import auth
 from vortex.observability.calllog import read_recent
 from vortex.observability.demo import write_scripted_call
 from vortex.observability.view import CallCard, build_calls, flatten_grouped
+from vortex.observability.wall_timeline import build_timeline, call_summary, latest_intent
 from vortex.settings import REPO_ROOT, get_settings
 
 LINE_URL = os.environ.get("VORTEX_LINE_URL", "http://127.0.0.1:7860").rstrip("/")
@@ -29,6 +31,7 @@ PRESENCE: dict[str, float] = {}
 _HERE = Path(__file__).parent
 DESIGN_CSS = (_HERE / "design.css").read_text(encoding="utf-8")
 BOARD_CSS = (_HERE / "board.css").read_text(encoding="utf-8")
+WALL_APP_DIST = _HERE / "wall-app" / "dist"
 
 NAV_LINKS = (("Ops", "/"), ("Wall", "/wall"), ("Evals", "/evals"), ("Bench", "/bench"))
 
@@ -252,6 +255,10 @@ def _wall_body(card: CallCard | None, health: dict[str, Any] | None) -> None:
         ui.label("Vortex · Prosper AI").classes("pill mute")
         _line_pill(health)
         if card:
+            ui.link("Demo", f"/call/{card.call_id}", new_tab=True).classes("pill mute")
+        else:
+            ui.link("Demo", "/call/demo", new_tab=True).classes("pill mute")
+        if card:
             ui.label(card.call_id).classes("pill mute mono")
 
     with ui.element("div").classes("grid3"):
@@ -321,28 +328,62 @@ def wall_page() -> None:
     ui.timer(0.4, redraw)
 
 
-@ui.page("/call/{call_id}")
-def call_page(call_id: str) -> None:
-    """One call, by id — public, same chrome and body as /wall.
+@app.get("/api/wall/timeline/{call_id}")
+def wall_timeline_api(call_id: str) -> JSONResponse:
+    """The chat+tool timeline the react-spring zoom page polls."""
+    events, health = _load_events()
+    items = build_timeline(events, call_id)
+    intent = latest_intent(events, call_id)
+    call = call_summary(events, call_id)
+    call["submit_window_secs"] = get_settings().submit_window_secs
+    return JSONResponse(
+        {
+            "call_id": call_id,
+            "items": items,
+            "intent": intent,
+            "call": call,
+            "line_up": health is not None,
+        }
+    )
 
-    Unlike /wall (always the live/most-recent call), this looks up a specific
-    call_id. An id that matches nothing yet renders _wall_body's own empty
-    state — that *is* the placeholder, no separate one needed.
-    """
-    _apply_chrome()
-    ui.page_title(f"Vortex · {call_id}")
-    stage = ui.element("div").classes("shell")
 
-    def redraw() -> None:
-        events, health = _load_events()
-        cards = build_calls(events)
-        card = next((c for c in cards if c.call_id == call_id), None)
-        stage.clear()
-        with stage:
-            _wall_body(card, health)
+if WALL_APP_DIST.exists():
+    app.add_static_files("/wall-assets", str(WALL_APP_DIST))
+    _WALL_INDEX_HTML = (WALL_APP_DIST / "index.html").read_text(encoding="utf-8")
 
-    redraw()
-    ui.timer(0.4, redraw)
+    @app.get("/call/{call_id}")
+    def call_zoom_page(call_id: str) -> HTMLResponse:
+        """The react-spring zoom page: chat, tool badge, live stage, results grid.
+
+        Built by ``npm run build`` in ``vortex/observability/wall-app/``. It
+        reads its data from ``/api/wall/timeline/{call_id}`` above, client-side.
+        """
+        del call_id  # the SPA reads the id itself from window.location
+        return HTMLResponse(_WALL_INDEX_HTML)
+
+else:
+
+    @ui.page("/call/{call_id}")
+    def call_page(call_id: str) -> None:
+        """Fallback while wall-app/dist has not been built yet.
+
+        Run ``npm install && npm run build`` inside ``wall-app/`` to get the
+        real react-spring zoom page at this same route.
+        """
+        _apply_chrome()
+        ui.page_title(f"Vortex · {call_id}")
+        stage = ui.element("div").classes("shell")
+
+        def redraw() -> None:
+            events, health = _load_events()
+            cards = build_calls(events)
+            card = next((c for c in cards if c.call_id == call_id), None)
+            stage.clear()
+            with stage:
+                _wall_body(card, health)
+
+        redraw()
+        ui.timer(0.4, redraw)
 
 
 # ---------------------------------------------------------------------------
