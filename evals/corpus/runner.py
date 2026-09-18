@@ -51,12 +51,22 @@ _PROBE_TOOL = {
 #: The fields each submit route carries, from the contract.
 _ROUTE_FIELDS: dict[str, set[str]] = {
     "REGISTER": {
-        "given_name", "first_surname", "second_surname", "national_id",
-        "date_of_birth", "phone", "email", "insurer",
+        "given_name",
+        "first_surname",
+        "second_surname",
+        "national_id",
+        "date_of_birth",
+        "phone",
+        "email",
+        "insurer",
     },
     "BOOK": {
-        "patient_id", "provider_id", "location_id",
-        "appointment_type_id", "slot", "policy_id",
+        "patient_id",
+        "provider_id",
+        "location_id",
+        "appointment_type_id",
+        "slot",
+        "policy_id",
     },
     "RESCHEDULE": {"appointment_id", "provider_id", "location_id", "slot", "policy_id"},
     "CANCEL": {"appointment_id"},
@@ -270,9 +280,7 @@ def _judge_cases(roster: Roster, log_path: Path) -> tuple[list[CaseResult], list
         if case is None:
             unmatched += 1
             continue
-        verdict = judge.score(
-            case, call["actions"], our_turns=call["our_turns"] or None
-        )
+        verdict = judge.score(case, call["actions"], our_turns=call["our_turns"] or None)
         out.append(
             CaseResult(
                 id=f"judged.{case.id}",

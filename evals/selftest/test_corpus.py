@@ -154,9 +154,14 @@ def test_a_book_beside_a_register_fails_problem_four() -> None:
     register = {
         "action": "REGISTER",
         "new_patient": {
-            "given_name": "Ana", "first_surname": "García", "second_surname": "López",
-            "national_id": "12345678Z", "date_of_birth": "1985-03-12",
-            "phone": "612345678", "email": "ana@example.com", "insurer": "cigna",
+            "given_name": "Ana",
+            "first_surname": "García",
+            "second_surname": "López",
+            "national_id": "12345678Z",
+            "date_of_birth": "1985-03-12",
+            "phone": "612345678",
+            "email": "ana@example.com",
+            "insurer": "cigna",
         },
     }
     case = _case([[register]], problem_id="the_new_patient")
@@ -166,8 +171,12 @@ def test_a_book_beside_a_register_fails_problem_four() -> None:
 
 def test_register_surnames_match_as_a_set() -> None:
     fields = {
-        "given_name": "José", "national_id": "12345678-z", "date_of_birth": "1985-03-12",
-        "phone": "+34 612 345 678", "email": "Jose.Garcia @ Gmail.com", "insurer": "Cigna",
+        "given_name": "José",
+        "national_id": "12345678-z",
+        "date_of_birth": "1985-03-12",
+        "phone": "+34 612 345 678",
+        "email": "Jose.Garcia @ Gmail.com",
+        "insurer": "Cigna",
     }
     want_fields = {**fields, "first_surname": "García", "second_surname": "López"}
     got_fields = {**fields, "first_surname": "Lopez", "second_surname": "Garcia"}
@@ -283,9 +292,7 @@ def test_no_phrase_ever_lands_on_a_closed_day() -> None:
 
 def test_first_thing_monday_the_twelfth_moves_to_the_thirteenth() -> None:
     friday = datetime(2026, 9, 18, 9, 0, tzinfo=MADRID)
-    phrase = next(
-        p for p in probes.date_phrases() if p.phrase.startswith("first thing on Monday")
-    )
+    phrase = next(p for p in probes.date_phrases() if p.phrase.startswith("first thing on Monday"))
     assert probes.target_day(phrase, friday) == date(2026, 10, 12)
     assert probes.expected_day(phrase, friday) == date(2026, 10, 13)
 
@@ -311,7 +318,10 @@ def test_the_triage_table_is_complete() -> None:
     assert len(probes.TRIAGE_TABLE) == 15
     assert len(probes.RED_FLAGS) == 5
     assert {s for _, s in probes.TRIAGE_TABLE} == {
-        "orthopaedics", "paediatrics", "general_practice", "gynaecology",
+        "orthopaedics",
+        "paediatrics",
+        "general_practice",
+        "gynaecology",
     }
 
 

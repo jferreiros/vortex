@@ -160,9 +160,7 @@ class Roster:
 def load(path: Path = CASES_FILE) -> Roster:
     """Read the roster once per process. Raises if the file is missing."""
     if not path.exists():  # pragma: no cover - the file is committed
-        raise FileNotFoundError(
-            f"{path} is missing. Run: uv run python -m evals.corpus.fetch"
-        )
+        raise FileNotFoundError(f"{path} is missing. Run: uv run python -m evals.corpus.fetch")
     blob = path.read_bytes()
     doc = json.loads(blob)
     cases = []

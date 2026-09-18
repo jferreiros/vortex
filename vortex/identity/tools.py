@@ -113,9 +113,7 @@ async def find_patient(ctx: ToolContext, args: FindPatientInput) -> FindPatientR
         patient = candidates[0]
         # Fire-and-forget: mine their visit history while the conversation carries
         # on, so a preference is already there by the time it's needed.
-        ctx.state[PATIENT_POSTPROCESS_KEY] = asyncio.create_task(
-            _postprocess_patient(ctx, patient)
-        )
+        ctx.state[PATIENT_POSTPROCESS_KEY] = asyncio.create_task(_postprocess_patient(ctx, patient))
         return FindPatientResult(status="found", patient=patient)
 
     # Ambiguous: ask for whichever unfilled field would split the candidates.

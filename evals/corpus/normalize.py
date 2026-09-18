@@ -121,11 +121,30 @@ def transcript_words(text: str) -> list[str]:
 #: out in words has already made the mistake, whatever the scorer sees.
 DIGIT_WORDS: dict[str, str] = {
     # Spanish
-    "cero": "0", "uno": "1", "dos": "2", "tres": "3", "cuatro": "4",
-    "cinco": "5", "seis": "6", "siete": "7", "ocho": "8", "nueve": "9",
+    "cero": "0",
+    "uno": "1",
+    "dos": "2",
+    "tres": "3",
+    "cuatro": "4",
+    "cinco": "5",
+    "seis": "6",
+    "siete": "7",
+    "ocho": "8",
+    "nueve": "9",
     # English
-    "zero": "0", "one": "1", "two": "2", "three": "3", "four": "4",
-    "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9",
+    "zero": "0",
+    "one": "1",
+    "two": "2",
+    "three": "3",
+    "four": "4",
+    "five": "5",
+    "six": "6",
+    "seven": "7",
+    "eight": "8",
+    "nine": "9",
     # Catalan (only the forms that are not also a common word)
-    "quatre": "4", "cinc": "5", "sis": "6", "vuit": "8",
+    "quatre": "4",
+    "cinc": "5",
+    "sis": "6",
+    "vuit": "8",
 }

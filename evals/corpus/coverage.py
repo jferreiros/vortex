@@ -122,9 +122,7 @@ def print_report(roster: Roster | None = None) -> None:
         cases = roster.by_problem(problem_id)
         shapes = ", ".join(sorted({c.shape() for c in cases})) or "—"
         stake = weight * pool
-        print(
-            f"{number:>3}  {title[:24]:24} {weight:>2} {stake:>6} {len(cases):>7}  {shapes[:44]}"
-        )
+        print(f"{number:>3}  {title[:24]:24} {weight:>2} {stake:>6} {len(cases):>7}  {shapes[:44]}")
     print("-" * 96)
     print(f"{'':>3}  {'total':24} {'':>2} {max_points():>6} {len(roster.cases):>7}\n")
 
