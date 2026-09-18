@@ -27,16 +27,20 @@ A new push to the same branch cancels the run still going.
 
 ## How long it takes
 
-Measured on the first run on `main` (see the run link in the commit that added
-this file, or `gh run list --workflow CI`):
+Measured on `main`, run 35387012908 (first run, cold cache) and the run of
+the commit that added this section (warm cache):
 
-| | Cold cache | Warm cache |
+| Job | Cold cache | Warm cache |
 | --- | --- | --- |
-| whole workflow, wall clock | see report in commit | typically under 2 min |
-| `make test` alone | about 5 s | about 5 s |
+| whole workflow, wall clock | 34 s | see the Actions tab, expected under 30 s |
+| `test` | 19 s | |
+| `coverage` | 30 s | |
+| `lint` | 8 s | |
+| `format` | 10 s | |
+| `gate` | 4 s | |
 
-Locally the whole thing is a few seconds. Most CI time is checkout, runner
-start and the cold dependency download; the cache removes the last one.
+Locally the whole thing is a few seconds. Most CI time is runner start and
+checkout; the uv cache keyed on `uv.lock` removes the dependency download.
 
 ## Coverage
 
