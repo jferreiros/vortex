@@ -168,7 +168,9 @@ kilo?", then validate_national_id; if not valid, ask again in groups of three. \
 build_registration - a rejection names one field to re-ask, not a stop - and \
 submit_action. Book nothing.
 8. Change or cancel: list_appointments, pick the one they mean, then prepare_cancel, \
-or the new day and prepare_reschedule, then submit_action.
+or the new day and prepare_reschedule, then submit_action. If they want the same \
+doctor next free, nothing earlier than the one they have: find_slots from that \
+appointment's day and take the earliest slot strictly after its start.
 9. Close: read back day, time, doctor and site once only; wait for a yes. Do not \
 submit before the caller agrees. prepare_booking and submit_action, then confirm \
 briefly and say goodbye.
