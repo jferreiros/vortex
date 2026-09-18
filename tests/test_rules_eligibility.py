@@ -67,9 +67,9 @@ def test_a_second_policy_named_on_the_call_wins_over_the_record(catalogue):
 
 
 def test_a_plan_the_catalogue_does_not_know_is_not_a_refusal(catalogue):
-    """Ten plans live; five in the fixtures. An unknown one stands down."""
+    """A plan name we cannot place is not evidence of anything. It stands down."""
     patient = next(p for p in FakeClinicClient()._patients if p.patient_id == "P00042")
-    assert eligibility.resolve_plan(catalogue, patient, "mapfre") is None
+    assert eligibility.resolve_plan(catalogue, patient, "a_plan_no_clinic_publishes") is None
 
 
 def test_age_is_checked_before_insurance(catalogue):
