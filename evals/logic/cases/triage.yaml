@@ -126,3 +126,46 @@ cases:
     tool: triage
     args: {complaint: "tengo un dolor fuerte en el pecho y me cuesta respirar"}
     expect: {emergency: true, rejection: {reason: medical_emergency}}
+
+  # ---- a shared word is not a red flag ------------------------------------
+  - id: triage.nearmiss.bleeding_between_periods_is_not_a_haemorrhage
+    problem: 10
+    # "bleeding" alone must not escalate: the published flag is a cut that
+    # will not stop. Escalating this books nothing and loses the case.
+    tool: triage
+    args: {complaint: "I have been bleeding between periods, three cycles running"}
+    expect: {specialty_id: gynaecology, emergency: false}
+
+  - id: triage.nearmiss.child_with_a_temperature_is_not_an_emergency
+    problem: 10
+    tool: triage
+    args: {complaint: "my little boy has had a temperature for two days and will not eat"}
+    expect: {specialty_id: paediatrics, emergency: false}
+
+  - id: triage.nearmiss.sore_throat_and_fever_stays_general_practice
+    problem: 10
+    tool: triage
+    args: {complaint: "I have a sore throat and I have been feverish since the weekend"}
+    expect: {specialty_id: general_practice, emergency: false}
+
+  # ---- a complaint nothing published covers routes somewhere --------------
+  - id: triage.fallback.unrecognised_complaint_is_general_practice
+    problem: 10
+    # Never no specialty at all: a call with nowhere to route still has to end
+    # in a submission, and general practice is the published residue.
+    tool: triage
+    args: {complaint: "I would like to talk to someone about how I have been feeling"}
+    expect: {specialty_id: general_practice, emergency: false}
+
+  # ---- Catalan: one public case in four is not Spanish --------------------
+  - id: triage.ca.turmell
+    problem: 10
+    tool: triage
+    args: {complaint: "m'he tort el turmell, el tinc inflat i em fa mal caminar"}
+    expect: {specialty_id: orthopaedics, emergency: false}
+
+  - id: triage.ca.dolor_pit
+    problem: 10
+    tool: triage
+    args: {complaint: "tinc un dolor fort al pit i em costa respirar"}
+    expect: {emergency: true, rejection: {reason: medical_emergency}}

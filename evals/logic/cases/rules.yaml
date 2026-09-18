@@ -140,3 +140,98 @@ cases:
     # Physiotherapy sits only at Sur; a caller next to Centro still goes to Sur.
     args: {address: "Calle del Arenal 3, Madrid", specialty_id: physiotherapy}
     expect: {location_id: sur}
+
+  # ---- problem 17: the second policy is not in the API --------------------
+  - id: rules.second_policy.refusal_names_a_plan_rule_so_the_call_can_ask
+    problem: 17
+    # The five insurance reasons are the cue to ask for a second policy. This
+    # one must be one of them, never a bare no_availability.
+    tool: check_eligibility
+    args: {patient_id: P00043, specialty_id: gynaecology}
+    expect:
+      allowed: false
+      rejection:
+        reason:
+          $in: [specialty_not_covered, location_not_covered, provider_not_in_network,
+                insurer_referral_required, allowance_exhausted]
+
+  - id: rules.second_policy.control_first_plan_already_works
+    problem: 17
+    # Marta's own plan covers this. Naming a second one must not be needed,
+    # and the verdict must not be a refusal waiting for one.
+    tool: check_eligibility
+    args: {patient_id: P00042, specialty_id: general_practice, insurer: sanitas}
+    expect: {allowed: true, rejection: {$absent: true}}
+
+  # ---- redirects: a refusal that has somewhere to go ----------------------
+  - id: rules.redirect.age_refusal_points_at_the_right_specialty
+    problem: 6
+    # The child case is a redirect, not a dead end: paediatrics can see him.
+    tool: check_eligibility
+    args: {patient_id: P00107, specialty_id: general_practice}
+    expect:
+      allowed: false
+      rejection: {reason: not_eligible_age}
+      redirect_to: {$contains: {provider_id: PR03, specialty_id: paediatrics}}
+
+  - id: rules.redirect.provider_on_leave_offers_the_rest_of_his_site
+    problem: 3
+    tool: check_eligibility
+    args: {patient_id: P00042, specialty_id: general_practice, provider_id: PR07}
+    expect:
+      allowed: false
+      rejection: {reason: provider_on_leave}
+      redirect_to: {$contains: {provider_id: PR02}}
+
+  # ---- the fearful agent: these must NOT be refused -----------------------
+  - id: rules.control.adult_books_general_practice_at_any_site
+    problem: 6
+    tool: check_eligibility
+    args: {patient_id: P00042, specialty_id: general_practice}
+    expect: {allowed: true, rejection: {$absent: true}}
+
+  - id: rules.control.referral_holder_books_the_specialty_that_needs_one
+    problem: 6
+    # Antonio holds the dermatology referral. Quoting a plan the dermatologist
+    # takes leaves nothing to refuse.
+    tool: check_eligibility
+    args: {patient_id: P00200, specialty_id: dermatology, insurer: sanitas}
+    expect: {allowed: true, rejection: {$absent: true}}
+
+  - id: rules.control.asisa_physio_at_a_covered_site_is_only_a_missing_physio
+    problem: 6
+    # ASISA covers Centro. No physiotherapist sits there, so this is an empty
+    # calendar, not an insurance refusal.
+    tool: check_eligibility
+    args: {patient_id: P00042, specialty_id: physiotherapy, location_id: centro, insurer: asisa}
+    expect: {allowed: false, rejection: {reason: no_availability}}
+
+  - id: rules.control.unknown_plan_is_not_a_refusal
+    problem: 17
+    # The catalogue has ten plans; the fixtures have five. A plan we do not
+    # hold a record for must not be turned into a refusal we invented.
+    tool: check_eligibility
+    args: {patient_id: P00042, specialty_id: general_practice, insurer: mapfre}
+    expect: {allowed: true}
+
+  # ---- nearest site: the address does not have to be a site's own ---------
+  - id: rules.nearest.alcobendas_is_nearer_norte
+    problem: 15
+    tags: [needs-geocoder]
+    tool: nearest_location
+    args: {address: "Avenida de España 12, Alcobendas", specialty_id: general_practice}
+    expect: {location_id: norte}
+
+  - id: rules.nearest.lavapies_is_nearer_centro
+    problem: 15
+    tags: [needs-geocoder]
+    tool: nearest_location
+    args: {address: "Calle de Argumosa 20, Lavapiés, Madrid", specialty_id: general_practice}
+    expect: {location_id: centro}
+
+  - id: rules.nearest.an_address_nobody_can_place_is_asked_about
+    problem: 15
+    # Never a silent wrong site: an unplaceable address is a question.
+    tool: nearest_location
+    args: {address: "12 Privet Drive, Little Whinging", specialty_id: general_practice}
+    expect: {location_id: {$absent: true}, rejection: {reason: out_of_scope}}
