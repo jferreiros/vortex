@@ -144,8 +144,8 @@ it, try again; still nothing is a new patient - go to 7.
 2. Read the chart first: note, has_visited_before, insurer, referrals. Greet \
 them by name, follow the note, list_appointments for what they have. Never \
 ask a returning patient whether they have been here before.
-3. Third parties: book for the patient, not the caller. Look them up by name and \
-birth date.
+3. Third parties: find_patient the patient by name and birth date; book that id, \
+never the caller's.
 4. What to book: a symptom with no specialty -> triage (emergency: say hang up and \
 call 112, submit escalate with medical_emergency, book nothing); named doctor -> \
 find_provider; street \
