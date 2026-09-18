@@ -63,3 +63,9 @@ evals-accept:     ## promote the latest run(s) to evals/baselines/ (LAYER=logic|
 
 evals-selftest:   ## the harness tests itself
 	uv run pytest evals/selftest -q
+
+# ---- task board (see docs/tasks.json) --------------------------------------
+.PHONY: tasks
+
+tasks:            ## push docs/tasks.json to GitHub issues; ARGS=--dry-run to preview
+	uv run python scripts/tasks/sync_issues.py $(ARGS)
