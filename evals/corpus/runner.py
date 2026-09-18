@@ -35,7 +35,7 @@ from typing import Any
 from evals.common.context import make_context
 from evals.common.results import RESULTS_DIR, CaseResult, RunResult, git_info
 from evals.common.stubs import is_stub
-from evals.corpus import judge, probes
+from evals.corpus import judge, probes, world
 from evals.corpus.catalogue import PROBLEMS, REASONS, VERBS, Roster, load, max_points
 from vortex import tools as registry
 
@@ -304,10 +304,49 @@ def _judge_cases(roster: Roster, log_path: Path) -> tuple[list[CaseResult], list
 # ---- the run ----------------------------------------------------------------
 
 
+def _roster_reproduction_cases(roster: Roster, run_result: RunResult) -> list[CaseResult]:
+    """Does the API actually offer each published answer? Needs a snapshot."""
+    if not world.exists():
+        run_result.notes.append(
+            "--verify-roster needs a clinic snapshot: make evals-snapshot (needs PLATFORM_API_KEY)"
+        )
+        return [
+            CaseResult(
+                id="world.snapshot",
+                name="the clinic snapshot is missing",
+                status="skipped",
+                group="world",
+                details=["run: make evals-snapshot"],
+                tags=["world"],
+            )
+        ]
+    snapshot = world.read()
+    run_result.mode["snapshot_taken_at"] = snapshot.manifest.get("taken_at")
+    if snapshot.manifest.get("roster_sha256") != roster.sha256:
+        run_result.notes.append(
+            "the snapshot was taken for a different roster; re-take it after make evals-fetch"
+        )
+    out = []
+    for check in world.verify_roster(snapshot, roster):
+        out.append(
+            CaseResult(
+                id=f"world.{check.case_id}",
+                name=check.detail,
+                status="pass" if check.reproduced else "fail",
+                problem=PROBLEMS[check.problem_id][0],
+                group="world",
+                details=[] if check.reproduced else [check.detail],
+                tags=["world", check.problem_id],
+            )
+        )
+    return out
+
+
 async def run(
     *,
     only: str | None = None,
     judge_log: Path | None = None,
+    verify_roster: bool = False,
     results_dir: Path = RESULTS_DIR,
 ) -> RunResult:
     started = time.perf_counter()
@@ -331,6 +370,9 @@ async def run(
     results = await asyncio.gather(*(_run_probe(p, log_dir) for p in probe_list))
     cases += list(results)
     cases += [c for c in _skipped_families(roster) if not only or only in c.id]
+
+    if verify_roster:
+        cases += _roster_reproduction_cases(roster, run_result)
 
     if judge_log is not None:
         judged, notes = _judge_cases(roster, judge_log)
