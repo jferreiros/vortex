@@ -67,6 +67,9 @@ evals-coverage:   ## where the 196 points are, and what the public cases never s
 evals-verify:     ## do the published answers exist in the API we snapshotted?
 	uv run python -m evals corpus --verify-roster --only world
 
+evals-discover:   ## find a real caller for each decline reason; needs PLATFORM_API_KEY
+	uv run python -m evals.corpus.discover
+
 evals-fetch:      ## refresh evals/corpus/cases/public-cases.json (run it each morning)
 	uv run python -m evals.corpus.fetch
 
