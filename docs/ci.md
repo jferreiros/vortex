@@ -32,15 +32,16 @@ the commit that added this section (warm cache):
 
 | Job | Cold cache | Warm cache |
 | --- | --- | --- |
-| whole workflow, wall clock | 34 s | see the Actions tab, expected under 30 s |
-| `test` | 19 s | |
-| `coverage` | 30 s | |
-| `lint` | 8 s | |
-| `format` | 10 s | |
-| `gate` | 4 s | |
+| whole workflow, wall clock | 34 s | 56 s (includes 40 s queued for a runner) |
+| `test` | 19 s | 14 s |
+| `coverage` | 30 s | 32 s |
+| `lint` | 8 s | 10 s |
+| `format` | 10 s | 13 s |
+| `gate` | 4 s | 4 s |
 
-Locally the whole thing is a few seconds. Most CI time is runner start and
-checkout; the uv cache keyed on `uv.lock` removes the dependency download.
+Locally the whole thing is a few seconds. Most CI time is waiting for a runner,
+runner start and checkout; the uv cache keyed on `uv.lock` only shaves the
+dependency download, which is small for this lock.
 
 ## Coverage
 
@@ -185,3 +186,109 @@ If the team still wants Qlty later, the exact steps are:
    ```
 
    and give that job `id-token: write`. Nothing else in this repo changes.
+
+## CodeRabbit: an advisory review on every pull request
+
+A second workflow, `.github/workflows/coderabbit.yml`, asks CodeRabbit to
+review the PR and posts the result as one comment. It advises; `gate` decides.
+It is not required on `main`, the job has `continue-on-error`, and a red
+CodeRabbit changes nothing about whether you can merge.
+
+### Which integration, and why
+
+CodeRabbit has two ways in, and they are not interchangeable:
+
+| Path | What it needs | Who can set it up |
+| --- | --- | --- |
+| GitHub App | The repo owner logs in at https://app.coderabbit.ai/login with GitHub, installs the app on `jferreiros/vortex`, grants read-write on checks, code, commit statuses, issues and pull requests. No API key involved. | A person in a browser. Cannot be done by an agent or from a workflow. |
+| CLI in a workflow | An **Agentic** API key (`cr-...`) from https://app.coderabbit.ai, Settings, API Keys, stored as a repository secret. | Anyone with the key, fully from the repo. |
+
+The key the team has is a `cr-...` key, which is what the CLI takes, and the
+CLI path needs nobody in a browser. So this repo uses the CLI. The key is the
+repository secret `CODERABBIT_API_KEY` and is never written to a file or a log.
+
+Two things about that key the docs are explicit on, and that only a real run
+can confirm:
+
+- It must be an *Agentic* key, not a *user* key. The CLI rejects user keys
+  with "user API keys are not supported". If the first run fails that way,
+  whoever owns the CodeRabbit account generates an Agentic key at
+  https://app.coderabbit.ai, Settings, API Keys, and replaces the secret with
+  `gh secret set CODERABBIT_API_KEY`. Nothing in the repo changes.
+- Reviews are billed to the key's organisation and count against the seat's
+  allowance (3 CLI reviews per hour on the free plan; paid plans more). That is
+  why the workflow runs once per PR and not on every push.
+
+### What it reviews, and when
+
+- Runs on `pull_request` `opened`, `reopened` and `ready_for_review`. Not on
+  `synchronize`, so pushing more commits does not re-run it. Not on `push`.
+  Drafts are skipped.
+- To re-run on the current head, add the label `re-review` to the PR. Remove
+  it and add it again for another run. The existing comment is updated in
+  place, so a PR never has two review comments.
+- Diffs the PR head against its base branch, with `.coderabbit.yaml` and
+  `CLAUDE.md` passed as instructions. The path instructions in
+  `.coderabbit.yaml` restate the hard rules the reviewer must check on
+  anything under `vortex/`: every call ends in a submission, never nothing;
+  every `patient_id`, `appointment_id` and `appointment_type_id` comes from the
+  clinic API and never from the caller or the model; no state shared between
+  sockets; tools return typed data or a typed `Rejection`; time from
+  `ToolContext.now`, never the machine clock; no secrets. Extra checks apply to
+  `vortex/contract.py`, `vortex/tools.py`, `vortex/settings.py` (breaking
+  signature changes), `vortex/line/` (per-socket pipeline, submit window),
+  `tests/` (offline, no shared state) and the workflows themselves.
+- Skips formatting and naming: ruff gates those already.
+- Without the secret the job logs "secret not set" and exits green. So a fork
+  or a clone without the key still gets a clean CI.
+
+The CLI version is pinned in the workflow (`CODERABBIT_VERSION`). Bump it on
+purpose, after reading the changelog.
+
+### When it is wrong
+
+It will be, sometimes. It is a reviewer, not a gate:
+
+- Ignore the comment and merge. Nothing to override, nothing to click.
+- If it flagged one of the hard rules and it is actually fine, say so in a
+  reply on the PR so the next person at 3 a.m. does not re-open the question.
+- If it keeps flagging the same non-issue, tighten the wording in
+  `.coderabbit.yaml` under `reviews.path_instructions`. Validate the file
+  before you push it:
+
+  ```bash
+  curl -fsSL https://cli.coderabbit.ai/install.sh | CI=1 sh   # once
+  coderabbit config validate                                  # exit 0 = valid
+  ```
+
+  Validation needs no key. A real review does:
+  `coderabbit review --base main --api-key "$CODERABBIT_API_KEY"`.
+- If the job itself is red (rate limit, wrong key type, CodeRabbit down), the
+  comment says so and the merge is unaffected. Fix the key or wait an hour;
+  do not touch `gate`.
+
+### How to silence it
+
+Pick the smallest one:
+
+| You want | Do |
+| --- | --- |
+| No review on this one PR | Open it as a draft and mark it ready only when done; or just ignore the comment. |
+| Pause it for the weekend | `gh workflow disable coderabbit`. `gh workflow enable coderabbit` brings it back. |
+| Stop it spending quota at all | `gh secret delete CODERABBIT_API_KEY`. The job then skips green on every PR. |
+| Remove it | Delete `.github/workflows/coderabbit.yml` and `.coderabbit.yaml`, and this section. |
+
+### If the team wants the GitHub App instead
+
+The App reviews inline on the diff, replies to comments and re-reviews on
+every push. It is the better product and it costs one browser session:
+
+1. The repo owner (`jferreiros`, personal account) logs in at
+   https://app.coderabbit.ai/login with GitHub and installs the app on
+   `jferreiros/vortex` when asked. Permissions requested: read on actions,
+   discussions, members, metadata and merge queues; read-write on checks,
+   code, commit statuses, issues and pull requests.
+2. Nothing in the repo changes. `.coderabbit.yaml` already sets
+   `reviews.auto_review` (no drafts, no re-review on every push) and the same
+   path instructions, so the App reads them as-is.
+3. Then remove the CLI workflow or keep both; the App does not use the secret.

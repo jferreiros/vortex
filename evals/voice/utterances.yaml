@@ -1,0 +1,38 @@
+# What the caller says, per language, with the reference text the STT must
+# produce. Short, telephone-like, with the things that break transcription:
+# names, a DNI read digit by digit, a date, a site name.
+#
+# Catalan, Galician and Basque are here because problem 11 draws Catalan far
+# more often than its public cases show, and because a Spanish clinic gets
+# all four on the phone. TTS for gl/eu is synthesised by whichever provider
+# claims the language; a provider that does not is marked unsupported.
+
+utterances:
+  - id: es.simple
+    language: es
+    text: "Hola, buenos días. Soy Marta Ruiz López y quería pedir cita con medicina general lo antes posible."
+  - id: es.dni
+    language: es
+    text: "Mi DNI es uno dos tres cuatro cinco seis siete ocho zeta, y nací el doce de marzo de mil novecientos ochenta y cinco."
+  - id: es.doctor_site
+    language: es
+    text: "Quiero cita con la doctora Sáenz, la pediatra, en Arenal Centro, el jueves por la tarde."
+  - id: es.correction
+    language: es
+    text: "Espera, no, el martes no puedo. Mejor el miércoles por la mañana a primera hora."
+  - id: ca.simple
+    language: ca
+    text: "Bon dia. Sóc la Marta Ruiz i voldria hora amb un metge de capçalera que parli català, si us plau."
+  - id: ca.dni
+    language: ca
+    text: "El meu DNI és u dos tres quatre cinc sis set vuit zeta, i vaig néixer el dotze de març del vuitanta-cinc."
+  - id: gl.simple
+    language: gl
+    text: "Bos días. Son Marta Ruiz e quería pedir cita con medicina xeral canto antes, en Arenal Norte."
+  - id: eu.simple
+    language: eu
+    text: "Egun on. Marta Ruiz naiz eta familia-medikuarekin hitzordua nahi nuke ahalik eta lasterren."
+
+# The reply the agent gives, for the LLM and TTS stages. Same for every stack.
+agent_prompt: "Responde en una frase corta, como recepcionista de Clínica Arenal, ofreciendo la primera cita disponible el lunes a las nueve y cuarto con el doctor Sáez en Arenal Norte."
+agent_reply_reference: "Le puedo ofrecer el lunes a las nueve y cuarto con el doctor Sáez en Arenal Norte. ¿Le viene bien?"

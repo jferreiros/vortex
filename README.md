@@ -36,6 +36,30 @@ The server always starts. Missing keys switch components to fake mode:
 `GET /health` says which mode is active. `VORTEX_VOICE_MODE` and
 `VORTEX_CLINIC_MODE` force a mode (see `.env.example`).
 
+## The board — what to do next
+
+Every task is one GitHub issue. The priority order is published as a page:
+
+**https://jferreiros.github.io/vortex/tasks.html**
+
+It groups the 52 tasks into the blocks of the plan — what unblocks everything
+tonight, then problem 1, problem 2, problem 3, then the problems as they open,
+then the wall and the jury. Each task carries the condition that closes it.
+
+Take a task by assigning its issue to yourself. One at a time, in your lane's
+folder. The page reads the issues live, so the page and GitHub never disagree.
+
+`docs/tasks.json` is the source. Edit a task there, then:
+
+```bash
+make tasks ARGS=--dry-run   # print what would change
+make tasks                  # create what is missing, update what changed
+```
+
+It matches issues by the `[T14]` prefix, so running it twice is safe. It never
+closes an issue and never touches an assignee: who took a task is decided in
+GitHub, not in a file.
+
 ## Who touches what
 
 One folder per person. Touch your folder; ask before you touch another.

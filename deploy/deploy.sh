@@ -47,7 +47,9 @@ for arg in "$@"; do
   esac
 done
 
-TOTAL=5
+# Six steps: sources, build, restart, health, endpoint, dial. --check-only
+# runs only health and endpoint.
+TOTAL=6
 [[ ${CHECK_ONLY} -eq 1 ]] && TOTAL=2
 [[ ${SKIP_PULL} -eq 1 ]] && TOTAL=$((TOTAL - 1))
 

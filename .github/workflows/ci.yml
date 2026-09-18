@@ -136,18 +136,22 @@ jobs:
     steps:
       - run: echo "evals/ is not wired into CI yet"
 
-  # The single required status check for main. Fails if any blocking job did.
+  # The single required status check for main.
+  #
+  # Only the test suite blocks a merge. Style does not. During the event a red
+  # `main` stops five people from merging at once, and a style rule is never
+  # worth that. `lint` and `format` still run and still show up here, so the
+  # drift stays visible and someone can clear it when the queue is calm.
+  # Restore them as blocking by adding their checks back below.
   gate:
     name: gate
     runs-on: ubuntu-latest
     needs: [test, lint, format]
     if: always()
     steps:
-      - name: All blocking jobs green?
+      - name: Blocking job green?
         run: |
-          echo "test:   ${{ needs.test.result }}"
-          echo "lint:   ${{ needs.lint.result }}"
-          echo "format: ${{ needs.format.result }}"
-          [ "${{ needs.test.result }}" = success ] &&
-          [ "${{ needs.lint.result }}" = success ] &&
-          [ "${{ needs.format.result }}" = success ]
+          echo "test:   ${{ needs.test.result }}   (blocking)"
+          echo "lint:   ${{ needs.lint.result }}   (advisory)"
+          echo "format: ${{ needs.format.result }}   (advisory)"
+          [ "${{ needs.test.result }}" = success ]

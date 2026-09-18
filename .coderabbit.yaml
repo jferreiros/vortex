@@ -1,0 +1,98 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# CodeRabbit review settings. Read by the CLI run in
+# .github/workflows/coderabbit.yml (advisory, never blocks a merge) and by the
+# GitHub App if someone installs it later. Docs: docs/ci.md, last section.
+#
+# The path_instructions below restate the hard rules from CLAUDE.md. Keep the
+# two in sync: CLAUDE.md is the source, this file is what the reviewer reads.
+
+language: en-US
+
+tone_instructions: >-
+  Be brief and concrete. Point at the line and the rule it breaks. Skip praise,
+  style nits ruff already covers, and anything a five-person hackathon team
+  would not fix at 3 a.m.
+
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: true
+  review_status: true
+  poem: false
+  sequence_diagrams: false
+  suggested_labels: false
+  suggested_reviewers: false
+  auto_review:
+    enabled: true
+    drafts: false
+    # One review per PR. Re-runs are on demand only, to save quota.
+    auto_incremental_review: false
+  path_filters:
+    - "!uv.lock"
+    - "!logs/**"
+    - "!api_results/**"
+    - "!**/*.jsonl"
+  path_instructions:
+    - path: "vortex/**"
+      instructions: |
+        This is a voice agent that answers a clinic's scheduling calls over a
+        WebSocket and must POST one action per call. Review against these hard
+        rules from CLAUDE.md. Each is a scoring failure, not a style choice.
+
+        1. Never submit nothing. Every path through a call must end in exactly
+           one submission. A refusal, a caller who hangs up, an exception, a
+           timeout or a lookup that returns nothing must still send NO_ACTION
+           with a typed `reason`. Flag any early return, `except` block or
+           branch where the call can end with no submit.
+        2. Identifiers come from the API, never from the caller or the model.
+           `patient_id` comes from `/directory`, `appointment_id` from
+           `/patients/{id}/appointments`, `appointment_type_id` from
+           `/availability`. Flag any id built from transcript text, LLM output,
+           string formatting, a guess or a default. Ids are compared exactly.
+        3. No shared state between calls. Every socket gets a fresh pipeline.
+           Flag module-level mutable objects (dicts, lists, sessions, clients
+           with per-call state, caches keyed on nothing), class attributes used
+           as instance state, globals holding a conversation, a `call_id` or an
+           in-flight request, and singletons that carry per-call data.
+        4. Tools return typed data or a typed `Rejection`, never prose. The
+           `reason` a tool returns is the `reason` submitted. Flag tools that
+           return strings the model would have to parse, or a `reason` that is
+           not one of the contract's values.
+        5. Time is Europe/Madrid resolved from `ToolContext.now`, never the
+           machine clock. Flag `datetime.now()`, `date.today()`, naive datetimes
+           and slots without an explicit UTC offset. Nothing is booked same-day.
+        6. No secrets. Flag any literal that looks like an API key, a `.env`
+           read outside `vortex/settings.py`, or a log line printing a key.
+
+        Do not comment on formatting, import order or naming: `make lint` and
+        `make fmt` gate those already.
+    - path: "vortex/{contract,tools,settings}.py"
+      instructions: |
+        Shared surface for five people. Any renamed, removed or retyped
+        signature, field or `reason` value must be called out as a breaking
+        change that needs the whole team on the call. Adding an optional field
+        is fine. Every `stub_*` still referenced by a lane's `tools.py` must
+        keep existing.
+    - path: "vortex/line/**"
+      instructions: |
+        WebSocket server and Twilio Media Streams wire format. Check: one
+        pipeline per socket, no state shared across connections, `call_id`
+        read from the `start` event and carried on every log line, µ-law 8 kHz
+        audio handled without resampling mistakes, the submit happens inside
+        the 30-second window after the call ends, and the 3-minute call cap is
+        enforced.
+    - path: "tests/**"
+      instructions: |
+        Tests must run offline with no API key: no network, no `.env`, fixtures
+        from `vortex/clinic/`. Flag tests that share mutable state between
+        cases or that assert on prose instead of typed results.
+    - path: ".github/workflows/**"
+      instructions: |
+        `gate` is the only required check on main. Flag any change that makes
+        an advisory job blocking, removes `continue-on-error`, adds a `push`
+        trigger to a quota-spending job, prints a secret, or widens
+        `permissions`.
+
+chat:
+  auto_reply: true
