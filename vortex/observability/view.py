@@ -31,6 +31,7 @@ class ToolStep:
 class Turn:
     role: Literal["user", "assistant"]
     text: str
+    ts: str | None = None
 
 
 @dataclass
@@ -53,6 +54,7 @@ class CallCard:
     provider_name: str | None = None
     slot: str | None = None
     decline_reason: str | None = None
+    events: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def status(self) -> CallStatus:
@@ -150,7 +152,7 @@ def _action_from_result(result: Any) -> tuple[str | None, dict[str, Any] | None]
 
 
 def build_call(call_id: str, events: list[dict[str, Any]]) -> CallCard:
-    card = CallCard(call_id=call_id)
+    card = CallCard(call_id=call_id, events=events)
     open_tools: list[ToolStep] = []
     for event in events:
         kind = event.get("kind")
@@ -160,9 +162,9 @@ def build_call(call_id: str, events: list[dict[str, Any]]) -> CallCard:
             card.voice = event.get("voice")
             card.clinic = event.get("clinic")
         elif kind == "turn.user":
-            card.turns.append(Turn("user", str(event.get("text") or "")))
+            card.turns.append(Turn("user", str(event.get("text") or ""), event.get("ts")))
         elif kind == "turn.assistant":
-            card.turns.append(Turn("assistant", str(event.get("text") or "")))
+            card.turns.append(Turn("assistant", str(event.get("text") or ""), event.get("ts")))
         elif kind == "tool.called":
             step = ToolStep(name=str(event.get("tool") or "?"), args=event.get("args"))
             card.tools.append(step)
