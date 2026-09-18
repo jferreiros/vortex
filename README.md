@@ -13,7 +13,7 @@ no-action or escalate. Full brief: https://hackspain.app/tracks/prosper-ai
 uv sync --all-groups        # Python 3.12+, uv 0.9+
 cp .env.example .env        # every key is optional; see "Modes" below
 make run                    # http://localhost:7860  (ws://localhost:7860/ws)
-make board                  # http://localhost:8080  ops ·  http://localhost:8080/wall  jury
+make board                  # http://localhost:8080/wall  Live (jury) · /  Calls (team) · /call/<id>
 make smoke                  # in-process WebSocket test: connected/start/media/stop
 make call                   # dial the running server with 1 fake call
 make call N=10              # ... with 10 concurrent fake calls
@@ -78,6 +78,14 @@ the default alternate gives ElevenLabs Spanish and Google ca/gl/eu.
 
 STT is Soniox `stt-rt-v5` throughout: language identification on, clinic
 vocabulary boosted, `SONIOX_API_KEY` and `SONIOX_STT_MODEL`.
+## The console
+
+`make board` serves the console. `/wall` is public: every call on the line,
+the four stages it goes through, the transcript, each tool call in words, and
+the outcome with the rule that applied. `/call/<id>` is one call, shareable.
+`/`, `/evals` and `/bench` are for the team (`VORTEX_OPS_PASSWORD` in
+production). The board reads calls from the line at `VORTEX_LINE_URL`.
+
 ## Design
 
 Every screen (the jury wall, the ops board, the docs pages, `/mic`, the evals
@@ -196,9 +204,10 @@ and the transport can run a whole call tonight.
 - Offline: `FakeClinicClient` answers from `vortex/clinic/fixtures.py`. It
   mirrors the traps in the docs (near-miss surnames, a provider on leave, two
   patients with the same name). Add fixtures when your lane needs a new shape.
-- Live: set `PLATFORM_API_KEY` and `PLATFORM_API_BASE_URL`. `vortex/clinic/client.py`
-  has a `TODO(clinic)` to align field names with `/api/openapi.json` once a
-  key exists; the docs' prose is the only source today.
+- Live: set `PLATFORM_API_KEY` and `PLATFORM_API_BASE_URL`. `vortex/clinic/client.py`,
+  `vortex/contract.py` and the fixtures follow `docs/api/openapi.json`, the
+  platform's own spec. `make try-api` hits every read endpoint and saves each
+  raw response under `api_results/`, so a field-name drift shows up in minutes.
 
 ## Tunnel and endpoint
 

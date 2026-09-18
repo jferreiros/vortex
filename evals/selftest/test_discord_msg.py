@@ -38,6 +38,32 @@ def test_overall_fail_wins():
     assert overall_verdict(_summary()) == "FAIL"
 
 
+def _empty_summary():
+    return {
+        "logic": {"verdict": "EMPTY", "totals": {}, "broke": [], "fixed": [], "git": {}},
+        "conversation": {"verdict": "EMPTY", "totals": {}, "broke": [], "fixed": [], "git": {}},
+    }
+
+
+def test_overall_empty_is_not_pass():
+    assert overall_verdict({}) == "EMPTY"
+    assert overall_verdict(_empty_summary()) == "EMPTY"
+
+
+def test_overall_pass_needs_one_layer_that_ran():
+    summary = _empty_summary()
+    summary["conversation"]["verdict"] = "PASS"
+    assert overall_verdict(summary) == "PASS"
+
+
+def test_empty_embed_is_not_green():
+    body = webhook_body(_empty_summary(), wall="https://example.test/wall")
+    embed = body["embeds"][0]
+    assert embed["title"] == "Evals EMPTY"
+    assert embed["color"] != 0x3DDC84
+    assert "No corrió" in body["content"]
+
+
 def test_embed_names_layers_and_sha():
     body = webhook_body(_summary(), wall="https://example.test/wall")
     assert body["username"] == "Vortex evals"

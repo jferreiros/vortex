@@ -10,8 +10,8 @@ from evals.common.results import RESULTS_DIR
 
 WALL = "https://vortex.203.0.113.20.sslip.io/wall"
 
-# Discord embed colors: red / amber / green.
-_COLOUR = {"FAIL": 0xE23D4A, "UNVERIFIED": 0xEAB619, "PASS": 0x3DDC84}
+# Discord embed colors: red / amber / amber / green.
+_COLOUR = {"FAIL": 0xE23D4A, "UNVERIFIED": 0xEAB619, "EMPTY": 0xEAB619, "PASS": 0x3DDC84}
 
 _QUIP = {
     "FAIL": (
@@ -19,6 +19,7 @@ _QUIP = {
         "Hollow = stubs aplaudiéndose. El jurado no pica."
     ),
     "UNVERIFIED": "Corrió, pero no pudo comprobarse. Cassette viejo o caso a medias.",
+    "EMPTY": "No corrió ningún caso. Un verde aquí sería de mentira, así que no hay verde.",
     "PASS": "Hoy sí coge el teléfono. Mira hollow: si no es cero, el verde es de mentira.",
 }
 
@@ -36,7 +37,8 @@ def overall_verdict(summary: dict[str, Any]) -> str:
         return "FAIL"
     if any(v == "UNVERIFIED" for v in verdicts):
         return "UNVERIFIED"
-    return "PASS" if verdicts else "EMPTY"
+    # A layer that ran no cases is EMPTY. It must not count as green.
+    return "PASS" if any(v == "PASS" for v in verdicts) else "EMPTY"
 
 
 def _layer_line(name: str, block: dict[str, Any]) -> str:

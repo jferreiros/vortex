@@ -54,6 +54,7 @@ class CallCard:
     provider_name: str | None = None
     slot: str | None = None
     decline_reason: str | None = None
+    last_ts: str | None = None
     events: list[dict[str, Any]] = field(default_factory=list)
 
     @property
@@ -156,6 +157,8 @@ def build_call(call_id: str, events: list[dict[str, Any]]) -> CallCard:
     open_tools: list[ToolStep] = []
     for event in events:
         kind = event.get("kind")
+        if event.get("ts"):
+            card.last_ts = str(event["ts"])
         if kind == "call.started":
             card.started_at = event.get("ts") or event.get("connected_at")
             card.from_number = event.get("from_number")

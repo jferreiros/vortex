@@ -35,6 +35,12 @@ body,
 .nicegui-content {
   gap: 0 !important;
   align-items: stretch !important;
+  overflow-x: hidden;
+}
+
+.nicegui-content > * {
+  min-width: 0;
+  max-width: 100%;
 }
 
 /* Quasar's colour classes are !important inside a cascade layer, so a plain
@@ -126,23 +132,6 @@ body,
   background: var(--hairline) !important;
 }
 
-/* Expansions open raw JSON under a step: keep them quiet, caption-sized. */
-.q-expansion-item .q-item {
-  min-height: 24px !important;
-  padding: 0 !important;
-  font: var(--text-caption-sm) !important;
-  color: var(--mute) !important;
-}
-
-.q-expansion-item .q-item__section--side {
-  padding-right: var(--space-xs) !important;
-  min-width: 0 !important;
-}
-
-.q-expansion-item__content {
-  padding: var(--space-xs) 0 var(--space-sm) !important;
-}
-
 /* ------------------------------------------------------------------ */
 /* Shared chrome                                                       */
 /* ------------------------------------------------------------------ */
@@ -169,30 +158,38 @@ body,
 }
 
 /* ------------------------------------------------------------------ */
-/* Wall                                                                */
+/* Console layout                                                      */
 /* ------------------------------------------------------------------ */
 
-.wall-head {
-  display: flex;
-  align-items: center;
-  gap: var(--space-lg);
-  padding: var(--space-xl) var(--space-xl) var(--space-lg);
+.page {
+  padding: var(--space-xl) var(--space-xl) var(--space-xxl);
+  max-width: 1600px;
+  margin: 0 auto;
+  width: 100%;
+  min-width: 0;
 }
 
-.wall-head .clinic {
-  font: var(--text-display-lg);
-  color: var(--ink);
+@media (max-width: 640px) {
+  .page {
+    padding: var(--space-lg) var(--space-lg) var(--space-xl);
+  }
+
+  .stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.primary-nav .tabs {
+  margin-left: var(--space-sm);
 }
 
 .grid3 {
   display: grid;
   grid-template-columns: 1.1fr 1.2fr 0.9fr;
   gap: var(--space-xl);
-  padding: 0 var(--space-xl) var(--space-xl);
-  min-height: calc(100vh - 140px);
 }
 
-@media (max-width: 850px) {
+@media (max-width: 1024px) {
   .grid3 {
     grid-template-columns: 1fr;
   }
@@ -200,189 +197,89 @@ body,
 
 .col {
   min-width: 0;
-  overflow: auto;
 }
 
-.col .terminal-card {
-  min-height: 100%;
-}
-
-.step {
-  display: grid;
-  grid-template-columns: 14px 1fr auto;
-  gap: var(--space-md);
-  align-items: start;
-  padding: var(--space-sm) 0;
-  border-bottom: 1px solid var(--hairline);
-}
-
-.step:last-child {
-  border-bottom: 0;
-}
-
-.step .dot {
-  margin-top: 6px;
-}
-
-.step .name {
+.raw pre {
   font: var(--text-code-sm);
-  color: var(--ink);
-}
-
-.step .meta {
-  font: var(--text-caption-sm);
-  font-family: var(--font-mono);
-  color: var(--mute);
-  margin-top: var(--space-xxs);
+  font-size: 12px;
+  color: var(--charcoal);
+  background: var(--surface-soft);
+  border-radius: var(--rounded-md);
+  padding: var(--space-sm) var(--space-md);
+  margin: var(--space-xs) 0 var(--space-sm);
+  white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
-.step .ms {
-  font: var(--text-caption-sm);
-  color: var(--body);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
+/* Expansions open raw JSON under a step: keep them quiet, caption-sized.
+   Quasar sets the item metrics with its own rules, so these need !important. */
+.q-expansion-item.raw {
+  margin-top: var(--space-xs);
 }
 
-/* The verdict: the wall's single dark surface. */
-.verdict {
-  margin-top: var(--space-xl);
-  padding: 24px 32px;
-  background: var(--surface-dark);
-  color: var(--on-dark);
+.q-expansion-item.raw .q-item {
+  min-height: 28px !important;
+  padding: 0 !important;
+  font: var(--text-caption-sm) !important;
+  color: var(--body) !important;
+}
+
+.q-expansion-item.raw .q-item__section--side {
+  padding-left: var(--space-xs) !important;
+  min-width: 0 !important;
+}
+
+.q-expansion-item.raw .q-expansion-item__content {
+  padding: var(--space-xs) 0 var(--space-sm) !important;
+}
+
+/* Concurrent calls on the wall. */
+.live-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-md);
+  margin-bottom: var(--space-xl);
+}
+
+.live-card {
+  display: block;
+  text-decoration: none;
+  color: var(--ink);
+  border: 1px solid var(--hairline);
   border-radius: var(--rounded-lg);
-  font: var(--text-heading-lg);
-  display: flex;
-  align-items: center;
-  gap: var(--space-md);
-}
-
-.verdict .dot {
-  width: 10px;
-  height: 10px;
-}
-
-.verdict .dot.live {
-  background: var(--on-dark);
-}
-
-/* ------------------------------------------------------------------ */
-/* Ops                                                                 */
-/* ------------------------------------------------------------------ */
-
-.ops {
-  padding: var(--space-xl) var(--space-xl) 40px;
-}
-
-.ops-grid {
-  display: grid;
-  grid-template-columns: 300px 1fr;
-  gap: var(--space-xl);
-}
-
-@media (max-width: 850px) {
-  .ops-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
-.presence {
-  font: var(--text-caption-sm);
-  color: var(--body);
-  margin-bottom: var(--space-md);
-}
-
-.call-row {
-  display: grid;
-  grid-template-columns: 14px 1fr auto;
-  gap: var(--space-md);
-  align-items: center;
-  padding: var(--space-md) var(--space-sm);
-  border-bottom: 1px solid var(--hairline);
-  border-radius: var(--rounded-md);
-  cursor: pointer;
-}
-
-.call-row:last-child {
-  border-bottom: 0;
-}
-
-.call-row.on {
-  background: var(--surface-soft);
-}
-
-.call-row > div {
+  padding: var(--space-md) var(--space-lg);
   min-width: 0;
 }
 
-.call-row .title,
-.call-row .sub {
+.live-card.on {
+  border-color: var(--ink);
+}
+
+.live-card .last {
+  font: var(--text-body-sm);
+  color: var(--body);
+  margin-top: var(--space-xs);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.call-row .title {
-  font: var(--text-body-sm-strong);
-  color: var(--ink);
+.stat .n.row {
+  gap: var(--space-sm);
 }
 
-.call-row .sub {
-  font: var(--text-caption-sm);
-  font-family: var(--font-mono);
-  color: var(--body);
-}
-
-/* The ops detail pane replays a call in the wall's three columns,
-   inside the right-hand card. */
-.replay-grid {
+/* Team pages. */
+.ops-grid {
   display: grid;
-  grid-template-columns: 1fr 1.2fr 0.9fr;
-  gap: var(--space-lg);
+  grid-template-columns: minmax(0, 1.3fr) minmax(360px, 1fr);
+  gap: var(--space-xl);
+  align-items: start;
 }
 
-@media (max-width: 1100px) {
-  .replay-grid {
+@media (max-width: 1024px) {
+  .ops-grid {
     grid-template-columns: 1fr;
   }
-}
-
-.replay-grid .col {
-  min-width: 0;
-}
-
-.replay-grid .terminal-card {
-  height: 100%;
-}
-
-.detail-id {
-  font: var(--text-caption-sm);
-  font-family: var(--font-mono);
-  color: var(--body);
-}
-
-.detail-name {
-  font: var(--text-heading-md);
-  color: var(--ink);
-  margin: var(--space-xs) 0 var(--space-lg);
-}
-
-.detail-turn {
-  font: var(--text-body-sm);
-  color: var(--ink);
-  margin: var(--space-sm) 0;
-}
-
-.detail-turn b {
-  font-weight: 500;
-  color: var(--body);
-  margin-right: var(--space-sm);
-}
-
-.detail-tool {
-  font: var(--text-code-sm);
-  color: var(--ink);
-  margin: var(--space-xs) 0;
 }
 
 .login {
@@ -395,4 +292,11 @@ body,
   color: var(--body);
   margin-top: var(--space-sm);
   min-height: 1.4em;
+}
+
+/* Tables built from NiceGUI elements: labels are divs, keep them inline. */
+.table td .q-label,
+.table th .q-label,
+.table td > div:not(.row) {
+  display: inline;
 }
