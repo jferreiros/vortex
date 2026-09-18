@@ -32,7 +32,9 @@ model never sees it. Keys of ``means``: ``identify``, ``patient`` (a third
 party), ``request`` (``intent``, ``specialty_id``, ``complaint``, ``provider``,
 ``location_id``, ``address``, ``when``, ``part_of_day``, ``language``,
 ``appointment_ref``), ``register``, ``policy``, ``accept``, ``decline``,
-``off_topic``, ``adversarial``, ``silence_secs``, ``end``.
+``off_topic``, ``adversarial``, ``silence_secs``, ``end``, and ``ask`` (a
+``clinic_facts`` input; ``request.location_id: as_told`` then books at the
+one site that answer named).
 """
 
 from __future__ import annotations

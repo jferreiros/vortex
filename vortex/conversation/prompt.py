@@ -50,18 +50,13 @@ from vortex.conversation.language import DEFAULT_LANGUAGE, language_name, normal
 
 CLINIC_NAME = "Clínica Arenal"
 
-# The three sites and the standing calendar, as the organisers publish them.
-# Fixed for the event: facts, so "which site opens Saturday?" costs no tool
-# call and the model never promises a slot that cannot exist. No street
-# addresses - nearest_location answers those, and a half-remembered address
-# spoken aloud is a wrong fact (problem 16).
-SITES_BRIEF = (
-    "Sites: Arenal Centro = centro, Arenal Norte = norte (Madrid), "
-    "Arenal Sur = sur (Getafe). "
-    "Weekdays all three open; Sur shuts Friday lunchtime. Saturday "
-    "only Centro opens. Sunday none. Monday 12 October is a national holiday, "
-    "all shut."
-)
+# The three site ids, so a caller who names a site can be quoted the right
+# location_id without a round trip. Nothing else about a site lives here: no
+# hours, no closures, no towns, no doctors. Problem 16 is scored on the
+# booking made after we answer such a question, so a fact stated from memory
+# ("Norte opens Saturday") becomes an unbookable request. clinic_facts reads
+# the catalogue; the prompt tells the model to ask it, every time.
+SITES_BRIEF = "Sites: Centro = centro, Norte = norte, Sur = sur."
 
 # One line per tool: when to call it, and what to trust in the answer. The
 # tool's own ``description`` (vortex/tools.py) already says what it does and
@@ -85,6 +80,7 @@ TOOL_LINES: dict[str, str] = {
     "triage": "specialty_id, emergency. A symptom only, never a specialty.",
     "nearest_location": "location_id.",
     "find_provider": "status, provider_id.",
+    "clinic_facts": "sites, open_days, providers.",
     "submit_action": "status. Nothing counts without it.",
 }
 
@@ -177,7 +173,8 @@ confirm briefly and say goodbye.
 TROUBLE. Garbled: ask them to repeat it; never guess. \
 Silence: "Are you still there?", then your last question. Rude caller: stay calm.
 
-FACTS. {sites_brief}
+FACTS. {sites_brief} Hours, days, doctors, towns: ask clinic_facts and say only \
+its answer, never memory. The caller books on what you say.
 
 {tool_guide}
 """
