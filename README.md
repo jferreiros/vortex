@@ -11,14 +11,14 @@
 | vortex/contract.py                   |      346 |       18 |     95% |663, 672, 678-679, 685, 689-695, 699, 704, 720, 753, 767, 771 |
 | vortex/conversation/language.py      |       38 |        6 |     84% |48-49, 51, 68-69, 75 |
 | vortex/conversation/prompt.py        |       11 |        0 |    100% |           |
-| vortex/conversation/stt\_context.py  |       38 |        2 |     95% |     81-82 |
+| vortex/conversation/stt\_context.py  |       41 |        3 |     93% |90, 99-100 |
 | vortex/conversation/turns.py         |       19 |        0 |    100% |           |
 | vortex/diary/tools.py                |      106 |       43 |     59% |70-71, 75-79, 100, 102, 104, 106, 108, 110-114, 116-117, 119, 121-122, 124-125, 136-147, 172-174, 177-179, 227, 257-258 |
 | vortex/identity/tools.py             |       64 |       26 |     59% |50, 59-65, 91-96, 105, 111, 113-117, 129, 137-141, 154-156 |
 | vortex/line/pipecat\_voice.py        |      168 |       87 |     48% |68-69, 76-238, 242, 304, 427-430, 452-453, 460-480 |
-| vortex/line/server.py                |       64 |       17 |     73% |44-46, 59-60, 65, 73-75, 82-84, 89-94 |
-| vortex/line/session.py               |       62 |        6 |     90% |60, 94, 109-110, 125-126 |
-| vortex/line/stub\_voice.py           |       43 |        7 |     84% | 34, 57-62 |
+| vortex/line/server.py                |       64 |       15 |     77% |44-46, 59-60, 65, 73-75, 82-84, 90, 92-94 |
+| vortex/line/session.py               |       62 |        4 |     94% |60, 94, 109-110 |
+| vortex/line/stub\_voice.py           |       43 |        6 |     86% |34, 57-60, 62 |
 | vortex/line/submit.py                |       47 |       22 |     53% |41, 48-66, 69, 89 |
 | vortex/line/twilio.py                |       77 |        3 |     96% |61, 153, 160 |
 | vortex/line/ulaw.py                  |       49 |       12 |     76% |22, 34-40, 53-56 |
@@ -31,7 +31,7 @@
 | vortex/rules/tools.py                |       50 |       14 |     72% |80-96, 131, 140-146, 149, 151, 157 |
 | vortex/settings.py                   |      169 |        1 |     99% |       235 |
 | vortex/tools.py                      |       51 |        9 |     82% |182, 185-187, 193-195, 197, 210 |
-| **TOTAL**                            | **2291** |  **761** | **67%** |           |
+| **TOTAL**                            | **2294** |  **757** | **67%** |           |
 
 6 empty files skipped.
 
