@@ -1,22 +1,30 @@
 """The real voice pipeline: pipecat over the Twilio-shaped socket.
 
-    transport.input -> STT (Deepgram) -> user aggregator -> LLM (OpenAI)
-                    -> TTS (OpenAI) -> transport.output -> assistant aggregator
+    transport.input -> STT (Soniox stt-rt-v5) -> language watcher
+                    -> user aggregator -> LLM (OpenAI-compatible, EU)
+                    -> TTS (Azure Neural, or Deepgram Aura-2) -> transport.output
+                    -> assistant aggregator
+
+Every provider is EU-hosted: Soniox for transcription, an OpenAI-compatible
+endpoint (IONOS / Nebius / Groq EU) running a small non-thinking Qwen for the
+model, and Azure Neural for the voice. ``VORTEX_TTS_PROVIDER=deepgram`` swaps
+the voice for Aura-2 on Deepgram's EU endpoint.
 
 One pipeline per socket. The serializer takes the ``stream_sid`` of this call,
 the context takes this call's prompt, and every tool handler closes over this
 call's ``ToolContext``. Nothing here is module-level state.
 
 Owner: the line lane for the wiring; the conversation lane for prompt, turn
-settings and tool exposure (it edits ``vortex/conversation/*``, not this file).
+settings, STT vocabulary and language (it edits ``vortex/conversation/*``).
 
 Imports of pipecat live inside the function so the server starts, and the
 smoke test runs, with the stub pipeline when the keys are missing.
 
 TODO(line):
-- Run one real call end to end once DEEPGRAM_API_KEY and OPENAI_API_KEY exist.
+- Run one real call end to end once the four keys exist.
 - Confirm the 8 kHz µ-law path: serializer ``twilio_sample_rate=8000`` in, and
-  the TTS resampled by the output transport. Check for choppy audio.
+  the TTS asked for 8 kHz PCM out (Azure Raw8Khz16BitMonoPcm). Check for
+  choppy audio.
 - Decide the idle policy: the platform cuts a call that goes quiet. Keep a
   user-idle prompt so the agent is never silent for long.
 - Hang up from our side when the agent says goodbye (send EndFrame, let the
@@ -31,11 +39,30 @@ from typing import Any
 from fastapi import WebSocket
 
 from vortex import tools as registry
+from vortex.conversation.language import detect_language, tts_voice_for
 from vortex.conversation.prompt import GREETING, initial_messages
+from vortex.conversation.stt_context import stt_terms
 from vortex.conversation.turns import TurnSettings, default_turn_settings
 from vortex.line.session import CallSession
 
 log = logging.getLogger(__name__)
+
+# Both the line in and the voice out are 8 kHz: the platform speaks µ-law at
+# 8 kHz and the serializer does the companding.
+LINE_SAMPLE_RATE = 8000
+
+
+def _language_hints(codes: tuple[str, ...]) -> list[Any]:
+    """Turn our ISO codes into pipecat ``Language`` members, dropping unknowns."""
+    from pipecat.transcriptions.language import Language
+
+    hints = []
+    for code in codes:
+        try:
+            hints.append(Language(code))
+        except ValueError:
+            log.warning("unknown STT language hint %r, ignored", code)
+    return hints
 
 
 async def run_pipecat_call(
@@ -55,10 +82,9 @@ async def run_pipecat_call(
         LLMUserAggregatorParams,
     )
     from pipecat.serializers.twilio import TwilioFrameSerializer
-    from pipecat.services.deepgram.stt import DeepgramSTTService, LiveOptions
     from pipecat.services.llm_service import FunctionCallParams
     from pipecat.services.openai.llm import OpenAILLMService
-    from pipecat.services.openai.tts import OpenAITTSService
+    from pipecat.services.soniox.stt import SonioxContextObject, SonioxSTTService
     from pipecat.transports.websocket.fastapi import (
         FastAPIWebsocketParams,
         FastAPIWebsocketTransport,
@@ -67,7 +93,7 @@ async def run_pipecat_call(
     settings = session.settings
     turns = turn_settings or default_turn_settings()
     ctx = session.ctx
-    ctx.log.event("voice.mode", mode="pipecat")
+    ctx.log.event("voice.mode", mode="pipecat", **_providers(settings))
 
     serializer = TwilioFrameSerializer(
         stream_sid=session.stream_sid,
@@ -84,21 +110,41 @@ async def run_pipecat_call(
         ),
     )
 
-    stt = DeepgramSTTService(
-        api_key=settings.deepgram_api_key,
-        live_options=LiveOptions(
-            model=settings.deepgram_stt_model,
-            language=turns.stt_language,
-            smart_format=True,
-            interim_results=True,
+    # ---- STT: Soniox. Language identification tags every transcription frame,
+    # which is what the language watcher below switches the voice on. ----------
+    stt = SonioxSTTService(
+        api_key=settings.soniox_api_key,
+        settings=SonioxSTTService.Settings(
+            model=settings.soniox_stt_model,
+            language_hints=_language_hints(turns.stt_language_hints),
+            enable_language_identification=True,
+            context=SonioxContextObject(terms=stt_terms(ctx)),
+            max_endpoint_delay_ms=turns.stt_max_endpoint_delay_ms,
+            endpoint_sensitivity=turns.stt_endpoint_sensitivity,
+            endpoint_latency_adjustment_level=turns.stt_endpoint_latency_adjustment_level,
         ),
+        # False hands the end of the turn to Soniox's own endpoint detection.
+        vad_force_turn_endpoint=not turns.soniox_turn_detection,
+        should_interrupt=turns.enable_interruptions,
     )
-    llm = OpenAILLMService(api_key=settings.openai_api_key, model=settings.openai_llm_model)
-    tts = OpenAITTSService(
-        api_key=settings.openai_api_key,
-        model=settings.openai_tts_model,
-        voice=settings.openai_tts_voice,
+
+    # ---- LLM: any OpenAI-compatible endpoint, as long as it is in the EU. ----
+    llm_settings = OpenAILLMService.Settings(
+        model=settings.llm_model,
+        temperature=settings.llm_temperature,
+        max_tokens=settings.llm_max_tokens,
+        # vLLM/SGLang read this off the request and skip the reasoning block.
+        extra={"chat_template_kwargs": {"enable_thinking": False}}
+        if settings.llm_disable_thinking
+        else {},
     )
+    llm = OpenAILLMService(
+        api_key=settings.llm_api_key,
+        base_url=settings.llm_base_url or None,
+        settings=llm_settings,
+    )
+
+    tts = _make_tts(settings)
 
     # ---- tools: every registry entry becomes a function the model can call ----
     def make_handler(tool_name: str):
@@ -144,22 +190,23 @@ async def run_pipecat_call(
         ),
     )
 
-    pipeline = Pipeline(
-        [
-            transport.input(),
-            stt,
-            aggregators.user(),
-            llm,
-            tts,
-            transport.output(),
-            aggregators.assistant(),
-        ]
-    )
+    stages: list[Any] = [transport.input(), stt]
+    if settings.tts_is_azure:
+        # Only Azure has a Catalan voice to switch to.
+        stages.append(_LanguageWatcher(session))
+    stages += [
+        aggregators.user(),
+        llm,
+        tts,
+        transport.output(),
+        aggregators.assistant(),
+    ]
+
     task = PipelineTask(
-        pipeline,
+        Pipeline(stages),
         params=PipelineParams(
-            audio_in_sample_rate=8000,
-            audio_out_sample_rate=8000,
+            audio_in_sample_rate=LINE_SAMPLE_RATE,
+            audio_out_sample_rate=LINE_SAMPLE_RATE,
             enable_metrics=True,
         ),
         observers=[_CallLogObserver(session)],
@@ -183,6 +230,99 @@ async def run_pipecat_call(
     runner = PipelineRunner(handle_sigint=False)
     await runner.run(task)
     return "pipeline_finished"
+
+
+def _providers(settings: Any) -> dict[str, object]:
+    return {
+        "stt": f"soniox/{settings.soniox_stt_model}",
+        "llm": settings.llm_model,
+        "tts": "azure" if settings.tts_is_azure else "deepgram",
+    }
+
+
+def _make_tts(settings: Any) -> Any:
+    """Azure Neural by default; Deepgram Aura-2 when VORTEX_TTS_PROVIDER says so.
+
+    Both are asked for 8 kHz PCM: Azure maps it to ``Raw8Khz16BitMonoPcm`` and
+    the Twilio serializer does the µ-law companding on the way out.
+    """
+    if settings.tts_is_azure:
+        from pipecat.services.azure.tts import AzureTTSService
+        from pipecat.transcriptions.language import Language
+
+        return AzureTTSService(
+            api_key=settings.azure_speech_key,
+            region=settings.azure_speech_region,
+            sample_rate=LINE_SAMPLE_RATE,
+            settings=AzureTTSService.Settings(
+                voice=settings.azure_tts_voice_es,
+                language=Language.ES_ES,
+            ),
+        )
+
+    from pipecat.services.deepgram.tts import DeepgramTTSService
+
+    return DeepgramTTSService(
+        api_key=settings.deepgram_api_key,
+        # The streaming service wants a WebSocket origin; the env var holds the
+        # HTTP one so it reads like every other base URL.
+        base_url=_as_websocket_url(settings.deepgram_base_url),
+        sample_rate=LINE_SAMPLE_RATE,
+        settings=DeepgramTTSService.Settings(voice=settings.deepgram_tts_model),
+    )
+
+
+def _as_websocket_url(url: str) -> str:
+    if url.startswith("https://"):
+        return "wss://" + url[len("https://") :]
+    if url.startswith("http://"):
+        return "ws://" + url[len("http://") :]
+    return url
+
+
+def _LanguageWatcher(session: CallSession):  # noqa: N802 - factory that returns a processor
+    """Switch the Azure voice when the caller switches language.
+
+    Soniox tags each transcription frame with the language it heard. When that
+    flips between Spanish and Catalan we push a ``TTSUpdateSettingsFrame``
+    downstream; the TTS service applies the delta in place, so the voice
+    changes without rebuilding the pipeline. There is no public
+    ``update_settings()`` coroutine on ``TTSService`` in pipecat 1.11 — the
+    control frame is the supported way in.
+    """
+    from pipecat.frames.frames import Frame, TranscriptionFrame, TTSUpdateSettingsFrame
+    from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+    from pipecat.services.settings import TTSSettings
+
+    class LanguageWatcher(FrameProcessor):
+        def __init__(self) -> None:
+            super().__init__()
+            self._language = "es"
+
+        async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+            await super().process_frame(frame, direction)
+            if isinstance(frame, TranscriptionFrame):
+                await self._maybe_switch(frame)
+            await self.push_frame(frame, direction)
+
+        async def _maybe_switch(self, frame: TranscriptionFrame) -> None:
+            try:
+                language = detect_language(frame.text, hint=frame.language)
+                if language == self._language:
+                    return
+                voice, tts_language = tts_voice_for(language, session.settings)
+                previous, self._language = self._language, language
+                session.ctx.log.event(
+                    "voice.language_switch", was=previous, now=language, voice=voice
+                )
+                await self.push_frame(
+                    TTSUpdateSettingsFrame(delta=TTSSettings(voice=voice, language=tts_language)),
+                    FrameDirection.DOWNSTREAM,
+                )
+            except Exception as exc:  # a failed switch must never end the call
+                log.warning("language switch failed: %s", exc)
+
+    return LanguageWatcher()
 
 
 def _CallLogObserver(session: CallSession):  # noqa: N802 - factory that returns an observer

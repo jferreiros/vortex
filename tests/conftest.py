@@ -13,7 +13,14 @@ from vortex import settings as settings_module
 @pytest.fixture
 def offline_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> settings_module.Settings:
     """Settings with every key blank and the call log in a temp dir."""
-    for key in ("PLATFORM_API_KEY", "DEEPGRAM_API_KEY", "OPENAI_API_KEY"):
+    for key in (
+        "PLATFORM_API_KEY",
+        "SONIOX_API_KEY",
+        "LLM_API_KEY",
+        "LLM_BASE_URL",
+        "AZURE_SPEECH_KEY",
+        "DEEPGRAM_API_KEY",
+    ):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("VORTEX_VOICE_MODE", "stub")
     monkeypatch.setenv("VORTEX_CLINIC_MODE", "fake")
@@ -30,7 +37,14 @@ def anyio_backend() -> str:
 
 def _unset_dotenv_keys() -> None:
     # A developer's .env must not leak into the tests.
-    for key in ("PLATFORM_API_KEY", "DEEPGRAM_API_KEY", "OPENAI_API_KEY"):
+    for key in (
+        "PLATFORM_API_KEY",
+        "SONIOX_API_KEY",
+        "LLM_API_KEY",
+        "LLM_BASE_URL",
+        "AZURE_SPEECH_KEY",
+        "DEEPGRAM_API_KEY",
+    ):
         os.environ.pop(key, None)
 
 

@@ -5,6 +5,9 @@ missing, the matching component runs in fake mode:
 
 - no ``PLATFORM_API_KEY``  -> fake clinic data and a dry-run submit client
 - no voice keys            -> the stub voice pipeline (beeps, no STT/LLM/TTS)
+
+The voice pipeline is EU-first: Soniox for STT, any OpenAI-compatible endpoint
+hosted in the EU for the LLM, and Azure Neural (or Deepgram Aura-2) for TTS.
 """
 
 from __future__ import annotations
@@ -32,15 +35,46 @@ class Settings:
         default_factory=lambda: _env("PLATFORM_API_BASE_URL", "http://localhost:9999")
     )
 
-    # Voice pipeline providers
-    deepgram_api_key: str = field(default_factory=lambda: _env("DEEPGRAM_API_KEY"))
-    openai_api_key: str = field(default_factory=lambda: _env("OPENAI_API_KEY"))
-    openai_llm_model: str = field(default_factory=lambda: _env("OPENAI_LLM_MODEL", "gpt-4.1"))
-    openai_tts_model: str = field(
-        default_factory=lambda: _env("OPENAI_TTS_MODEL", "gpt-4o-mini-tts")
+    # --- STT: Soniox real-time ------------------------------------------------
+    soniox_api_key: str = field(default_factory=lambda: _env("SONIOX_API_KEY"))
+    soniox_stt_model: str = field(default_factory=lambda: _env("SONIOX_STT_MODEL", "stt-rt-v5"))
+
+    # --- LLM: any OpenAI-compatible endpoint hosted in the EU -----------------
+    # IONOS AI Model Hub, Nebius Token Factory, Groq EU ... all speak /v1/chat/completions.
+    llm_base_url: str = field(default_factory=lambda: _env("LLM_BASE_URL"))
+    llm_api_key: str = field(default_factory=lambda: _env("LLM_API_KEY"))
+    llm_model: str = field(
+        default_factory=lambda: _env("LLM_MODEL", "Qwen/Qwen3-30B-A3B-Instruct-2507")
     )
-    openai_tts_voice: str = field(default_factory=lambda: _env("OPENAI_TTS_VOICE", "coral"))
-    deepgram_stt_model: str = field(default_factory=lambda: _env("DEEPGRAM_STT_MODEL", "nova-3"))
+    llm_temperature: float = field(default_factory=lambda: float(_env("LLM_TEMPERATURE", "0.2")))
+    llm_max_tokens: int = field(default_factory=lambda: int(_env("LLM_MAX_TOKENS", "120")))
+    # Qwen3 hybrid builds think by default; a phone call cannot wait for that.
+    llm_disable_thinking: bool = field(
+        default_factory=lambda: (
+            _env("LLM_DISABLE_THINKING", "true").lower() not in ("0", "false", "no")
+        )
+    )
+
+    # --- TTS: Azure Neural (default) or Deepgram Aura-2 -----------------------
+    # VORTEX_TTS_PROVIDER: azure | deepgram
+    tts_provider: str = field(default_factory=lambda: _env("VORTEX_TTS_PROVIDER", "azure").lower())
+    azure_speech_key: str = field(default_factory=lambda: _env("AZURE_SPEECH_KEY"))
+    azure_speech_region: str = field(
+        default_factory=lambda: _env("AZURE_SPEECH_REGION", "westeurope")
+    )
+    azure_tts_voice_es: str = field(
+        default_factory=lambda: _env("AZURE_TTS_VOICE_ES", "es-ES-ElviraNeural")
+    )
+    azure_tts_voice_ca: str = field(
+        default_factory=lambda: _env("AZURE_TTS_VOICE_CA", "ca-ES-JoanaNeural")
+    )
+    deepgram_api_key: str = field(default_factory=lambda: _env("DEEPGRAM_API_KEY"))
+    deepgram_tts_model: str = field(
+        default_factory=lambda: _env("DEEPGRAM_TTS_MODEL", "aura-2-celeste-es")
+    )
+    deepgram_base_url: str = field(
+        default_factory=lambda: _env("DEEPGRAM_BASE_URL", "https://api.eu.deepgram.com")
+    )
 
     # Server
     host: str = field(default_factory=lambda: _env("VORTEX_HOST", "0.0.0.0"))
@@ -72,12 +106,22 @@ class Settings:
         return bool(self.platform_api_key)
 
     @property
+    def tts_is_azure(self) -> bool:
+        return self.tts_provider != "deepgram"
+
+    @property
+    def has_tts_key(self) -> bool:
+        return bool(self.azure_speech_key if self.tts_is_azure else self.deepgram_api_key)
+
+    @property
     def voice_is_pipecat(self) -> bool:
         if self.voice_mode == "pipecat":
             return True
         if self.voice_mode == "stub":
             return False
-        return bool(self.deepgram_api_key and self.openai_api_key)
+        return bool(
+            self.soniox_api_key and self.llm_api_key and self.llm_base_url and self.has_tts_key
+        )
 
     def describe(self) -> dict[str, object]:
         """A safe summary for logs and /health. Never includes key values."""
@@ -86,8 +130,16 @@ class Settings:
             "voice": "pipecat" if self.voice_is_pipecat else "stub",
             "platform_api_base_url": self.platform_api_base_url,
             "has_platform_key": bool(self.platform_api_key),
+            "has_soniox_key": bool(self.soniox_api_key),
+            "has_llm_key": bool(self.llm_api_key),
+            "has_azure_speech_key": bool(self.azure_speech_key),
             "has_deepgram_key": bool(self.deepgram_api_key),
-            "has_openai_key": bool(self.openai_api_key),
+            "stt_model": self.soniox_stt_model,
+            "llm_model": self.llm_model,
+            "llm_base_url": self.llm_base_url,
+            "tts_provider": "azure" if self.tts_is_azure else "deepgram",
+            "tts_voice": self.azure_tts_voice_es if self.tts_is_azure else self.deepgram_tts_model,
+            "azure_speech_region": self.azure_speech_region if self.tts_is_azure else "",
             "ws_path": self.ws_path,
             "calls_log_path": str(self.calls_log_path),
         }
