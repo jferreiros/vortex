@@ -66,9 +66,12 @@ HELMCODE_BASE_URL = "https://api.helmcode.com/v1"
 LLM_PRESETS: dict[str, LlmPreset] = {
     # Bring your own endpoint: the three LLM_* variables and nothing else.
     "custom": LlmPreset("", "llm_api_key_env", "Qwen/Qwen3-30B-A3B-Instruct-2507"),
-    # Hackathon perk: 600M tokens. qwen3.6 = 35B MoE, 3B active, tool calling,
-    # fastest of their catalogue. Ids confirmed from helmcode.com/docs/models.
-    "helmcode": LlmPreset("", "helmcode_api_key", "qwen3.6"),
+    # Hackathon perk: 600M tokens. deepseek-v4-flash, not the faster qwen3.6:
+    # measured on 2026-09-19, qwen3.6 fails both problem-1 scenarios. It loops
+    # prepare_booking and submit_action for 20 tool calls against a cap of 12,
+    # submits nothing, and the session fallback sends no-action. deepseek-v4-flash
+    # passes both, in a third of the time and a quarter of the tokens.
+    "helmcode": LlmPreset("", "helmcode_api_key", "deepseek-v4-flash"),
     # Hackathon perk: $100 of AI Gateway. UNVERIFIED model id.
     "cloudflare": LlmPreset(
         CLOUDFLARE_LLM_BASE_URL, "cloudflare_api_token", "@cf/qwen/qwen3-30b-a3b-fp8"
