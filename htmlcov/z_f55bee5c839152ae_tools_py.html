@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
-    <title>Coverage for vortex/rules/tools.py: 57%</title>
+    <title>Coverage for vortex/rules/tools.py: 59%</title>
     <link rel="icon" sizes="32x32" href="favicon_32_cb_c827f16f.png">
     <link rel="stylesheet" href="style_cb_4667309f.css" type="text/css">
     <script src="coverage_html_cb_dd2e7eb5.js" defer></script>
@@ -12,7 +12,7 @@
     <div class="content">
         <h1>
             <span class="text">Coverage for </span><b>vortex<span class="sep">/</span>rules<span class="sep">/</span>tools.py</b>:
-            <span class="pc_cov">57%</span>
+            <span class="pc_cov">59%</span>
         </h1>
         <aside id="help_panel_wrapper">
             <input id="help_panel_state" type="checkbox">
@@ -55,8 +55,8 @@
         </aside>
         <h2>
             <span class="text">119 statements &nbsp;</span>
-            <button type="button" class="run button_toggle_run" value="run" data-shortcut="r" title="Toggle lines run">68<span class="text"> run</span></button>
-            <button type="button" class="mis show_mis button_toggle_mis" value="mis" data-shortcut="m" title="Toggle lines missing">51<span class="text"> missing</span></button>
+            <button type="button" class="run button_toggle_run" value="run" data-shortcut="r" title="Toggle lines run">70<span class="text"> run</span></button>
+            <button type="button" class="mis show_mis button_toggle_mis" value="mis" data-shortcut="m" title="Toggle lines missing">49<span class="text"> missing</span></button>
             <button type="button" class="exc show_exc button_toggle_exc" value="exc" data-shortcut="x" title="Toggle lines excluded">0<span class="text"> excluded</span></button>
         </h2>
         <p class="text">
@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_f55bee5c839152ae_triage_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.15.4">coverage.py v7.15.4</a>,
-            created at 2026-09-18 21:40 +0000
+            created at 2026-09-18 21:46 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -338,12 +338,12 @@
     <p class="pln"><span class="n"><a id="t256" href="#t256">256</a></span><span class="t"><span class="str">    &quot;&quot;&quot;</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t257" href="#t257">257</a></span><span class="t">    <span class="nam">flag</span> <span class="op">=</span> <span class="nam">triage_table</span><span class="op">.</span><span class="nam">red_flag</span><span class="op">(</span><span class="nam">args</span><span class="op">.</span><span class="nam">complaint</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t258" href="#t258">258</a></span><span class="t">    <span class="key">if</span> <span class="nam">flag</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis show_mis"><span class="n"><a id="t259" href="#t259">259</a></span><span class="t">        <span class="nam">ctx</span><span class="op">.</span><span class="nam">log</span><span class="op">.</span><span class="nam">event</span><span class="op">(</span><span class="str">&quot;triage.red_flag&quot;</span><span class="op">,</span> <span class="nam">flag</span><span class="op">=</span><span class="nam">flag</span><span class="op">,</span> <span class="nam">complaint</span><span class="op">=</span><span class="nam">args</span><span class="op">.</span><span class="nam">complaint</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis show_mis"><span class="n"><a id="t260" href="#t260">260</a></span><span class="t">        <span class="key">return</span> <span class="nam">TriageResult</span><span class="op">(</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis mis2 show_mis"><span class="n"><a id="t261" href="#t261">261</a></span><span class="t">            <span class="nam">specialty_id</span><span class="op">=</span><span class="key">None</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis mis2 show_mis"><span class="n"><a id="t262" href="#t262">262</a></span><span class="t">            <span class="nam">emergency</span><span class="op">=</span><span class="key">True</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis mis2 show_mis"><span class="n"><a id="t263" href="#t263">263</a></span><span class="t">            <span class="nam">rejection</span><span class="op">=</span><span class="nam">Rejection</span><span class="op">(</span><span class="nam">reason</span><span class="op">=</span><span class="str">&quot;medical_emergency&quot;</span><span class="op">,</span> <span class="nam">detail</span><span class="op">=</span><span class="fst">f&quot;</span><span class="fst">published red flag: </span><span class="op">{</span><span class="nam">flag</span><span class="op">}</span><span class="fst">&quot;</span><span class="op">)</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis mis2 show_mis"><span class="n"><a id="t264" href="#t264">264</a></span><span class="t">        <span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t259" href="#t259">259</a></span><span class="t">        <span class="nam">ctx</span><span class="op">.</span><span class="nam">log</span><span class="op">.</span><span class="nam">event</span><span class="op">(</span><span class="str">&quot;triage.red_flag&quot;</span><span class="op">,</span> <span class="nam">flag</span><span class="op">=</span><span class="nam">flag</span><span class="op">,</span> <span class="nam">complaint</span><span class="op">=</span><span class="nam">args</span><span class="op">.</span><span class="nam">complaint</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t260" href="#t260">260</a></span><span class="t">        <span class="key">return</span> <span class="nam">TriageResult</span><span class="op">(</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t261" href="#t261">261</a></span><span class="t">            <span class="nam">specialty_id</span><span class="op">=</span><span class="key">None</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t262" href="#t262">262</a></span><span class="t">            <span class="nam">emergency</span><span class="op">=</span><span class="key">True</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t263" href="#t263">263</a></span><span class="t">            <span class="nam">rejection</span><span class="op">=</span><span class="nam">Rejection</span><span class="op">(</span><span class="nam">reason</span><span class="op">=</span><span class="str">&quot;medical_emergency&quot;</span><span class="op">,</span> <span class="nam">detail</span><span class="op">=</span><span class="fst">f&quot;</span><span class="fst">published red flag: </span><span class="op">{</span><span class="nam">flag</span><span class="op">}</span><span class="fst">&quot;</span><span class="op">)</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t264" href="#t264">264</a></span><span class="t">        <span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t265" href="#t265">265</a></span><span class="t">    <span class="key">return</span> <span class="nam">TriageResult</span><span class="op">(</span><span class="nam">specialty_id</span><span class="op">=</span><span class="nam">triage_table</span><span class="op">.</span><span class="nam">route</span><span class="op">(</span><span class="nam">args</span><span class="op">.</span><span class="nam">complaint</span><span class="op">)</span><span class="op">,</span> <span class="nam">emergency</span><span class="op">=</span><span class="key">False</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t266" href="#t266">266</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t267" href="#t267">267</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
@@ -441,7 +441,7 @@
             <a class="nav" href="z_f55bee5c839152ae_triage_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.15.4">coverage.py v7.15.4</a>,
-            created at 2026-09-18 21:40 +0000
+            created at 2026-09-18 21:46 +0000
         </p>
     </div>
 </footer>
