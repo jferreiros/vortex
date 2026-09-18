@@ -10,10 +10,11 @@ Two layers, in order:
 1. **A gazetteer**, below: the municipalities of the Madrid area and the city's
    main streets and districts. No network, deterministic, and enough for a
    margin measured in kilometres.
-2. **A live geocoder**, when ``VORTEX_GEOCODER_URL`` names a Nominatim-
-   compatible endpoint. Off by default so that evals and offline work never
-   depend on a network call, and so nothing leaks a caller's address to a
-   third party unless the team turned it on deliberately.
+2. **A live geocoder**, when ``Settings.geocoder_url`` (``VORTEX_GEOCODER_URL``)
+   names a Nominatim-compatible endpoint. Off by default so that evals and
+   offline work never depend on a network call, and so nothing leaks a
+   caller's address to a third party unless the team turned it on
+   deliberately.
 
 If neither places the address, the site whose own published address shares the
 most words with it answers. A caller who gives an address we cannot place is
@@ -23,16 +24,15 @@ not a refusal: it is a question to ask them.
 from __future__ import annotations
 
 import math
-import os
 import re
 import unicodedata
 from functools import lru_cache
 from typing import Any
 
+from vortex.settings import Settings, get_settings
+
 EARTH_RADIUS_KM = 6371.0088
 
-#: Nominatim-compatible endpoint. Empty means the gazetteer only.
-GEOCODER_URL_ENV = "VORTEX_GEOCODER_URL"
 GEOCODER_TIMEOUT_SECS = 3.0
 
 
@@ -197,13 +197,11 @@ def gazetteer_lookup(address: str) -> tuple[float, float] | None:
     return best[1] if best else None
 
 
-def _geocoder_url() -> str:
-    return os.environ.get(GEOCODER_URL_ENV, "").strip()
-
-
-async def geocode_live(address: str) -> tuple[float, float] | None:
+async def geocode_live(
+    address: str, settings: Settings | None = None
+) -> tuple[float, float] | None:
     """Ask a Nominatim-compatible endpoint. ``None`` unless one is configured."""
-    url = _geocoder_url()
+    url = (settings or get_settings()).geocoder_url
     if not url:
         return None
     import httpx  # local: the offline path must not need it
@@ -237,9 +235,9 @@ def address_overlap(caller: str, site_address: str) -> int:
     return len(_address_words(caller) & _address_words(site_address))
 
 
-async def locate(address: str) -> tuple[float, float] | None:
+async def locate(address: str, settings: Settings | None = None) -> tuple[float, float] | None:
     """Coordinates for a spoken address: gazetteer first, then a live geocoder."""
-    return gazetteer_lookup(address) or await geocode_live(address)
+    return gazetteer_lookup(address) or await geocode_live(address, settings)
 
 
 def nearest(point: tuple[float, float], sites: list[Any]) -> tuple[Any, float] | None:

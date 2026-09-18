@@ -178,6 +178,29 @@ per-socket, so concurrency is not a deployment concern — but do check
 
 ---
 
+## The board lives somewhere else
+
+`deploy/deploy.sh` deploys the call socket only. The jury wall and the ops
+board (`vortex.167.233.80.47.sslip.io`) run from a separate clone that root
+owns, built from `Dockerfile.board` with `deploy/compose.yml`:
+
+```
+/opt/vortex-board          the clone; deploy/.env holds VORTEX_OPS_PASSWORD
+```
+
+A merge into `main` does not reach the wall on its own. To redeploy the board:
+
+```bash
+ssh vps
+cd /opt/vortex-board
+git fetch origin main && git reset --hard origin/main
+docker compose -f deploy/compose.yml up -d --build
+```
+
+Then open `https://vortex.167.233.80.47.sslip.io/wall`. The container exposes
+no host port, so `curl 127.0.0.1:8080` on the box says nothing: check through
+Traefik.
+
 ## Living next to the other services
 
 This host runs other services, including one in real use. This deployment stays
