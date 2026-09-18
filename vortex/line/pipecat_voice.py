@@ -155,7 +155,10 @@ async def run_pipecat_call(
     def make_handler(tool_name: str):
         async def handler(params: FunctionCallParams) -> None:
             try:
-                result = await registry.call_tool(tool_name, ctx, dict(params.arguments))
+                # Through the session, not the registry: it remembers what the
+                # end-of-call fallback needs (the last refusal, the last
+                # prepared action) and records the model's own submissions.
+                result = await session.call_tool(tool_name, dict(params.arguments))
                 await params.result_callback(result.model_dump(mode="json"))
             except Exception as exc:  # the model must hear about failures, typed
                 await params.result_callback({"error": f"{type(exc).__name__}: {exc}"})
