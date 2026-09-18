@@ -24,7 +24,7 @@ scenarios:
       actions:
         - kind: book
           patient_id: P00042
-          slot: {$earliest_slot: {specialty_id: general_practice, on: "2026-09-23", part_of_day: morning, patient_id: P00042}}
+          slot: {$earliest_slot: {specialty_id: general_practice, "on": "2026-09-23", part_of_day: morning, patient_id: P00042}}
       privacy_of: [P00042]
       max_tool_calls: 14
 
@@ -92,7 +92,7 @@ scenarios:
         - kind: reschedule
           appointment_id: A0001
           provider_id: PR01
-          slot: {$earliest_slot: {provider_id: PR01, on: "2026-10-05", patient_id: P00042}}
+          slot: {$earliest_slot: {provider_id: PR01, "on": "2026-10-05", patient_id: P00042}}
       must_not_call: [prepare_cancel, prepare_booking]
       privacy_of: [P00042]
 
@@ -111,5 +111,96 @@ scenarios:
         - kind: reschedule
           appointment_id: A0002
           provider_id: PR03
-          slot: {$earliest_slot: {provider_id: PR03, on: "2026-10-05", patient_id: P00107}}
+          slot: {$earliest_slot: {provider_id: PR03, "on": "2026-10-05", patient_id: P00107}}
       privacy_of: [P00042, P00107]
+
+  # ---- problem 13, the public case shapes, in English -------------------------
+
+  - id: p13.site_corrected_while_the_offer_is_read
+    problem: 13
+    caller:
+      - says: "Hi, my blood pressure's been high on the pharmacy machine. I'd like the earliest General Practice appointment at Arenal Norte. Marta Ruiz López, born twelfth of March eighty-five."
+        means: {identify: {name: "Marta Ruiz López", date_of_birth: "1985-03-12"}, request: {intent: book, specialty_id: general_practice, location_id: norte}}
+      - says: "Sorry, no, wait. Not Norte, I meant Arenal Centro. Centro, please."
+        interrupt_after_words: 4
+        means: {request: {location_id: centro}}
+      - says: "Yes, that one's fine."
+        means: {accept: true}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00042
+          location_id: centro
+          slot: {$earliest_slot: {specialty_id: general_practice, location_id: centro, patient_id: P00042}}
+      privacy_of: [P00042]
+
+  - id: p13.dni_wrong_digit_then_corrected
+    problem: 13
+    caller:
+      - says: "Hello, my yearly check-up is overdue. Earliest General Practice appointment, please. Marta Ruiz López."
+        means: {identify: {name: "Marta Ruiz López"}, request: {intent: book, specialty_id: general_practice}}
+      - says: "One two three four five six seven eight A... no, sorry, I got the letter wrong. It's one two three four five six seven eight Z."
+        means: {clear: [national_id], identify: {national_id: "12345678Z"}}
+      - says: "Great, yes, I'll take that."
+        means: {accept: true}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00042
+          appointment_type_id: review
+          slot: {$earliest_slot: {specialty_id: general_practice, patient_id: P00042}}
+      must_not_call: [build_registration]
+      privacy_of: [P00042, P00043]
+
+  - id: p13.parking_digression_then_back_to_the_booking
+    problem: 13
+    caller:
+      - says: "Hi, I haven't been sleeping well for a couple of months. Can I get the earliest General Practice appointment? Marta Ruiz López, twelfth of March nineteen eighty-five."
+        means: {identify: {name: "Marta Ruiz López", date_of_birth: "1985-03-12"}, request: {intent: book, specialty_id: general_practice}}
+      - says: "Oh, before I forget, is there parking near the clinic? Do I have to pay for it?"
+        means: {off_topic: true}
+      - says: "And is it underground or on the street?"
+        means: {off_topic: true}
+      - says: "Okay, never mind. Back to the appointment: yes, the first one you have."
+        means: {accept: true}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00042
+          slot: {$earliest_slot: {specialty_id: general_practice, patient_id: P00042}}
+      privacy_of: [P00042]
+      max_tool_calls: 12
+
+  - id: p13.eight_seconds_of_silence_then_carries_on
+    problem: 13
+    caller:
+      - says: "Hello, my lower back has been sore for a month. I'd like the earliest Orthopaedics appointment. Marta Ruiz López, born the twelfth of March eighty-five."
+        means: {identify: {name: "Marta Ruiz López", date_of_birth: "1985-03-12"}, request: {intent: book, specialty_id: orthopaedics}}
+      - says: ""
+        silence_secs: 8
+        means: {silence_secs: 8}
+      - says: "Yes, sorry. Yes, that one is fine."
+        means: {accept: true}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00042
+          provider_id: PR05
+          slot: {$earliest_slot: {specialty_id: orthopaedics, patient_id: P00042}}
+      privacy_of: [P00042]
+
+  - id: p13.day_corrected_from_tuesday_to_thursday
+    problem: 13
+    caller:
+      - says: "Hi, I've been sleeping badly for months. I'd like the earliest General Practice appointment on a Tuesday. Marta Ruiz López, born twelfth of March nineteen eighty-five."
+        means: {identify: {name: "Marta Ruiz López", date_of_birth: "1985-03-12"}, request: {intent: book, specialty_id: general_practice, when: "this coming Tuesday"}}
+      - says: "Actually, hang on, no. What I actually need is a Thursday. The earliest General Practice appointment on a Thursday."
+        means: {request: {when: "this coming Thursday"}}
+      - says: "Yes, that's the one. Thank you."
+        means: {accept: true}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00042
+          slot: {$earliest_slot: {specialty_id: general_practice, "on": "2026-09-24", patient_id: P00042}}
+      privacy_of: [P00042]

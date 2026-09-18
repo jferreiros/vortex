@@ -20,8 +20,30 @@ from vortex.clinic import fixtures
 from vortex.conversation.prompt import CLINIC_NAME
 
 # Said on every call, in the language the caller uses. Not in the catalogue.
+# English first (the clinic's default), then the Spanish and Catalan the
+# exceptions use. Soniox spells a boosted term the way it is written here.
 SPOKEN_TERMS: tuple[str, ...] = (
     CLINIC_NAME,
+    "Arenal Centro",
+    "Arenal Norte",
+    "Arenal Sur",
+    "Getafe",
+    "appointment",
+    "General Practice",
+    "Paediatrics",
+    "Dermatology",
+    "Orthopaedics",
+    "Gynaecology",
+    "Physiotherapy",
+    "referral",
+    "insurer",
+    "Sanitas",
+    "Adeslas",
+    "ASISA",
+    "DKV",
+    "Mapfre",
+    "AXA",
+    "Cigna",
     "cita previa",
     "medicina general",
     "pediatría",
@@ -75,14 +97,18 @@ def _fallback_terms() -> list[str]:
 # Free-text context for Soniox (up to 8k tokens). The shape of a Spanish
 # national id and the check alphabet bias digit and letter recognition; the
 # letters I, O, U and Ñ never occur, which the identity lane also enforces.
+# English, because that is the language of most calls; the Spanish sentence
+# at the end covers the callers who switch.
 STT_CONTEXT_TEXT = (
-    "Llamada telefónica a la recepción de una clínica en España para pedir, "
-    "cambiar o anular una cita médica. El paciente dice su nombre, apellidos, "
-    "fecha de nacimiento, teléfono y su DNI o NIE. Un DNI son ocho dígitos "
-    "seguidos de una letra de control; un NIE empieza por X, Y o Z, seguido de "
-    "siete dígitos y una letra. Letras de control posibles: "
-    "T R W A G M Y F P D X B N J Z S Q V H L C K E. "
-    "Los números se dictan a menudo en pares: doce, treinta y cuatro, cincuenta y seis."
+    "Phone call to the reception desk of a private clinic in Madrid, Spain, to "
+    "book, move or cancel a medical appointment. Most callers speak English; "
+    "some speak Spanish or Catalan. The caller gives their name, two surnames, "
+    "date of birth, phone number and their DNI or NIE. A DNI is eight digits "
+    "followed by a check letter; a NIE starts with X, Y or Z, then seven digits "
+    "and a letter. Possible check letters: T R W A G M Y F P D X B N J Z S Q V H "
+    "L C K E. Digits are often read out one at a time or in pairs. "
+    "Llamada a la recepción de una clínica para pedir, cambiar o anular una cita; "
+    "el paciente dice su nombre, apellidos, fecha de nacimiento, teléfono y DNI o NIE."
 )
 
 

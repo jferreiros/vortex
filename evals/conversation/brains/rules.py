@@ -18,7 +18,13 @@ from typing import Any
 
 from evals.conversation.brains.base import Trace
 from evals.conversation.scenario import CallerTurn, Scenario
-from vortex.conversation.prompt import GREETING
+from vortex.conversation.prompt import (
+    GREETING,
+    emergency_line_for,
+    goodbye_for,
+    idle_prompt_for,
+    refusal_line_for,
+)
 from vortex.tools import ToolError
 
 _ID_FIELDS = ("name", "date_of_birth", "national_id", "phone")
@@ -59,13 +65,13 @@ class RulesBrain:
             trace.say("user", turn.says)
         if m.get("adversarial"):
             s.refuse = "out_of_scope"
-            return self._reply(
-                trace, "Lo siento, no puedo ayudarle con eso. ¿Desea pedir una cita?"
-            )
+            return self._reply(trace, refusal_line_for("en"))
         if m.get("silence_secs") or turn.silence_secs:
-            return self._reply(trace, "¿Sigue ahí?")
+            return self._reply(trace, idle_prompt_for("en"))
         if m.get("off_topic"):
-            return self._reply(trace, "Entiendo. Volvamos a la cita, si le parece.")
+            return self._reply(
+                trace, "I don't have that information, sorry. Back to your appointment."
+            )
         for key in ("identify", "patient", "request", "register"):
             if m.get(key):
                 getattr(s, "caller" if key == "identify" else key).update(m[key])
@@ -89,11 +95,11 @@ class RulesBrain:
         if s.record is None and not s.register and subject:
             missing = self._second_field(subject)
             if missing:
-                return self._reply(trace, f"¿Me confirma su {missing}, por favor?")
+                return self._reply(trace, f"Could you give me your {missing}, please?")
         if m.get("end") or m.get("accept"):
             await self._decide(trace)
-            return self._reply(trace, "Perfecto. Queda anotado. Gracias por llamar, hasta luego.")
-        return self._reply(trace, "Muy bien. ¿Algo más que deba saber?")
+            return self._reply(trace, "All done, that is noted. " + goodbye_for("en"))
+        return self._reply(trace, "Very well. Anything else I should know?")
 
     async def hangup(self, trace: Trace) -> None:
         if not self._state.decided:
@@ -113,9 +119,9 @@ class RulesBrain:
         for f in ("date_of_birth", "national_id", "phone"):
             if f not in given:
                 return {
-                    "date_of_birth": "fecha de nacimiento",
-                    "national_id": "DNI",
-                    "phone": "teléfono",
+                    "date_of_birth": "date of birth",
+                    "national_id": "DNI or NIE",
+                    "phone": "phone number",
                 }[f]
         return None
 
@@ -151,6 +157,8 @@ class RulesBrain:
         if complaint:
             route = await trace.call("triage", {"complaint": complaint})
             if route.get("emergency"):
+                # What the prompt tells the model to say the moment a red flag lands.
+                trace.say("assistant", emergency_line_for("en"))
                 await self._submit(trace, {"kind": "escalate", "reason": "medical_emergency"})
                 return
             specialty = specialty or route.get("specialty_id")
@@ -208,10 +216,15 @@ class RulesBrain:
                 provider_id = pick["provider_id"]
                 specialty = specialty or pick["specialty_id"]
             elif match["status"] == "on_leave":
-                specialty = specialty or (match.get("provider") or {}).get("specialty_id")
+                away = match.get("provider") or {}
+                specialty = specialty or away.get("specialty_id")
                 if not specialty:
                     await self._submit(trace, {"kind": "no-action", "reason": "provider_on_leave"})
                     return
+                # The prompt's rule: same specialty at the same site. A Centro
+                # doctor for someone who asked for Norte is the wrong redirect.
+                if not req.get("location_id") and len(away.get("location_ids") or []) == 1:
+                    req["location_id"] = away["location_ids"][0]
                 trace.notes.append("named provider on leave: redirecting inside the specialty")
             else:
                 reason = (match.get("rejection") or {}).get("reason", "provider_not_found")
@@ -228,7 +241,9 @@ class RulesBrain:
             )
             location_id = near.get("location_id")
 
-        insurer = s.record.get("insurer") or None
+        # The prompt's rule: price against the plan the caller named on the
+        # call; otherwise the one on the record.
+        insurer = req.get("insurer") or s.record.get("insurer") or None
         verdict = await trace.call(
             "check_eligibility",
             {
@@ -270,6 +285,11 @@ class RulesBrain:
                 await self._submit(
                     trace, {"kind": "no-action", "reason": window["rejection"]["reason"]}
                 )
+                return
+            if window.get("moved_from_closed_day") and s.declined and not s.accepted:
+                # The day they asked for is closed and they turned the next open
+                # day down: nothing to book, and the reason is the closure.
+                await self._submit(trace, {"kind": "no-action", "reason": "clinic_closed"})
                 return
         elif req.get("part_of_day"):
             window = await trace.call(

@@ -1,0 +1,79 @@
+# Problem 12: noise. In text there is no noise; what survives is its effect on
+# the dialogue: a name or an id heard wrong once, a repeat, and a booking that
+# still lands on the right record without the agent reading the id back.
+# The call connects Friday 18 September 2026, 09:00 Europe/Madrid.
+group: noise
+problem: 12
+now: "2026-09-18T09:00:00+02:00"
+
+scenarios:
+  - id: p12.street_noise_dni_misheard_then_repeated
+    # First pass hears the wrong check letter; the caller reads it out again.
+    caller:
+      - says: "Hello, I'd like the earliest General Practice appointment, I've had a cough for three weeks. Marta Ruiz López, DNI one two three four five six seven eight A."
+        means: {identify: {name: "Marta Ruiz López", national_id: "12345678A"}, request: {intent: book, specialty_id: general_practice}}
+      - says: "Sorry, it's loud here. One, two, three, four, five, six, seven, eight, Z. Zed for zebra."
+        means: {clear: [national_id], identify: {national_id: "12345678Z"}}
+      - says: "Yes, that's fine. Thank you."
+        means: {accept: true}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00042
+          appointment_type_id: review
+          slot: {$earliest_slot: {specialty_id: general_practice, patient_id: P00042}}
+          policy_id: sanitas
+      trajectory_contains: [find_patient, find_slots, prepare_booking, submit_action]
+      must_not_call: [build_registration]
+      privacy_of: [P00042]
+      max_tool_calls: 12
+
+  - id: p12.television_surname_misheard_then_spelled
+    # "Ruiz" heard as "Luis"; the caller spells it. Two lookups, one booking.
+    caller:
+      - says: "Good morning, my blood pressure's been reading high, I'd like the soonest General Practice appointment. Marta Luis López, born the twelfth of March nineteen eighty-five."
+        means: {identify: {name: "Marta Luis López", date_of_birth: "1985-03-12"}, request: {intent: book, specialty_id: general_practice}}
+      - says: "Ruiz. R, U, I, Z. Marta Ruiz López."
+        means: {clear: [name], identify: {name: "Marta Ruiz López"}}
+      - says: "Perfect, I'll take it."
+        means: {accept: true}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00042
+          slot: {$earliest_slot: {specialty_id: general_practice, patient_id: P00042}}
+      must_not_call: [build_registration]
+      privacy_of: [P00042]
+
+  - id: p12.car_noise_phone_as_the_identifier
+    # No caller id on the line; the caller gives the phone number when asked.
+    caller:
+      - says: "Hi, I'm in the car, sorry. I need a General Practice appointment as soon as possible, my hay fever is terrible this year. It's Marta Ruiz López."
+        means: {identify: {name: "Marta Ruiz López"}, request: {intent: book, specialty_id: general_practice}}
+      - says: "Six one two, three four five, six seven eight."
+        means: {identify: {phone: "612345678"}}
+      - says: "Yes, book it. Thanks."
+        means: {accept: true}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00042
+          slot: {$earliest_slot: {specialty_id: general_practice, patient_id: P00042}}
+      privacy_of: [P00042]
+
+  - id: p12.room_noise_never_seen_patient_is_a_first_visit
+    # The other Marta Ruiz, never seen: the type follows the record.
+    caller:
+      - says: "Hello? Can you hear me? I want the earliest General Practice appointment. Marta Ruiz García, DNI eight seven six five four three two one X."
+        means: {identify: {name: "Marta Ruiz García", national_id: "87654321X"}, request: {intent: book, specialty_id: general_practice}}
+      - says: "Yes. Yes, that one."
+        means: {accept: true}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00043
+          appointment_type_id: first_visit
+          slot: {$earliest_slot: {specialty_id: general_practice, patient_id: P00043}}
+          policy_id: adeslas
+      must_not_call: [build_registration]
+      privacy_of: [P00043, P00042]

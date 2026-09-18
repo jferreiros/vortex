@@ -367,20 +367,28 @@ def test_google_voice_map_covers_es_ca_gl_eu(clean_env) -> None:
     # A pipecat Language, a regional string and an unsupported one all fold.
     assert tts_voice_for(Language.CA_ES, s) == (s.google_tts_voice_ca, Language.CA_ES)
     assert tts_voice_for("gl-ES", s) == (s.google_tts_voice_gl, Language.GL_ES)
-    assert tts_voice_for("de", s) == (s.google_tts_voice_es, Language.ES_ES)
-    assert tts_voice_for("en", s) == (s.google_tts_voice_es, Language.ES_ES)
+    # English is the clinic's default: it has its own voice, and it is the
+    # fallback for anything unsupported.
+    from vortex.conversation.language import DEFAULT_GOOGLE_VOICE_EN
+
+    assert tts_voice_for("en", s) == (DEFAULT_GOOGLE_VOICE_EN, Language.EN_GB)
+    assert tts_voice_for("de", s) == (DEFAULT_GOOGLE_VOICE_EN, Language.EN_GB)
 
 
-def test_elevenlabs_says_everything_in_spanish(clean_env) -> None:
+def test_elevenlabs_says_english_and_spanish_with_one_voice(clean_env) -> None:
     pytest.importorskip("pipecat")
     from pipecat.transcriptions.language import Language
 
     from vortex.conversation.language import tts_voice_for
 
     s = _settings(clean_env, VORTEX_TTS_PROVIDER="elevenlabs", ELEVENLABS_VOICE_ID_ES="voice-1")
-    # ElevenLabs takes a bare "es", not the regional code.
-    for code in ("es", "ca", "gl", "eu", "de"):
-        assert tts_voice_for(code, s) == ("voice-1", Language.ES)
+    # ElevenLabs takes a bare code, not the regional one; its voices are
+    # multilingual, so the one id speaks Spanish and English.
+    assert tts_voice_for("es", s) == ("voice-1", Language.ES)
+    assert tts_voice_for("en", s) == ("voice-1", Language.EN)
+    # What it cannot say falls back to English, the clinic's default.
+    for code in ("ca", "gl", "eu", "de"):
+        assert tts_voice_for(code, s) == ("voice-1", Language.EN)
 
 
 def test_the_provider_argument_overrides_the_primary(clean_env) -> None:
@@ -405,9 +413,9 @@ def test_tts_voice_for_never_raises(clean_env) -> None:
     pytest.importorskip("pipecat")
     from pipecat.transcriptions.language import Language
 
-    from vortex.conversation.language import tts_voice_for
+    from vortex.conversation.language import DEFAULT_GOOGLE_VOICE_EN, tts_voice_for
 
     s = _settings(clean_env)
-    assert tts_voice_for(None, s) == (s.google_tts_voice_es, Language.ES_ES)  # type: ignore[arg-type]
+    assert tts_voice_for(None, s) == (DEFAULT_GOOGLE_VOICE_EN, Language.EN_GB)  # type: ignore[arg-type]
     # A settings stand-in with nothing on it still answers.
     assert tts_voice_for("ca", object()) == ("", Language.CA_ES)
