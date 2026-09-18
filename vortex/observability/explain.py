@@ -252,6 +252,75 @@ def tool_description(name: str) -> str:
     return TOOL_TEXT.get(name, name.replace("_", " ").capitalize())
 
 
+#: Which clinic endpoint each tool hits. Same map as scripts/call_rundown.py.
+TOOL_ENDPOINT: dict[str, str] = {
+    "find_patient": "GET /api/v1/directory · +GET /patients/{id}/appointments?when=past",
+    "validate_national_id": "local · DNI/NIE check letter",
+    "build_registration": "GET /api/v1/clinic",
+    "resolve_date": "GET /api/v1/clinic",
+    "find_slots": "GET /api/v1/availability",
+    "list_appointments": "GET /patients/{id}/appointments",
+    "prepare_booking": "GET /api/v1/clinic + GET /api/v1/availability",
+    "prepare_reschedule": "GET /patients/{id}/appointments + /availability",
+    "prepare_cancel": "GET /patients/{id}/appointments",
+    "check_eligibility": "GET /api/v1/availability + GET /api/v1/clinic",
+    "triage": "local · symptom rules",
+    "nearest_location": "local · site distances",
+    "find_provider": "GET /api/v1/clinic",
+    "submit_action": "POST /api/v1/submit/<route>",
+}
+
+
+def tool_endpoint(name: str) -> str | None:
+    return TOOL_ENDPOINT.get(name)
+
+
+#: The lines of a call that are neither a turn nor a tool call, in words.
+EVENT_TEXT: dict[str, str] = {
+    "call.started": "The socket opened and a fresh pipeline started.",
+    "submit.sent": "Posted the action to the platform.",
+    "submit.result": "The platform answered the submission.",
+    "call.ended": "The socket closed.",
+    "call.summary": "The call was summarised.",
+    "call.crashed": "The pipeline crashed.",
+}
+
+
+def is_lifecycle(event: dict[str, Any]) -> bool:
+    """True for the socket, submission and summary lines; false for turns and tools."""
+    kind = str(event.get("kind") or "")
+    return not (kind.startswith("turn.") or kind.startswith("tool."))
+
+
+def event_text(event: dict[str, Any]) -> str:
+    kind = str(event.get("kind") or "")
+    return EVENT_TEXT.get(kind, kind.replace(".", " ").capitalize() or "Event")
+
+
+def event_detail(event: dict[str, Any]) -> str:
+    """The facts on the line, in one string: route, status, reason, frames, error."""
+    kind = str(event.get("kind") or "")
+    bits: list[str] = []
+    for key in ("voice", "clinic", "route", "reason", "why"):
+        value = event.get(key)
+        if value:
+            bits.append(f"{key} {value}")
+    result = event.get("result")
+    if isinstance(result, dict):
+        for key in ("status", "http_status", "detail"):
+            if result.get(key):
+                bits.append(f"{key} {result[key]}")
+    if kind == "call.ended":
+        frames_in = event.get("media_frames_in", "?")
+        frames_out = event.get("media_frames_out", "?")
+        bits.append(f"frames in {frames_in}, out {frames_out}")
+    if kind == "call.summary" and event.get("duration_ms") is not None:
+        bits.append(f"{event['duration_ms']} ms")
+    if kind == "call.crashed" and event.get("error"):
+        bits.append(str(event["error"])[:120])
+    return " · ".join(bits)
+
+
 # ---------------------------------------------------------------------------
 # Numbers
 # ---------------------------------------------------------------------------

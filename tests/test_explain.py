@@ -3,12 +3,16 @@ from __future__ import annotations
 from vortex.contract import ALL_REASONS
 from vortex.observability.explain import (
     REASON_TEXT,
+    event_detail,
+    event_text,
+    is_lifecycle,
     outcome_text,
     outcome_title,
     payload_rows,
     stage_of,
     stats_for,
     step_text,
+    tool_endpoint,
 )
 from vortex.observability.view import CallCard, ToolStep, Turn
 
@@ -88,3 +92,32 @@ def test_stats_and_payload_rows() -> None:
     rows = payload_rows(card)
     assert rows[0][0] == "patient_id"
     assert all(k != "call_id" for k, _ in rows)
+
+
+def test_tool_endpoint_names_the_clinic_route() -> None:
+    assert tool_endpoint("find_slots") == "GET /api/v1/availability"
+    assert tool_endpoint("not_a_tool") is None
+
+
+def test_lifecycle_events_are_the_socket_the_submission_and_the_summary() -> None:
+    assert is_lifecycle({"kind": "call.started"})
+    assert is_lifecycle({"kind": "submit.result"})
+    assert not is_lifecycle({"kind": "turn.user"})
+    assert not is_lifecycle({"kind": "tool.returned"})
+
+
+def test_event_text_says_what_happened_and_event_detail_says_the_facts() -> None:
+    ended = {"kind": "call.ended", "reason": "hangup", "media_frames_in": 3, "media_frames_out": 5}
+    assert event_text(ended) == "The socket closed."
+    assert event_detail(ended) == "reason hangup · frames in 3, out 5"
+    submitted = {
+        "kind": "submit.result",
+        "route": "/api/v1/submit/book",
+        "result": {"status": "submitted", "http_status": 200},
+    }
+    assert event_text(submitted) == "The platform answered the submission."
+    assert (
+        event_detail(submitted) == "route /api/v1/submit/book · status submitted · http_status 200"
+    )
+    assert event_text({"kind": "socket.odd"}) == "Socket odd"
+    assert event_detail({"kind": "socket.odd"}) == ""

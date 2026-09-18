@@ -187,6 +187,27 @@ def _ms(value: float | None) -> str:
     return f"{value:.0f} ms" if value < 1000 else f"{value / 1000:.1f} s"
 
 
+def _turn_time(card: CallCard, ts: str | None) -> str:
+    """'21:38:13 +12.3s': wall clock and seconds since the call connected."""
+    stamp = _parse_ts(ts)
+    if stamp is None:
+        return ""
+    label = stamp.astimezone().strftime("%H:%M:%S")
+    start = _parse_ts(card.started_at)
+    if start is not None:
+        delta = (stamp - start).total_seconds()
+        if 0 <= delta < 3600:
+            label += f" +{delta:.1f}s"
+    return label
+
+
+def _signature(cards: list[CallCard], health: dict[str, Any] | None, *extra: Any) -> tuple:
+    """What a redraw depends on. A page whose log did not change redraws
+    nothing; a page with a live call ticks once a second so durations move."""
+    tick = int(time.time()) if any(c.live for c in cards) else None
+    return (repr(cards), repr(health), tick, *extra)
+
+
 def _caller(card: CallCard) -> str:
     return card.patient_name or card.from_number or "Unidentified patient"
 
@@ -349,6 +370,9 @@ def _transcript(card: CallCard | None) -> None:
         with ui.element("div").classes(f"turn {turn.role}"):
             ui.label("Patient" if turn.role == "user" else "Vortex").classes("who")
             ui.label(turn.text).classes("bubble")
+            stamp = _turn_time(card, turn.ts)
+            if stamp:
+                ui.label(stamp).classes("caption-sm mono")
     if card.live:
         with ui.element("div").classes("turn assistant"):
             ui.label("Vortex").classes("who")
@@ -379,6 +403,9 @@ def _decisions(card: CallCard | None, *, verbose: bool = False) -> None:
                         with ui.element("div").classes("row").style("gap:0"):
                             ui.label(explain.tool_description(step.name)).classes("what")
                             ui.label(step.name).classes("tool")
+                        endpoint = explain.tool_endpoint(step.name)
+                        if verbose and endpoint:
+                            ui.label(endpoint).classes("caption-sm mono")
                         said = explain.step_text(step)
                         bad = step.status == "fail" or said.startswith("Rejected")
                         ui.label(said).classes("said bad" if bad else "said")
@@ -389,6 +416,46 @@ def _decisions(card: CallCard | None, *, verbose: bool = False) -> None:
                                 ui.label("result").classes("caption-sm")
                                 ui.html(f"<pre>{_escape(_pretty(step.error or step.result))}</pre>")
                     ui.label(_ms(step.ms) if step.ms is not None else step.status).classes("ms")
+
+
+def _event_dot(event: dict[str, Any]) -> str:
+    kind = str(event.get("kind") or "")
+    if kind == "call.crashed":
+        return "bad"
+    if kind == "submit.result":
+        result = event.get("result") if isinstance(event.get("result"), dict) else {}
+        return "ok" if result.get("status") in {"submitted", "accepted"} else "warn"
+    return "off"
+
+
+def _lifecycle(card: CallCard) -> None:
+    """The socket, the submission and the summary, with the raw log line under
+    each. Together with Decisions and Transcript this replays the whole call."""
+    events = [e for e in card.events if explain.is_lifecycle(e)]
+    with ui.element("div").classes("section-title"):
+        ui.label("Timeline").classes("t")
+        ui.label(f"{len(events)} events · {len(card.events)} lines in the log").classes("m")
+    with ui.element("div").classes("terminal-card"):
+        with ui.element("div").classes("terminal-traffic-lights"):
+            for _ in range(3):
+                ui.element("i")
+        if not events:
+            ui.label("No lifecycle event yet. The socket handshake shows here.").classes("comment")
+            return
+        with ui.element("div").classes("timeline"):
+            for event in events:
+                with ui.element("div").classes("tl-row"):
+                    _dot(_event_dot(event))
+                    with ui.element("div"):
+                        with ui.element("div").classes("row").style("gap:0"):
+                            ui.label(explain.event_text(event)).classes("what")
+                            ui.label(str(event.get("kind") or "?")).classes("tool")
+                        detail = explain.event_detail(event)
+                        if detail:
+                            ui.label(detail).classes("said")
+                        with ui.expansion("Raw event").classes("raw"):
+                            ui.html(f"<pre>{_escape(_pretty(event, limit=4000))}</pre>")
+                    ui.label(_turn_time(card, event.get("ts")) or "—").classes("ms")
 
 
 def _outcome(card: CallCard | None) -> None:
@@ -440,6 +507,9 @@ def _call_panel(card: CallCard | None, *, verbose: bool) -> None:
             _transcript(card)
         with ui.element("section").classes("col"):
             _decisions(card, verbose=verbose)
+            if verbose and card is not None:
+                ui.element("div").style("height: 24px")
+                _lifecycle(card)
         with ui.element("section").classes("col"):
             _outcome(card)
             ui.element("div").style("height: 24px")
@@ -555,9 +625,14 @@ def wall_page() -> None:
     _apply_chrome()
     ui.page_title("Vortex · Live")
     stage = ui.element("div").classes("shell")
+    rendered: dict[str, Any] = {"sig": None}
 
     def redraw() -> None:
         cards, health = _load_cards()
+        sig = _signature(cards, health)
+        if sig == rendered["sig"]:
+            return
+        rendered["sig"] = sig
         featured = _feature(cards)
         live_count = sum(1 for c in cards if c.live)
         stage.clear()
@@ -603,10 +678,15 @@ def call_page(call_id: str) -> None:
     _apply_chrome()
     ui.page_title(f"Vortex · {call_id}")
     stage = ui.element("div").classes("shell")
+    rendered: dict[str, Any] = {"sig": None}
 
     def redraw() -> None:
         cards, health = _load_cards()
         card = next((c for c in cards if c.call_id == call_id), None)
+        sig = _signature(cards, health, call_id)
+        if sig == rendered["sig"]:
+            return
+        rendered["sig"] = sig
         stage.clear()
         with stage:
             slot = _nav("", team=False)
@@ -730,6 +810,8 @@ def ops_page() -> None:
             left = ui.element("div")
             right = ui.element("div").classes("card card-compact")
 
+    rendered: dict[str, Any] = {"sig": None}
+
     def pick(call_id: str) -> None:
         state["id"] = call_id
         redraw()
@@ -745,10 +827,14 @@ def ops_page() -> None:
         if state["id"] is None and shown:
             state["id"] = shown[0].call_id
         card = next((c for c in cards if c.call_id == state["id"]), shown[0] if shown else None)
+        names = _prune_presence()
+        sig = _signature(cards, health, state["id"], state["filter"], tuple(names))
+        if sig == rendered["sig"]:
+            return
+        rendered["sig"] = sig
         line_pill.clear()
         with line_pill:
             _line_pill(health)
-        names = _prune_presence()
         people.set_text("In the room · " + (" · ".join(names) if names else "nobody"))
         chips.clear()
         with chips:
@@ -782,6 +868,8 @@ def ops_page() -> None:
                 _outcome(card)
                 ui.element("div").style("height: 16px")
                 _decisions(card, verbose=True)
+                ui.element("div").style("height: 16px")
+                _lifecycle(card)
                 ui.element("div").style("height: 16px")
                 _transcript(card)
 

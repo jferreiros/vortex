@@ -7,6 +7,9 @@
     python -m evals corpus                # layer 4, the organisers' own 73 cases
     python -m evals corpus --judge-log logs/calls.jsonl   # score real practice calls
     python -m evals voice --real --max-eur 1.00
+    python -m evals bench                 # layer 5, every candidate model, one matrix
+    python -m evals bench --models helmcode/qwen3.6,helmcode/deepseek-v4-flash --repeat 3
+    python -m evals publish               # push the latest runs to the bench-results branch
     python -m evals ci                    # layers 1 + 2, report, exit 1 on failure
     python -m evals report                # rebuild summary.md / report.html
     python -m evals accept [layer]        # promote latest run(s) to the baseline
@@ -127,6 +130,56 @@ def cmd_ci(args: argparse.Namespace) -> int:
     return 1 if failed else 0
 
 
+def cmd_bench(args: argparse.Namespace) -> int:
+    from evals.bench.runner import BudgetExceeded, run_sync
+
+    try:
+        run = run_sync(
+            models=args.models.split(",") if args.models else None,
+            only=args.only,
+            repeat=args.repeat,
+            max_eur=args.max_eur,
+            concurrency=args.concurrency,
+            include_paid=args.include_paid,
+            record=args.record,
+            results_dir=args.results_dir,
+        )
+    except BudgetExceeded as exc:
+        print(f"refused: {exc}")
+        return 2
+    save_run(run, args.results_dir)
+    md, page = write_reports(args.results_dir)
+    _print_summary(run)
+    from evals.common.report import bench_table
+
+    print()
+    print(bench_table(run))
+    routing = run.summary.get("routing", {})
+    for role, rec in (routing.get("recommended") or {}).items():
+        current = (routing.get("current") or {}).get(role, "?")
+        mark = "→ change" if rec["id"] != current else "= keep"
+        print(f"{role:13s} now {current}  bench says {rec['id']}  {mark}: {rec['reason']}")
+    print(f"report: {md}  ·  {page}")
+    # A bench with failing models is a result, not a failure of the bench.
+    return 0 if any(b.get("status") == "ran" for b in run.summary.get("models", [])) else 1
+
+
+def cmd_publish(args: argparse.Namespace) -> int:
+    from evals.bench.publish import publish
+
+    outcome = publish(
+        results_dir=args.results_dir,
+        branch=args.branch,
+        remote=args.remote,
+        layers=args.layers.split(",") if args.layers else None,
+        dry_run=args.dry_run,
+        message=args.message,
+    )
+    for line in outcome.lines:
+        print(line)
+    return 0 if outcome.ok else 1
+
+
 def cmd_report(args: argparse.Namespace) -> int:
     md, page = write_reports(args.results_dir)
     print(md.read_text())
@@ -146,6 +199,15 @@ def cmd_accept(args: argparse.Namespace) -> int:
 def cmd_discord(args: argparse.Namespace) -> int:
     from evals.common.discord_msg import load_summary, pr_comment, webhook_body
 
+    if args.bench:
+        from evals.common.discord_msg import bench_webhook_body
+        from evals.common.results import load_latest
+
+        run = load_latest("bench", args.results_dir)
+        if run is None:
+            raise FileNotFoundError("no bench run yet; run `python -m evals bench` first")
+        print(json.dumps(bench_webhook_body(run, page=args.page), ensure_ascii=False))
+        return 0
     summary = load_summary(args.results_dir)
     if args.pr:
         print(pr_comment(summary))
@@ -186,6 +248,26 @@ def main(argv: list[str] | None = None) -> int:
     )
     p.set_defaults(fn=cmd_corpus)
 
+    p = sub.add_parser("bench", help="layer 5: every candidate model on the same scenarios")
+    p.add_argument("--models", default=None, help="comma-separated provider/model ids")
+    p.add_argument("--only", help="substring filter on scenario ids")
+    p.add_argument("--repeat", type=int, default=1, help="runs per scenario; reports pass^k")
+    p.add_argument("--max-eur", type=float, default=1.0, help="refuse a run estimated above this")
+    p.add_argument("--concurrency", type=int, default=3, help="scenarios in flight per model")
+    p.add_argument("--include-paid", action="store_true", help="also the prepaid-credit models")
+    p.add_argument("--record", action="store_true", help="save model answers as cassettes")
+    p.set_defaults(fn=cmd_bench)
+
+    p = sub.add_parser("publish", help="push the latest run(s) to the results branch")
+    p.add_argument("--branch", default="bench-results")
+    p.add_argument("--remote", default="origin")
+    p.add_argument(
+        "--layers", default=None, help="comma-separated; default: every layer with a run"
+    )
+    p.add_argument("--message", default=None, help="commit message")
+    p.add_argument("--dry-run", action="store_true", help="build the commit, do not push")
+    p.set_defaults(fn=cmd_publish)
+
     p = sub.add_parser("ci", help="layers 1 + 2 + 4, report, exit 1 on any failure")
     p.add_argument("--brain", default="auto")
     p.add_argument("--strict", action="store_true", help="also fail on unverified")
@@ -200,6 +282,8 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("discord", help="JSON embed (or --pr markdown) from the latest summary")
     p.add_argument("--pr", action="store_true", help="print the GitHub PR comment instead")
+    p.add_argument("--bench", action="store_true", help="the bench embed from the latest bench run")
+    p.add_argument("--page", default=None, help="URL the bench embed links to")
     p.set_defaults(fn=cmd_discord)
 
     args = parser.parse_args(argv)
