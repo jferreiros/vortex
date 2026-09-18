@@ -119,9 +119,10 @@ set (always in production). Play dials `scripts/fake_caller.py` against `:7860`.
 Replay writes a scripted book/refuse into the JSONL. The wall tails `GET /calls`
 when line is up, otherwise the JSONL file.
 
-Production: `https://vortex.jferreiros.com/wall` (público) and
-`https://vortex.jferreiros.com/` (equipo). Deploy: `deploy/compose.yml` on the
-VPS, Traefik/Let's Encrypt. Never put the ops password in git.
+Production: `https://vortex.167.233.80.47.sslip.io/wall` (público) and
+`https://vortex.167.233.80.47.sslip.io/` (equipo). That hostname is the VPS
+IP, not a personal domain. Deploy: `deploy/compose.yml` on the VPS,
+Traefik/Let's Encrypt. Never put the ops password in git.
 
 ## Team
 
