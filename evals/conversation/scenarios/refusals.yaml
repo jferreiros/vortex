@@ -87,6 +87,23 @@ scenarios:
             - {kind: no-action, reason: clinic_closed}
       must_not_call: [prepare_booking]
 
+  - id: p7.empty_afternoon_declines_the_nearest
+    problem: 7
+    # The same empty Friday afternoon at Sur. The nearest is offered and turned
+    # down: nothing the caller accepts exists, and the answer is no_availability,
+    # not clinic_closed - Sur did open that morning.
+    caller:
+      - says: "Soy Marta Ruiz, doce de marzo del ochenta y cinco. Traumatología en Arenal Sur, el viernes que viene por la tarde."
+        means: {identify: {name: "Marta Ruiz", date_of_birth: "1985-03-12"}, request: {intent: book, specialty_id: orthopaedics, location_id: sur, when: "this coming Friday", part_of_day: afternoon}}
+      - says: "No, por la mañana trabajo y otro día no puedo. Déjelo, gracias."
+        means: {decline: true, end: true}
+    expect:
+      actions:
+        - {kind: no-action, reason: no_availability}
+      trajectory_contains: [find_slots]
+      must_not_call: [prepare_booking]
+      privacy_of: [P00042]
+
   - id: p10.red_flag_escalates
     problem: 10
     caller:

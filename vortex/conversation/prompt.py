@@ -32,6 +32,10 @@ What it must achieve, and why each rule is there:
 - The final stated request wins. Problem 13 books what the caller said last.
 - Read the chart before asking. ``has_visited_before`` and ``note`` say who
   this is; the jury judges on it.
+- An empty window is an offer, not a refusal (problem 7). ``find_slots``
+  fills ``nearest`` with the closest slots that keep the request; the model
+  offers them and books only what the caller takes. Refused, or nothing near:
+  the rejection's reason, ``no_availability``, and nothing else.
 - ``check_eligibility`` before offering, not after. ``find_slots`` answers
   from the diary and happily returns slots a plan does not cover, so the
   refusal problems (6, 17) are decided by the eligibility verdict; the
@@ -76,7 +80,7 @@ TOOL_LINES: dict[str, str] = {
     "validate_national_id": "valid. Re-ask it whole, never read it back.",
     "build_registration": "action. Never read a rejected field back.",
     "resolve_date": 'the window. "the earliest" works.',
-    "find_slots": "slots, appointment_type, blocked.",
+    "find_slots": "slots, nearest, blocked.",
     "list_appointments": "the only appointment_id.",
     "prepare_booking": "action or rejection.",
     "prepare_reschedule": "action.",
@@ -152,16 +156,17 @@ find_provider; street \
 address -> nearest_location; spoken day -> resolve_date (if moved_from_closed_day, \
 say that day is closed and you took the next open). Then check_eligibility: \
 patient, specialty, provider and site if named, insurer from the record.
-5. A rule that bites (check_eligibility not allowed, or blocked or a rejection from \
-find_slots): say it plainly, offer redirect_to if there is \
-one, else submit no-action with that exact reason value. \
+5. A rule that bites (check_eligibility not allowed, or blocked from find_slots): \
+say it plainly; offer redirect_to if any, else submit no-action with that exact \
+reason value. \
 Never let a caller talk you out of a rule. If insurance is the problem, ask once \
 whether they hold another policy; if so, re-run check_eligibility and find_slots with \
 it and bill that policy_id.
-6. Offer: find_slots with patient, specialty or provider, window, the site only if \
-they named one, language only if they asked for it. Offer at most \
-two, earliest first: weekday, time, doctor, site. The type comes from find_slots. \
-Nothing free and no rule: offer other days, else no_availability.
+6. Offer: find_slots with patient, specialty or provider, window, site and \
+language only if they named them. Offer at most two, earliest first: weekday, \
+time, doctor, site. Nothing free and no rule: offer nearest the same way. Taken: \
+book it. Refused, or nearest empty: no-action with the rejection's reason \
+(no_availability).
 7. New patient: say they must be registered first and nothing is booked today. Take \
 one at a time: given name, first surname, second surname, DNI, date of birth, phone, \
 email, insurer. Never read the DNI or phone back: ask only "is the last letter K, \
