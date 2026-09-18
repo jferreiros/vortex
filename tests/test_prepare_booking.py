@@ -32,7 +32,10 @@ def ctx(tmp_path: Path) -> ToolContext:
 
 
 async def _offered_slot(ctx: ToolContext, day) -> Slot:
-    answer = await ctx.clinic.availability(date_from=day, date_to=day, patient_id=PATIENT)
+    # The platform needs provider_id or specialty_id: a window on its own is a 422.
+    answer = await ctx.clinic.availability(
+        date_from=day, date_to=day, specialty_id="general_practice", patient_id=PATIENT
+    )
     assert answer.slots, f"fake clinic offers nothing on {day}"
     return answer.slots[0]
 

@@ -1,317 +1,438 @@
-"""Fake clinic data for offline work. Raw dicts, shaped like the API answers.
+"""Fake clinic data for offline work.
+
+These are **raw platform payloads**, not contract records: ``CLINIC`` is shaped
+like ``GET /api/v1/clinic``'s ``ClinicResponse``, ``PATIENTS`` like
+``/directory``'s ``PatientMatchOut`` and ``APPOINTMENTS`` like
+``/patients/{id}/appointments``' ``AppointmentOut``, down to the en dash in
+``"09:00–20:00"`` and the ten-plan insurer vocabulary. ``FakeClinicClient``
+feeds them through the same ``_adapt_*`` functions a live response goes
+through, so the offline suite tests the adapters too.
 
 Ids and people here are invented. They mirror the traps the docs describe
 (near-miss surnames, a provider on leave, a same-name pair) so the lanes can
-rehearse against them before the key arrives. Keep the set small.
+rehearse against them. Keep the set small.
 
 Owner: clinic/. Add fixtures here when a lane needs a new shape to test against.
 """
 
 from __future__ import annotations
 
-WEEKDAY_HOURS = [{"weekday": d, "opens": "09:00", "closes": "20:00"} for d in range(5)]  # Mon-Fri
+from typing import Any
 
-LOCATIONS: list[dict] = [
+#: The platform's ten plans, id -> display name. The ``insurer`` and
+#: ``policy_id`` we submit must be one of these ids.
+INSURER_NAMES: dict[str, str] = {
+    "sanitas": "Sanitas",
+    "adeslas": "Adeslas",
+    "dkv": "DKV",
+    "asisa": "ASISA",
+    "mapfre": "Mapfre Salud",
+    "caser": "Caser Salud",
+    "cigna": "Cigna",
+    "axa": "AXA",
+    "nueva_mutua": "Nueva Mutua Sanitaria",
+    "privado": "Privado",
+}
+
+ALL_PLANS: list[str] = list(INSURER_NAMES)
+
+
+def insurer_refs(ids: list[str]) -> list[dict[str, str]]:
+    """``ClinicInsurerRef``: the catalogue names a plan as ``{id, name}``."""
+    return [{"id": i, "name": INSURER_NAMES[i]} for i in ids]
+
+
+def days(intervals_by_weekday: dict[str, str]) -> list[dict[str, Any]]:
+    """``ClinicDayResponse``: a named weekday and its ``"09:00–20:00"`` intervals."""
+    return [{"weekday": d, "intervals": [iv]} for d, iv in intervals_by_weekday.items()]
+
+
+WEEKDAYS_9_20 = {
+    "monday": "09:00–20:00",
+    "tuesday": "09:00–20:00",
+    "wednesday": "09:00–20:00",
+    "thursday": "09:00–20:00",
+    "friday": "09:00–20:00",
+}
+
+LOCATIONS: list[dict[str, Any]] = [
     {
-        "location_id": "centro",
+        "id": "centro",
         "name": "Arenal Centro",
         "address": "Calle del Arenal 1, Madrid",
         "latitude": 40.4170,
         "longitude": -3.7060,
-        "hours": WEEKDAY_HOURS + [{"weekday": 5, "opens": "09:00", "closes": "14:00"}],
-        "provider_ids": ["PR01", "PR03", "PR04"],
-        "insurer_ids": ["sanitas", "adeslas", "asisa", "dkv", "privado"],
+        "hours": days(WEEKDAYS_9_20 | {"saturday": "09:00–14:00"}),
+        "provider_names": ["Dra. Ortiz", "Dra. Sáenz", "Dra. Iglesias"],
+        "covered_by": insurer_refs(ALL_PLANS),
+        "not_covered_by": [],
     },
     {
-        "location_id": "norte",
+        "id": "norte",
         "name": "Arenal Norte",
         "address": "Paseo de la Castellana 200, Madrid",
         "latitude": 40.4700,
         "longitude": -3.6880,
-        "hours": WEEKDAY_HOURS,
-        "provider_ids": ["PR02", "PR07"],
-        "insurer_ids": ["sanitas", "adeslas", "asisa", "dkv", "privado"],
+        "hours": days(WEEKDAYS_9_20),
+        "provider_names": ["Dr. Sáez", "Dr. Requena"],
+        "covered_by": insurer_refs(ALL_PLANS),
+        "not_covered_by": [],
     },
     {
-        "location_id": "sur",
+        "id": "sur",
         "name": "Arenal Sur",
+        # Sur shuts Friday lunchtime.
         "address": "Calle de Madrid 54, Getafe",
         "latitude": 40.3080,
         "longitude": -3.7320,
-        # Sur shuts Friday lunchtime.
-        "hours": [{"weekday": d, "opens": "09:00", "closes": "20:00"} for d in range(4)]
-        + [{"weekday": 4, "opens": "09:00", "closes": "14:00"}],
-        "provider_ids": ["PR05", "PR06"],
-        "insurer_ids": ["sanitas", "adeslas", "dkv", "privado"],
+        "hours": days(
+            {
+                "monday": "09:00–20:00",
+                "tuesday": "09:00–20:00",
+                "wednesday": "09:00–20:00",
+                "thursday": "09:00–20:00",
+                "friday": "09:00–14:00",
+            }
+        ),
+        "provider_names": ["Dr. Iglesia", "D. Álvaro Cid"],
+        # ASISA does not cover Sur; the physiotherapist sits there.
+        "covered_by": insurer_refs([i for i in ALL_PLANS if i != "asisa"]),
+        "not_covered_by": insurer_refs(["asisa"]),
     },
 ]
 
-SPECIALTIES: list[dict] = [
+SPECIALTIES: list[dict[str, Any]] = [
     {
-        "specialty_id": "general_practice",
+        "id": "general_practice",
         "name": "General practice",
         "min_age_months": 14 * 12,
+        "max_age_months": None,
         "referral_required": False,
-        "insurer_ids": ["sanitas", "adeslas", "asisa", "dkv", "privado"],
+        "provider_names": ["Dra. Ortiz", "Dr. Sáez", "Dr. Requena"],
+        "covered_by": insurer_refs(ALL_PLANS),
+        "not_covered_by": [],
     },
     {
-        "specialty_id": "paediatrics",
+        "id": "paediatrics",
         "name": "Paediatrics",
+        "min_age_months": 0,
         "max_age_months": 14 * 12 - 1,
         "referral_required": False,
-        "insurer_ids": ["sanitas", "adeslas", "asisa", "dkv", "privado"],
+        "provider_names": ["Dra. Sáenz"],
+        "covered_by": insurer_refs(ALL_PLANS),
+        "not_covered_by": [],
     },
     {
-        "specialty_id": "dermatology",
+        "id": "dermatology",
         "name": "Dermatology",
+        "min_age_months": 0,
+        "max_age_months": None,
         "referral_required": True,
-        "insurer_ids": ["sanitas", "adeslas", "asisa", "dkv", "privado"],
+        "provider_names": ["Dra. Iglesias"],
+        "covered_by": insurer_refs(ALL_PLANS),
+        "not_covered_by": [],
     },
     {
-        "specialty_id": "orthopaedics",
+        "id": "orthopaedics",
         "name": "Orthopaedics",
+        "min_age_months": 0,
+        "max_age_months": None,
         "referral_required": False,
-        "insurer_ids": ["sanitas", "adeslas", "asisa", "dkv", "privado"],
+        "provider_names": ["Dr. Iglesia"],
+        "covered_by": insurer_refs(ALL_PLANS),
+        "not_covered_by": [],
     },
     {
-        "specialty_id": "gynaecology",
+        # No age window on purpose: the rules must not invent one.
+        "id": "gynaecology",
         "name": "Gynaecology",
+        "min_age_months": 0,
+        "max_age_months": None,
         "referral_required": False,
-        "insurer_ids": ["sanitas", "asisa", "dkv", "privado"],  # not adeslas
+        "provider_names": [],
+        # Adeslas does not cover gynaecology.
+        "covered_by": insurer_refs([i for i in ALL_PLANS if i != "adeslas"]),
+        "not_covered_by": insurer_refs(["adeslas"]),
     },
     {
-        "specialty_id": "physiotherapy",
+        "id": "physiotherapy",
         "name": "Physiotherapy",
+        "min_age_months": 0,
+        "max_age_months": None,
         "referral_required": False,
-        "insurer_ids": ["sanitas", "adeslas", "asisa", "dkv", "privado"],
+        "provider_names": ["D. Álvaro Cid"],
+        "covered_by": insurer_refs(ALL_PLANS),
+        "not_covered_by": [],
     },
 ]
 
-APPOINTMENT_TYPES: list[dict] = [
+APPOINTMENT_TYPES: list[dict[str, Any]] = [
     {
-        "appointment_type_id": "first_visit",
+        "id": "first_visit",
         "name": "First visit",
-        "specialty_id": None,
         "duration_minutes": 30,
-        "for_new_patients": True,
+        "new_patient_requirement": "new_only",
         "guidance": "A patient the clinic has never seen, in a specialty without its own.",
-    },
-    {
-        "appointment_type_id": "review",
-        "name": "Review",
+        "provider_names": ["Dra. Ortiz", "Dr. Sáez", "Dr. Requena", "Dr. Iglesia", "D. Álvaro Cid"],
         "specialty_id": None,
+        "specialty_name": None,
+    },
+    {
+        "id": "review",
+        "name": "Review",
         "duration_minutes": 15,
-        "for_new_patients": False,
+        "new_patient_requirement": "existing_only",
         "guidance": "Any returning patient in a specialty without its own review type.",
+        "provider_names": ["Dra. Ortiz", "Dr. Sáez", "Dr. Requena", "Dr. Iglesia", "D. Álvaro Cid"],
+        "specialty_id": None,
+        "specialty_name": None,
     },
     {
-        "appointment_type_id": "dermatology_first",
+        "id": "dermatology_first",
         "name": "Dermatology first visit",
-        "specialty_id": "dermatology",
         "duration_minutes": 30,
-        "for_new_patients": True,
+        "new_patient_requirement": "new_only",
         "guidance": "New dermatology patient.",
-    },
-    {
-        "appointment_type_id": "dermatology_review",
-        "name": "Dermatology review",
+        "provider_names": ["Dra. Iglesias"],
         "specialty_id": "dermatology",
-        "duration_minutes": 15,
-        "for_new_patients": False,
-        "guidance": "Returning dermatology patient. Same minutes as review; different id.",
+        "specialty_name": "Dermatology",
     },
     {
-        "appointment_type_id": "gynaecology_review",
-        "name": "Gynaecology review",
-        "specialty_id": "gynaecology",
+        "id": "dermatology_review",
+        "name": "Dermatology review",
         "duration_minutes": 15,
-        "for_new_patients": False,
+        "new_patient_requirement": "existing_only",
+        "guidance": "Returning dermatology patient. Same minutes as review; different id.",
+        "provider_names": ["Dra. Iglesias"],
+        "specialty_id": "dermatology",
+        "specialty_name": "Dermatology",
+    },
+    {
+        "id": "gynaecology_review",
+        "name": "Gynaecology review",
+        "duration_minutes": 15,
+        "new_patient_requirement": "existing_only",
         "guidance": "Returning gynaecology patient. New patients book first_visit.",
+        "provider_names": [],
+        "specialty_id": "gynaecology",
+        "specialty_name": "Gynaecology",
     },
 ]
 
-ALL_PLANS = ["sanitas", "adeslas", "asisa", "dkv", "privado"]
 
-PROVIDERS: list[dict] = [
+def schedule(location_id: str, location_name: str, hours: dict[str, str]) -> dict[str, Any]:
+    """``ClinicScheduleResponse``: when one provider sits at one site."""
+    return {"location_id": location_id, "location_name": location_name, "days": days(hours)}
+
+
+CENTRO_HOURS = schedule("centro", "Arenal Centro", WEEKDAYS_9_20)
+NORTE_HOURS = schedule("norte", "Arenal Norte", WEEKDAYS_9_20)
+SUR_HOURS = schedule("sur", "Arenal Sur", WEEKDAYS_9_20 | {"friday": "09:00–14:00"})
+
+PROVIDERS: list[dict[str, Any]] = [
     {
-        "provider_id": "PR01",
+        "id": "PR01",
         "name": "Dra. Ortiz",
         "specialty_id": "general_practice",
+        "specialty_name": "General practice",
         "languages": ["es", "en"],
-        "appointment_type_ids": ["first_visit", "review"],
-        "location_ids": ["centro"],
-        "insurer_ids_accepted": ALL_PLANS,
-        "insurer_ids_refused": [],
-        "leave": [],
+        "appointment_type_names": ["First visit", "Review"],
+        "location_names": ["Arenal Centro"],
+        "schedules": [CENTRO_HOURS],
+        "accepted_insurers": insurer_refs(ALL_PLANS),
+        "refused_insurers": [],
+        "leave": None,
     },
     {
-        "provider_id": "PR02",
+        "id": "PR02",
         "name": "Dr. Sáez",
         "specialty_id": "general_practice",
+        "specialty_name": "General practice",
         "languages": ["es", "ca"],
-        "appointment_type_ids": ["first_visit", "review"],
-        "location_ids": ["norte"],
-        "insurer_ids_accepted": ALL_PLANS,
-        "insurer_ids_refused": [],
-        "leave": [],
+        "appointment_type_names": ["First visit", "Review"],
+        "location_names": ["Arenal Norte"],
+        "schedules": [NORTE_HOURS],
+        "accepted_insurers": insurer_refs(ALL_PLANS),
+        "refused_insurers": [],
+        "leave": None,
     },
     {
-        "provider_id": "PR03",
+        # One letter from PR02: "Sáenz" and "Sáez" are the near-miss pair.
+        "id": "PR03",
         "name": "Dra. Sáenz",
         "specialty_id": "paediatrics",
+        "specialty_name": "Paediatrics",
         "languages": ["es"],
-        "appointment_type_ids": ["first_visit", "review"],
-        "location_ids": ["centro"],
-        "insurer_ids_accepted": ALL_PLANS,
-        "insurer_ids_refused": [],
-        "leave": [],
+        "appointment_type_names": ["First visit", "Review"],
+        "location_names": ["Arenal Centro"],
+        "schedules": [CENTRO_HOURS],
+        "accepted_insurers": insurer_refs(ALL_PLANS),
+        "refused_insurers": [],
+        "leave": None,
     },
     {
-        "provider_id": "PR04",
+        "id": "PR04",
         "name": "Dra. Iglesias",
         "specialty_id": "dermatology",
+        "specialty_name": "Dermatology",
         "languages": ["es", "en"],
-        "appointment_type_ids": ["dermatology_first", "dermatology_review"],
-        "location_ids": ["centro"],
-        "insurer_ids_accepted": ["sanitas", "adeslas", "asisa", "privado"],
-        "insurer_ids_refused": ["dkv"],
-        "leave": [],
+        "appointment_type_names": ["Dermatology first visit", "Dermatology review"],
+        "location_names": ["Arenal Centro"],
+        "schedules": [CENTRO_HOURS],
+        # Refuses DKV: the provider_not_in_network case.
+        "accepted_insurers": insurer_refs([i for i in ALL_PLANS if i != "dkv"]),
+        "refused_insurers": insurer_refs(["dkv"]),
+        "leave": None,
     },
     {
-        "provider_id": "PR05",
+        # One letter from PR04.
+        "id": "PR05",
         "name": "Dr. Iglesia",
         "specialty_id": "orthopaedics",
+        "specialty_name": "Orthopaedics",
         "languages": ["es"],
-        "appointment_type_ids": ["first_visit", "review"],
-        "location_ids": ["sur"],
-        "insurer_ids_accepted": ALL_PLANS,
-        "insurer_ids_refused": [],
-        "leave": [],
+        "appointment_type_names": ["First visit", "Review"],
+        "location_names": ["Arenal Sur"],
+        "schedules": [SUR_HOURS],
+        "accepted_insurers": insurer_refs(ALL_PLANS),
+        "refused_insurers": [],
+        "leave": None,
     },
     {
-        "provider_id": "PR06",
+        "id": "PR06",
         "name": "D. Álvaro Cid",
         "specialty_id": "physiotherapy",
+        "specialty_name": "Physiotherapy",
         "languages": ["es", "ca"],
-        "appointment_type_ids": ["first_visit", "review"],
-        "location_ids": ["sur"],
-        "insurer_ids_accepted": ALL_PLANS,
-        "insurer_ids_refused": [],
-        "leave": [],
+        "appointment_type_names": ["First visit", "Review"],
+        "location_names": ["Arenal Sur"],
+        "schedules": [SUR_HOURS],
+        "accepted_insurers": insurer_refs(ALL_PLANS),
+        "refused_insurers": [],
+        "leave": None,
     },
     {
-        "provider_id": "PR07",
+        "id": "PR07",
         "name": "Dr. Requena",
         "specialty_id": "general_practice",
+        "specialty_name": "General practice",
         "languages": ["es"],
-        "appointment_type_ids": ["first_visit", "review"],
-        "location_ids": ["norte"],
-        "insurer_ids_accepted": ALL_PLANS,
-        "insurer_ids_refused": [],
-        "leave": [{"date_from": "2026-09-14", "date_to": "2026-09-30", "reason": "sick leave"}],
+        "appointment_type_names": ["First visit", "Review"],
+        "location_names": ["Arenal Norte"],
+        "schedules": [NORTE_HOURS],
+        "accepted_insurers": insurer_refs(ALL_PLANS),
+        "refused_insurers": [],
+        # The platform sends one leave period or null, never a list.
+        "leave": {"start": "2026-09-14", "end": "2026-09-30", "reason": "sick leave"},
     },
 ]
 
-INSURANCE_PLANS: list[dict] = [
+SPECIALTY_NAMES = [s["name"] for s in SPECIALTIES]
+LOCATION_NAMES = [loc["name"] for loc in LOCATIONS]
+PROVIDER_NAMES = [p["name"] for p in PROVIDERS]
+
+PLANS: list[dict[str, Any]] = [
     {
-        "insurer_id": "sanitas",
-        "name": "Sanitas",
-        "specialty_ids": [s["specialty_id"] for s in SPECIALTIES],
-        "location_ids": ["centro", "norte", "sur"],
-        "provider_ids": [p["provider_id"] for p in PROVIDERS],
-    },
-    {
-        "insurer_id": "adeslas",
-        "name": "Adeslas",
-        "specialty_ids": [
-            s["specialty_id"] for s in SPECIALTIES if s["specialty_id"] != "gynaecology"
+        "id": plan_id,
+        "name": INSURER_NAMES[plan_id],
+        "covered_specialty_names": [
+            n for n in SPECIALTY_NAMES if not (plan_id == "adeslas" and n == "Gynaecology")
         ],
-        "location_ids": ["centro", "norte", "sur"],
-        "provider_ids": [p["provider_id"] for p in PROVIDERS],
+        "uncovered_specialty_names": ["Gynaecology"] if plan_id == "adeslas" else [],
+        "covered_location_names": [
+            n for n in LOCATION_NAMES if not (plan_id == "asisa" and n == "Arenal Sur")
+        ],
+        "uncovered_location_names": ["Arenal Sur"] if plan_id == "asisa" else [],
+        "accepted_by": [
+            n for n in PROVIDER_NAMES if not (plan_id == "dkv" and n == "Dra. Iglesias")
+        ],
+        "refused_by": ["Dra. Iglesias"] if plan_id == "dkv" else [],
+        "holders": 100,
+    }
+    for plan_id in ALL_PLANS
+]
+
+#: A restriction's id *is* the decline reason it carries; ``/availability``'s
+#: ``blocked[].restriction`` names one of these eleven.
+RESTRICTIONS: list[dict[str, str]] = [
+    {
+        "id": "not_eligible_age",
+        "title": "Not eligible by age",
+        "explanation": "The patient is outside the specialty's age window.",
     },
     {
-        "insurer_id": "asisa",
-        "name": "ASISA",
-        "specialty_ids": [s["specialty_id"] for s in SPECIALTIES],
-        # ASISA covers physio only at Centro and Norte; the physio sits at Sur.
-        "location_ids": ["centro", "norte"],
-        "provider_ids": [p["provider_id"] for p in PROVIDERS],
+        "id": "referral_required",
+        "title": "Referral required",
+        "explanation": "The specialty needs a referral the patient does not hold.",
     },
     {
-        "insurer_id": "dkv",
-        "name": "DKV",
-        "specialty_ids": [s["specialty_id"] for s in SPECIALTIES],
-        "location_ids": ["centro", "norte", "sur"],
-        "provider_ids": [p["provider_id"] for p in PROVIDERS if p["provider_id"] != "PR04"],
+        "id": "provider_not_in_network",
+        "title": "Provider not in network",
+        "explanation": "The provider refuses the patient's plan.",
     },
     {
-        "insurer_id": "privado",
-        "name": "Self-pay",
-        "specialty_ids": [s["specialty_id"] for s in SPECIALTIES],
-        "location_ids": ["centro", "norte", "sur"],
-        "provider_ids": [p["provider_id"] for p in PROVIDERS],
+        "id": "specialty_not_covered",
+        "title": "Specialty not covered",
+        "explanation": "The plan does not cover the specialty.",
+    },
+    {
+        "id": "location_not_covered",
+        "title": "Location not covered",
+        "explanation": "The plan does not cover the site.",
+    },
+    {
+        "id": "insurer_referral_required",
+        "title": "Insurer referral required",
+        "explanation": "The plan needs its own referral.",
+    },
+    {
+        "id": "allowance_exhausted",
+        "title": "Allowance exhausted",
+        "explanation": "The patient has used this year's visits.",
+    },
+    {
+        "id": "provider_on_leave",
+        "title": "Provider on leave",
+        "explanation": "The provider is away for the whole window asked about.",
+    },
+    {
+        "id": "location_hours",
+        "title": "Outside site hours",
+        "explanation": "The site is shut, or the provider does not sit there then.",
+    },
+    {
+        "id": "type_not_offered",
+        "title": "Type not offered",
+        "explanation": "The provider does not perform that appointment type.",
+    },
+    {
+        "id": "patient_history",
+        "title": "Patient history",
+        "explanation": "The record forbids this booking.",
     },
 ]
 
-RESTRICTIONS: list[dict] = [
-    {"rule_id": "age_window", "reason": "not_eligible_age", "description": "Specialty age window"},
-    {
-        "rule_id": "referral",
-        "reason": "referral_required",
-        "description": "Specialty needs a referral",
+CLINIC: dict[str, Any] = {
+    "clinic_name": "Clínica Arenal (fixtures)",
+    "patient_count": 4,
+    "calendar": {
+        "starts": "2026-09-07",
+        "ends": "2026-10-16",
+        "max_span_days": 14,
+        "slot_minutes": 15,
+        "closure_days": ["2026-10-12"],
+        "appointment_count": 4,
     },
-    {
-        "rule_id": "provider_plan",
-        "reason": "provider_not_in_network",
-        "description": "Provider refuses the plan",
-    },
-    {
-        "rule_id": "plan_specialty",
-        "reason": "specialty_not_covered",
-        "description": "Plan does not cover the specialty",
-    },
-    {
-        "rule_id": "plan_location",
-        "reason": "location_not_covered",
-        "description": "Plan does not cover the site",
-    },
-    {
-        "rule_id": "plan_referral",
-        "reason": "insurer_referral_required",
-        "description": "Plan needs its own referral",
-    },
-    {
-        "rule_id": "allowance",
-        "reason": "allowance_exhausted",
-        "description": "Yearly visits used up",
-    },
-    {"rule_id": "leave", "reason": "provider_on_leave", "description": "Provider on leave"},
-    {"rule_id": "hours", "reason": "location_hours", "description": "Outside site hours"},
-    {
-        "rule_id": "type",
-        "reason": "type_not_offered",
-        "description": "Type not offered by the provider",
-    },
-    {
-        "rule_id": "history",
-        "reason": "patient_history",
-        "description": "History forbids the booking",
-    },
-]
-
-CLINIC: dict = {
-    "locations": LOCATIONS,
+    "restrictions": RESTRICTIONS,
     "providers": PROVIDERS,
     "specialties": SPECIALTIES,
     "appointment_types": APPOINTMENT_TYPES,
-    "insurance_plans": INSURANCE_PLANS,
-    "restrictions": RESTRICTIONS,
-    "bookable_from": "2026-09-07",
-    "bookable_to": "2026-10-16",
-    "closure_days": ["2026-10-12"],
+    "locations": LOCATIONS,
+    "plans": PLANS,
 }
 
-PATIENTS: list[dict] = [
+#: ``PatientMatchOut``. Note what is *not* here: the directory returns no email.
+PATIENTS: list[dict[str, Any]] = [
     {
         "patient_id": "P00042",
         "given_name": "Marta",
@@ -319,12 +440,14 @@ PATIENTS: list[dict] = [
         "second_surname": "López",
         "national_id": "12345678Z",
         "date_of_birth": "1985-03-12",
-        "phone": "+34612345678",
-        "email": "marta.ruiz@example.com",
-        "insurer": "sanitas",
+        "phone": "612345678",
+        "sex": "F",
         "has_visited_before": True,
-        "note": "Fake record. Seen twice, both times by Dra. Ortiz at Arenal Centro.",
+        "insurer": "sanitas",
         "referrals": [],
+        "note": "Fake record. Seen twice, both times by Dra. Ortiz at Arenal Centro.",
+        "match_score": 1.0,
+        "matched_fields": ["name"],
     },
     {
         # Same name as P00042, different birth date: the ambiguity case.
@@ -334,12 +457,14 @@ PATIENTS: list[dict] = [
         "second_surname": "García",
         "national_id": "87654321X",
         "date_of_birth": "1992-11-02",
-        "phone": "+34699000111",
-        "email": "m.ruiz.garcia@example.com",
-        "insurer": "adeslas",
+        "phone": "699000111",
+        "sex": "F",
         "has_visited_before": False,
-        "note": "Fake record. Never seen. Registered online.",
+        "insurer": "adeslas",
         "referrals": [],
+        "note": "Fake record. Never seen. Registered online.",
+        "match_score": 1.0,
+        "matched_fields": ["name"],
     },
     {
         "patient_id": "P00107",
@@ -348,12 +473,14 @@ PATIENTS: list[dict] = [
         "second_surname": "López",
         "national_id": "",
         "date_of_birth": "2018-06-20",
-        "phone": "+34612345678",  # the mother's line (P00042)
-        "email": "",
-        "insurer": "sanitas",
+        "phone": "612345678",  # the mother's line (P00042)
+        "sex": "M",
         "has_visited_before": True,
-        "note": "Fake record. Child. Mother (Marta Ruiz López) usually calls. Seen by Dra. Sáenz.",
+        "insurer": "sanitas",
         "referrals": [],
+        "note": "Fake record. Child. Mother (Marta Ruiz López) usually calls. Seen by Dra. Sáenz.",
+        "match_score": 1.0,
+        "matched_fields": ["phone"],
     },
     {
         "patient_id": "P00200",
@@ -362,24 +489,28 @@ PATIENTS: list[dict] = [
         "second_surname": "Martín",
         "national_id": "X1234567L",
         "date_of_birth": "1958-01-30",
-        "phone": "+34655555555",
-        "email": "antonio.perez@example.com",
-        "insurer": "dkv",
+        "phone": "655555555",
+        "sex": "M",
         "has_visited_before": True,
-        "note": "Fake record. Hard of hearing; speak slowly. Holds a dermatology referral.",
+        "insurer": "dkv",
         "referrals": ["dermatology"],
+        "note": "Fake record. Hard of hearing; speak slowly. Holds a dermatology referral.",
+        "match_score": 1.0,
+        "matched_fields": ["name"],
     },
 ]
 
-APPOINTMENTS: list[dict] = [
+#: ``AppointmentOut``. The platform sends no status: ``when=upcoming`` is the
+#: only thing that can be cancelled or moved.
+APPOINTMENTS: list[dict[str, Any]] = [
     {
         "appointment_id": "A0001",
         "patient_id": "P00042",
         "provider_id": "PR01",
         "location_id": "centro",
         "appointment_type_id": "review",
-        "start": "2026-09-30T10:00:00+02:00",
-        "status": "scheduled",
+        "start_time": "2026-09-30T10:00:00+02:00",
+        "duration_minutes": 15,
     },
     {
         "appointment_id": "A0002",
@@ -387,8 +518,8 @@ APPOINTMENTS: list[dict] = [
         "provider_id": "PR03",
         "location_id": "centro",
         "appointment_type_id": "review",
-        "start": "2026-10-02T17:15:00+02:00",
-        "status": "scheduled",
+        "start_time": "2026-10-02T17:15:00+02:00",
+        "duration_minutes": 15,
     },
     {
         "appointment_id": "A9001",
@@ -396,8 +527,8 @@ APPOINTMENTS: list[dict] = [
         "provider_id": "PR01",
         "location_id": "centro",
         "appointment_type_id": "review",
-        "start": "2025-03-14T09:30:00+01:00",
-        "status": "completed",
+        "start_time": "2025-03-14T09:30:00+01:00",
+        "duration_minutes": 15,
     },
     {
         "appointment_id": "A9002",
@@ -405,7 +536,7 @@ APPOINTMENTS: list[dict] = [
         "provider_id": "PR01",
         "location_id": "centro",
         "appointment_type_id": "first_visit",
-        "start": "2024-04-08T11:00:00+02:00",
-        "status": "completed",
+        "start_time": "2024-04-08T11:00:00+02:00",
+        "duration_minutes": 30,
     },
 ]

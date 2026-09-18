@@ -33,7 +33,7 @@ from datetime import date, datetime, time, timedelta
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, avoids an import cycle
     from vortex.clinic.client import ClinicApi
@@ -74,6 +74,25 @@ OTHER_REASONS: tuple[str, ...] = (
 
 ALL_REASONS: tuple[str, ...] = RULE_REASONS + OTHER_REASONS
 
+#: The ``Insurer`` enum of the platform schema, in its published order. The
+#: platform validates ``insurer`` and ``policy_id`` against exactly these ten
+#: values (422 otherwise), and ``/availability?insurer=`` against them too.
+#: Kept as data, not as a field type: a plan we cannot name must still reach the
+#: platform so the rejection is theirs to explain, not a local ValidationError
+#: in the middle of a call.
+INSURERS: tuple[str, ...] = (
+    "sanitas",
+    "adeslas",
+    "dkv",
+    "asisa",
+    "mapfre",
+    "caser",
+    "cigna",
+    "axa",
+    "nueva_mutua",
+    "privado",
+)
+
 DeclineReason = Literal[
     "not_eligible_age",
     "referral_required",
@@ -108,6 +127,15 @@ class Rejection(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+def _aware_slot(value: datetime) -> datetime:
+    """``slot`` must serialise with an explicit offset or the platform 422s.
+
+    A naive datetime can only ever have meant clinic time, so it is read as
+    Europe/Madrid rather than allowed out of the door without an offset.
+    """
+    return value.replace(tzinfo=MADRID) if value.tzinfo is None else value
+
+
 class BookAction(BaseModel):
     kind: Literal["book"] = "book"
     patient_id: str
@@ -115,7 +143,9 @@ class BookAction(BaseModel):
     location_id: str
     appointment_type_id: str
     slot: datetime  # tz-aware; serialised with its offset
-    policy_id: str
+    policy_id: str  # one of INSURERS
+
+    _slot_offset = field_validator("slot")(_aware_slot)
 
 
 class RegisterAction(BaseModel):
@@ -127,7 +157,7 @@ class RegisterAction(BaseModel):
     date_of_birth: date
     phone: str
     email: str
-    insurer: str
+    insurer: str  # one of INSURERS
 
 
 class RescheduleAction(BaseModel):
@@ -136,7 +166,9 @@ class RescheduleAction(BaseModel):
     provider_id: str
     location_id: str
     slot: datetime
-    policy_id: str
+    policy_id: str  # one of INSURERS
+
+    _slot_offset = field_validator("slot")(_aware_slot)
 
 
 class CancelAction(BaseModel):
@@ -177,9 +209,14 @@ def action_payload(action: Action, call_id: str) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# 3. Clinic records. Shapes follow the clinic docs; ``extra="allow"`` keeps
-#    unknown fields from the live schema instead of failing on them.
-#    TODO(clinic): align field names with /api/openapi.json once a key exists.
+# 3. Clinic records. These are *our* shape, not the platform's: the adapters in
+#    ``vortex/clinic/client.py`` translate every payload into them, which is the
+#    one place a platform field name appears. Checked against
+#    ``docs/platform/openapi.json`` and against live responses from every
+#    read-only route on 18 Sep 2026. ``extra="allow"`` keeps a field the
+#    platform adds later instead of failing the call on it.
+#
+#    Where a name differs from the platform's, the platform's is in a comment.
 # ---------------------------------------------------------------------------
 
 
@@ -188,6 +225,8 @@ class _Record(BaseModel):
 
 
 class PatientRecord(_Record):
+    """One ``PatientMatchOut`` from ``GET /api/v1/directory``."""
+
     patient_id: str
     given_name: str
     first_surname: str
@@ -195,11 +234,18 @@ class PatientRecord(_Record):
     national_id: str = ""
     date_of_birth: date | None = None
     phone: str = ""
+    #: The directory does **not** return an email. It stays here because
+    #: registration collects one on the call; on a looked-up patient it is "".
     email: str = ""
-    insurer: str = ""  # the first (and only recorded) plan
+    sex: str = ""  # "M" or "F"
+    insurer: str = ""  # the one plan on the record; a second one is never in the data
     has_visited_before: bool = False
     note: str = ""
     referrals: list[str] = Field(default_factory=list)  # specialty ids
+    #: How the platform rated this match, and on which fields it matched.
+    #: Both come back on every match; they are how two namesakes are told apart.
+    match_score: float | None = None
+    matched_fields: list[str] = Field(default_factory=list)
 
     @property
     def full_name(self) -> str:
@@ -207,117 +253,189 @@ class PatientRecord(_Record):
 
 
 class OpeningHours(_Record):
+    """One interval of one weekday. The platform sends ``"09:00–14:00"`` strings
+    under a named weekday; a day that shuts for lunch becomes two of these."""
+
     weekday: int  # 0 = Monday ... 6 = Sunday
     opens: time
     closes: time
 
 
 class LocationRecord(_Record):
-    location_id: str
+    location_id: str  # platform: id
     name: str
     address: str = ""
     latitude: float | None = None
     longitude: float | None = None
     hours: list[OpeningHours] = Field(default_factory=list)
-    provider_ids: list[str] = Field(default_factory=list)
-    insurer_ids: list[str] = Field(default_factory=list)
+    provider_ids: list[str] = Field(default_factory=list)  # platform: provider_names
+    insurer_ids: list[str] = Field(default_factory=list)  # platform: covered_by
+    insurer_ids_excluded: list[str] = Field(default_factory=list)  # platform: not_covered_by
 
 
 class SpecialtyRecord(_Record):
-    specialty_id: str
+    specialty_id: str  # platform: id
     name: str
     min_age_months: int | None = None
     max_age_months: int | None = None
     referral_required: bool = False
-    insurer_ids: list[str] = Field(default_factory=list)
+    insurer_ids: list[str] = Field(default_factory=list)  # platform: covered_by
+    insurer_ids_excluded: list[str] = Field(default_factory=list)  # platform: not_covered_by
+    provider_ids: list[str] = Field(default_factory=list)  # platform: provider_names
 
 
 class AppointmentTypeRecord(_Record):
-    appointment_type_id: str
+    appointment_type_id: str  # platform: id
     name: str
     specialty_id: str | None = None  # None = universal (first_visit, review)
     duration_minutes: int = 15
-    for_new_patients: bool | None = None  # None = either
+    #: The platform's own word: "new_only" or "existing_only". Kept raw so a
+    #: value we have not seen cannot silently become "either".
+    new_patient_requirement: str = ""
+    for_new_patients: bool | None = None  # None = either; derived from the above
     guidance: str = ""
 
 
 class LeaveRecord(_Record):
-    date_from: date
-    date_to: date
+    date_from: date  # platform: start
+    date_to: date  # platform: end
     reason: str = ""
 
 
+class ProviderSchedule(_Record):
+    """When one provider sits at one site. The rule behind ``location_hours``."""
+
+    location_id: str
+    hours: list[OpeningHours] = Field(default_factory=list)
+
+
 class ProviderRecord(_Record):
-    provider_id: str
+    provider_id: str  # platform: id
     name: str  # as submitted and as spoken, title included ("D. Álvaro Cid")
     specialty_id: str
+    specialty_name: str = ""
     languages: list[str] = Field(default_factory=list)  # ISO-639-1: es, ca, en ...
-    appointment_type_ids: list[str] = Field(default_factory=list)
-    location_ids: list[str] = Field(default_factory=list)
-    insurer_ids_accepted: list[str] = Field(default_factory=list)
-    insurer_ids_refused: list[str] = Field(default_factory=list)
+    appointment_type_ids: list[str] = Field(default_factory=list)  # platform: *_names
+    location_ids: list[str] = Field(default_factory=list)  # from schedules' location_id
+    insurer_ids_accepted: list[str] = Field(default_factory=list)  # platform: accepted_insurers
+    insurer_ids_refused: list[str] = Field(default_factory=list)  # platform: refused_insurers
+    schedules: list[ProviderSchedule] = Field(default_factory=list)
+    #: The platform sends at most one leave period, or null. A list keeps the
+    #: door open for a second one without another contract change.
     leave: list[LeaveRecord] = Field(default_factory=list)
 
 
 class InsurancePlanRecord(_Record):
-    insurer_id: str
+    """One ``ClinicPlanResponse``. The platform states coverage both ways round;
+    an empty ``*_excluded`` list means the plan excludes nothing, not unknown."""
+
+    insurer_id: str  # platform: id
     name: str
-    specialty_ids: list[str] = Field(default_factory=list)
-    location_ids: list[str] = Field(default_factory=list)
-    provider_ids: list[str] = Field(default_factory=list)
+    specialty_ids: list[str] = Field(default_factory=list)  # platform: covered_specialty_names
+    specialty_ids_excluded: list[str] = Field(default_factory=list)  # uncovered_specialty_names
+    location_ids: list[str] = Field(default_factory=list)  # platform: covered_location_names
+    location_ids_excluded: list[str] = Field(default_factory=list)  # uncovered_location_names
+    provider_ids: list[str] = Field(default_factory=list)  # platform: accepted_by
+    provider_ids_refused: list[str] = Field(default_factory=list)  # platform: refused_by
+    holders: int | None = None
+    #: Ours, not the platform's: ``/clinic`` publishes neither, so on live data
+    #: both stay at their defaults. The rules they would encode reach us as the
+    #: ``insurer_referral_required`` and ``allowance_exhausted`` restrictions on
+    #: ``/availability``'s ``blocked`` instead. Read them from there.
     referral_required: bool = False
     yearly_allowance: int | None = None
 
 
 class RestrictionRecord(_Record):
-    """A standing rule from GET /clinic, with the decline reason it carries."""
+    """A standing rule from GET /clinic, with the decline reason it carries.
 
-    rule_id: str
+    The platform's restriction ids *are* the eleven rule reasons, verbatim, and
+    ``/availability``'s ``blocked[].restriction`` names one of them.
+    """
+
+    rule_id: str  # platform: id, and equal to ``reason``
     reason: DeclineReason
-    description: str = ""
+    description: str = ""  # platform: title
+    explanation: str = ""  # the rule in the clinic's own words
 
 
 class Catalogue(_Record):
     """Everything GET /api/v1/clinic returns. Fixed for the event; cache it."""
 
+    clinic_name: str = ""
+    patient_count: int | None = None
     locations: list[LocationRecord] = Field(default_factory=list)
     providers: list[ProviderRecord] = Field(default_factory=list)
     specialties: list[SpecialtyRecord] = Field(default_factory=list)
     appointment_types: list[AppointmentTypeRecord] = Field(default_factory=list)
-    insurance_plans: list[InsurancePlanRecord] = Field(default_factory=list)
+    insurance_plans: list[InsurancePlanRecord] = Field(default_factory=list)  # platform: plans
     restrictions: list[RestrictionRecord] = Field(default_factory=list)
+    # platform: calendar.{starts, ends, closure_days, max_span_days, slot_minutes}
     bookable_from: date | None = None
     bookable_to: date | None = None
     closure_days: list[date] = Field(default_factory=list)
+    max_span_days: int = 14  # a wider /availability window is a 422
+    slot_minutes: int = 15
 
 
 class Slot(_Record):
-    start: datetime  # tz-aware
+    """One ``SlotOut``. Every field the platform sends is kept: the submitted
+    ``appointment_type_id`` must be the one the slot carries."""
+
+    start: datetime  # platform: start_time, tz-aware with an explicit offset
     provider_id: str
+    provider_name: str = ""
+    specialty_id: str = ""
     location_id: str
     appointment_type_id: str
     duration_minutes: int = 15
+    #: Which of the queried plans covers this slot. **Empty unless the request
+    #: passed ``insurer`` or ``patient_id``** - the platform only prices against
+    #: plans it was asked about. An empty list is not "nothing covers it".
+    payable_with: list[str] = Field(default_factory=list)
 
 
 class BlockedProvider(_Record):
     provider_id: str
+    #: The rule that stopped this provider, which is the reason we submit.
     reason: DeclineReason
+    restriction: str = ""  # the platform's raw ``restriction`` id
     detail: str = ""
 
 
+class AvailabilityProvider(_Record):
+    """One ``ProviderOut`` from ``/availability``. Leaner than the catalogue's
+    provider, and its ``locations``/``accepted_insurers`` are ids, not names."""
+
+    provider_id: str  # platform: id
+    name: str = ""
+    specialty_id: str = ""
+    languages: list[str] = Field(default_factory=list)
+    insurer_ids_accepted: list[str] = Field(default_factory=list)  # platform: accepted_insurers
+    location_ids: list[str] = Field(default_factory=list)  # platform: locations
+    on_leave_until: str = ""
+
+
 class AvailabilityResponse(_Record):
+    providers: list[AvailabilityProvider] = Field(default_factory=list)
     slots: list[Slot] = Field(default_factory=list)
     blocked: list[BlockedProvider] = Field(default_factory=list)
     appointment_type: AppointmentTypeRecord | None = None
 
 
 class Appointment(_Record):
+    """One ``AppointmentOut``."""
+
     appointment_id: str
     patient_id: str
     provider_id: str
     location_id: str
     appointment_type_id: str
-    start: datetime
+    start: datetime  # platform: start_time
+    duration_minutes: int = 15
+    #: Ours, not the platform's: ``AppointmentOut`` carries no status, so on
+    #: live data this is always "scheduled". What can be cancelled or moved is
+    #: what ``when=upcoming`` returns, not what this field says.
     status: str = "scheduled"
 
 
