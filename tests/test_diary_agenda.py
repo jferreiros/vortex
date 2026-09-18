@@ -382,9 +382,7 @@ async def test_two_cancellations_in_one_call_do_not_cross_contaminate(
     first = await prepare_cancel(
         ctx, PrepareCancelInput(appointment_id="A0001", patient_id=PATIENT)
     )
-    second = await prepare_cancel(
-        ctx, PrepareCancelInput(appointment_id="A0002", patient_id=CHILD)
-    )
+    second = await prepare_cancel(ctx, PrepareCancelInput(appointment_id="A0002", patient_id=CHILD))
     assert first.rejection is None
     assert first.action is not None
     assert first.action.appointment_id == "A0001"

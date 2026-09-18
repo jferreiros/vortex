@@ -39,9 +39,7 @@ class AcceptingSubmitter:
 
 
 def make_session(settings) -> CallSession:
-    start = StartPayload(
-        streamSid="MZ-real-call", callSid="CA-real-call", customParameters={}
-    )
+    start = StartPayload(streamSid="MZ-real-call", callSid="CA-real-call", customParameters={})
     session = CallSession.open(start, settings=settings, now=NOW)
     submitter = AcceptingSubmitter()
     session.submitter = session.ctx.submitter = submitter
