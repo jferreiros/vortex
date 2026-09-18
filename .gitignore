@@ -2,6 +2,8 @@
 .env
 .env.*
 !.env.example
+google-tts.json
+*.serviceaccount.json
 
 # Node
 node_modules/

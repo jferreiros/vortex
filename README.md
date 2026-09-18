@@ -30,7 +30,7 @@ The server always starts. Missing keys switch components to fake mode:
 | Key(s) missing | What runs instead |
 | --- | --- |
 | `PLATFORM_API_KEY` | `FakeClinicClient` (fixtures in `vortex/clinic/fixtures.py`) and a dry-run submit client that logs instead of POSTing |
-| any of `SONIOX_API_KEY`, `LLM_API_KEY`, `LLM_BASE_URL`, `AZURE_SPEECH_KEY` | the stub voice pipeline: beeps out, counts frames in, submits a typed refusal at the end |
+| any of `SONIOX_API_KEY`, `LLM_API_KEY`, `LLM_BASE_URL`, or the TTS credentials of the active `VORTEX_TTS_PROVIDER` | the stub voice pipeline: beeps out, counts frames in, submits a typed refusal at the end |
 
 `GET /health` says which mode is active. `VORTEX_VOICE_MODE` and
 `VORTEX_CLINIC_MODE` force a mode (see `.env.example`).
@@ -43,8 +43,9 @@ Every hop stays in the EU.
 | --- | --- | --- |
 | STT | Soniox `stt-rt-v5` — language identification on, clinic vocabulary boosted | `SONIOX_API_KEY`, `SONIOX_STT_MODEL` |
 | LLM | any OpenAI-compatible EU endpoint (IONOS / Nebius / Groq EU), small non-thinking Qwen | `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`, `LLM_TEMPERATURE`, `LLM_MAX_TOKENS`, `LLM_DISABLE_THINKING` |
-| TTS | Azure Neural streaming (default), voice switches es ↔ ca mid-call | `AZURE_SPEECH_KEY`, `AZURE_SPEECH_REGION`, `AZURE_TTS_VOICE_ES`, `AZURE_TTS_VOICE_CA` |
-| TTS | Deepgram Aura-2, the fallback: `VORTEX_TTS_PROVIDER=deepgram` | `DEEPGRAM_API_KEY`, `DEEPGRAM_TTS_MODEL`, `DEEPGRAM_BASE_URL` |
+| TTS | **Google Cloud Text-to-Speech (default)** — es / ca / gl / eu, the only provider that covers all four; the voice switches mid-call. Chirp 3 HD for Spanish, Standard voices for ca/gl/eu | `GOOGLE_APPLICATION_CREDENTIALS` *or* `GOOGLE_TTS_CREDENTIALS_JSON`, `GOOGLE_TTS_VOICE_ES`, `GOOGLE_TTS_VOICE_CA`, `GOOGLE_TTS_VOICE_GL`, `GOOGLE_TTS_VOICE_EU` |
+| TTS | Azure Neural streaming: `VORTEX_TTS_PROVIDER=azure` — es / ca only, switches mid-call | `AZURE_SPEECH_KEY`, `AZURE_SPEECH_REGION`, `AZURE_TTS_VOICE_ES`, `AZURE_TTS_VOICE_CA` |
+| TTS | Deepgram Aura-2, the fallback: `VORTEX_TTS_PROVIDER=deepgram` — es only, no mid-call switch | `DEEPGRAM_API_KEY`, `DEEPGRAM_TTS_MODEL`, `DEEPGRAM_BASE_URL` |
 
 ## Who touches what
 

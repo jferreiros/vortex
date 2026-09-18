@@ -7,7 +7,8 @@ missing, the matching component runs in fake mode:
 - no voice keys            -> the stub voice pipeline (beeps, no STT/LLM/TTS)
 
 The voice pipeline is EU-first: Soniox for STT, any OpenAI-compatible endpoint
-hosted in the EU for the LLM, and Azure Neural (or Deepgram Aura-2) for TTS.
+hosted in the EU for the LLM, and Google Cloud TTS (or Azure Neural, or
+Deepgram Aura-2) for TTS.
 """
 
 from __future__ import annotations
@@ -25,6 +26,16 @@ load_dotenv(REPO_ROOT / ".env")
 
 def _env(name: str, default: str = "") -> str:
     return os.environ.get(name, default).strip()
+
+
+TTS_PROVIDERS: tuple[str, ...] = ("google", "azure", "deepgram")
+DEFAULT_TTS_PROVIDER = "google"
+
+
+def _tts_provider() -> str:
+    """Fold ``VORTEX_TTS_PROVIDER`` to a known provider. Anything odd -> google."""
+    name = _env("VORTEX_TTS_PROVIDER", DEFAULT_TTS_PROVIDER).lower()
+    return name if name in TTS_PROVIDERS else DEFAULT_TTS_PROVIDER
 
 
 @dataclass(frozen=True)
@@ -55,9 +66,33 @@ class Settings:
         )
     )
 
-    # --- TTS: Azure Neural (default) or Deepgram Aura-2 -----------------------
-    # VORTEX_TTS_PROVIDER: azure | deepgram
-    tts_provider: str = field(default_factory=lambda: _env("VORTEX_TTS_PROVIDER", "azure").lower())
+    # --- TTS: Google Cloud (default), Azure Neural or Deepgram Aura-2 ---------
+    # VORTEX_TTS_PROVIDER: google | azure | deepgram  (unknown values -> google)
+    tts_provider: str = field(default_factory=_tts_provider)
+
+    # Google Cloud Text-to-Speech. The only provider with Catalan, Galician
+    # *and* Basque voices, which is why it is the default. Credentials come
+    # either as a path to the service-account JSON or as the JSON itself.
+    google_application_credentials: str = field(
+        default_factory=lambda: _env("GOOGLE_APPLICATION_CREDENTIALS")
+    )
+    google_tts_credentials_json: str = field(
+        default_factory=lambda: _env("GOOGLE_TTS_CREDENTIALS_JSON")
+    )
+    # Spanish gets a Chirp 3 HD voice; ca/gl/eu only exist as Standard voices.
+    google_tts_voice_es: str = field(
+        default_factory=lambda: _env("GOOGLE_TTS_VOICE_ES", "es-ES-Chirp3-HD-Aoede")
+    )
+    google_tts_voice_ca: str = field(
+        default_factory=lambda: _env("GOOGLE_TTS_VOICE_CA", "ca-ES-Standard-B")
+    )
+    google_tts_voice_gl: str = field(
+        default_factory=lambda: _env("GOOGLE_TTS_VOICE_GL", "gl-ES-Standard-A")
+    )
+    google_tts_voice_eu: str = field(
+        default_factory=lambda: _env("GOOGLE_TTS_VOICE_EU", "eu-ES-Standard-A")
+    )
+
     azure_speech_key: str = field(default_factory=lambda: _env("AZURE_SPEECH_KEY"))
     azure_speech_region: str = field(
         default_factory=lambda: _env("AZURE_SPEECH_REGION", "westeurope")
@@ -106,12 +141,31 @@ class Settings:
         return bool(self.platform_api_key)
 
     @property
-    def tts_is_azure(self) -> bool:
-        return self.tts_provider != "deepgram"
+    def has_google_tts_credentials(self) -> bool:
+        """Either the path to the service-account file or the JSON itself."""
+        return bool(self.google_application_credentials or self.google_tts_credentials_json)
+
+    @property
+    def tts_supports_language_switch(self) -> bool:
+        """Can the voice change mid-call? Google and Azure yes, Deepgram no."""
+        return self.tts_provider in ("google", "azure")
+
+    @property
+    def tts_voice(self) -> str:
+        """The voice this provider starts the call with (Spanish)."""
+        if self.tts_provider == "google":
+            return self.google_tts_voice_es
+        if self.tts_provider == "azure":
+            return self.azure_tts_voice_es
+        return self.deepgram_tts_model
 
     @property
     def has_tts_key(self) -> bool:
-        return bool(self.azure_speech_key if self.tts_is_azure else self.deepgram_api_key)
+        if self.tts_provider == "google":
+            return self.has_google_tts_credentials
+        if self.tts_provider == "azure":
+            return bool(self.azure_speech_key)
+        return bool(self.deepgram_api_key)
 
     @property
     def voice_is_pipecat(self) -> bool:
@@ -132,14 +186,18 @@ class Settings:
             "has_platform_key": bool(self.platform_api_key),
             "has_soniox_key": bool(self.soniox_api_key),
             "has_llm_key": bool(self.llm_api_key),
+            "has_google_tts_credentials": self.has_google_tts_credentials,
             "has_azure_speech_key": bool(self.azure_speech_key),
             "has_deepgram_key": bool(self.deepgram_api_key),
             "stt_model": self.soniox_stt_model,
             "llm_model": self.llm_model,
             "llm_base_url": self.llm_base_url,
-            "tts_provider": "azure" if self.tts_is_azure else "deepgram",
-            "tts_voice": self.azure_tts_voice_es if self.tts_is_azure else self.deepgram_tts_model,
-            "azure_speech_region": self.azure_speech_region if self.tts_is_azure else "",
+            "tts_provider": self.tts_provider,
+            "tts_voice": self.tts_voice,
+            "tts_language_switch": self.tts_supports_language_switch,
+            "azure_speech_region": (
+                self.azure_speech_region if self.tts_provider == "azure" else ""
+            ),
             "ws_path": self.ws_path,
             "calls_log_path": str(self.calls_log_path),
         }

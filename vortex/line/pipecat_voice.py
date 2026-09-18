@@ -2,13 +2,15 @@
 
     transport.input -> STT (Soniox stt-rt-v5) -> language watcher
                     -> user aggregator -> LLM (OpenAI-compatible, EU)
-                    -> TTS (Azure Neural, or Deepgram Aura-2) -> transport.output
-                    -> assistant aggregator
+                    -> TTS (Google Cloud, Azure Neural or Deepgram Aura-2)
+                    -> transport.output -> assistant aggregator
 
 Every provider is EU-hosted: Soniox for transcription, an OpenAI-compatible
 endpoint (IONOS / Nebius / Groq EU) running a small non-thinking Qwen for the
-model, and Azure Neural for the voice. ``VORTEX_TTS_PROVIDER=deepgram`` swaps
-the voice for Aura-2 on Deepgram's EU endpoint.
+model, and Google Cloud Text-to-Speech for the voice — the only one with
+Catalan, Galician *and* Basque. ``VORTEX_TTS_PROVIDER=azure`` swaps it for
+Azure Neural (es/ca), ``=deepgram`` for Aura-2 on Deepgram's EU endpoint
+(es only, no mid-call switch).
 
 One pipeline per socket. The serializer takes the ``stream_sid`` of this call,
 the context takes this call's prompt, and every tool handler closes over this
@@ -23,8 +25,8 @@ smoke test runs, with the stub pipeline when the keys are missing.
 TODO(line):
 - Run one real call end to end once the four keys exist.
 - Confirm the 8 kHz µ-law path: serializer ``twilio_sample_rate=8000`` in, and
-  the TTS asked for 8 kHz PCM out (Azure Raw8Khz16BitMonoPcm). Check for
-  choppy audio.
+  the TTS asked for 8 kHz PCM out (Google LINEAR16 @ 8000, Azure
+  Raw8Khz16BitMonoPcm). Check for choppy audio.
 - Decide the idle policy: the platform cuts a call that goes quiet. Keep a
   user-idle prompt so the agent is never silent for long.
 - Hang up from our side when the agent says goodbye (send EndFrame, let the
@@ -39,7 +41,7 @@ from typing import Any
 from fastapi import WebSocket
 
 from vortex import tools as registry
-from vortex.conversation.language import detect_language, tts_voice_for
+from vortex.conversation.language import DEFAULT_LANGUAGE, detect_language, tts_voice_for
 from vortex.conversation.prompt import GREETING, initial_messages
 from vortex.conversation.stt_context import stt_terms
 from vortex.conversation.turns import TurnSettings, default_turn_settings
@@ -191,8 +193,9 @@ async def run_pipecat_call(
     )
 
     stages: list[Any] = [transport.input(), stt]
-    if settings.tts_is_azure:
-        # Only Azure has a Catalan voice to switch to.
+    if settings.tts_supports_language_switch:
+        # Google (es/ca/gl/eu) and Azure (es/ca) have a voice to switch to.
+        # Deepgram has one Spanish voice, so the watcher would be a no-op.
         stages.append(_LanguageWatcher(session))
     stages += [
         aggregators.user(),
@@ -236,17 +239,34 @@ def _providers(settings: Any) -> dict[str, object]:
     return {
         "stt": f"soniox/{settings.soniox_stt_model}",
         "llm": settings.llm_model,
-        "tts": "azure" if settings.tts_is_azure else "deepgram",
+        "tts": settings.tts_provider,
     }
 
 
 def _make_tts(settings: Any) -> Any:
-    """Azure Neural by default; Deepgram Aura-2 when VORTEX_TTS_PROVIDER says so.
+    """Google Cloud by default; Azure Neural or Deepgram Aura-2 on request.
 
-    Both are asked for 8 kHz PCM: Azure maps it to ``Raw8Khz16BitMonoPcm`` and
-    the Twilio serializer does the µ-law companding on the way out.
+    All three are asked for 8 kHz PCM: Google encodes LINEAR16 at that rate,
+    Azure maps it to ``Raw8Khz16BitMonoPcm``, and the Twilio serializer does
+    the µ-law companding on the way out.
     """
-    if settings.tts_is_azure:
+    if settings.tts_provider == "google":
+        # The HTTP service, not the streaming ``GoogleTTSService``: streaming
+        # only speaks Chirp 3 HD / Journey, and ca/gl/eu exist solely as
+        # Standard voices. The HTTP one takes both families, so a single
+        # service covers every language through a voice swap.
+        from pipecat.services.google.tts import GoogleHttpTTSService
+
+        voice, language = tts_voice_for(DEFAULT_LANGUAGE, settings)
+        return GoogleHttpTTSService(
+            # Inline JSON wins when both are set, matching pipecat's own order.
+            credentials=settings.google_tts_credentials_json or None,
+            credentials_path=settings.google_application_credentials or None,
+            sample_rate=LINE_SAMPLE_RATE,
+            settings=GoogleHttpTTSService.Settings(voice=voice, language=language),
+        )
+
+    if settings.tts_provider == "azure":
         from pipecat.services.azure.tts import AzureTTSService
         from pipecat.transcriptions.language import Language
 
@@ -281,14 +301,21 @@ def _as_websocket_url(url: str) -> str:
 
 
 def _LanguageWatcher(session: CallSession):  # noqa: N802 - factory that returns a processor
-    """Switch the Azure voice when the caller switches language.
+    """Switch the voice when the caller switches language.
 
     Soniox tags each transcription frame with the language it heard. When that
-    flips between Spanish and Catalan we push a ``TTSUpdateSettingsFrame``
-    downstream; the TTS service applies the delta in place, so the voice
-    changes without rebuilding the pipeline. There is no public
-    ``update_settings()`` coroutine on ``TTSService`` in pipecat 1.11 — the
-    control frame is the supported way in.
+    flips (es <-> ca / gl / eu on Google, es <-> ca on Azure) we push a
+    ``TTSUpdateSettingsFrame`` downstream; the TTS service applies the delta in
+    place, so the voice changes without rebuilding the pipeline. There is no
+    public ``update_settings()`` coroutine on ``TTSService`` in pipecat 1.11 —
+    the control frame is the supported way in.
+
+    ``TTSService._update_settings`` converts the pipecat ``Language`` we send
+    into the provider's own code before storing it, which is what
+    ``GoogleHttpTTSService.run_tts`` passes as ``language_code`` next to the
+    new voice name. Google's verified map only lists the Chirp 3 HD locales,
+    so ca/gl/eu log a "not verified" warning and fall through to the full code
+    ("ca-ES", "gl-ES", "eu-ES") — the right value either way.
     """
     from pipecat.frames.frames import Frame, TranscriptionFrame, TTSUpdateSettingsFrame
     from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
