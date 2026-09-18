@@ -106,17 +106,61 @@ models:
   # --- other gateways from .env.example
   - id: vercel/anthropic/claude-haiku-4.5
     label: "Claude Haiku 4.5 (Vercel AI Gateway)"
-    default: true
+    default: false
     usd_per_1m_input: 1.00
     usd_per_1m_output: 5.00
-    notes: "Needs VERCEL_AI_GATEWAY_KEY. $50 perk."
+    notes: "Needs VERCEL_AI_GATEWAY_KEY ($50 perk). Verified 2026-09-19: tool calls, ~2.5 s, but 16% weighted with ten tool rounds per scenario and about 3.5 EUR per full run. Opt in with --models."
+
+  - id: vercel/google/gemini-2.5-flash
+    label: "Gemini 2.5 Flash (Vercel AI Gateway)"
+    default: true
+    usd_per_1m_input: 0.30
+    usd_per_1m_output: 2.50
+    notes: "Verified 2026-09-19: tool calls, ~1.8 s. About 1 EUR per full run."
+
+  - id: vercel/anthropic/claude-sonnet-4.5
+    label: "Claude Sonnet 4.5 (Vercel AI Gateway)"
+    default: false
+    usd_per_1m_input: 3.00
+    usd_per_1m_output: 15.00
+    notes: "Verified 2026-09-19: tool calls, ~3.7 s. About 10 EUR per full run; run it on purpose with --models."
+
+  - id: vercel/openai/gpt-4.1-mini
+    label: "GPT-4.1 mini (Vercel AI Gateway)"
+    default: false
+    usd_per_1m_input: 0.40
+    usd_per_1m_output: 1.60
+    notes: "Same model as openai/gpt-4.1-mini through the gateway; use one or the other."
 
   - id: cloudflare/@cf/qwen/qwen3-30b-a3b-fp8
     label: "Qwen3 30B (Cloudflare Workers AI)"
     default: true
+    billing: perk
     usd_per_1m_input: null
     usd_per_1m_output: null
-    notes: "UNVERIFIED model id and endpoint. Needs CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN."
+    notes: "Endpoint and id verified 2026-09-19 (needs CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN, $100 credit). Answered the probe in prose, no tool call. Workers AI list price unverified."
+
+  - id: cloudflare/@cf/meta/llama-4-scout-17b-16e-instruct
+    label: "Llama 4 Scout 17B (Cloudflare Workers AI)"
+    default: true
+    billing: perk
+    usd_per_1m_input: null
+    usd_per_1m_output: null
+    notes: "Verified 2026-09-19: tool call in 319 ms, the fastest endpoint of the catalogue."
+
+  - id: cloudflare/@cf/qwen/qwq-32b
+    label: "QwQ 32B (Cloudflare Workers AI)"
+    default: false
+    billing: perk
+    usd_per_1m_input: null
+    usd_per_1m_output: null
+    notes: "Verified 2026-09-19: tool call in 2.7 s. A reasoning model; expect the token cap to bite."
+
+  # Probed and rejected on 2026-09-19: @cf/openai/gpt-oss-120b refuses
+  # reasoning_effort=none (Harmony wants low/medium/high), and
+  # @cf/mistralai/mistral-small-3.1-24b-instruct fails schema validation on
+  # our tool definitions. Both need a per-model request override before they
+  # can join.
 
   # --- the reference
   - id: openai/gpt-4.1-mini

@@ -135,6 +135,69 @@ cases:
     args: {patient_id: P00043, specialty_id: gynaecology, insurer: privado}
     expect: {allowed: false}
 
+  # The two plan rules the catalogue has no field for. /clinic publishes no
+  # referral flag and no allowance on a plan, so the only place they show is
+  # /availability's ``blocked[].restriction``, and that id is the reason.
+  # Fixtures: PLAN_REFERRALS and EXHAUSTED_ALLOWANCES in vortex/clinic/fixtures.py.
+  - id: rules.insurance.plan_demands_its_own_referral
+    problem: 6
+    tool: check_eligibility
+    from_number: "+34611222333"
+    # Carmen holds Mapfre, which wants its own referral for orthopaedics. The
+    # specialty itself needs none, so this can only be the plan's rule.
+    args: {patient_id: P00300, specialty_id: orthopaedics}
+    expect:
+      allowed: false
+      rejection: {reason: insurer_referral_required}
+      redirect_to: {$len: 0}
+
+  - id: rules.insurance.plan_referral_bites_by_provider_name_too
+    problem: 6
+    tool: check_eligibility
+    from_number: "+34611222333"
+    args: {patient_id: P00300, specialty_id: orthopaedics, provider_id: PR05}
+    expect: {allowed: false, rejection: {reason: insurer_referral_required}}
+
+  - id: rules.insurance.plan_referral_is_per_specialty
+    problem: 6
+    tool: check_eligibility
+    from_number: "+34611222333"
+    # Same plan, a specialty it asks nothing extra for: books normally.
+    args: {patient_id: P00300, specialty_id: general_practice}
+    expect: {allowed: true, rejection: {$absent: true}}
+
+  - id: rules.insurance.plan_out_of_visits_this_year
+    problem: 6
+    tool: check_eligibility
+    from_number: "+34622333444"
+    # Rafael's Caser has no visits left. Nothing on his record says so; the
+    # platform does, on every provider asked about.
+    args: {patient_id: P00301, specialty_id: general_practice}
+    expect:
+      allowed: false
+      rejection: {reason: allowance_exhausted}
+      redirect_to: {$len: 0}
+
+  - id: rules.insurance.exhausted_plan_names_no_other_doctor
+    problem: 6
+    tool: check_eligibility
+    from_number: "+34622333444"
+    # Asking for one doctor by name: the other two are on the same plan and
+    # would be refused the same way, so they are not offered.
+    args: {patient_id: P00301, specialty_id: general_practice, provider_id: PR01}
+    expect:
+      allowed: false
+      rejection: {reason: allowance_exhausted}
+      redirect_to: {$len: 0}
+
+  - id: rules.insurance.exhausted_plan_is_still_named_without_a_record
+    problem: 6
+    tool: check_eligibility
+    # No line to look the record up with. /availability applies the plan's
+    # rule server-side anyway, so the reason is still the platform's.
+    args: {patient_id: P00301, specialty_id: general_practice}
+    expect: {allowed: false, rejection: {reason: allowance_exhausted}}
+
   # ---- nearest_location: needs a geocoder; fails offline until the lane
   #      ships one (or a fixture table). Kept so the gap is visible. ----------
   - id: rules.nearest.getafe_address_goes_to_sur
@@ -173,6 +236,22 @@ cases:
         reason:
           $in: [specialty_not_covered, location_not_covered, provider_not_in_network,
                 insurer_referral_required, allowance_exhausted]
+
+  - id: rules.second_policy.unlocks_a_plan_referral_rule
+    problem: 17
+    # Mapfre wants its own referral for orthopaedics; Sanitas, named on the
+    # call, wants none. The second policy is the way past a plan rule.
+    tool: check_eligibility
+    from_number: "+34611222333"
+    args: {patient_id: P00300, specialty_id: orthopaedics, insurer: sanitas}
+    expect: {allowed: true, rejection: {$absent: true}}
+
+  - id: rules.second_policy.unlocks_an_exhausted_allowance
+    problem: 17
+    tool: check_eligibility
+    from_number: "+34622333444"
+    args: {patient_id: P00301, specialty_id: general_practice, insurer: sanitas}
+    expect: {allowed: true, rejection: {$absent: true}}
 
   - id: rules.second_policy.control_first_plan_already_works
     problem: 17

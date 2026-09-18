@@ -50,9 +50,7 @@ def ctx(tmp_path: Path) -> ToolContext:
 async def test_asisa_alone_is_refused_for_physiotherapy_at_sur(ctx: ToolContext) -> None:
     verdict = await check_eligibility(
         ctx,
-        CheckEligibilityInput(
-            patient_id=ELENA, specialty_id="physiotherapy", location_id="sur"
-        ),
+        CheckEligibilityInput(patient_id=ELENA, specialty_id="physiotherapy", location_id="sur"),
     )
     assert verdict.allowed is False
     assert verdict.rejection is not None

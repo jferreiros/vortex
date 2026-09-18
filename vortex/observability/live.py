@@ -17,11 +17,12 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx
 from nicegui import app, ui
 
-from vortex.observability import auth, explain
+from vortex.observability import auth, explain, insights
 from vortex.observability.calllog import read_recent
 from vortex.observability.demo import write_scripted_call
 from vortex.observability.view import CallCard, build_calls, flatten_grouped
@@ -36,11 +37,12 @@ DESIGN_CSS = (_HERE / "design.css").read_text(encoding="utf-8")
 BOARD_CSS = (_HERE / "board.css").read_text(encoding="utf-8")
 EVALS_SUMMARY = REPO_ROOT / "evals" / "results" / "summary.json"
 
-#: A call with no event for this long is over, whatever the log says.
-STALE_AFTER_S = 240
+MADRID = ZoneInfo("Europe/Madrid")
 
-NAV_PUBLIC = (("Live", "/wall"),)
-NAV_TEAM = (("Calls", "/"), ("Evals", "/evals"), ("Bench", "/bench"))
+#: A call with no event for this long is over, whatever the log says.
+STALE_AFTER_S = 180
+
+NAV_PUBLIC = (("Live", "/wall"), ("Console", "/"))
 
 # ---------------------------------------------------------------------------
 # Data
@@ -166,7 +168,7 @@ def _clock(value: str | None) -> str:
     stamp = _parse_ts(value)
     if stamp is None:
         return "—"
-    return stamp.astimezone().strftime("%H:%M:%S")
+    return stamp.astimezone(MADRID).strftime("%H:%M:%S")
 
 
 def _duration(card: CallCard) -> str:
@@ -208,8 +210,12 @@ def _signature(cards: list[CallCard], health: dict[str, Any] | None, *extra: Any
     return (repr(cards), repr(health), tick, *extra)
 
 
-def _caller(card: CallCard) -> str:
-    return card.patient_name or card.from_number or "Unidentified patient"
+def _caller(card: CallCard, *, public: bool = False) -> str:
+    if card.patient_name:
+        return card.patient_name
+    if card.from_number:
+        return insights.mask_phone(card.from_number) if public else card.from_number
+    return "Unidentified patient"
 
 
 def _status_dot(status: str) -> str:
@@ -278,11 +284,12 @@ def _pill(text: str, dot: str | None = None, extra: str = "") -> None:
         ui.label(text)
 
 
-def _line_pill(health: dict[str, Any] | None) -> None:
+def _line_pill(health: dict[str, Any] | None, *, short: bool = False) -> None:
     if health:
-        _pill(f"Line up · {health.get('voice')} / {health.get('clinic')}", "ok", "mute")
+        detail = "" if short else f" · {health.get('voice')} / {health.get('clinic')}"
+        _pill(f"Line up{detail}", "ok", "mute")
     else:
-        _pill("Line down · reading the log", "bad", "mute")
+        _pill("Line down" if short else "Line down · reading the log", "bad", "mute")
 
 
 def _nav(active: str, *, team: bool) -> ui.element:
@@ -291,8 +298,7 @@ def _nav(active: str, *, team: bool) -> ui.element:
         ui.link("Vortex", "/" if team else "/wall").classes("brand")
         ui.label(CLINIC_NAME).classes("nav-mute")
         with ui.element("div").classes("tabs"):
-            links = NAV_PUBLIC + NAV_TEAM if team else NAV_PUBLIC
-            for label, path in links:
+            for label, path in NAV_PUBLIC:
                 ui.link(label, path).classes("tab on" if path == active else "tab")
         ui.element("div").classes("grow")
         slot = ui.element("div").classes("row")
@@ -477,13 +483,16 @@ def _outcome(card: CallCard | None) -> None:
                     ui.label(str(value)).classes("mono")
 
 
-def _record(card: CallCard | None) -> None:
+def _record(card: CallCard | None, *, public: bool = False) -> None:
     with ui.element("div").classes("section-title"):
         ui.label("Record").classes("t")
     ended = "on the call" if card and card.live else (card.reason if card else None)
+    phone = card.from_number if card else None
+    if public and phone:
+        phone = insights.mask_phone(phone)
     rows = [
         ("Patient", card.patient_name if card else None),
-        ("Phone", card.from_number if card else None),
+        ("Phone", phone),
         ("Doctor", card.provider_name if card else None),
         ("Slot", card.slot if card else None),
         ("Submitted", card.submit_status if card else None),
@@ -499,7 +508,7 @@ def _record(card: CallCard | None) -> None:
             ui.label(value or "—").classes("mono")
 
 
-def _call_panel(card: CallCard | None, *, verbose: bool) -> None:
+def _call_panel(card: CallCard | None, *, verbose: bool, public: bool = False) -> None:
     _stages(card)
     ui.element("div").style("height: 24px")
     with ui.element("div").classes("grid3"):
@@ -513,10 +522,10 @@ def _call_panel(card: CallCard | None, *, verbose: bool) -> None:
         with ui.element("section").classes("col"):
             _outcome(card)
             ui.element("div").style("height: 24px")
-            _record(card)
+            _record(card, public=public)
 
 
-def _live_strip(cards: list[CallCard], featured: CallCard | None) -> None:
+def _live_strip(cards: list[CallCard], featured: CallCard | None, *, public: bool = False) -> None:
     live = [c for c in cards if c.live]
     if len(live) < 2:
         return
@@ -531,7 +540,7 @@ def _live_strip(cards: list[CallCard], featured: CallCard | None) -> None:
             ):
                 with ui.element("div").classes("row"):
                     _dot("live")
-                    ui.label(_caller(card)).classes("body-sm-strong")
+                    ui.label(_caller(card, public=public)).classes("body-sm-strong")
                     ui.element("div").classes("grow")
                     ui.label(_duration(card)).classes("caption-sm tabular")
                 stage = explain.stage_of(card)
@@ -543,6 +552,7 @@ def _live_strip(cards: list[CallCard], featured: CallCard | None) -> None:
 def _calls_table(
     cards: list[CallCard],
     *,
+    public: bool = False,
     selected: str | None = None,
     on_pick=None,
     link: bool = False,
@@ -577,7 +587,7 @@ def _calls_table(
                     with ui.element("td").classes("mute num"):
                         ui.label(_clock(card.started_at))
                     with ui.element("td"):
-                        ui.label(_caller(card))
+                        ui.label(_caller(card, public=public))
                     with ui.element("td"), ui.element("div").classes("row"):
                         _dot(_status_dot(card.status))
                         ui.label(explain.STATUS_LABEL.get(card.status, card.status))
@@ -657,13 +667,13 @@ def wall_page() -> None:
                         _pill("Idle · waiting for the next call", "off", "mute")
                 _kpis(cards)
                 ui.element("div").style("height: 32px")
-                _live_strip(cards, featured)
-                _call_panel(featured, verbose=False)
+                _live_strip(cards, featured, public=True)
+                _call_panel(featured, verbose=False, public=True)
                 ui.element("div").style("height: 48px")
                 with ui.element("div").classes("section-title"):
                     ui.label("Recent calls").classes("t")
                     ui.label("Click a row for the full story").classes("m")
-                _calls_table(cards, link=True, limit=12)
+                _calls_table(cards, link=True, limit=12, public=True)
                 ui.element("div").style("height: 32px")
                 _facts(health)
             _footer()
@@ -696,7 +706,9 @@ def call_page(call_id: str) -> None:
                 with ui.element("div").classes("page-head"):
                     with ui.element("div"):
                         ui.link("← Live", "/wall").classes("caption-sm")
-                        ui.label(_caller(card) if card else "Unknown call").classes("title")
+                        ui.label(
+                            _caller(card, public=not _ops_ok()) if card else "Unknown call"
+                        ).classes("title")
                         ui.label(call_id).classes("sub mono")
                     if card:
                         _pill(
@@ -709,7 +721,8 @@ def call_page(call_id: str) -> None:
                         ui.label("No call with this id yet").classes("t")
                         ui.label("It appears here as soon as the socket opens.").classes("d")
                 else:
-                    _call_panel(card, verbose=True)
+                    team = _ops_ok()
+                    _call_panel(card, verbose=team, public=not team)
             _footer()
 
     redraw()
@@ -771,7 +784,7 @@ def _passes(card: CallCard, key: str) -> bool:
     return card.status == key
 
 
-@ui.page("/")
+@ui.page("/calls")
 def ops_page() -> None:
     _apply_chrome()
     ui.page_title("Vortex · Calls")
@@ -779,35 +792,44 @@ def ops_page() -> None:
         _login_form()
         return
     state: dict[str, Any] = {"id": None, "filter": "all"}
+    holder: dict[str, Any] = {}
 
-    slot = _nav("/", team=True)
-    with slot:
-        line_pill = ui.element("div")
+    def controls() -> None:
+        holder["line_pill"] = ui.element("div")
         name = ui.input(placeholder="your name", value="joaquin").props("dense outlined")
         name.classes("mono").style("width:10rem")
-        ui.button("Play", on_click=_play_line).props("unelevated no-caps").classes("button-primary")
-        ui.button("Replay book", on_click=lambda: _replay("book")).props("outline no-caps").classes(
-            "button-secondary"
+        holder["name"] = name
+        ui.button("Play a test call", on_click=_play_line).props("unelevated no-caps").classes(
+            "button-primary"
         )
-        ui.button("Replay refuse", on_click=lambda: _replay("refuse")).props(
+        ui.button("Replay booking", on_click=lambda: _replay("book")).props(
             "outline no-caps"
         ).classes("button-secondary")
-        ui.button("Sign out", on_click=_logout).props("flat no-caps").classes("button-quiet")
+        ui.button("Replay refusal", on_click=lambda: _replay("refuse")).props(
+            "outline no-caps"
+        ).classes("button-secondary")
 
-    with ui.element("main").classes("page"):
-        with ui.element("div").classes("page-head"):
-            with ui.element("div"):
-                ui.label("Calls").classes("title")
-                ui.label(
-                    "Every call on the line, newest first. Pick one to see what the agent "
-                    "heard, what it checked and what it sent."
-                ).classes("sub")
+    from vortex.observability.shell import console_page
+
+    _cards0, health0 = _load_cards()
+    with console_page(
+        "/calls",
+        "Calls",
+        "Every call on the line, newest first. Pick one to see what the agent heard, "
+        "what it checked and what it sent.",
+        health=health0,
+        clinic=CLINIC_NAME,
+        who="team",
+        controls=controls,
+    ) as body:
+        with body:
             people = ui.label().classes("caption-sm")
-        chips = ui.element("div").classes("chip-row")
-        ui.element("div").style("height: 16px")
-        with ui.element("div").classes("ops-grid"):
-            left = ui.element("div")
-            right = ui.element("div").classes("card card-compact")
+            chips = ui.element("div").classes("chip-row")
+            with ui.element("div").classes("ops-grid"):
+                left = ui.element("div")
+                right = ui.element("div").classes("card card-compact")
+    line_pill = holder["line_pill"]
+    name = holder["name"]
 
     rendered: dict[str, Any] = {"sig": None}
 
@@ -825,7 +847,7 @@ def ops_page() -> None:
         shown = [c for c in cards if _passes(c, state["filter"])]
         if state["id"] is None and shown:
             state["id"] = shown[0].call_id
-        card = next((c for c in cards if c.call_id == state["id"]), shown[0] if shown else None)
+        card = next((c for c in shown if c.call_id == state["id"]), shown[0] if shown else None)
         names = _prune_presence()
         sig = _signature(cards, health, state["id"], state["filter"], tuple(names))
         if sig == rendered["sig"]:
@@ -884,103 +906,105 @@ def _read_summary() -> dict[str, Any] | None:
 
 
 def _team_page(path: str, title: str, sub: str, body) -> None:
+    from vortex.observability.shell import console_page
+
     _apply_chrome()
     ui.page_title(f"Vortex · {title}")
     if not _ops_ok():
         _login_form()
         return
-    _nav(path, team=True)
-    with ui.element("main").classes("page"):
-        with ui.element("div").classes("page-head"), ui.element("div"):
-            ui.label(title).classes("title")
-            ui.label(sub).classes("sub")
-        body()
+    _cards, health = _load_cards()
+    with console_page(
+        "/settings/engineering", title, sub, health=health, clinic=CLINIC_NAME, who="team"
+    ) as content:
+        with content:
+            body()
     _footer()
 
 
 _VERDICT_DOT = {"PASS": "ok", "FAIL": "bad", "UNVERIFIED": "warn"}
 
 
+def _evals_body() -> None:
+    summary = _read_summary()
+    if not summary:
+        with ui.element("div").classes("empty-state"):
+            ui.label("No evals run yet").classes("t")
+            ui.label("Run `make evals`. The scoreboard from summary.json shows here.").classes("d")
+        return
+    layers = {k: v for k, v in summary.items() if isinstance(v, dict)}
+    with ui.element("div").classes("stat-grid"):
+        for layer, data in layers.items():
+            totals = data.get("totals", {})
+            verdict = str(data.get("verdict", "?"))
+            passed = totals.get("pass", 0)
+            total = sum(v for v in totals.values() if isinstance(v, int))
+            _stat(
+                f"{passed}/{total}",
+                f"{layer} · {verdict.lower()}",
+                _VERDICT_DOT.get(verdict, "off"),
+            )
+    ui.element("div").style("height: 24px")
+    with ui.element("table").classes("table"):
+        with ui.element("thead"), ui.element("tr"):
+            for head in ("Layer", "Verdict", "Broke", "Fixed", "Ran", "Commit"):
+                with ui.element("th"):
+                    ui.label(head)
+        with ui.element("tbody"):
+            for layer, data in layers.items():
+                verdict = str(data.get("verdict", "?"))
+                with ui.element("tr"):
+                    with ui.element("td"):
+                        ui.label(layer)
+                    with ui.element("td"), ui.element("div").classes("row"):
+                        _dot(_VERDICT_DOT.get(verdict, "warn"))
+                        ui.label(verdict)
+                    with ui.element("td").classes("num"):
+                        ui.label(str(len(data.get("broke", []))))
+                    with ui.element("td").classes("num"):
+                        ui.label(str(len(data.get("fixed", []))))
+                    with ui.element("td").classes("mute"):
+                        ui.label(_clock(data.get("started_at")))
+                    with ui.element("td").classes("id"):
+                        ui.label(str((data.get("git") or {}).get("sha", "?"))[:10])
+
+
 @ui.page("/evals")
 def evals_page() -> None:
-    def body() -> None:
-        summary = _read_summary()
-        if not summary:
-            with ui.element("div").classes("empty-state"):
-                ui.label("No evals run yet").classes("t")
-                ui.label("Run `make evals`. The scoreboard from summary.json shows here.").classes(
-                    "d"
-                )
-            return
-        layers = {k: v for k, v in summary.items() if isinstance(v, dict)}
-        with ui.element("div").classes("stat-grid"):
-            for layer, data in layers.items():
-                totals = data.get("totals", {})
-                verdict = str(data.get("verdict", "?"))
-                passed = totals.get("pass", 0)
-                total = sum(v for v in totals.values() if isinstance(v, int))
-                _stat(
-                    f"{passed}/{total}",
-                    f"{layer} · {verdict.lower()}",
-                    _VERDICT_DOT.get(verdict, "off"),
-                )
-        ui.element("div").style("height: 24px")
-        with ui.element("table").classes("table"):
-            with ui.element("thead"), ui.element("tr"):
-                for head in ("Layer", "Verdict", "Broke", "Fixed", "Ran", "Commit"):
-                    with ui.element("th"):
-                        ui.label(head)
-            with ui.element("tbody"):
-                for layer, data in layers.items():
-                    verdict = str(data.get("verdict", "?"))
-                    with ui.element("tr"):
-                        with ui.element("td"):
-                            ui.label(layer)
-                        with ui.element("td"), ui.element("div").classes("row"):
-                            _dot(_VERDICT_DOT.get(verdict, "warn"))
-                            ui.label(verdict)
-                        with ui.element("td").classes("num"):
-                            ui.label(str(len(data.get("broke", []))))
-                        with ui.element("td").classes("num"):
-                            ui.label(str(len(data.get("fixed", []))))
-                        with ui.element("td").classes("mute"):
-                            ui.label(_clock(data.get("started_at")))
-                        with ui.element("td").classes("id"):
-                            ui.label(str((data.get("git") or {}).get("sha", "?"))[:10])
-
     _team_page(
         "/evals",
         "Evals",
         "Four layers: tool logic, scripted conversations, voice providers and the organisers' "
         "public cases. Green only counts when it is not a stub.",
-        body,
+        _evals_body,
     )
+
+
+def _bench_body() -> None:
+    summary = _read_summary()
+    voice = summary.get("voice") if isinstance(summary, dict) else None
+    if not isinstance(voice, dict):
+        with ui.element("div").classes("empty-state"):
+            ui.label("No provider benchmark yet").classes("t")
+            ui.label(
+                "Run `make evals-voice REAL=1`. Latency, WER and cost per stack show here."
+            ).classes("d")
+        return
+    totals = voice.get("totals", {})
+    with ui.element("div").classes("stat-grid"):
+        _stat(str(totals.get("pass", 0)), "stacks within budget", "ok")
+        _stat(str(totals.get("fail", 0)), "stacks over budget", "bad")
+    ui.element("div").style("height: 16px")
+    ui.label("Open evals/results/report.html for the full matrix.").classes("body-sm")
 
 
 @ui.page("/bench")
 def bench_page() -> None:
-    def body() -> None:
-        summary = _read_summary()
-        voice = summary.get("voice") if isinstance(summary, dict) else None
-        if not isinstance(voice, dict):
-            with ui.element("div").classes("empty-state"):
-                ui.label("No provider benchmark yet").classes("t")
-                ui.label(
-                    "Run `make evals-voice REAL=1`. Latency, WER and cost per stack show here."
-                ).classes("d")
-            return
-        totals = voice.get("totals", {})
-        with ui.element("div").classes("stat-grid"):
-            _stat(str(totals.get("pass", 0)), "stacks within budget", "ok")
-            _stat(str(totals.get("fail", 0)), "stacks over budget", "bad")
-        ui.element("div").style("height: 16px")
-        ui.label("Open evals/results/report.html for the full matrix.").classes("body-sm")
-
     _team_page(
         "/bench",
         "Bench",
         "STT, LLM and TTS latency, word error rate and cost per call, per provider stack.",
-        body,
+        _bench_body,
     )
 
 
@@ -998,6 +1022,10 @@ def main() -> None:
         storage_secret=auth.storage_secret(),
     )
 
+
+# The clinic console (Overview, Agents, Patients, Insights, Settings) registers
+# its pages on import. It imports this module, so it must come last.
+from vortex.observability import console  # noqa: E402, F401
 
 if __name__ in {"__main__", "__mp_main__"}:
     main()
