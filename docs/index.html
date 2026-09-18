@@ -390,7 +390,7 @@
 
   <header class="masthead">
     <span class="eyebrow">Equipo Vortex · HackSpain 2026 · Madrid · Track Prosper AI</span>
-    <h1>Cinco personas, 49 puntos, un socket.</h1>
+    <h1>Cinco personas, 196 puntos, un socket.</h1>
     <p class="lede">Un agente de voz que coge las llamadas de una clínica y gestiona citas. <b>Esto es un menú, no un reparto.</b> Lee los cinco carriles, entiende qué hay dentro y pide el tuyo.</p>
 
     <div class="clock" id="clock" aria-label="Los cinco momentos del fin de semana">
@@ -410,21 +410,23 @@
       <li><a href="#contrato">Contrato</a></li>
       <li><a href="#bloques">3 bloques</a></li>
       <li><a href="#hablar">Cómo hablamos</a></li>
-      <li><a href="tasks.html">Tareas</a></li>
       <li><a href="#numeros">Números</a></li>
     </ol>
   </nav>
 
   <div class="score" aria-label="Reparto de puntos">
-    <div><div class="n tab">49</div><div class="l">puntos en juego. 18 retos, 17 puntúan.</div></div>
-    <div><div class="n tab tl">30</div><div class="l">en tooling y dominio. 3 personas.</div></div>
-    <div><div class="n tab pipe">14</div><div class="l">en pipeline y voz. 2 personas.</div></div>
-    <div><div class="n tab">5</div><div class="l">La llamada real (#18). Necesita el sistema entero.</div></div>
-    <div><div class="n tab hoy">3</div><div class="l">retos abiertos hoy, 3 puntos en total.</div></div>
+    <div><div class="n tab">196</div><div class="l">puntos en juego. 17 retos puntúan, 4 casos cada uno.</div></div>
+    <div><div class="n tab tl">120</div><div class="l">en tooling y dominio. 3 personas.</div></div>
+    <div><div class="n tab pipe">56</div><div class="l">en pipeline y voz. 2 personas.</div></div>
+    <div><div class="n tab">20</div><div class="l">La llamada real (#18). Necesita el sistema entero.</div></div>
+    <div><div class="n tab hoy">6</div><div class="l">retos abiertos hoy: 40 puntos disponibles.</div></div>
   </div>
 
   <div class="call" data-lane="linea">
-    <b>30 contra 14 es 3 contra 2.</b> Pero el pipeline tiene el cero: un socket que se cae, que emite silencio o que mezcla estado entre llamadas falla <em>todos</em> los casos del run a la vez. Quien coja La Línea protege los 49, no los 14 de su columna.
+    <b>120 contra 56 es 3 contra 2.</b> Pero el pipeline tiene el cero: un socket que se cae, que emite silencio o que mezcla estado entre llamadas falla <em>todos</em> los casos del run a la vez. Quien coja La Línea protege los 196, no los 56 de su columna.
+  </div>
+  <div class="call" data-lane="conv">
+    <b>El agente atiende en inglés por defecto.</b> De los 73 casos públicos, 69 son en inglés, 3 en español y 1 en catalán. La clínica opera en inglés. Quien llama en otra lengua es la excepción, y eso es justo lo que aísla el reto Idiomas (#11).
   </div>
 
   <!-- ===== CARRILES ===== -->
@@ -439,7 +441,7 @@
 
       <article class="lane" data-lane="linea">
         <div class="in">
-          <div class="top"><span class="code">P1 · Pipeline</span><span class="pts">Protege los 49</span></div>
+          <div class="top"><span class="code">P1 · Pipeline</span><span class="pts">Protege los 196</span></div>
           <h3>La Línea</h3>
           <p class="owns">El socket, el audio y el envío. Si esto falla, nada más cuenta.</p>
           <ul>
@@ -460,13 +462,13 @@
 
       <article class="lane" data-lane="conv">
         <div class="in">
-          <div class="top"><span class="code">P2 · Pipeline</span><span class="pts">14<small>pts</small></span></div>
+          <div class="top"><span class="code">P2 · Pipeline</span><span class="pts">56<small>pts</small></span></div>
           <h3>La Conversación</h3>
           <p class="owns">Cómo escucha el agente, cuándo calla y con qué no se deja liar.</p>
           <ul>
             <li>Turnos y barge-in. El harness no hace nada de esto por nosotros</li>
             <li>Elegir STT / TTS, y aguantar con una línea mala</li>
-            <li>Español primero. Luego catalán, gallego y euskera</li>
+            <li>Inglés por defecto (69 de 73 casos públicos). Español, catalán y las otras lenguas de España son la excepción del reto Idiomas</li>
             <li>Nunca leer datos de un paciente a quien no se ha identificado</li>
             <li>El techo de 3 minutos: llegar al registro antes de que caiga</li>
           </ul>
@@ -480,7 +482,7 @@
 
       <article class="lane" data-lane="ident">
         <div class="in">
-          <div class="top"><span class="code">T1 · Tooling</span><span class="pts">6<small>pts</small></span></div>
+          <div class="top"><span class="code">T1 · Tooling</span><span class="pts">24<small>pts</small></span></div>
           <h3>Identidad</h3>
           <p class="owns">Quién llama, y para quién es la cita de verdad.</p>
           <ul>
@@ -501,7 +503,7 @@
 
       <article class="lane" data-lane="agenda">
         <div class="in">
-          <div class="top"><span class="code">T2 · Tooling</span><span class="pts">11<small>pts</small></span></div>
+          <div class="top"><span class="code">T2 · Tooling</span><span class="pts">44<small>pts</small></span></div>
           <h3>La Agenda</h3>
           <p class="owns">Disponibilidad real, y convertir lo que dice quien llama en un minuto exacto.</p>
           <ul>
@@ -523,7 +525,7 @@
 
       <article class="lane" data-lane="reglas">
         <div class="in">
-          <div class="top"><span class="code">T3 · Tooling</span><span class="pts">13<small>pts</small></span></div>
+          <div class="top"><span class="code">T3 · Tooling</span><span class="pts">52<small>pts</small></span></div>
           <h3>Las Reglas</h3>
           <p class="owns">Todo lo que la clínica no hace, y decirlo con la palabra exacta.</p>
           <ul>
@@ -543,7 +545,7 @@
 
       <article class="lane" data-lane="all">
         <div class="in">
-          <div class="top"><span class="code">18 · Todos</span><span class="pts">5<small>pts</small></span></div>
+          <div class="top"><span class="code">18 · Todos</span><span class="pts">20<small>pts</small></span></div>
           <h3>La llamada real</h3>
           <p class="owns">El reto que necesita el sistema entero. No es un carril: es la suma de los cinco.</p>
           <ul>
@@ -629,7 +631,7 @@
     <div class="head">
       <span class="eyebrow">El mapa</span>
       <h2>Los 18 retos, de un vistazo</h2>
-      <p>Peso en puntos, si está abierto hoy, y qué carril lo cubre. Se abren en orden. Un reto suelto también se puede pedir: cada ficha tiene su hueco.</p>
+      <p>Puntos por reto (peso × 4 casos privados), si está abierto hoy, y qué carril lo cubre. Se abren en orden. Un reto suelto también se puede pedir: cada ficha tiene su hueco.</p>
     </div>
 
     <div class="legend">
@@ -644,29 +646,29 @@
     </div>
 
     <div class="map">
-      <div class="prob" data-open="yes" data-lane="ident"><div class="row"><span class="num">#1</span><span class="st">Abierto</span></div><div class="name">La cita simple<small>simple_booking</small></div><div class="w"><span class="big">1</span><span class="dots"><i class="on"></i><i></i><i></i><i></i><i></i></span></div><span class="lane-chip">Identidad + Agenda</span><div class="pick">quién: <b>&nbsp;</b></div></div>
+      <div class="prob" data-open="yes" data-lane="ident"><div class="row"><span class="num">#1</span><span class="st">Abierto</span></div><div class="name">La cita simple<small>simple_booking</small></div><div class="w"><span class="big">4</span><span class="dots"><i class="on"></i><i></i><i></i><i></i><i></i></span><span class="unit">peso 1</span></div><span class="lane-chip">Identidad + Agenda</span><div class="pick">quién: <b>&nbsp;</b></div></div>
       <div class="prob zero" data-open="yes" data-lane="linea"><div class="row"><span class="num">#2</span><span class="st">Abierto</span></div><div class="name">La centralita<small>switchboard</small></div><div class="w"><span class="big">0 pts</span><span class="unit">5 · 10 · 20 a la vez</span></div><span class="lane-chip">La Línea</span><div class="pick">quién: <b>&nbsp;</b></div></div>
-      <div class="prob" data-open="yes" data-lane="agenda"><div class="row"><span class="num">#3</span><span class="st">Abierto</span></div><div class="name">El médico y la sede<small>doctor_and_site</small></div><div class="w"><span class="big">2</span><span class="dots"><i class="on"></i><i class="on"></i><i></i><i></i><i></i></span></div><span class="lane-chip">La Agenda</span><div class="pick">quién: <b>&nbsp;</b></div></div>
-      <div class="prob" data-open="no" data-lane="ident"><div class="row"><span class="num">#4</span><span class="st">Aún no</span></div><div class="name">El paciente nuevo<small>the_new_patient</small></div><div class="w"><span class="big">2</span><span class="dots"><i class="on"></i><i class="on"></i><i></i><i></i><i></i></span></div><span class="lane-chip">Identidad</span><div class="pick">quién: <b>&nbsp;</b></div></div>
-      <div class="prob" data-open="no" data-lane="agenda"><div class="row"><span class="num">#5</span><span class="st">Aún no</span></div><div class="name">Cuándo exactamente<small>when_exactly</small></div><div class="w"><span class="big">2</span><span class="dots"><i class="on"></i><i class="on"></i><i></i><i></i><i></i></span></div><span class="lane-chip">La Agenda</span><div class="pick">quién: <b>&nbsp;</b></div></div>
-      <div class="prob" data-open="no" data-lane="reglas"><div class="row"><span class="num">#6</span><span class="st">Aún no</span></div><div class="name">Las normas<small>the_rules</small></div><div class="w"><span class="big">3</span><span class="dots"><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i></span></div><span class="lane-chip">Las Reglas</span><div class="pick">quién: <b>&nbsp;</b></div></div>
-      <div class="prob" data-open="no" data-lane="agenda"><div class="row"><span class="num">#7</span><span class="st">Aún no</span></div><div class="name">Sin hueco libre<small>no_slot_free</small></div><div class="w"><span class="big">2</span><span class="dots"><i class="on"></i><i class="on"></i><i></i><i></i><i></i></span></div><span class="lane-chip">La Agenda</span><div class="pick">quién: <b>&nbsp;</b></div></div>
-      <div class="prob" data-open="no" data-lane="agenda"><div class="row"><span class="num">#8</span><span class="st">Aún no</span></div><div class="name">Cambiar y cancelar<small>change_and_cancel</small></div><div class="w"><span class="big">2</span><span class="dots"><i class="on"></i><i class="on"></i><i></i><i></i><i></i></span></div><span class="lane-chip">La Agenda</span><div class="pick">quién: <b>&nbsp;</b></div></div>
-      <div class="prob" data-open="no" data-lane="ident"><div class="row"><span class="num">#9</span><span class="st">Aún no</span></div><div class="name">Llama otra persona<small>third_party</small></div><div class="w"><span class="big">3</span><span class="dots"><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i></span></div><span class="lane-chip">Identidad</span><div class="pick">quién: <b>&nbsp;</b></div></div>
-      <div class="prob" data-open="no" data-lane="reglas"><div class="row"><span class="num">#10</span><span class="st">Aún no</span></div><div class="name">Triaje<small>triage</small></div><div class="w"><span class="big">3</span><span class="dots"><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i></span></div><span class="lane-chip">Las Reglas</span><div class="pick">quién: <b>&nbsp;</b></div></div>
-      <div class="prob" data-open="no" data-lane="conv"><div class="row"><span class="num">#11</span><span class="st">Aún no</span></div><div class="name">Idiomas<small>languages</small></div><div class="w"><span class="big">3</span><span class="dots"><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i></span></div><span class="lane-chip">La Conversación</span><div class="pick">quién: <b>&nbsp;</b></div></div>
-      <div class="prob" data-open="no" data-lane="conv"><div class="row"><span class="num">#12</span><span class="st">Aún no</span></div><div class="name">Ruido<small>noise</small></div><div class="w"><span class="big">3</span><span class="dots"><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i></span></div><span class="lane-chip">La Conversación</span><div class="pick">quién: <b>&nbsp;</b></div></div>
-      <div class="prob" data-open="no" data-lane="conv"><div class="row"><span class="num">#13</span><span class="st">Aún no</span></div><div class="name">La llamada difícil<small>difficult_caller</small></div><div class="w"><span class="big">4</span><span class="dots"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i></span></div><span class="lane-chip">La Conversación</span><div class="pick">quién: <b>&nbsp;</b></div></div>
-      <div class="prob" data-open="no" data-lane="conv"><div class="row"><span class="num">#14</span><span class="st">Aún no</span></div><div class="name">Manipulación y privacidad<small>adversarial</small></div><div class="w"><span class="big">4</span><span class="dots"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i></span></div><span class="lane-chip">La Conversación</span><div class="pick">quién: <b>&nbsp;</b></div></div>
-      <div class="prob" data-open="no" data-lane="agenda"><div class="row"><span class="num">#15</span><span class="st">Aún no</span></div><div class="name">La sede más cercana<small>nearest_site</small></div><div class="w"><span class="big">3</span><span class="dots"><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i></span></div><span class="lane-chip">La Agenda</span><div class="pick">quién: <b>&nbsp;</b></div></div>
-      <div class="prob" data-open="no" data-lane="reglas"><div class="row"><span class="num">#16</span><span class="st">Aún no</span></div><div class="name">Las preguntas<small>the_questions</small></div><div class="w"><span class="big">3</span><span class="dots"><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i></span></div><span class="lane-chip">Las Reglas</span><div class="pick">quién: <b>&nbsp;</b></div></div>
-      <div class="prob" data-open="no" data-lane="reglas"><div class="row"><span class="num">#17</span><span class="st">Aún no</span></div><div class="name">La segunda póliza<small>second_policy</small></div><div class="w"><span class="big">4</span><span class="dots"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i></span></div><span class="lane-chip">Las Reglas</span><div class="pick">quién: <b>&nbsp;</b></div></div>
-      <div class="prob" data-open="no" data-lane="all"><div class="row"><span class="num">#18</span><span class="st">Aún no</span></div><div class="name">La llamada real<small>the_real_call</small></div><div class="w"><span class="big">5</span><span class="dots"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i></span></div><span class="lane-chip">Todos</span><div class="pick">quién: <b>&nbsp;</b></div></div>
+      <div class="prob" data-open="yes" data-lane="agenda"><div class="row"><span class="num">#3</span><span class="st">Abierto</span></div><div class="name">El médico y la sede<small>doctor_and_site</small></div><div class="w"><span class="big">8</span><span class="dots"><i class="on"></i><i class="on"></i><i></i><i></i><i></i></span><span class="unit">peso 2</span></div><span class="lane-chip">La Agenda</span><div class="pick">quién: <b>&nbsp;</b></div></div>
+      <div class="prob" data-open="yes" data-lane="ident"><div class="row"><span class="num">#4</span><span class="st">Abierto</span></div><div class="name">El paciente nuevo<small>the_new_patient</small></div><div class="w"><span class="big">8</span><span class="dots"><i class="on"></i><i class="on"></i><i></i><i></i><i></i></span><span class="unit">peso 2</span></div><span class="lane-chip">Identidad</span><div class="pick">quién: <b>&nbsp;</b></div></div>
+      <div class="prob" data-open="yes" data-lane="agenda"><div class="row"><span class="num">#5</span><span class="st">Abierto</span></div><div class="name">Cuándo exactamente<small>when_exactly</small></div><div class="w"><span class="big">8</span><span class="dots"><i class="on"></i><i class="on"></i><i></i><i></i><i></i></span><span class="unit">peso 2</span></div><span class="lane-chip">La Agenda</span><div class="pick">quién: <b>&nbsp;</b></div></div>
+      <div class="prob" data-open="yes" data-lane="reglas"><div class="row"><span class="num">#6</span><span class="st">Abierto</span></div><div class="name">Las normas<small>the_rules</small></div><div class="w"><span class="big">12</span><span class="dots"><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i></span><span class="unit">peso 3</span></div><span class="lane-chip">Las Reglas</span><div class="pick">quién: <b>&nbsp;</b></div></div>
+      <div class="prob" data-open="no" data-lane="agenda"><div class="row"><span class="num">#7</span><span class="st">Aún no</span></div><div class="name">Sin hueco libre<small>no_slot_free</small></div><div class="w"><span class="big">8</span><span class="dots"><i class="on"></i><i class="on"></i><i></i><i></i><i></i></span><span class="unit">peso 2</span></div><span class="lane-chip">La Agenda</span><div class="pick">quién: <b>&nbsp;</b></div></div>
+      <div class="prob" data-open="no" data-lane="agenda"><div class="row"><span class="num">#8</span><span class="st">Aún no</span></div><div class="name">Cambiar y cancelar<small>change_and_cancel</small></div><div class="w"><span class="big">8</span><span class="dots"><i class="on"></i><i class="on"></i><i></i><i></i><i></i></span><span class="unit">peso 2</span></div><span class="lane-chip">La Agenda</span><div class="pick">quién: <b>&nbsp;</b></div></div>
+      <div class="prob" data-open="no" data-lane="ident"><div class="row"><span class="num">#9</span><span class="st">Aún no</span></div><div class="name">Llama otra persona<small>third_party</small></div><div class="w"><span class="big">12</span><span class="dots"><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i></span><span class="unit">peso 3</span></div><span class="lane-chip">Identidad</span><div class="pick">quién: <b>&nbsp;</b></div></div>
+      <div class="prob" data-open="no" data-lane="reglas"><div class="row"><span class="num">#10</span><span class="st">Aún no</span></div><div class="name">Triaje<small>triage</small></div><div class="w"><span class="big">12</span><span class="dots"><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i></span><span class="unit">peso 3</span></div><span class="lane-chip">Las Reglas</span><div class="pick">quién: <b>&nbsp;</b></div></div>
+      <div class="prob" data-open="no" data-lane="conv"><div class="row"><span class="num">#11</span><span class="st">Aún no</span></div><div class="name">Idiomas<small>languages</small></div><div class="w"><span class="big">12</span><span class="dots"><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i></span><span class="unit">peso 3</span></div><span class="lane-chip">La Conversación</span><div class="pick">quién: <b>&nbsp;</b></div></div>
+      <div class="prob" data-open="no" data-lane="conv"><div class="row"><span class="num">#12</span><span class="st">Aún no</span></div><div class="name">Ruido<small>noise</small></div><div class="w"><span class="big">12</span><span class="dots"><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i></span><span class="unit">peso 3</span></div><span class="lane-chip">La Conversación</span><div class="pick">quién: <b>&nbsp;</b></div></div>
+      <div class="prob" data-open="no" data-lane="conv"><div class="row"><span class="num">#13</span><span class="st">Aún no</span></div><div class="name">La llamada difícil<small>difficult_caller</small></div><div class="w"><span class="big">16</span><span class="dots"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i></span><span class="unit">peso 4</span></div><span class="lane-chip">La Conversación</span><div class="pick">quién: <b>&nbsp;</b></div></div>
+      <div class="prob" data-open="no" data-lane="conv"><div class="row"><span class="num">#14</span><span class="st">Aún no</span></div><div class="name">Manipulación y privacidad<small>adversarial</small></div><div class="w"><span class="big">16</span><span class="dots"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i></span><span class="unit">peso 4</span></div><span class="lane-chip">La Conversación</span><div class="pick">quién: <b>&nbsp;</b></div></div>
+      <div class="prob" data-open="no" data-lane="agenda"><div class="row"><span class="num">#15</span><span class="st">Aún no</span></div><div class="name">La sede más cercana<small>nearest_site</small></div><div class="w"><span class="big">12</span><span class="dots"><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i></span><span class="unit">peso 3</span></div><span class="lane-chip">La Agenda</span><div class="pick">quién: <b>&nbsp;</b></div></div>
+      <div class="prob" data-open="no" data-lane="reglas"><div class="row"><span class="num">#16</span><span class="st">Aún no</span></div><div class="name">Las preguntas<small>the_questions</small></div><div class="w"><span class="big">12</span><span class="dots"><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i></span><span class="unit">peso 3</span></div><span class="lane-chip">Las Reglas</span><div class="pick">quién: <b>&nbsp;</b></div></div>
+      <div class="prob" data-open="no" data-lane="reglas"><div class="row"><span class="num">#17</span><span class="st">Aún no</span></div><div class="name">La segunda póliza<small>second_policy</small></div><div class="w"><span class="big">16</span><span class="dots"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i></span><span class="unit">peso 4</span></div><span class="lane-chip">Las Reglas</span><div class="pick">quién: <b>&nbsp;</b></div></div>
+      <div class="prob" data-open="no" data-lane="all"><div class="row"><span class="num">#18</span><span class="st">Aún no</span></div><div class="name">La llamada real<small>the_real_call</small></div><div class="w"><span class="big">20</span><span class="dots"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i></span><span class="unit">peso 5</span></div><span class="lane-chip">Todos</span><div class="pick">quién: <b>&nbsp;</b></div></div>
     </div>
 
     <div class="map-foot">
-      <span class="sum tab">49 puntos</span>
-      <span>= 30 tooling + 14 pipeline + 5 de La llamada real. El #2 no puntúa: Run All no lo marca nunca. Es el test de concurrencia, y se lanza a mano.</span>
+      <span class="sum tab">196 puntos</span>
+      <span>= 120 tooling + 56 pipeline + 20 de La llamada real. Cada caso privado que pasa vale el peso entero de su reto, nunca una fracción: <span class="mono">puntos = Σ (casos pasados × peso)</span>. El #2 no puntúa: Run All no lo marca nunca. Es el test de concurrencia, y se lanza a mano.</span>
     </div>
 
     <div class="call" data-lane="conv">
@@ -711,7 +713,7 @@
     <div class="head">
       <span class="eyebrow">El tiempo</span>
       <h2>El fin de semana tiene tres plazos, no uno</h2>
-      <p>Hoy solo hay tres retos abiertos, 3 puntos. El ranking se congela el domingo a las 06:00, cinco horas antes de que llame el jurado. Planifica hacia atrás desde ahí.</p>
+      <p>Hoy hay seis retos abiertos, 40 puntos disponibles. El ranking se congela el domingo a las 06:00, cinco horas antes de que llame el jurado. Planifica hacia atrás desde ahí.</p>
     </div>
 
     <div class="blocks">
@@ -720,7 +722,7 @@
         <div class="bh">
           <div class="dl"><small>Bloque 1 → Checkpoint 1</small>Sáb 10:00</div>
           <h3>Una llamada que contesta y reporta</h3>
-          <p class="goal"><b>Objetivo:</b> 3 de 3 puntos abiertos. Hoy solo están abiertos La cita simple y El médico y la sede.</p>
+          <p class="goal"><b>Objetivo:</b> los 40 puntos abiertos. Primero La cita simple y El médico y la sede. Luego El paciente nuevo, Cuándo exactamente y Las normas, que ya están abiertos.</p>
         </div>
         <div class="tasks">
           <div class="task" data-lane="all"><span class="dot"></span><div><span class="ln">Todos</span><div class="t">Alguien va al mostrador. Ya.</div><div class="d">Clave de API, contraseña del panel y la tarjeta de 100 € se leen una vez, en una pantalla. Sin la clave, nada de lo de abajo existe.</div></div></div>
@@ -748,7 +750,7 @@
           <div class="task" data-lane="agenda"><span class="dot"></span><div><span class="ln">La Agenda</span><div class="t">Cancelar y cambiar, incluso los dos en una llamada</div><div class="d">Dos acciones, dos POST, una llamada.</div></div></div>
           <div class="task" data-lane="reglas"><span class="dot"></span><div><span class="ln">Las Reglas</span><div class="t">Lee <span class="mono">blocked</span>, nunca adivines la regla</div><div class="d">Cinco formas de rechazo, cada una con una respuesta distinta. Un caso público es una reserva normal: el control que pilla al agente que aprendió a rechazarlo todo.</div></div></div>
           <div class="task" data-lane="reglas"><span class="dot"></span><div><span class="ln">Las Reglas</span><div class="t">Triaje desde la lista de síntomas publicada</div><div class="d">Es una búsqueda, no juicio clínico. Las banderas rojas van a <span class="mono">ESCALATE</span>, nunca a un calendario.</div></div></div>
-          <div class="task" data-lane="conv"><span class="dot"></span><div><span class="ln">La Conversación</span><div class="t">Barge-in y las otras lenguas de España</div><div class="d">Los casos privados del reto 11 van más allá del español. Es el único reto cuyos casos públicos no representan el pool privado.</div></div></div>
+          <div class="task" data-lane="conv"><span class="dot"></span><div><span class="ln">La Conversación</span><div class="t">Barge-in y las otras lenguas de España</div><div class="d">Los casos privados del reto 11 van más allá del inglés. Es el único reto cuyos casos públicos no representan el pool privado.</div></div></div>
           <div class="task" data-lane="linea"><span class="dot"></span><div><span class="ln">La Línea</span><div class="t">La vista en directo</div><div class="d">Llamadas en curso, las tools que ha llamado cada una, el JSON que ha enviado. La mitad de la nota del jurado es lo que podemos ver y enseñar.</div></div></div>
         </div>
       </div>
@@ -805,7 +807,7 @@
 
     <div class="tools">
       <div class="tool"><span class="verd yes">La de verdad</span><h3>El contrato, en el repo</h3><p>Firmas congeladas más stubs. Esto, y no un chat, es lo que deja a cinco personas programar en paralelo. Una hora aquí compra el fin de semana entero.</p></div>
-      <div class="tool"><span class="verd yes">Tablero</span><h3><a href="tasks.html">Las 52 tareas</a></h3><p>Ya montado: una issue por tarea, una etiqueta por carril, un hito por bloque. <a href="tasks.html">El tablero</a> las ordena por prioridad y enseña quién ha cogido cada una. Se coge asignándote la issue. La fuente es <span class="mono">docs/tasks.json</span>.</p></div>
+      <div class="tool"><span class="verd yes">Tablero</span><h3>GitHub Issues + Projects</h3><p>El repo ya está compartido. Cinco etiquetas, una por carril, y una columna por bloque. Dos minutos de montaje, se lee desde el móvil y deja la traza que pide el jurado.</p></div>
       <div class="tool"><span class="verd once">Una vez</span><h3>Miro</h3><p>Sirve para una sola cosa: dibujar juntos el flujo de la llamada al principio, para que los cinco tengamos la misma imagen. Veinte minutos, un tablero, y nadie lo vuelve a abrir. No es un gestor de tareas y a las 3 de la mañana nadie lo mira.</p></div>
       <div class="tool"><span class="verd yes">Avisos</span><h3>WhatsApp</h3><p>Para "subo a main", "el socket está caído", "quién tiene la clave". Ya lo tienes y todos lo leen. No estrenes una herramienta esta noche.</p></div>
       <div class="tool"><span class="verd no">Ahora no</span><h3>Notion, Linear, un Slack nuevo</h3><p>Cualquier herramienta que necesite cinco cuentas y un esquema cuesta más de lo que devuelve en 48 horas.</p></div>
@@ -843,7 +845,7 @@
 
   <footer>
     <span>Equipo Vortex · HackSpain 2026 · Track Prosper AI</span>
-    <span class="mono"><a href="tasks.html">tareas</a> · github.com/jferreiros/vortex</span>
+    <span class="mono">github.com/jferreiros/vortex</span>
   </footer>
 
 </div>

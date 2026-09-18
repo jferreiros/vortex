@@ -7,7 +7,8 @@ VAD decides when the caller starts and stops; ``enable_interruptions`` lets a
 caller talk over the agent while it reads options.
 
 TODO(conversation):
-- Tune ``vad_stop_secs`` for Spanish speakers and the 8 kHz line; noise
+- Tune ``vad_stop_secs`` and the Soniox endpoint knobs for Spanish speakers
+  and the 8 kHz line; noise
   (problem 12) and 8-second silences (problem 13) both live here.
 - Decide whether the model sees every tool at once or a staged subset.
 - Add a user-idle prompt ("¿Sigue ahí?") after N seconds of silence.
@@ -46,8 +47,18 @@ class TurnSettings:
     # Seconds of caller silence before the agent prompts again. 0 disables.
     user_idle_secs: float = 8.0
     exposed_tools: list[str] = field(default_factory=lambda: list(DEFAULT_EXPOSED_TOOLS))
-    # Deepgram language hint. "multi" lets nova-3 switch between languages.
-    stt_language: str = "multi"
+
+    # --- Soniox STT ---------------------------------------------------------
+    # Hints, not a lock: stt-rt-v5 still transcribes anything it hears, and with
+    # language identification on it tags every token with the language it heard.
+    stt_language_hints: tuple[str, ...] = ("es", "ca")
+    # True  -> Soniox's own endpoint detection ends the turn (vad_force_turn_endpoint=False)
+    # False -> pipecat's VAD ends the turn and finalises Soniox
+    soniox_turn_detection: bool = True
+    # The three below only bite when soniox_turn_detection is True.
+    stt_max_endpoint_delay_ms: int = 800
+    stt_endpoint_sensitivity: float = 0.3
+    stt_endpoint_latency_adjustment_level: int = 2
 
 
 def default_turn_settings() -> TurnSettings:

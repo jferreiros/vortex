@@ -31,11 +31,53 @@ The server always starts. Missing keys switch components to fake mode:
 | Key(s) missing | What runs instead |
 | --- | --- |
 | `PLATFORM_API_KEY` | `FakeClinicClient` (fixtures in `vortex/clinic/fixtures.py`) and a dry-run submit client that logs instead of POSTing |
-| `DEEPGRAM_API_KEY` or `OPENAI_API_KEY` | the stub voice pipeline: beeps out, counts frames in, submits a typed refusal at the end |
+| any of `SONIOX_API_KEY`, the LLM key and base URL the active `LLM_PROVIDER` resolves to, or the credentials of `VORTEX_TTS_PROVIDER` (and of `VORTEX_TTS_PROVIDER_ALT` when it differs) | the stub voice pipeline: beeps out, counts frames in, submits a typed refusal at the end |
 
 `GET /health` says which mode is active. `VORTEX_VOICE_MODE` and
 `VORTEX_CLINIC_MODE` force a mode (see `.env.example`).
 
+## Providers
+
+Every provider is picked with an environment variable, so swapping one is a
+`.env` edit and a restart — never a code change.
+
+### LLM presets
+
+`LLM_PROVIDER` names a preset that fills in the base URL, the key variable and
+the model id. `LLM_BASE_URL`, `LLM_API_KEY` and `LLM_MODEL` override it
+whenever they are set. Each preset reads its own key variable, so several can
+live in one `.env` and the switch is one line. `ARBITER_PROVIDER` (default
+`helmcode`, model `deepseek-v4-flash`) resolves the same way for the post-hangup
+submission arbiter; nothing consumes it yet.
+
+| `LLM_PROVIDER` | Base URL | Key | Default model |
+| --- | --- | --- | --- |
+| `custom` | `LLM_BASE_URL` | `LLM_API_KEY` | `Qwen/Qwen3-30B-A3B-Instruct-2507` |
+| `helmcode` (default) | `HELMCODE_BASE_URL`, default `https://api.helmcode.com/v1` | `HELMCODE_API_KEY` | `qwen3.6` (also `deepseek-v4-flash`, `gemma4`, `glm5.3` add-on) |
+| `cloudflare` | `https://api.cloudflare.com/client/v4/accounts/<CLOUDFLARE_ACCOUNT_ID>/ai/v1` | `CLOUDFLARE_API_TOKEN` | `@cf/qwen/qwen3-30b-a3b-fp8` (UNVERIFIED) |
+| `vercel` | `https://ai-gateway.vercel.sh/v1` | `VERCEL_AI_GATEWAY_KEY` | `anthropic/claude-haiku-4.5` |
+
+UNVERIFIED means nobody has called that URL or model id yet. `LLM_TEMPERATURE`,
+`LLM_MAX_TOKENS`, `LLM_DISABLE_THINKING` and `LLM_REASONING_EFFORT` (default
+`none`; Helmcode models reason by default otherwise) apply to every preset.
+
+### TTS: a primary and an alternate
+
+`VORTEX_TTS_PROVIDER` speaks Spanish. `VORTEX_TTS_PROVIDER_ALT` speaks any
+language the primary cannot, and the pipeline routes each detected language to
+whichever of the two can say it.
+
+Both set to the same provider (the default, `google`/`google`) means one
+service and the plain voice-swap path; `VORTEX_TTS_PROVIDER=elevenlabs` with
+the default alternate gives ElevenLabs Spanish and Google ca/gl/eu.
+
+| `VORTEX_TTS_PROVIDER` | Languages | Env vars |
+| --- | --- | --- |
+| `google` (default) | es / ca / gl / eu — the only one that covers all four. Chirp 3 HD for Spanish, Standard voices for ca/gl/eu | `GOOGLE_APPLICATION_CREDENTIALS` *or* `GOOGLE_TTS_CREDENTIALS_JSON`, `GOOGLE_TTS_VOICE_ES`, `GOOGLE_TTS_VOICE_CA`, `GOOGLE_TTS_VOICE_GL`, `GOOGLE_TTS_VOICE_EU` |
+| `elevenlabs` | es | `ELEVENLABS_API_KEY`, `ELEVENLABS_MODEL`, `ELEVENLABS_VOICE_ID_ES` (no default — set it), `ELEVENLABS_BASE_URL` (optional gateway origin) |
+
+STT is Soniox `stt-rt-v5` throughout: language identification on, clinic
+vocabulary boosted, `SONIOX_API_KEY` and `SONIOX_STT_MODEL`.
 ## The board — what to do next
 
 Every task is one GitHub issue. The priority order is published as a page:

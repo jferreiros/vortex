@@ -16,8 +16,10 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
+from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse
 
 from vortex.line import twilio
 from vortex.line.session import CallSession
@@ -56,6 +58,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def calls(limit: int = 500) -> dict[str, object]:
         events = read_recent(settings.calls_log_path, limit=limit)
         return {"calls": group_by_call(events)}
+
+    @app.get("/mic", response_class=HTMLResponse)
+    async def mic() -> str:
+        """Talk to the agent from a browser: mic in, agent audio out, Twilio wire."""
+        return (Path(__file__).parent / "mic.html").read_text(encoding="utf-8")
 
     @app.websocket(settings.ws_path)
     async def call_socket(ws: WebSocket) -> None:

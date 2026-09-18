@@ -43,7 +43,7 @@ fmt:
 # ---- evals (see docs/evals.md) ---------------------------------------------
 .PHONY: evals evals-logic evals-conversation evals-voice evals-report evals-accept evals-selftest
 
-evals:            ## layers 1 + 2, no keys needed; the CI entry point (exit 1 on failure)
+evals:            ## layers 1 + 2 + 4, no keys needed; the CI entry point (exit 1 on failure)
 	uv run python -m evals ci
 
 evals-logic:      ## layer 1 only: tool cases, seconds
@@ -55,10 +55,22 @@ evals-conversation: ## layer 2 only: scripted callers; BRAIN=rules|openai|replay
 evals-voice:      ## layer 3: provider benchmark. Fake unless REAL=1; MAX_EUR caps a real run
 	uv run python -m evals voice $(if $(REAL),--real,) --max-eur $(or $(MAX_EUR),0.50) $(if $(STACKS),--stacks $(STACKS),)
 
+evals-corpus:     ## layer 4: the organisers' 73 published cases and the surface behind them
+	uv run python -m evals corpus $(if $(ONLY),--only $(ONLY),) $(if $(LOG),--judge-log $(LOG),)
+
+evals-coverage:   ## where the 196 points are, and what the public cases never show
+	uv run python -m evals corpus --coverage
+
+evals-fetch:      ## refresh evals/corpus/cases/public-cases.json (run it each morning)
+	uv run python -m evals.corpus.fetch
+
+evals-snapshot:   ## freeze the real clinic for offline judging; needs PLATFORM_API_KEY
+	uv run python -m evals.corpus.snapshot
+
 evals-report:     ## rebuild evals/results/summary.md and report.html
 	uv run python -m evals report
 
-evals-accept:     ## promote the latest run(s) to evals/baselines/ (LAYER=logic|conversation|voice)
+evals-accept:     ## promote the latest run(s) to evals/baselines/ (LAYER=logic|conversation|voice|corpus)
 	uv run python -m evals accept $(LAYER)
 
 evals-selftest:   ## the harness tests itself
