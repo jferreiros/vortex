@@ -51,6 +51,7 @@ from vortex.conversation.turns import (
     user_turn_strategies,
 )
 from vortex.line.session import CallSession
+from vortex.observability.tracing import traced_openai_llm_service
 
 log = logging.getLogger(__name__)
 
@@ -137,7 +138,8 @@ async def run_pipecat_call(
         max_tokens=settings.llm_max_tokens,
         extra=_llm_extra_body(settings),
     )
-    llm = OpenAILLMService(
+    llm = traced_openai_llm_service(
+        OpenAILLMService,
         api_key=settings.llm_api_key,
         base_url=settings.llm_base_url or None,
         settings=llm_settings,

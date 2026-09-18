@@ -27,6 +27,7 @@ from vortex.contract import ToolContext
 from vortex.diary import tools as diary
 from vortex.identity import tools as identity
 from vortex.line import submit as line_submit
+from vortex.observability.tracing import observe_tool, redact
 from vortex.rules import tools as rules
 
 ToolFn = Callable[[ToolContext, Any], Awaitable[BaseModel]]
@@ -238,6 +239,14 @@ def _parse_stringified(model: type[BaseModel], raw_args: dict[str, Any]) -> dict
 
 async def call_tool(name: str, ctx: ToolContext, raw_args: dict[str, Any]) -> BaseModel:
     """Validate, run, validate, log. The one path every tool call goes through."""
+    with observe_tool(name, raw_args) as observation:
+        result = await _run_tool(name, ctx, raw_args)
+        if observation is not None:
+            observation.update(output=redact(result.model_dump(mode="json")))
+        return result
+
+
+async def _run_tool(name: str, ctx: ToolContext, raw_args: dict[str, Any]) -> BaseModel:
     spec = TOOLS.get(name)
     if spec is None:
         raise ToolError(f"unknown tool: {name}")
