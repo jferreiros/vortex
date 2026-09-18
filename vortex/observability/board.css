@@ -300,3 +300,37 @@ body,
 .table td > div:not(.row) {
   display: inline;
 }
+
+/* ------------------------------------------------------------------ */
+/* App shell on NiceGUI                                                */
+/* ------------------------------------------------------------------ */
+
+.app .page {
+  padding: var(--space-xl) var(--space-xxl) var(--space-xxl);
+  max-width: 1440px;
+  margin: 0;
+}
+
+@media (max-width: 640px) {
+  .app .page {
+    padding: var(--space-lg);
+  }
+}
+
+.sidebar .q-link,
+.sidebar a {
+  text-decoration: none;
+}
+
+.sidebar .pill {
+  align-self: flex-start;
+}
+
+.ops-grid {
+  grid-template-columns: minmax(0, 1.4fr) minmax(380px, 1fr);
+}
+
+.sidebar .q-btn {
+  height: 32px !important;
+  padding: 0 14px !important;
+}
