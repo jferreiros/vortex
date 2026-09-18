@@ -4,6 +4,8 @@
     python -m evals conversation          # layer 2, scripted callers, no keys (rules brain)
     python -m evals conversation --brain openai --repeat 3   # the real model, pass^3
     python -m evals voice                 # layer 3, fake provider unless --real
+    python -m evals corpus                # layer 4, the organisers' own 73 cases
+    python -m evals corpus --judge-log logs/calls.jsonl   # score real practice calls
     python -m evals voice --real --max-eur 1.00
     python -m evals ci                    # layers 1 + 2, report, exit 1 on failure
     python -m evals report                # rebuild summary.md / report.html
@@ -86,20 +88,41 @@ def cmd_voice(args: argparse.Namespace) -> int:
     return _finish(run, args.results_dir)
 
 
+def cmd_corpus(args: argparse.Namespace) -> int:
+    from evals.corpus.runner import run_sync
+
+    if args.coverage:
+        from evals.corpus.coverage import print_report
+
+        print_report()
+        return 0
+    run = run_sync(
+        only=args.only,
+        judge_log=args.judge_log,
+        results_dir=args.results_dir,
+    )
+    return _finish(run, args.results_dir)
+
+
 def cmd_ci(args: argparse.Namespace) -> int:
     from evals.conversation.runner import run_sync as run_conversation
     from evals.logic.runner import run_sync as run_logic
+
+    from evals.corpus.runner import run_sync as run_corpus
 
     logic = run_logic(results_dir=args.results_dir)
     save_run(logic, args.results_dir)
     conv = run_conversation(brain=args.brain, results_dir=args.results_dir)
     save_run(conv, args.results_dir)
+    corpus = run_corpus(results_dir=args.results_dir)
+    save_run(corpus, args.results_dir)
     md, page = write_reports(args.results_dir)
-    _print_summary(logic)
-    _print_summary(conv)
+    for run in (logic, conv, corpus):
+        _print_summary(run)
     print(f"report: {md}  ·  {page}")
-    failed = any(r.verdict == "FAIL" for r in (logic, conv))
-    if args.strict and any(r.verdict == "UNVERIFIED" for r in (logic, conv)):
+    runs = (logic, conv, corpus)
+    failed = any(r.verdict == "FAIL" for r in runs)
+    if args.strict and any(r.verdict == "UNVERIFIED" for r in runs):
         failed = True
     return 1 if failed else 0
 
@@ -144,7 +167,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--languages", default=None, help="comma-separated: es,ca,gl,eu")
     p.set_defaults(fn=cmd_voice)
 
-    p = sub.add_parser("ci", help="layers 1 + 2, report, exit 1 on any failure")
+    p = sub.add_parser("corpus", help="layer 4: the published roster and its documented surface")
+    p.add_argument("--only", help="substring filter on case or probe ids")
+    p.add_argument("--judge-log", type=Path, default=None, help="score the calls in this JSONL log")
+    p.add_argument("--coverage", action="store_true", help="print the points-at-stake table and exit")
+    p.set_defaults(fn=cmd_corpus)
+
+    p = sub.add_parser("ci", help="layers 1 + 2 + 4, report, exit 1 on any failure")
     p.add_argument("--brain", default="auto")
     p.add_argument("--strict", action="store_true", help="also fail on unverified")
     p.set_defaults(fn=cmd_ci)
