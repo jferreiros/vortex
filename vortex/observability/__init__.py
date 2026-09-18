@@ -2,17 +2,12 @@
 
 Owner: the observability lane.
 
-Done in the base:
 - ``CallLog`` writes one JSON line per event to ``logs/calls.jsonl``.
 - ``GET /calls`` on the server returns the recent events grouped by call.
-
-TODO(observability):
-- A live view for the jury: tail ``logs/calls.jsonl`` (or ``GET /calls``) and
-  render calls in flight, their turns, tool calls and the submitted action.
-- A "why did it say that?" view: the tool results that preceded each turn.
-- Per-call cost and latency: STT/LLM/TTS timings from pipecat metrics.
+- ``make board`` serves the live view: ``/`` ops, ``/wall`` jury.
 """
 
 from vortex.observability.calllog import CallLog, group_by_call, read_recent
+from vortex.observability.view import CallCard, build_calls
 
-__all__ = ["CallLog", "group_by_call", "read_recent"]
+__all__ = ["CallLog", "CallCard", "build_calls", "group_by_call", "read_recent"]
