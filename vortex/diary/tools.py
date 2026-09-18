@@ -513,6 +513,11 @@ async def find_slots(ctx: ToolContext, args: FindSlotsInput) -> AvailabilityResu
     (the caller takes the next open day), ``no_availability`` when the sites
     were open and the diaries were simply full. A non-empty ``blocked`` carries
     no rejection: naming the rule as a refusal is the rules lane's call.
+
+    Problem 7: a true ``no_availability`` (never ``clinic_closed``, never a
+    kept ``blocked`` rule) with ``args.widen_days`` set searches forward that
+    many days past ``date_to`` once, under the same constraints, before giving
+    up — so the caller can be offered the nearest thing that works.
     """
     catalogue = await ctx.clinic.catalogue()
     today = ctx.now.astimezone(MADRID).date()
@@ -590,11 +595,43 @@ async def find_slots(ctx: ToolContext, args: FindSlotsInput) -> AvailabilityResu
                 else f"no free slot {date_from}..{date_to} within the caller's constraints"
             ),
         )
+
+    widened = False
+    if rejection is not None and rejection.reason == "no_availability" and args.widen_days:
+        further_to = date_to + timedelta(days=args.widen_days)
+        if catalogue.bookable_to:
+            further_to = min(further_to, catalogue.bookable_to)
+        if further_to > date_to:
+            extended = await find_slots(
+                ctx,
+                args.model_copy(
+                    update={
+                        "date_from": date_to + timedelta(days=1),
+                        "date_to": further_to,
+                        "widen_days": None,  # one widen per call: stop the recursion here
+                    }
+                ),
+            )
+            widened = True
+            if extended.slots:
+                return AvailabilityResult(
+                    slots=extended.slots,
+                    blocked=extended.blocked or kept,
+                    appointment_type=appointment_type or extended.appointment_type,
+                    rejection=None,
+                    widened=True,
+                )
+            rejection = Rejection(
+                reason="no_availability",
+                detail=rejection.detail + f"; still nothing {args.widen_days} days further",
+            )
+
     return AvailabilityResult(
         slots=slots,
         blocked=kept,
         appointment_type=appointment_type,
         rejection=rejection,
+        widened=widened,
     )
 
 

@@ -563,6 +563,16 @@ class FindSlotsInput(BaseModel):
     time_to: time | None = None
     insurer: str | None = Field(default=None, description="Plan to price against")
     language: str | None = Field(default=None, description="ISO-639-1 the provider must speak")
+    widen_days: int | None = Field(
+        default=None,
+        ge=1,
+        le=45,
+        description=(
+            "Problem 7 (no slot free): when the exact window comes back genuinely "
+            "empty (no_availability, never a closure or a rule), search this many "
+            "days past date_to for the nearest alternative before giving up."
+        ),
+    )
 
 
 class AvailabilityResult(BaseModel):
@@ -570,6 +580,9 @@ class AvailabilityResult(BaseModel):
     blocked: list[BlockedProvider] = Field(default_factory=list)
     appointment_type: AppointmentTypeRecord | None = None
     rejection: Rejection | None = None
+    widened: bool = Field(
+        default=False, description="True when widen_days triggered a further search."
+    )
 
 
 class ListAppointmentsInput(BaseModel):
