@@ -1,0 +1,138 @@
+# Advisory AI code review on pull requests, via the CodeRabbit CLI.
+#
+# Not part of `gate`: it can never block a merge. It runs once when a PR is
+# opened (or reopened, or leaves draft), not on every push, to save quota.
+# Add the `re-review` label to run it again on the current head.
+# Needs the repository secret CODERABBIT_API_KEY (an Agentic key, `cr-...`).
+# Without it the job skips cleanly. Docs: docs/ci.md, last section.
+
+name: coderabbit
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review, labeled]
+
+# One review per PR at a time. A new trigger cancels the one still running.
+concurrency:
+  group: coderabbit-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write   # the review comment
+
+jobs:
+  review:
+    name: coderabbit (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    # Skip drafts. For `labeled`, run only when the label is `re-review`.
+    if: >-
+      github.event.pull_request.draft == false &&
+      (github.event.action != 'labeled' || github.event.label.name == 're-review')
+    env:
+      BASE: ${{ github.event.pull_request.base.ref }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      # Pinned so a CLI release cannot change the review overnight.
+      # Bump on purpose: check the changelog, then edit this one line.
+      CODERABBIT_VERSION: "0.7.8"
+    steps:
+      - name: Is the key there?
+        id: key
+        env:
+          CODERABBIT_API_KEY: ${{ secrets.CODERABBIT_API_KEY }}
+        run: |
+          if [ -z "$CODERABBIT_API_KEY" ]; then
+            echo "CODERABBIT_API_KEY secret not set. Skip."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v7
+        if: steps.key.outputs.present == 'true'
+        with:
+          # The CLI diffs HEAD against a local base branch, so it needs history.
+          fetch-depth: 0
+
+      - name: Make the base branch available locally
+        if: steps.key.outputs.present == 'true'
+        run: git branch --force "$BASE" "origin/$BASE"
+
+      - name: Install the CodeRabbit CLI
+        if: steps.key.outputs.present == 'true'
+        env:
+          CI: "1"   # the installer skips its interactive login prompt
+        run: |
+          curl -fsSL https://cli.coderabbit.ai/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/coderabbit" --version
+
+      - name: Review the PR against its base branch
+        if: steps.key.outputs.present == 'true'
+        id: review
+        env:
+          CODERABBIT_API_KEY: ${{ secrets.CODERABBIT_API_KEY }}
+          NO_COLOR: "1"
+          TERM: dumb
+        run: |
+          set +e
+          # .coderabbit.yaml carries the path instructions; CLAUDE.md the hard
+          # rules in full. Both are passed explicitly so nothing depends on
+          # the CLI's auto-discovery.
+          coderabbit review \
+            --base "$BASE" \
+            --api-key "$CODERABBIT_API_KEY" \
+            --config .coderabbit.yaml CLAUDE.md \
+            2>&1 | sed -r 's/\x1B\[[0-9;?]*[A-Za-z]//g' | tee review.txt
+          status=${PIPESTATUS[0]}
+          set -e
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          echo "CodeRabbit exit code: $status"
+
+      - name: Post the review as one PR comment (updated on re-review)
+        if: steps.key.outputs.present == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STATUS: ${{ steps.review.outputs.status }}
+        run: |
+          marker='<!-- coderabbit-cli-review -->'
+          if [ "$STATUS" = "0" ]; then
+            headline="CodeRabbit review of \`${HEAD_SHA:0:7}\` against \`$BASE\`"
+          else
+            headline="CodeRabbit could not complete the review of \`${HEAD_SHA:0:7}\` (exit $STATUS). Advisory only; see docs/ci.md"
+          fi
+          {
+            echo "$marker"
+            echo "**$headline**"
+            echo
+            echo 'Advisory. It does not block the merge. Wrong? Reply on the line or ignore it. Re-run with the `re-review` label.'
+            echo
+            echo '<details><summary>Full output</summary>'
+            echo
+            echo '```text'
+            # GitHub caps a comment at 65,536 characters.
+            head -c 60000 review.txt
+            echo
+            echo '```'
+            echo '</details>'
+          } > comment.md
+          cat comment.md >> "$GITHUB_STEP_SUMMARY"
+
+          existing=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --paginate \
+            --jq "[.[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$marker\")))] | first | .id // empty")
+          if [ -n "$existing" ]; then
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$existing" -F body=@comment.md > /dev/null
+            echo "Updated comment $existing"
+          else
+            gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -F body=@comment.md > /dev/null
+            echo "Posted a new comment"
+          fi
+
+      - name: Report the CLI result (advisory)
+        if: steps.key.outputs.present == 'true' && steps.review.outputs.status != '0'
+        run: |
+          echo "::warning::CodeRabbit exited with ${{ steps.review.outputs.status }}. The review is incomplete. This job never blocks the merge."
+          exit 1

@@ -1,0 +1,115 @@
+# Problems 8, 9, 13, 18: the messy human. Corrections, interruptions, silence,
+# calling for someone else, two intents in one call.
+group: difficult
+now: "2026-09-18T09:00:00+02:00"
+
+scenarios:
+  - id: p13.correction_final_request_wins
+    problem: 13
+    from_number: "+34612345678"
+    caller:
+      - says: "Hola, soy Marta Ruiz, doce del tres del ochenta y cinco. Quiero cita de medicina general el martes por la tarde."
+        means: {identify: {name: "Marta Ruiz", date_of_birth: "1985-03-12"}, request: {intent: book, specialty_id: general_practice, when: "this coming Tuesday", part_of_day: afternoon}}
+      - says: "Espera, espera, no. El martes no puedo. Mejor el miércoles por la mañana."
+        means: {request: {when: "this coming Wednesday", part_of_day: morning}}
+      - says: "Perdone, ¿el aparcamiento de la clínica es gratis? Es que vengo en coche."
+        interrupt_after_words: 5
+        means: {off_topic: true}
+      - says: ""
+        silence_secs: 8
+        means: {silence_secs: 8}
+      - says: "Sí, sí, sigo aquí. Vale, la primera del miércoles por la mañana."
+        means: {accept: true}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00042
+          slot: {$earliest_slot: {specialty_id: general_practice, on: "2026-09-23", part_of_day: morning, patient_id: P00042}}
+      privacy_of: [P00042]
+      max_tool_calls: 14
+
+  - id: p13.id_stated_then_contradicted
+    problem: 13
+    caller:
+      - says: "Soy Marta Ruiz. Mi DNI es uno dos tres cuatro cinco seis siete ocho... ay, no, ese es el de mi madre. El mío es ocho siete seis cinco cuatro tres dos uno equis."
+        means: {identify: {name: "Marta Ruiz", national_id: "87654321X"}, request: {intent: book, specialty_id: general_practice}}
+      - says: "La primera que haya."
+        means: {accept: true}
+    expect:
+      # The second DNI is P00043 (Marta Ruiz García, never seen): first_visit, not review.
+      actions:
+        - kind: book
+          patient_id: P00043
+          appointment_type_id: first_visit
+          slot: {$earliest_slot: {specialty_id: general_practice, patient_id: P00043}}
+      privacy_of: [P00042, P00043]
+
+  - id: p9.mother_books_for_her_son
+    problem: 9
+    from_number: "+34612345678"
+    caller:
+      - says: "Hola, soy Marta Ruiz López, llamo por mi hijo Lucas. Lleva una semana con tos, peor por la noche."
+        means: {identify: {name: "Marta Ruiz López"}, patient: {name: "Lucas Ruiz López", relation: son}, request: {intent: book, complaint: "child with a cough for over a week, worse at night"}}
+      - says: "Lucas nació el veinte de junio de dos mil dieciocho."
+        means: {patient: {date_of_birth: "2018-06-20"}}
+      - says: "Vale, la primera con la pediatra."
+        means: {accept: true}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00107
+          provider_id: PR03
+          appointment_type_id: review
+          slot: {$earliest_slot: {specialty_id: paediatrics, patient_id: P00107}}
+      must_not_call: [build_registration]
+      privacy_of: [P00042, P00107]
+
+  - id: p8.cancel_mine_and_my_sons
+    problem: 8
+    from_number: "+34612345678"
+    caller:
+      - says: "Soy Marta Ruiz López, doce de marzo del ochenta y cinco. Quiero anular mi cita y también la de mi hijo Lucas, nacido el veinte de junio de dos mil dieciocho."
+        means: {identify: {name: "Marta Ruiz López", date_of_birth: "1985-03-12"}, patient: {name: "Lucas Ruiz López", date_of_birth: "2018-06-20"}, request: {intent: cancel, appointment_ref: all}}
+      - says: "Sí, las dos. Gracias."
+        means: {end: true}
+    expect:
+      actions:
+        - {kind: cancel, appointment_id: A0001}
+        - {kind: cancel, appointment_id: A0002}
+      actions_any_order: true
+      must_not_call: [prepare_booking]
+      privacy_of: [P00042, P00107]
+
+  - id: p8.move_my_appointment_to_next_week
+    problem: 8
+    caller:
+      - says: "Marta Ruiz, doce del tres del ochenta y cinco. Tengo cita el treinta con la doctora Ortiz y quiero moverla a la semana del cinco de octubre."
+        means: {identify: {name: "Marta Ruiz", date_of_birth: "1985-03-12"}, request: {intent: reschedule, appointment_ref: "2026-09-30", when: "Monday the fifth of October"}}
+      - says: "Perfecto, esa."
+        means: {accept: true}
+    expect:
+      actions:
+        - kind: reschedule
+          appointment_id: A0001
+          provider_id: PR01
+          slot: {$earliest_slot: {provider_id: PR01, on: "2026-10-05", patient_id: P00042}}
+      must_not_call: [prepare_cancel, prepare_booking]
+      privacy_of: [P00042]
+
+  - id: p18.grandmother_moves_grandson_and_books_herself
+    problem: 18
+    tags: [multi-action]
+    caller:
+      - says: "Hola, hija, soy Marta Ruiz, del doce de marzo del ochenta y cinco. Llamo por mi nieto Lucas, que tiene cita el dos de octubre y no puede ir. Nació el veinte de junio de dos mil dieciocho."
+        means: {identify: {name: "Marta Ruiz", date_of_birth: "1985-03-12"}, patient: {name: "Lucas Ruiz", date_of_birth: "2018-06-20"}, request: {intent: reschedule, appointment_ref: "2026-10-02", when: "Monday the fifth of October"}}
+      - says: "Sí, el lunes cinco a la primera hora que haya."
+        means: {accept: true}
+    expect:
+      # Only the first intent is scripted deterministically; the second (booking herself)
+      # needs a brain that handles two subjects in one call. The rules brain does not.
+      actions:
+        - kind: reschedule
+          appointment_id: A0002
+          provider_id: PR03
+          slot: {$earliest_slot: {provider_id: PR03, on: "2026-10-05", patient_id: P00107}}
+      privacy_of: [P00042, P00107]

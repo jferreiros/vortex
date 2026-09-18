@@ -1,0 +1,137 @@
+# Provider list prices, read on 2026-09-18 from the vendors' pricing pages.
+# USD unless stated. eur_per_usd converts. Every number here is a *list* price:
+# free credits (Deepgram $200, Cartesia 20k credits/month) are noted but not
+# subtracted, so the report shows what a run would cost at full price.
+#
+# When a number changes, change it here and re-run: the report recomputes.
+
+eur_per_usd: 0.92
+read_on: "2026-09-18"
+
+# What one scored call looks like, for the cost-per-call extrapolation.
+# 3 minutes on the wire; the caller and the agent each talk ~half of it.
+call_profile:
+  duration_min: 3.0            # Deepgram bills the open socket, not speech time
+  caller_speech_min: 1.5
+  agent_speech_min: 1.5
+  agent_chars: 1300            # TTS characters per call (about 10 short replies)
+  llm_input_tokens: 12000      # cumulative across ~10 turns (system prompt + tools + history)
+  llm_output_tokens: 600
+  calls_per_run_all: 68        # 17 scored problems x 4 private cases
+  weekend_run_alls: 8          # how many Run All we expect to launch
+  weekend_practice_calls: 150  # practice calls, same cost each
+
+stt:
+  deepgram_nova3:
+    label: "Deepgram Nova-3 (streaming)"
+    usd_per_min: 0.0048          # pay-as-you-go; `multi` mode 0.0058
+    usd_per_min_multi: 0.0058
+    bills: socket                # whole open socket, not speech time
+    languages: [es, ca]          # no gl, no eu; `multi` code-switching set excludes ca
+    free_credit_usd: 200
+    latency_claim: "<300 ms"
+    source: https://deepgram.com/pricing
+  openai_gpt4o_mini_transcribe:
+    label: "OpenAI gpt-4o-mini-transcribe"
+    usd_per_min: 0.003
+    bills: speech
+    languages: [es, ca, gl, eu]  # Whisper family
+    source: https://developers.openai.com/api/docs/pricing
+  openai_gpt4o_transcribe:
+    label: "OpenAI gpt-4o-transcribe"
+    usd_per_min: 0.006
+    bills: speech
+    languages: [es, ca, gl, eu]
+    source: https://developers.openai.com/api/docs/pricing
+  cartesia_ink_whisper:
+    label: "Cartesia Ink-Whisper"
+    usd_per_min: 0.0             # credits: 1 credit / second; Pro plan $5 = 100k credits
+    usd_per_min_effective: 0.003 # 60 credits/min at Pro's $0.00005/credit
+    bills: speech
+    languages: [es, ca, gl, eu]
+    free_credit_note: "20k credits/month free (about 5.5 h)"
+    source: https://docs.cartesia.ai/pricing
+
+tts:
+  openai_gpt4o_mini_tts:
+    label: "OpenAI gpt-4o-mini-tts"
+    usd_per_min_audio: 0.015     # OpenAI's own estimate; $12 per 1M audio tokens
+    usd_per_1k_chars: 0.0
+    languages: [es, ca, gl, eu]  # multilingual, no published list
+    latency_claim: "n/a"
+    source: https://developers.openai.com/api/docs/pricing
+  cartesia_sonic:
+    label: "Cartesia Sonic-3"
+    usd_per_1k_chars: 0.05       # Pro plan effective (1 credit/char, $5 = 100k)
+    usd_per_min_audio: 0.0
+    languages: [es]              # no ca, gl, eu
+    latency_claim: "<90 ms TTFA"
+    source: https://cartesia.ai/pricing
+  deepgram_aura2:
+    label: "Deepgram Aura-2"
+    usd_per_1k_chars: 0.030
+    usd_per_min_audio: 0.0
+    languages: [es]              # no ca, gl, eu
+    latency_claim: "<200 ms TTFB"
+    source: https://deepgram.com/pricing
+
+llm:
+  gpt-4.1:
+    usd_per_1m_input: 2.00
+    usd_per_1m_output: 8.00
+    usd_per_1m_cached_input: 0.50
+  gpt-4.1-mini:
+    usd_per_1m_input: 0.40
+    usd_per_1m_output: 1.60
+    usd_per_1m_cached_input: 0.10
+  gpt-4o-mini:
+    usd_per_1m_input: 0.15
+    usd_per_1m_output: 0.60
+    usd_per_1m_cached_input: 0.075
+  gpt-5-mini:
+    usd_per_1m_input: 0.25
+    usd_per_1m_output: 2.00
+    usd_per_1m_cached_input: 0.025
+  gpt-5:
+    usd_per_1m_input: 1.25
+    usd_per_1m_output: 10.00
+    usd_per_1m_cached_input: 0.125
+  # Speech-to-speech, for the cost comparison only (not benchmarked here).
+  gpt-realtime:
+    usd_per_1m_audio_input: 32.0
+    usd_per_1m_audio_output: 64.0
+    audio_tokens_per_min_input: 600    # OpenAI's 2024 launch figure; unverified today
+    audio_tokens_per_min_output: 1200
+  gpt-realtime-mini:
+    usd_per_1m_audio_input: 10.0
+    usd_per_1m_audio_output: 20.0
+    audio_tokens_per_min_input: 600
+    audio_tokens_per_min_output: 1200
+
+# The stacks the benchmark compares. Names are what the report shows.
+stacks:
+  - name: dg-41mini-oai
+    stt: deepgram_nova3
+    llm: gpt-4.1-mini
+    tts: openai_gpt4o_mini_tts
+    describe: "the current .env.example stack, with the mini model"
+  - name: dg-41-oai
+    stt: deepgram_nova3
+    llm: gpt-4.1
+    tts: openai_gpt4o_mini_tts
+    describe: "the current .env.example stack"
+  - name: dg-41mini-cartesia
+    stt: deepgram_nova3
+    llm: gpt-4.1-mini
+    tts: cartesia_sonic
+    describe: "fastest TTS on paper; Spanish only"
+  - name: oai-41mini-oai
+    stt: openai_gpt4o_mini_transcribe
+    llm: gpt-4.1-mini
+    tts: openai_gpt4o_mini_tts
+    describe: "one vendor, Whisper-family STT (gl, eu)"
+  - name: cartesia-41mini-cartesia
+    stt: cartesia_ink_whisper
+    llm: gpt-4.1-mini
+    tts: cartesia_sonic
+    describe: "Cartesia in and out; STT covers gl and eu, TTS does not"

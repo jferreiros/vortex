@@ -1,0 +1,115 @@
+# Vortex — the call socket, published through the Traefik that Coolify already
+# runs on this host.
+#
+#     docker compose -f deploy/compose.yaml up -d --build
+#
+# The container publishes no port of its own. It joins the external `coolify`
+# network and Traefik routes to it by label, which is how every other service
+# on this machine is exposed and how the TLS certificate gets renewed.
+#
+# Names are prefixed `vortex-line` / `vortexline` throughout so nothing here
+# collides with the vortex-board deployment already using the `vortex-*`
+# router names.
+
+name: vortex-line
+
+networks:
+  coolify:
+    external: true
+
+volumes:
+  line-logs:
+
+services:
+  line:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: vortex-line:local
+    container_name: vortex-line
+
+    # The reason the server moved off a laptop: it comes back by itself after a
+    # crash, a Docker restart or a reboot.
+    restart: unless-stopped
+
+    # Keys live here, never in the image and never in git. deploy/.env is
+    # git-ignored; copy deploy/.env.example to start one.
+    env_file:
+      - .env
+
+    environment:
+      VORTEX_HOST: 0.0.0.0
+      VORTEX_PORT: "7860"
+      VORTEX_WS_PATH: /ws
+      VORTEX_CALLS_LOG: /app/logs/calls.jsonl
+
+    volumes:
+      - line-logs:/app/logs
+
+    networks:
+      - coolify
+
+    # Visible to Traefik on the shared network, not to the internet directly.
+    expose:
+      - "7860"
+
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:7860/health', timeout=4).status == 200 else 1)
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+    stop_grace_period: 35s  # longer than the 30 s submission window
+
+    # A courteous neighbour on a shared box: bounded memory, bounded logs.
+    mem_limit: 4g
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=coolify
+
+      # --- plain HTTP: redirect to HTTPS -------------------------------------
+      - traefik.http.middlewares.vortexline-https.redirectscheme.scheme=https
+      - traefik.http.middlewares.vortexline-https.redirectscheme.permanent=true
+
+      # --- the name to hand the organisers -----------------------------------
+      - traefik.http.routers.vortexline-http.rule=Host(`line.vortex.jferreiros.com`)
+      - traefik.http.routers.vortexline-http.entrypoints=http
+      - traefik.http.routers.vortexline-http.middlewares=vortexline-https
+      - traefik.http.routers.vortexline-http.service=vortexline
+
+      - traefik.http.routers.vortexline-https.rule=Host(`line.vortex.jferreiros.com`)
+      - traefik.http.routers.vortexline-https.entrypoints=https
+      - traefik.http.routers.vortexline-https.tls=true
+      - traefik.http.routers.vortexline-https.tls.certresolver=letsencrypt
+      - traefik.http.routers.vortexline-https.service=vortexline
+
+      # --- the same service on a name that needs no DNS record ---------------
+      # sslip.io resolves <anything>.203.0.113.20.sslip.io to 203.0.113.20,
+      # so this host works the moment the container starts. It is the fallback
+      # to paste into the dashboard if the DNS record is not in place yet.
+      - traefik.http.routers.vortexline-sslip-http.rule=Host(`line.203.0.113.20.sslip.io`)
+      - traefik.http.routers.vortexline-sslip-http.entrypoints=http
+      - traefik.http.routers.vortexline-sslip-http.middlewares=vortexline-https
+      - traefik.http.routers.vortexline-sslip-http.service=vortexline
+
+      - traefik.http.routers.vortexline-sslip-https.rule=Host(`line.203.0.113.20.sslip.io`)
+      - traefik.http.routers.vortexline-sslip-https.entrypoints=https
+      - traefik.http.routers.vortexline-sslip-https.tls=true
+      - traefik.http.routers.vortexline-sslip-https.tls.certresolver=letsencrypt
+      - traefik.http.routers.vortexline-sslip-https.service=vortexline
+
+      # No compression and no header middleware on the HTTPS routers. Traefik
+      # forwards a WebSocket upgrade transparently; every middleware left out
+      # is one that cannot break a 20 ms audio frame at three in the morning.
+      - traefik.http.services.vortexline.loadbalancer.server.port=7860
