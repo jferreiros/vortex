@@ -154,8 +154,9 @@ def test_a_provider_refusing_a_plan_redirects_to_one_who_takes_it(catalogue):
     )
     assert verdict is not None
     assert verdict.reason == "provider_not_in_network"
-    # The fixtures hold one dermatologist; live there is a second who takes DKV.
+    # Dr. Vilar (PR12) is the second dermatologist and takes DKV: he is the redirect.
     assert all(p.provider_id != "PR04" for p in verdict.redirect_to)
+    assert [p.provider_id for p in verdict.redirect_to] == ["PR12"]
 
 
 # ---------------------------------------------------------------------------

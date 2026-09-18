@@ -10,7 +10,12 @@ through, so the offline suite tests the adapters too.
 
 Ids and people here are invented. They mirror the traps the docs describe
 (near-miss surnames, a provider on leave, a same-name pair) so the lanes can
-rehearse against them. Keep the set small.
+rehearse against them. The provider roster has the real clinic's shape: twelve
+providers over six specialties, one gynaecologist, one physiotherapist, every
+one of them speaking Spanish and exactly four speaking Catalan (PR01, PR08,
+PR10, PR12, one per specialty that has one). Problem 11 filters on that, so an
+offline run must bite on the same specialties the live one does. Keep the rest
+small.
 
 Owner: clinic/. Add fixtures here when a lane needs a new shape to test against.
 """
@@ -63,7 +68,7 @@ LOCATIONS: list[dict[str, Any]] = [
         "latitude": 40.4170,
         "longitude": -3.7060,
         "hours": days(WEEKDAYS_9_20 | {"saturday": "09:00–14:00"}),
-        "provider_names": ["Dra. Ortiz", "Dra. Sáenz", "Dra. Iglesias"],
+        "provider_names": ["Dra. Ortiz", "Dra. Sáenz", "Dra. Iglesias", "Dra. Ferrer"],
         "covered_by": insurer_refs(ALL_PLANS),
         "not_covered_by": [],
     },
@@ -74,7 +79,7 @@ LOCATIONS: list[dict[str, Any]] = [
         "latitude": 40.4700,
         "longitude": -3.6880,
         "hours": days(WEEKDAYS_9_20),
-        "provider_names": ["Dr. Sáez", "Dr. Requena"],
+        "provider_names": ["Dr. Sáez", "Dr. Requena", "Dr. Javier Ocaña", "Dr. Pons", "Dr. Vilar"],
         "covered_by": insurer_refs(ALL_PLANS),
         "not_covered_by": [],
     },
@@ -94,7 +99,13 @@ LOCATIONS: list[dict[str, Any]] = [
                 "friday": "09:00–14:00",
             }
         ),
-        "provider_names": ["Dr. Iglesia", "D. Álvaro Cid"],
+        "provider_names": [
+            "Dr. Iglesia",
+            "D. Álvaro Cid",
+            "Dr. Javier Ocaña",
+            "Dra. Laura Benítez",
+            "Dr. Pons",
+        ],
         # ASISA does not cover Sur; the physiotherapist sits there.
         "covered_by": insurer_refs([i for i in ALL_PLANS if i != "asisa"]),
         "not_covered_by": insurer_refs(["asisa"]),
@@ -108,7 +119,7 @@ SPECIALTIES: list[dict[str, Any]] = [
         "min_age_months": 14 * 12,
         "max_age_months": None,
         "referral_required": False,
-        "provider_names": ["Dra. Ortiz", "Dr. Sáez", "Dr. Requena"],
+        "provider_names": ["Dra. Ortiz", "Dr. Sáez", "Dr. Requena", "Dra. Laura Benítez"],
         "covered_by": insurer_refs(ALL_PLANS),
         "not_covered_by": [],
     },
@@ -118,7 +129,7 @@ SPECIALTIES: list[dict[str, Any]] = [
         "min_age_months": 0,
         "max_age_months": 14 * 12 - 1,
         "referral_required": False,
-        "provider_names": ["Dra. Sáenz"],
+        "provider_names": ["Dra. Sáenz", "Dr. Javier Ocaña"],
         "covered_by": insurer_refs(ALL_PLANS),
         "not_covered_by": [],
     },
@@ -128,7 +139,7 @@ SPECIALTIES: list[dict[str, Any]] = [
         "min_age_months": 0,
         "max_age_months": None,
         "referral_required": True,
-        "provider_names": ["Dra. Iglesias"],
+        "provider_names": ["Dra. Iglesias", "Dr. Vilar"],
         "covered_by": insurer_refs(ALL_PLANS),
         "not_covered_by": [],
     },
@@ -138,7 +149,7 @@ SPECIALTIES: list[dict[str, Any]] = [
         "min_age_months": 0,
         "max_age_months": None,
         "referral_required": False,
-        "provider_names": ["Dr. Iglesia"],
+        "provider_names": ["Dr. Iglesia", "Dr. Pons"],
         "covered_by": insurer_refs(ALL_PLANS),
         "not_covered_by": [],
     },
@@ -149,8 +160,8 @@ SPECIALTIES: list[dict[str, Any]] = [
         "min_age_months": 0,
         "max_age_months": None,
         "referral_required": False,
-        "provider_names": [],
-        # Adeslas does not cover gynaecology.
+        # The one gynaecologist. Adeslas does not cover gynaecology.
+        "provider_names": ["Dra. Ferrer"],
         "covered_by": insurer_refs([i for i in ALL_PLANS if i != "adeslas"]),
         "not_covered_by": insurer_refs(["adeslas"]),
     },
@@ -166,6 +177,20 @@ SPECIALTIES: list[dict[str, Any]] = [
     },
 ]
 
+#: Providers whose specialty has no type of its own: they perform the two
+#: universal ones. The gynaecologist joins them for ``first_visit`` only.
+UNIVERSAL_PROVIDER_NAMES: list[str] = [
+    "Dra. Ortiz",
+    "Dr. Sáez",
+    "Dr. Requena",
+    "Dra. Laura Benítez",
+    "Dra. Sáenz",
+    "Dr. Javier Ocaña",
+    "Dr. Iglesia",
+    "Dr. Pons",
+    "D. Álvaro Cid",
+]
+
 APPOINTMENT_TYPES: list[dict[str, Any]] = [
     {
         "id": "first_visit",
@@ -173,7 +198,7 @@ APPOINTMENT_TYPES: list[dict[str, Any]] = [
         "duration_minutes": 30,
         "new_patient_requirement": "new_only",
         "guidance": "A patient the clinic has never seen, in a specialty without its own.",
-        "provider_names": ["Dra. Ortiz", "Dr. Sáez", "Dr. Requena", "Dr. Iglesia", "D. Álvaro Cid"],
+        "provider_names": UNIVERSAL_PROVIDER_NAMES + ["Dra. Ferrer"],
         "specialty_id": None,
         "specialty_name": None,
     },
@@ -183,7 +208,7 @@ APPOINTMENT_TYPES: list[dict[str, Any]] = [
         "duration_minutes": 15,
         "new_patient_requirement": "existing_only",
         "guidance": "Any returning patient in a specialty without its own review type.",
-        "provider_names": ["Dra. Ortiz", "Dr. Sáez", "Dr. Requena", "Dr. Iglesia", "D. Álvaro Cid"],
+        "provider_names": UNIVERSAL_PROVIDER_NAMES,
         "specialty_id": None,
         "specialty_name": None,
     },
@@ -193,7 +218,7 @@ APPOINTMENT_TYPES: list[dict[str, Any]] = [
         "duration_minutes": 30,
         "new_patient_requirement": "new_only",
         "guidance": "New dermatology patient.",
-        "provider_names": ["Dra. Iglesias"],
+        "provider_names": ["Dra. Iglesias", "Dr. Vilar"],
         "specialty_id": "dermatology",
         "specialty_name": "Dermatology",
     },
@@ -203,7 +228,7 @@ APPOINTMENT_TYPES: list[dict[str, Any]] = [
         "duration_minutes": 15,
         "new_patient_requirement": "existing_only",
         "guidance": "Returning dermatology patient. Same minutes as review; different id.",
-        "provider_names": ["Dra. Iglesias"],
+        "provider_names": ["Dra. Iglesias", "Dr. Vilar"],
         "specialty_id": "dermatology",
         "specialty_name": "Dermatology",
     },
@@ -213,7 +238,7 @@ APPOINTMENT_TYPES: list[dict[str, Any]] = [
         "duration_minutes": 15,
         "new_patient_requirement": "existing_only",
         "guidance": "Returning gynaecology patient. New patients book first_visit.",
-        "provider_names": [],
+        "provider_names": ["Dra. Ferrer"],
         "specialty_id": "gynaecology",
         "specialty_name": "Gynaecology",
     },
@@ -235,7 +260,9 @@ PROVIDERS: list[dict[str, Any]] = [
         "name": "Dra. Ortiz",
         "specialty_id": "general_practice",
         "specialty_name": "General practice",
-        "languages": ["es", "en"],
+        # The Catalan-speaking GP. Four providers speak Catalan, one per
+        # specialty that has one: PR01, PR08, PR10, PR12.
+        "languages": ["es", "en", "ca"],
         "appointment_type_names": ["First visit", "Review"],
         "location_names": ["Arenal Centro"],
         "schedules": [CENTRO_HOURS],
@@ -248,7 +275,7 @@ PROVIDERS: list[dict[str, Any]] = [
         "name": "Dr. Sáez",
         "specialty_id": "general_practice",
         "specialty_name": "General practice",
-        "languages": ["es", "ca"],
+        "languages": ["es", "en"],
         "appointment_type_names": ["First visit", "Review"],
         "location_names": ["Arenal Norte"],
         "schedules": [NORTE_HOURS],
@@ -303,7 +330,9 @@ PROVIDERS: list[dict[str, Any]] = [
         "name": "D. Álvaro Cid",
         "specialty_id": "physiotherapy",
         "specialty_name": "Physiotherapy",
-        "languages": ["es", "ca"],
+        # Spanish only: a Catalan speaker who insists on Catalan has no
+        # physiotherapist, and the language filter must say so.
+        "languages": ["es"],
         "appointment_type_names": ["First visit", "Review"],
         "location_names": ["Arenal Sur"],
         "schedules": [SUR_HOURS],
@@ -324,6 +353,77 @@ PROVIDERS: list[dict[str, Any]] = [
         "refused_insurers": [],
         # The platform sends one leave period or null, never a list.
         "leave": {"start": "2026-09-14", "end": "2026-09-30", "reason": "sick leave"},
+    },
+    {
+        # The second paediatrician, and the Catalan-speaking one.
+        "id": "PR08",
+        "name": "Dr. Javier Ocaña",
+        "specialty_id": "paediatrics",
+        "specialty_name": "Paediatrics",
+        "languages": ["es", "ca"],
+        "appointment_type_names": ["First visit", "Review"],
+        "location_names": ["Arenal Norte", "Arenal Sur"],
+        "schedules": [NORTE_HOURS, SUR_HOURS],
+        "accepted_insurers": insurer_refs(ALL_PLANS),
+        "refused_insurers": [],
+        "leave": None,
+    },
+    {
+        # The fourth GP, and the only one at Sur.
+        "id": "PR09",
+        "name": "Dra. Laura Benítez",
+        "specialty_id": "general_practice",
+        "specialty_name": "General practice",
+        "languages": ["es", "en"],
+        "appointment_type_names": ["First visit", "Review"],
+        "location_names": ["Arenal Sur"],
+        "schedules": [SUR_HOURS],
+        "accepted_insurers": insurer_refs(ALL_PLANS),
+        "refused_insurers": [],
+        "leave": None,
+    },
+    {
+        # The second orthopaedist, and the Catalan-speaking one.
+        "id": "PR10",
+        "name": "Dr. Pons",
+        "specialty_id": "orthopaedics",
+        "specialty_name": "Orthopaedics",
+        "languages": ["es", "ca"],
+        "appointment_type_names": ["First visit", "Review"],
+        "location_names": ["Arenal Norte", "Arenal Sur"],
+        "schedules": [NORTE_HOURS, SUR_HOURS],
+        "accepted_insurers": insurer_refs(ALL_PLANS),
+        "refused_insurers": [],
+        "leave": None,
+    },
+    {
+        # The one gynaecologist. No Catalan: nobody in the specialty speaks it.
+        "id": "PR11",
+        "name": "Dra. Ferrer",
+        "specialty_id": "gynaecology",
+        "specialty_name": "Gynaecology",
+        "languages": ["es", "en"],
+        "appointment_type_names": ["First visit", "Gynaecology review"],
+        "location_names": ["Arenal Centro"],
+        "schedules": [CENTRO_HOURS],
+        "accepted_insurers": insurer_refs(ALL_PLANS),
+        "refused_insurers": [],
+        "leave": None,
+    },
+    {
+        # The second dermatologist: takes DKV, which Dra. Iglesias refuses, so
+        # a DKV patient asking for her is redirected here. Speaks Catalan.
+        "id": "PR12",
+        "name": "Dr. Vilar",
+        "specialty_id": "dermatology",
+        "specialty_name": "Dermatology",
+        "languages": ["es", "ca"],
+        "appointment_type_names": ["Dermatology first visit", "Dermatology review"],
+        "location_names": ["Arenal Norte"],
+        "schedules": [NORTE_HOURS],
+        "accepted_insurers": insurer_refs(ALL_PLANS),
+        "refused_insurers": [],
+        "leave": None,
     },
 ]
 

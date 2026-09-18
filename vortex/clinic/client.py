@@ -622,6 +622,10 @@ class FakeClinicClient:
                         )
                     continue
                 for loc_id in p.location_ids:
+                    # A provider who sits at two sites answers only for the
+                    # site asked about, like the platform does.
+                    if location_id and loc_id != location_id:
+                        continue
                     loc = next(loc for loc in cat.locations if loc.location_id == loc_id)
                     if day in cat.closure_days:
                         continue
