@@ -25,7 +25,7 @@
 | vortex/models.py                     |       83 |        3 |     96% |88-90, 162 |
 | vortex/observability/\_\_init\_\_.py |        3 |        0 |    100% |           |
 | vortex/observability/auth.py         |       33 |        6 |     82% |     26-31 |
-| vortex/observability/calllog.py      |       67 |       19 |     72% |42-44, 92, 111-121, 125-128 |
+| vortex/observability/calllog.py      |       67 |       18 |     73% |42-44, 111-121, 125-128 |
 | vortex/observability/demo.py         |       61 |       61 |      0% |     1-187 |
 | vortex/observability/live.py         |      487 |      487 |      0% |     8-733 |
 | vortex/observability/view.py         |      230 |       28 |     88% |67, 69, 71, 73, 85, 87, 90, 111, 120, 130-131, 140, 150, 167, 181-182, 196-198, 200, 225-226, 250, 269-273 |
@@ -35,8 +35,8 @@
 | vortex/rules/tools.py                |      129 |       35 |     73% |131-132, 148-153, 168, 171-172, 179-185, 238, 264, 283, 287, 319, 337-342, 361, 370-376, 379, 381, 387 |
 | vortex/rules/triage.py               |       57 |        6 |     89% |63, 205-206, 217, 225, 230 |
 | vortex/settings.py                   |      171 |        1 |     99% |       252 |
-| vortex/tools.py                      |       51 |        9 |     82% |182, 185-187, 193-195, 197, 210 |
-| **TOTAL**                            | **3539** | **1035** | **71%** |           |
+| vortex/tools.py                      |       82 |        6 |     93% |243, 254-256, 258, 271 |
+| **TOTAL**                            | **3570** | **1031** | **71%** |           |
 
 6 empty files skipped.
 
