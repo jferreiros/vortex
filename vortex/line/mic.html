@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Vortex — mic test</title>
+<style>
+  body { font: 15px system-ui, sans-serif; margin: 2rem auto; max-width: 720px; color: #eee; background: #111; }
+  button { font-size: 1.1rem; padding: .6rem 1.4rem; margin-right: .6rem; border-radius: 8px; border: 0; cursor: pointer; }
+  #call { background: #2f8f4e; color: #fff; } #hang { background: #b33; color: #fff; }
+  #log { white-space: pre-wrap; background: #000; padding: 1rem; border-radius: 8px; min-height: 12rem; font-family: ui-monospace, monospace; font-size: 13px; }
+  .meter { height: 8px; background: #333; border-radius: 4px; margin: .5rem 0 1rem; } .meter > div { height: 100%; width: 0; background: #2f8f4e; border-radius: 4px; }
+</style>
+</head>
+<body>
+<h2>Vortex — talk to the agent</h2>
+<p>Speaks the Twilio Media Streams wire to <code id="url"></code>: mic → 8 kHz µ-law → agent; agent audio → speaker.</p>
+<button id="call">Call</button><button id="hang" disabled>Hang up</button>
+<div class="meter"><div id="mic"></div></div>
+<div id="log"></div>
+<script>
+const WS_URL = (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws";
+document.getElementById("url").textContent = WS_URL;
+const logEl = document.getElementById("log");
+const log = (m) => { logEl.textContent += new Date().toISOString().slice(11, 23) + "  " + m + "\n"; logEl.scrollTop = logEl.scrollHeight; };
+
+// ---- µ-law (G.711) ----
+const BIAS = 0x84, CLIP = 32635;
+function pcmToUlaw(s) {
+  let sign = (s >> 8) & 0x80; if (sign) s = -s; if (s > CLIP) s = CLIP; s += BIAS;
+  let exp = 7; for (let m = 0x4000; (s & m) === 0 && exp > 0; exp--, m >>= 1) {}
+  const mant = (s >> (exp + 3)) & 0x0f;
+  return ~(sign | (exp << 4) | mant) & 0xff;
+}
+function ulawToPcm(u) {
+  u = ~u & 0xff; const sign = u & 0x80, exp = (u >> 4) & 7, mant = u & 0x0f;
+  let s = ((mant << 3) + BIAS) << exp; s -= BIAS; return sign ? -s : s;
+}
+
+let ws, ctx, stream, proc, src, playHead = 0, seq = 1, chunk = 0, framesIn = 0, framesOut = 0;
+const callId = () => "CA-mic-" + Date.now();
+
+async function start() {
+  const id = callId(), sid = "MZ-mic";
+  ctx = new (window.AudioContext || window.webkitAudioContext)();
+  await ctx.resume();
+  stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
+  ws = new WebSocket(WS_URL);
+  ws.onopen = () => {
+    log("socket open, call " + id);
+    ws.send(JSON.stringify({ event: "connected", protocol: "Call", version: "1.0.0" }));
+    ws.send(JSON.stringify({ event: "start", sequenceNumber: String(seq++), streamSid: sid,
+      start: { streamSid: sid, callSid: id, tracks: ["inbound"],
+        customParameters: { call_id: id, from_number: "+34600000000" },
+        mediaFormat: { encoding: "audio/x-mulaw", sampleRate: 8000, channels: 1 } } }));
+    // Mic → 8 kHz µ-law frames of 160 bytes (20 ms).
+    src = ctx.createMediaStreamSource(stream);
+    proc = ctx.createScriptProcessor(4096, 1, 1);
+    const ratio = ctx.sampleRate / 8000; let acc = [], peak = 0;
+    proc.onaudioprocess = (e) => {
+      const inp = e.inputBuffer.getChannelData(0);
+      for (let i = 0; i < inp.length; i += ratio) {
+        // crude box filter over the decimation window
+        let s = 0, n = 0; for (let j = Math.floor(i); j < Math.min(inp.length, Math.floor(i + ratio)); j++) { s += inp[j]; n++; }
+        const v = n ? s / n : 0; peak = Math.max(peak, Math.abs(v));
+        acc.push(pcmToUlaw(Math.max(-32768, Math.min(32767, Math.round(v * 32767)))));
+      }
+      while (acc.length >= 160) {
+        const frame = acc.slice(0, 160); acc = acc.slice(160);
+        if (ws.readyState === 1) {
+          ws.send(JSON.stringify({ event: "media", sequenceNumber: String(seq++), streamSid: sid,
+            media: { track: "inbound", chunk: String(++chunk), timestamp: String(chunk * 20),
+              payload: btoa(String.fromCharCode(...frame)) } }));
+          framesOut++;
+        }
+      }
+      document.getElementById("mic").style.width = Math.min(100, peak * 300) + "%"; peak = 0;
+    };
+    src.connect(proc); proc.connect(ctx.destination);
+    document.getElementById("call").disabled = true; document.getElementById("hang").disabled = false;
+  };
+  ws.onmessage = (ev) => {
+    const msg = JSON.parse(ev.data);
+    if (msg.event === "media") {
+      const raw = atob(msg.media.payload); const n = raw.length;
+      const buf = ctx.createBuffer(1, n, 8000); const ch = buf.getChannelData(0);
+      for (let i = 0; i < n; i++) ch[i] = ulawToPcm(raw.charCodeAt(i)) / 32768;
+      const s = ctx.createBufferSource(); s.buffer = buf; s.connect(ctx.destination);
+      const t = Math.max(ctx.currentTime + 0.02, playHead); s.start(t); playHead = t + buf.duration;
+      if (++framesIn % 50 === 1) log("agent audio… (" + framesIn + " frames)");
+    } else if (msg.event === "clear") {
+      playHead = 0; log("clear (interruption)");
+    } else if (msg.event !== "mark") {
+      log("← " + ev.data.slice(0, 120));
+    }
+  };
+  ws.onclose = () => { log("socket closed (sent " + framesOut + " frames, received " + framesIn + ")"); stop(false); };
+  ws.onerror = (e) => log("socket error " + (e.message || ""));
+}
+
+function stop(send = true) {
+  if (send && ws && ws.readyState === 1) { ws.send(JSON.stringify({ event: "stop", streamSid: "MZ-mic", stop: {} })); ws.close(); }
+  if (proc) { proc.disconnect(); proc.onaudioprocess = null; proc = null; }
+  if (src) { src.disconnect(); src = null; }
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  document.getElementById("call").disabled = false; document.getElementById("hang").disabled = true;
+}
+document.getElementById("call").onclick = () => start().catch(e => log("error: " + e.message));
+document.getElementById("hang").onclick = () => stop(true);
+</script>
+</body>
+</html>

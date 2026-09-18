@@ -25,28 +25,77 @@ What the docs say this lane must get right (clinic docs + problems 6, 10, 15):
 
 from __future__ import annotations
 
+import unicodedata
+from datetime import timedelta
+from difflib import SequenceMatcher
+
 from vortex import contract
 from vortex.contract import (
+    MADRID,
     CheckEligibilityInput,
     EligibilityVerdict,
     FindProviderInput,
     NearestLocationInput,
     NearestLocationResult,
     ProviderMatch,
+    Rejection,
     ToolContext,
     TriageInput,
     TriageResult,
 )
 
+_TITLES = {"dr", "dra", "d", "doctor", "doctora"}
+_TYPO_MATCH_CUTOFF = 0.8
+
+
+def _name_tokens(name: str) -> set[str]:
+    """Lower-cased, accent-folded, title-stripped tokens — for surname matching."""
+    folded = unicodedata.normalize("NFKD", name)
+    folded = "".join(ch for ch in folded if not unicodedata.combining(ch))
+    tokens = {t.strip(".,").lower() for t in folded.split()}
+    return tokens - _TITLES
+
 
 async def check_eligibility(ctx: ToolContext, args: CheckEligibilityInput) -> EligibilityVerdict:
     """Can this patient book this specialty/provider/site under this plan?
 
-    TODO(rules): read the catalogue (``await ctx.clinic.catalogue()``) and the
-    patient record; return ``allowed=False`` with the matching rule reason, and
-    fill ``redirect_to`` when another provider can serve the same request.
+    Reads the answer straight from ``/availability``'s ``blocked`` for the
+    exact request asked about, rather than re-deriving the insurance/age
+    matrix independently (the docs are explicit: "take the exact reason from
+    ``blocked``. Never guess.").
     """
-    return await contract.stub_check_eligibility(ctx, args)
+    today = ctx.now.astimezone(MADRID).date()
+    result = await ctx.clinic.availability(
+        date_from=today + timedelta(days=1),
+        date_to=today + timedelta(days=14),
+        provider_id=args.provider_id,
+        specialty_id=args.specialty_id,
+        location_id=args.location_id,
+        patient_id=args.patient_id,
+        insurer=[args.insurer] if args.insurer else None,
+    )
+    if result.slots:
+        return EligibilityVerdict(allowed=True)
+
+    if not result.blocked:
+        return EligibilityVerdict(allowed=False, rejection=Rejection(reason="no_availability"))
+
+    blocked_ids = {b.provider_id for b in result.blocked}
+    match = next(
+        (b for b in result.blocked if b.provider_id == args.provider_id), result.blocked[0]
+    )
+
+    catalogue = await ctx.clinic.catalogue()
+    redirect_to = [
+        p
+        for p in catalogue.providers
+        if p.specialty_id == args.specialty_id
+        and p.provider_id not in blocked_ids
+        and (not args.location_id or args.location_id in p.location_ids)
+    ]
+    return EligibilityVerdict(
+        allowed=False, rejection=Rejection(reason=match.reason), redirect_to=redirect_to
+    )
 
 
 async def triage(ctx: ToolContext, args: TriageInput) -> TriageResult:
@@ -71,8 +120,43 @@ async def nearest_location(ctx: ToolContext, args: NearestLocationInput) -> Near
 async def find_provider(ctx: ToolContext, args: FindProviderInput) -> ProviderMatch:
     """Match a spoken provider name against the catalogue.
 
-    TODO(rules): handle the near-miss pairs (Sáez/Sáenz, Iglesias/Iglesia) as
-    ``ambiguous`` with both candidates, report ``on_leave`` with a
-    ``provider_on_leave`` rejection, and ``not_found`` with ``provider_not_found``.
+    Near-miss pairs (Sáez/Sáenz, Iglesias/Iglesia) surface as ``ambiguous``
+    with both candidates when ``specialty_id`` isn't given to tell them apart;
+    passing it filters the pool first, so the same spoken name resolves
+    cleanly once the specialty is known.
     """
-    return await contract.stub_find_provider(ctx, args)
+    catalogue = await ctx.clinic.catalogue()
+    pool = catalogue.providers
+    if args.specialty_id:
+        pool = [p for p in pool if p.specialty_id == args.specialty_id]
+
+    # Every token the caller said (surname alone is enough) must be one of the
+    # provider's tokens — deterministic, and never confuses Sáez with Sáenz,
+    # since "saez" and "saenz" are different tokens even after accent-folding.
+    target = _name_tokens(args.spoken_name)
+    matches = [p for p in pool if target <= _name_tokens(p.name)]
+    if not matches:
+        # Typo-tolerant fallback: each target token fuzzy-matches some provider token.
+        def _fuzzy_subset(wanted: set[str], have: set[str]) -> bool:
+            return all(
+                any(SequenceMatcher(None, w, h).ratio() >= _TYPO_MATCH_CUTOFF for h in have)
+                for w in wanted
+            )
+
+        matches = [p for p in pool if _fuzzy_subset(target, _name_tokens(p.name))]
+
+    if not matches:
+        return ProviderMatch(status="not_found", rejection=Rejection(reason="provider_not_found"))
+    if len(matches) > 1:
+        return ProviderMatch(status="ambiguous", candidates=matches)
+
+    provider = matches[0]
+    today = ctx.now.astimezone(MADRID).date()
+    on_leave = next((lv for lv in provider.leave if lv.date_from <= today <= lv.date_to), None)
+    if on_leave:
+        return ProviderMatch(
+            status="on_leave",
+            provider=provider,
+            rejection=Rejection(reason="provider_on_leave", detail=on_leave.reason),
+        )
+    return ProviderMatch(status="found", provider=provider)

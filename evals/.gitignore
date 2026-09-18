@@ -1,2 +1,6 @@
 # Run output. Baselines are committed; results are not.
 results/
+
+# The clinic snapshot: megabytes of the organisers' generated patient data.
+# Take it with `python -m evals.corpus.snapshot`; never commit it.
+corpus/world/

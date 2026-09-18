@@ -5,6 +5,22 @@ missing, the matching component runs in fake mode:
 
 - no ``PLATFORM_API_KEY``  -> fake clinic data and a dry-run submit client
 - no voice keys            -> the stub voice pipeline (beeps, no STT/LLM/TTS)
+
+The voice pipeline is Soniox for STT, any OpenAI-compatible endpoint for the
+LLM (picked with ``LLM_PROVIDER``), and Google Cloud TTS or ElevenLabs for the
+voice.
+
+Two ideas make every provider swappable from ``.env`` alone:
+
+- **LLM presets.** ``LLM_PROVIDER`` names a preset that fills in the base URL,
+  the key variable and the model id. ``LLM_BASE_URL`` / ``LLM_API_KEY`` /
+  ``LLM_MODEL`` always win when set, so a preset is a shortcut, never a cage.
+  Each preset reads its *own* key variable, so several can sit in one ``.env``.
+- **A primary and an alternate TTS.** ``VORTEX_TTS_PROVIDER`` speaks Spanish;
+  ``VORTEX_TTS_PROVIDER_ALT`` speaks whatever the primary cannot. With both on
+  ``google`` (the default) it is one service and the old single-voice path.
+
+UNVERIFIED markers below flag base URLs and model ids nobody has called yet.
 """
 
 from __future__ import annotations
@@ -24,6 +40,78 @@ def _env(name: str, default: str = "") -> str:
     return os.environ.get(name, default).strip()
 
 
+# --- LLM presets -------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class LlmPreset:
+    """One OpenAI-compatible endpoint: where it lives, which key, which model.
+
+    ``base_url`` is empty for presets whose URL is assembled elsewhere
+    (``custom`` reads it from the environment, ``cloudflare`` and ``helmcode``
+    are built in :meth:`Settings._preset_base_url`).
+    """
+
+    base_url: str
+    key_field: str
+    model: str
+
+
+# UNVERIFIED: Cloudflare's OpenAI-compatible path for Workers AI. The account id
+# is the one from the dashboard URL.
+CLOUDFLARE_LLM_BASE_URL = "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1"
+# Confirmed from https://helmcode.com/docs/integrations (18 Sep 2026).
+HELMCODE_BASE_URL = "https://api.helmcode.com/v1"
+
+LLM_PRESETS: dict[str, LlmPreset] = {
+    # Bring your own endpoint: the three LLM_* variables and nothing else.
+    "custom": LlmPreset("", "llm_api_key_env", "Qwen/Qwen3-30B-A3B-Instruct-2507"),
+    # Hackathon perk: 600M tokens. qwen3.6 = 35B MoE, 3B active, tool calling,
+    # fastest of their catalogue. Ids confirmed from helmcode.com/docs/models.
+    "helmcode": LlmPreset("", "helmcode_api_key", "qwen3.6"),
+    # Hackathon perk: $100 of AI Gateway. UNVERIFIED model id.
+    "cloudflare": LlmPreset(
+        CLOUDFLARE_LLM_BASE_URL, "cloudflare_api_token", "@cf/qwen/qwen3-30b-a3b-fp8"
+    ),
+    # Hackathon perk: $50 of AI Gateway.
+    "vercel": LlmPreset(
+        "https://ai-gateway.vercel.sh/v1", "vercel_ai_gateway_key", "anthropic/claude-haiku-4.5"
+    ),
+}
+
+DEFAULT_LLM_PROVIDER = "helmcode"
+# The arbiter reads the whole call after the hangup, so it can afford a bigger
+# model than the one answering the phone. deepseek-v4-flash reasons on its own
+# schedule (cannot be switched off), which is fine after the hangup.
+DEFAULT_ARBITER_PROVIDER = "helmcode"
+DEFAULT_ARBITER_MODEL = "deepseek-v4-flash"
+
+
+def _llm_provider(var: str, default: str) -> str:
+    """Fold an ``LLM_PROVIDER``-shaped variable to a known preset."""
+    name = _env(var, default).lower()
+    return name if name in LLM_PRESETS else default
+
+
+# --- TTS providers -----------------------------------------------------------
+
+TTS_PROVIDERS: tuple[str, ...] = ("google", "elevenlabs")
+DEFAULT_TTS_PROVIDER = "google"
+
+# Which languages each provider can actually say. Google is the only one with
+# the three co-official languages; ElevenLabs is here for Spanish.
+TTS_LANGUAGES: dict[str, frozenset[str]] = {
+    "google": frozenset({"es", "ca", "gl", "eu"}),
+    "elevenlabs": frozenset({"es"}),
+}
+
+
+def _tts_provider(var: str = "VORTEX_TTS_PROVIDER") -> str:
+    """Fold a TTS provider variable to a known provider. Anything odd -> google."""
+    name = _env(var, DEFAULT_TTS_PROVIDER).lower()
+    return name if name in TTS_PROVIDERS else DEFAULT_TTS_PROVIDER
+
+
 @dataclass(frozen=True)
 class Settings:
     # Platform (the organisers' API: clinic reads + submit routes)
@@ -32,15 +120,93 @@ class Settings:
         default_factory=lambda: _env("PLATFORM_API_BASE_URL", "http://localhost:9999")
     )
 
-    # Voice pipeline providers
-    deepgram_api_key: str = field(default_factory=lambda: _env("DEEPGRAM_API_KEY"))
-    openai_api_key: str = field(default_factory=lambda: _env("OPENAI_API_KEY"))
-    openai_llm_model: str = field(default_factory=lambda: _env("OPENAI_LLM_MODEL", "gpt-4.1"))
-    openai_tts_model: str = field(
-        default_factory=lambda: _env("OPENAI_TTS_MODEL", "gpt-4o-mini-tts")
+    # --- STT: Soniox real-time ------------------------------------------------
+    soniox_api_key: str = field(default_factory=lambda: _env("SONIOX_API_KEY"))
+    soniox_stt_model: str = field(default_factory=lambda: _env("SONIOX_STT_MODEL", "stt-rt-v5"))
+
+    # --- LLM: a preset, or the raw LLM_* variables ----------------------------
+    # LLM_PROVIDER: custom | helmcode | cloudflare | vercel (unknown -> helmcode)
+    llm_provider: str = field(
+        default_factory=lambda: _llm_provider("LLM_PROVIDER", DEFAULT_LLM_PROVIDER)
     )
-    openai_tts_voice: str = field(default_factory=lambda: _env("OPENAI_TTS_VOICE", "coral"))
-    deepgram_stt_model: str = field(default_factory=lambda: _env("DEEPGRAM_STT_MODEL", "nova-3"))
+    # The three overrides. Empty means "take it from the preset".
+    llm_base_url_env: str = field(default_factory=lambda: _env("LLM_BASE_URL"))
+    llm_api_key_env: str = field(default_factory=lambda: _env("LLM_API_KEY"))
+    llm_model_env: str = field(default_factory=lambda: _env("LLM_MODEL"))
+
+    # One key variable per preset, so a single .env can hold them all.
+    helmcode_base_url: str = field(
+        default_factory=lambda: _env("HELMCODE_BASE_URL", HELMCODE_BASE_URL)
+    )
+    helmcode_api_key: str = field(default_factory=lambda: _env("HELMCODE_API_KEY"))
+    cloudflare_account_id: str = field(default_factory=lambda: _env("CLOUDFLARE_ACCOUNT_ID"))
+    cloudflare_api_token: str = field(default_factory=lambda: _env("CLOUDFLARE_API_TOKEN"))
+    vercel_ai_gateway_key: str = field(default_factory=lambda: _env("VERCEL_AI_GATEWAY_KEY"))
+
+    llm_temperature: float = field(default_factory=lambda: float(_env("LLM_TEMPERATURE", "0.2")))
+    llm_max_tokens: int = field(default_factory=lambda: int(_env("LLM_MAX_TOKENS", "120")))
+    # Qwen3 hybrid builds think by default; a phone call cannot wait for that.
+    llm_disable_thinking: bool = field(
+        default_factory=lambda: (
+            _env("LLM_DISABLE_THINKING", "true").lower() not in ("0", "false", "no")
+        )
+    )
+    # Helmcode (and other OpenAI-style hosts) take ``reasoning_effort`` instead:
+    # "none" skips the reasoning phase on qwen3.6/gemma4. Empty sends nothing.
+    llm_reasoning_effort: str = field(
+        default_factory=lambda: _env("LLM_REASONING_EFFORT", "none").lower()
+    )
+
+    # --- Arbiter: the post-hangup submission judge ----------------------------
+    # Nothing consumes this yet. It is here so the key and the model id can be
+    # in .env before the arbiter lane needs them.
+    arbiter_provider: str = field(
+        default_factory=lambda: _llm_provider("ARBITER_PROVIDER", DEFAULT_ARBITER_PROVIDER)
+    )
+    arbiter_base_url_env: str = field(default_factory=lambda: _env("ARBITER_BASE_URL"))
+    arbiter_api_key_env: str = field(default_factory=lambda: _env("ARBITER_API_KEY"))
+    arbiter_model_env: str = field(default_factory=lambda: _env("ARBITER_MODEL"))
+
+    # --- TTS: a primary and an alternate --------------------------------------
+    # VORTEX_TTS_PROVIDER     speaks Spanish (google | elevenlabs)
+    # VORTEX_TTS_PROVIDER_ALT speaks whatever the primary cannot
+    tts_provider: str = field(default_factory=_tts_provider)
+    tts_provider_alt: str = field(default_factory=lambda: _tts_provider("VORTEX_TTS_PROVIDER_ALT"))
+
+    # Google Cloud Text-to-Speech. The only provider here with Catalan,
+    # Galician *and* Basque voices, which is why it is the default. Credentials
+    # come either as a path to the service-account JSON or as the JSON itself.
+    google_application_credentials: str = field(
+        default_factory=lambda: _env("GOOGLE_APPLICATION_CREDENTIALS")
+    )
+    google_tts_credentials_json: str = field(
+        default_factory=lambda: _env("GOOGLE_TTS_CREDENTIALS_JSON")
+    )
+    # Spanish gets a Chirp 3 HD voice; ca/gl/eu only exist as Standard voices.
+    google_tts_voice_es: str = field(
+        default_factory=lambda: _env("GOOGLE_TTS_VOICE_ES", "es-ES-Chirp3-HD-Aoede")
+    )
+    google_tts_voice_ca: str = field(
+        default_factory=lambda: _env("GOOGLE_TTS_VOICE_CA", "ca-ES-Standard-B")
+    )
+    google_tts_voice_gl: str = field(
+        default_factory=lambda: _env("GOOGLE_TTS_VOICE_GL", "gl-ES-Standard-A")
+    )
+    google_tts_voice_eu: str = field(
+        default_factory=lambda: _env("GOOGLE_TTS_VOICE_EU", "eu-ES-Standard-A")
+    )
+
+    # ElevenLabs. Spanish only here: it has no Catalan, Galician or Basque
+    # voice worth putting on a clinic line, so pair it with google as the ALT.
+    # There is no default voice id — a voice is an account-level choice.
+    elevenlabs_api_key: str = field(default_factory=lambda: _env("ELEVENLABS_API_KEY"))
+    elevenlabs_model: str = field(
+        default_factory=lambda: _env("ELEVENLABS_MODEL", "eleven_flash_v2_5")
+    )
+    elevenlabs_voice_id_es: str = field(default_factory=lambda: _env("ELEVENLABS_VOICE_ID_ES"))
+    # Optional WebSocket origin override, e.g. an AI Gateway in front of
+    # ElevenLabs. Empty means the service's own default.
+    elevenlabs_base_url: str = field(default_factory=lambda: _env("ELEVENLABS_BASE_URL"))
 
     # Server
     host: str = field(default_factory=lambda: _env("VORTEX_HOST", "0.0.0.0"))
@@ -71,13 +237,133 @@ class Settings:
             return False
         return bool(self.platform_api_key)
 
+    # --- LLM resolution -------------------------------------------------------
+
+    def _preset_base_url(self, provider: str) -> str:
+        """The preset's endpoint, before any override."""
+        if provider == "helmcode":
+            return self.helmcode_base_url
+        if provider == "cloudflare":
+            # No account id, no URL: half a Cloudflare URL is worse than none,
+            # because it would look configured and 404 on the first call.
+            if not self.cloudflare_account_id:
+                return ""
+            return CLOUDFLARE_LLM_BASE_URL.format(account_id=self.cloudflare_account_id)
+        return LLM_PRESETS[provider].base_url
+
+    def _preset_api_key(self, provider: str) -> str:
+        return str(getattr(self, LLM_PRESETS[provider].key_field, ""))
+
+    @property
+    def llm_base_url(self) -> str:
+        return self.llm_base_url_env or self._preset_base_url(self.llm_provider)
+
+    @property
+    def llm_api_key(self) -> str:
+        return self.llm_api_key_env or self._preset_api_key(self.llm_provider)
+
+    @property
+    def llm_model(self) -> str:
+        return self.llm_model_env or LLM_PRESETS[self.llm_provider].model
+
+    @property
+    def arbiter_base_url(self) -> str:
+        return self.arbiter_base_url_env or self._preset_base_url(self.arbiter_provider)
+
+    @property
+    def arbiter_api_key(self) -> str:
+        return self.arbiter_api_key_env or self._preset_api_key(self.arbiter_provider)
+
+    @property
+    def arbiter_model(self) -> str:
+        """The arbiter carries its own default, not the preset's chat model."""
+        return self.arbiter_model_env or DEFAULT_ARBITER_MODEL
+
+    # --- TTS resolution -------------------------------------------------------
+
+    @property
+    def has_google_tts_credentials(self) -> bool:
+        """Either the path to the service-account file or the JSON itself."""
+        return bool(self.google_application_credentials or self.google_tts_credentials_json)
+
+    @property
+    def tts_is_routed(self) -> bool:
+        """True when the two providers differ and the pipeline needs a router."""
+        return self.tts_provider_alt != self.tts_provider
+
+    @property
+    def tts_providers_in_use(self) -> tuple[str, ...]:
+        """The primary, plus the alternate when it is a different service."""
+        if self.tts_is_routed:
+            return (self.tts_provider, self.tts_provider_alt)
+        return (self.tts_provider,)
+
+    def tts_languages(self, provider: str | None = None) -> frozenset[str]:
+        """The languages a provider can say. Unknown providers say nothing."""
+        return TTS_LANGUAGES.get(provider or self.tts_provider, frozenset())
+
+    def tts_provider_for(self, language: str) -> str:
+        """Which of the two services speaks this language.
+
+        The primary gets everything it covers; the alternate gets the rest.
+        A language neither covers goes to the primary, which answers it in
+        Spanish (see ``tts_voice_for``).
+        """
+        if language in self.tts_languages(self.tts_provider):
+            return self.tts_provider
+        if self.tts_is_routed and language in self.tts_languages(self.tts_provider_alt):
+            return self.tts_provider_alt
+        return self.tts_provider
+
+    @property
+    def tts_covered_languages(self) -> frozenset[str]:
+        """Everything the pair can say between them."""
+        covered = self.tts_languages(self.tts_provider)
+        if self.tts_is_routed:
+            covered = covered | self.tts_languages(self.tts_provider_alt)
+        return covered
+
+    @property
+    def tts_supports_language_switch(self) -> bool:
+        """Can the voice change mid-call? Only if the pair speaks more than one."""
+        return len(self.tts_covered_languages) > 1
+
+    def tts_voice_es(self, provider: str | None = None) -> str:
+        """The Spanish voice of a provider: what it starts the call with."""
+        name = provider or self.tts_provider
+        if name == "elevenlabs":
+            return self.elevenlabs_voice_id_es
+        return self.google_tts_voice_es
+
+    @property
+    def tts_voice(self) -> str:
+        """The voice the primary provider starts the call with (Spanish)."""
+        return self.tts_voice_es(self.tts_provider)
+
+    def has_provider_tts_key(self, provider: str) -> bool:
+        if provider == "elevenlabs":
+            return bool(self.elevenlabs_api_key)
+        return self.has_google_tts_credentials
+
+    @property
+    def has_tts_key(self) -> bool:
+        """Keys for the primary and, when they differ, for the alternate too."""
+        return all(self.has_provider_tts_key(name) for name in self.tts_providers_in_use)
+
+    @property
+    def tts_voices_missing(self) -> list[str]:
+        """Providers in use with no Spanish voice configured (ElevenLabs has none by default)."""
+        return [name for name in self.tts_providers_in_use if not self.tts_voice_es(name)]
+
     @property
     def voice_is_pipecat(self) -> bool:
         if self.voice_mode == "pipecat":
             return True
         if self.voice_mode == "stub":
             return False
-        return bool(self.deepgram_api_key and self.openai_api_key)
+        return bool(
+            self.soniox_api_key and self.llm_api_key and self.llm_base_url and self.has_tts_key
+        )
 
     def describe(self) -> dict[str, object]:
         """A safe summary for logs and /health. Never includes key values."""
@@ -86,8 +372,27 @@ class Settings:
             "voice": "pipecat" if self.voice_is_pipecat else "stub",
             "platform_api_base_url": self.platform_api_base_url,
             "has_platform_key": bool(self.platform_api_key),
-            "has_deepgram_key": bool(self.deepgram_api_key),
-            "has_openai_key": bool(self.openai_api_key),
+            "has_soniox_key": bool(self.soniox_api_key),
+            "has_llm_key": bool(self.llm_api_key),
+            "has_google_tts_credentials": self.has_google_tts_credentials,
+            "has_elevenlabs_key": bool(self.elevenlabs_api_key),
+            "stt_model": self.soniox_stt_model,
+            "llm_provider": self.llm_provider,
+            "llm_model": self.llm_model,
+            "llm_base_url": self.llm_base_url,
+            "arbiter_provider": self.arbiter_provider,
+            "arbiter_model": self.arbiter_model,
+            "arbiter_base_url": self.arbiter_base_url,
+            "has_arbiter_key": bool(self.arbiter_api_key),
+            "tts_provider": self.tts_provider,
+            "tts_provider_alt": self.tts_provider_alt,
+            "tts_routed": self.tts_is_routed,
+            "tts_voice": self.tts_voice,
+            "tts_languages": sorted(self.tts_covered_languages),
+            "tts_language_switch": self.tts_supports_language_switch,
+            # A provider with a key but no voice id builds and then fails on
+            # every utterance, so say so before the first call.
+            "tts_voices_missing": self.tts_voices_missing,
             "ws_path": self.ws_path,
             "calls_log_path": str(self.calls_log_path),
         }

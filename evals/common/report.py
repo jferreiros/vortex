@@ -25,7 +25,7 @@ from evals.common.results import (
     load_previous,
 )
 
-LAYERS = ("logic", "conversation", "voice")
+LAYERS = ("logic", "conversation", "voice", "corpus")
 LAYER_TITLES = {
     "logic": "Layer 1 · Logic (tools, no voice)",
     "conversation": "Layer 2 · Conversation (scripted callers, text)",
