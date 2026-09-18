@@ -1,0 +1,488 @@
+{
+  "version": 1,
+  "repo": "jferreiros/vortex",
+  "board_url": "https://jferreiros.github.io/vortex/tasks.html",
+  "updated": "2026-09-18",
+  "note": "Fuente de verdad del tablero. La pagina y las issues de GitHub salen de aqui. Si cambias una tarea, cambiala aqui y lanza `make tasks`.",
+  "lanes": {
+    "linea": {"name": "La Línea", "folder": "vortex/line/", "short": "Socket, audio, envío"},
+    "conv": {"name": "La Conversación", "folder": "vortex/conversation/", "short": "Prompt, turnos, idiomas"},
+    "ident": {"name": "Identidad", "folder": "vortex/identity/", "short": "Quién llama, para quién es"},
+    "agenda": {"name": "La Agenda", "folder": "vortex/diary/", "short": "Huecos, fechas, cambios"},
+    "reglas": {"name": "Las Reglas", "folder": "vortex/rules/", "short": "Lo que la clínica no hace"},
+    "todos": {"name": "Los cinco", "folder": "—", "short": "Nadie lo hace solo"}
+  },
+  "waves": [
+    {
+      "id": "w0",
+      "label": "Bloque 0",
+      "title": "Ahora",
+      "deadline": "Viernes, esta noche",
+      "goal": "Que exista una llamada real que llegue al socket y envíe algo.",
+      "why": "Nada de lo de abajo puntúa hasta que esto sea verdad. Sin clave corremos contra fixtures y el marcador no se entera."
+    },
+    {
+      "id": "w1",
+      "label": "Bloque 1",
+      "title": "Reto 1 · La cita simple",
+      "deadline": "Sábado 10:00 · Checkpoint 1",
+      "goal": "Los 4 casos públicos del reto 1, dos veces seguidas.",
+      "why": "El reto 1 es el caso base de los otros diecisiete. Lo que se arregla aquí se arregla en todos."
+    },
+    {
+      "id": "w2",
+      "label": "Bloque 1",
+      "title": "Reto 2 · La centralita",
+      "deadline": "Sábado 10:00 · Checkpoint 1",
+      "goal": "20 líneas a la vez sin mezclar estado.",
+      "why": "No puntúa, pero es el cero de todos los demás: un socket que mezcla estado falla el run entero, no un caso."
+    },
+    {
+      "id": "w3",
+      "label": "Bloque 1",
+      "title": "Reto 3 · El médico y la sede",
+      "deadline": "Sábado 10:00 · Checkpoint 1",
+      "goal": "Los 5 casos públicos del reto 3.",
+      "why": "Es el tercer reto abierto hoy. Con el 1 y el 3 cerrados tenemos los 3 puntos que existen el viernes."
+    },
+    {
+      "id": "w4",
+      "label": "Bloque 2",
+      "title": "Los retos que se abren",
+      "deadline": "Sábado 23:00 · Checkpoint 2",
+      "goal": "Intentar todo lo que esté abierto, en orden de peso.",
+      "why": "Un reto que nadie marca puntúa igual que uno que falla. El carril que cubre un reto empieza antes de que se abra."
+    },
+    {
+      "id": "w5",
+      "label": "Bloque 3",
+      "title": "Muro y jurado",
+      "deadline": "Domingo 06:00 muro · 11:00 jurado",
+      "goal": "Medir en bucle, congelar, y enseñarlo.",
+      "why": "El ranking guarda el mejor Run All, no el último. Y la mitad de la nota del jurado es lo que podemos enseñar."
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T01", "wave": "w0", "lane": "todos", "kind": "infra",
+      "title": "Recoger la clave pk-… en el mostrador y repartirla",
+      "problems": [], "points": 0, "size": "20 min", "blocked_by": [],
+      "files": [".env"],
+      "done": "Los cinco tenemos PLATFORM_API_KEY y PLATFORM_API_BASE_URL en nuestro .env local, y `curl .../health` responde 200 con la clave puesta.",
+      "why": "Sin la clave todo corre contra FakeClinicClient y ningún caso puntúa. Se enseña una vez, en una pantalla, y no se guarda en ningún sitio legible."
+    },
+    {
+      "id": "T02", "wave": "w0", "lane": "linea", "kind": "infra",
+      "title": "Poner la clave en deploy/.env del VPS y redesplegar",
+      "problems": [], "points": 0, "size": "15 min", "blocked_by": ["T01"],
+      "files": ["deploy/.env", "deploy/deploy.sh"],
+      "done": "`deploy/deploy.sh --skip-pull` sale en verde y https://line.203.0.113.20.sslip.io/health dice clinic: live.",
+      "why": "Las claves se leen una sola vez al arrancar. Editar deploy/.env sin redesplegar deja el contenedor en modo fake y nadie se entera hasta el primer run."
+    },
+    {
+      "id": "T03", "wave": "w0", "lane": "linea", "kind": "infra",
+      "title": "Guardar el endpoint en Settings → Integration",
+      "problems": [2], "points": 0, "size": "10 min", "blocked_by": ["T02"],
+      "files": ["deploy/README.md"],
+      "done": "wss://line.203.0.113.20.sslip.io/ws guardado en el dashboard, y una llamada de práctica del reto 1 aparece en GET /calls.",
+      "why": "El esquema es wss:// y la ruta /ws va incluida. Olvidar la ruta es el error más común de todo el reto. Un run en cola marca a donde estaba cuando se admitió."
+    },
+    {
+      "id": "T04", "wave": "w0", "lane": "todos", "kind": "infra",
+      "title": "Alinear clinic/client.py con docs/api/openapi.json",
+      "problems": [], "points": 0, "size": "1 h", "blocked_by": ["T01"],
+      "files": ["vortex/clinic/client.py", "scripts/api/try_api.py"],
+      "done": "`make try-api` devuelve 200 en los once endpoints de lectura, y cada respuesta real parsea contra los modelos de contract.py sin perder campos.",
+      "why": "Hoy el cliente está escrito contra la prosa de los docs, con un TODO(clinic) sin resolver. Un nombre de campo mal puesto rompe los cinco carriles a la vez."
+    },
+    {
+      "id": "T05", "wave": "w0", "lane": "todos", "kind": "infra",
+      "title": "Rehacer las fixtures con la forma real de la API",
+      "problems": [], "points": 0, "size": "45 min", "blocked_by": ["T04"],
+      "files": ["vortex/clinic/fixtures.py"],
+      "done": "`make test` y `make evals` verdes sin red, y las fixtures usan los nombres de campo reales, no los inventados el viernes.",
+      "why": "Los evals sin red son el único sitio donde medimos en segundos. Si mienten sobre la forma de los datos, el verde no prueba nada."
+    },
+    {
+      "id": "T06", "wave": "w0", "lane": "todos", "kind": "infra",
+      "title": "Cerrar las tres PRs abiertas y borrar sus ramas",
+      "problems": [], "points": 0, "size": "30 min", "blocked_by": [],
+      "files": [],
+      "done": "PR #1 (proveedores de voz), #7 (prepare_booking) y #8 (referencia de reglas) fusionadas o cerradas, CI verde en main, ramas borradas.",
+      "why": "Cuatro personas ramificando sobre un main viejo es el conflicto de las tres de la mañana. Main tiene que ser el sitio del que todos salen."
+    },
+    {
+      "id": "T07", "wave": "w0", "lane": "todos", "kind": "infra",
+      "title": "Nombrar a quien tiene el botón de Run All",
+      "problems": [], "points": 0, "size": "5 min", "blocked_by": [],
+      "files": ["README.md"],
+      "done": "El nombre está escrito en el README y dicho en el canal. Standup de cinco minutos anclado al enfriamiento de cada run.",
+      "why": "El equipo tiene un run en cola o activo a la vez. Dos personas pulsando son dos personas bloqueándose."
+    },
+    {
+      "id": "T08", "wave": "w0", "lane": "linea", "kind": "infra",
+      "title": "Primera llamada de práctica de punta a punta",
+      "problems": [1], "points": 0, "size": "30 min", "blocked_by": ["T03"],
+      "files": ["vortex/line/session.py"],
+      "done": "La llamada entra, el agente habla, se envía un POST y el dashboard muestra un registro aceptado (200). El contenido puede estar mal.",
+      "why": "La fontanería antes que la inteligencia. Un BOOK a mano que llega dentro de la ventana vale más que una conversación brillante que no reporta nada."
+    },
+    {
+      "id": "T09", "wave": "w0", "lane": "todos", "kind": "infra",
+      "title": "Comprobar que el board de producción ve las llamadas reales",
+      "problems": [], "points": 0, "size": "20 min", "blocked_by": ["T08"],
+      "files": ["vortex/observability/live.py"],
+      "done": "El muro público muestra la llamada de T08 con sus tools y el JSON que enviamos, sin pedir contraseña.",
+      "why": "La mitad de la nota del jurado es lo que podemos ver y enseñar. Y para nosotros es el único sitio donde se lee un run mientras pasa."
+    },
+
+    {
+      "id": "T10", "wave": "w1", "lane": "ident", "kind": "reto",
+      "title": "find_patient contra /directory: teléfono, nombre y documento",
+      "problems": [1], "points": 1, "size": "1 h", "blocked_by": ["T04"],
+      "files": ["vortex/identity/tools.py"],
+      "done": "Los casos identity.* de evals/logic pasan contra el cliente real y ya no hay ninguna llamada a contract.stub_find_patient.",
+      "why": "Un campo exacto que no cuadra excluye al paciente. El patient_id sale del directorio, nunca de lo que dice quien llama."
+    },
+    {
+      "id": "T11", "wave": "w1", "lane": "ident", "kind": "reto",
+      "title": "Confirmación con segundo campo y dos pacientes con el mismo nombre",
+      "problems": [1, 9], "points": 0, "size": "45 min", "blocked_by": ["T10"],
+      "files": ["vortex/identity/tools.py"],
+      "done": "Con dos candidatos la tool devuelve un rechazo tipado que nombra el campo que los separa. Nunca elige a ciegas.",
+      "why": "El from_number es una pista, no una identificación. Elegir al paciente equivocado falla el caso con el hueco correcto."
+    },
+    {
+      "id": "T12", "wave": "w1", "lane": "agenda", "kind": "reto",
+      "title": "find_slots contra /availability, en tramos de 14 días",
+      "problems": [1], "points": 1, "size": "1 h 30", "blocked_by": ["T04"],
+      "files": ["vortex/diary/tools.py"],
+      "done": "Devuelve huecos con provider_id, location_id, appointment_type_id y slot con offset explícito. Los casos diary.* de evals pasan.",
+      "why": "El appointment_type_id lo lleva el hueco. El mismo hueco con el tipo equivocado falla el caso."
+    },
+    {
+      "id": "T13", "wave": "w1", "lane": "agenda", "kind": "reto",
+      "title": "\"Lo antes posible\" empieza mañana, nunca hoy",
+      "problems": [1, 5], "points": 0, "size": "30 min", "blocked_by": ["T12"],
+      "files": ["vortex/diary/tools.py"],
+      "done": "Un caso de eval con la llamada a las 09:00 del viernes nunca propone un hueco de ese viernes.",
+      "why": "Nada se reserva el mismo día. El reloj es ToolContext.now en Europe/Madrid, no el reloj de la máquina."
+    },
+    {
+      "id": "T14", "wave": "w1", "lane": "agenda", "kind": "reto",
+      "title": "Empatados en el primer hueco: valen todos",
+      "problems": [1], "points": 0, "size": "30 min", "blocked_by": ["T12"],
+      "files": ["vortex/diary/tools.py"],
+      "done": "El eval acepta el conjunto de médicos empatados, no un único provider_id, y no reordenamos por ninguna preferencia inventada.",
+      "why": "Un caso puede aceptar varias salidas. Tres médicos libres en el mismo minuto son tres respuestas correctas."
+    },
+    {
+      "id": "T15", "wave": "w1", "lane": "reglas", "kind": "reto",
+      "title": "El tipo de cita sigue al historial, no a lo que pida quien llama",
+      "problems": [1, 10], "points": 0, "size": "45 min", "blocked_by": ["T04"],
+      "files": ["vortex/rules/tools.py"],
+      "done": "Sin visitas en esa especialidad → primera visita. Con visitas → revisión. Un caso de eval por rama.",
+      "why": "Es la trampa silenciosa del reto 1: el hueco correcto con el tipo equivocado es un caso fallado y nadie te dice cuál fue el campo."
+    },
+    {
+      "id": "T16", "wave": "w1", "lane": "agenda", "kind": "reto",
+      "title": "prepare_booking: rechaza mismo día, fuera de ventana y hueco inventado",
+      "problems": [1], "points": 0, "size": "1 h", "blocked_by": ["T12"],
+      "files": ["vortex/diary/tools.py"],
+      "done": "Devuelve un BookAction con los cuatro ids sacados de /availability, o un Rejection tipado. Empieza por la PR #7.",
+      "why": "Es el último filtro antes del POST. Todo id que no venga de la API se para aquí, no en el modelo."
+    },
+    {
+      "id": "T17", "wave": "w1", "lane": "conv", "kind": "reto",
+      "title": "Prompt real: llegar a una acción en menos de 3 minutos",
+      "problems": [1], "points": 0, "size": "1 h 30", "blocked_by": [],
+      "files": ["vortex/conversation/prompt.py"],
+      "done": "El escenario del reto 1 en evals/conversation con brain openai acaba en un BOOK correcto en diez turnos o menos. Fuera el TODO de placeholder.",
+      "why": "El prompt de hoy es un marcador de posición. El techo de tres minutos se gasta en preguntas que no hacían falta."
+    },
+    {
+      "id": "T18", "wave": "w1", "lane": "conv", "kind": "reto",
+      "title": "Red de seguridad: ninguna llamada acaba sin enviar nada",
+      "problems": [1, 14], "points": 0, "size": "45 min", "blocked_by": [],
+      "files": ["vortex/line/session.py", "vortex/conversation/turns.py"],
+      "done": "Si a los 2:30 no hay acción decidida se envía NO_ACTION con su reason. Hay un test que lo prueba cortando la llamada a mitad.",
+      "why": "Un agente caído y un rechazo correcto no pueden parecer lo mismo. Una lista de acciones vacía siempre pierde."
+    },
+    {
+      "id": "T19", "wave": "w1", "lane": "linea", "kind": "reto",
+      "title": "El BOOK completo llega dentro de la ventana de 30 s",
+      "problems": [1], "points": 0, "size": "45 min", "blocked_by": ["T16"],
+      "files": ["vortex/line/submit.py"],
+      "done": "El 200 del submit aparece en logs/calls.jsonl con su call_id, el 409 se trata como éxito y un 422 se registra con el cuerpo que lo provocó.",
+      "why": "La ventana cierra 30 s después de que cierre el socket. Pronto nunca es motivo de rechazo. Tarde es un 410 y el caso está perdido."
+    },
+    {
+      "id": "T20", "wave": "w1", "lane": "todos", "kind": "reto",
+      "title": "Pasar los 4 casos públicos del reto 1, dos veces seguidas",
+      "problems": [1], "points": 1, "size": "1 h", "blocked_by": ["T10", "T12", "T15", "T16", "T17", "T19"],
+      "files": [],
+      "done": "Los cuatro casos publicados dan el registro que imprime su enunciado, en dos pasadas distintas.",
+      "why": "Una pasada buena puede ser suerte. pass^k: un escenario al 70% es un escenario fallado cuando son 68 llamadas."
+    },
+
+    {
+      "id": "T21", "wave": "w2", "lane": "linea", "kind": "reto",
+      "title": "Auditar que no queda estado compartido entre sockets",
+      "problems": [2], "points": 0, "size": "1 h", "blocked_by": [],
+      "files": ["vortex/line/server.py", "vortex/line/session.py"],
+      "done": "Un test abre dos llamadas a la vez con pacientes distintos y comprueba que ninguna ve el call_id, la conversación ni el ToolContext de la otra.",
+      "why": "Es el fallo exacto que busca el reto. Y no falla un caso: falla el run entero, porque Run All abre diez sockets a la vez."
+    },
+    {
+      "id": "T22", "wave": "w2", "lane": "linea", "kind": "reto",
+      "title": "Lanzar las ráfagas de 5 y 10 líneas del reto 2",
+      "problems": [2], "points": 0, "size": "30 min", "blocked_by": ["T08"],
+      "files": ["scripts/fake_caller.py"],
+      "done": "Las dos ráfagas públicas lanzadas desde el dashboard, con la fracción de líneas que sobrevivieron anotada en el canal.",
+      "why": "Diez a la vez es exactamente lo que abre un Run All. El viernes por la noche es cuando quieres enterarte, no el domingo a las cinco."
+    },
+    {
+      "id": "T23", "wave": "w2", "lane": "linea", "kind": "reto",
+      "title": "Ráfaga de 20 y el techo de CPU y memoria del contenedor",
+      "problems": [2], "points": 0, "size": "45 min", "blocked_by": ["T22"],
+      "files": ["deploy/compose.yaml"],
+      "done": "La ráfaga de 20 pasa, y `docker stats vortex-line` durante la ráfaga queda anotado. El contenedor está capado a 4 GB.",
+      "why": "Veinte es la ráfaga más grande del reto 2. Si el límite del contenedor muerde, muerde en silencio y parece un fallo del agente."
+    },
+
+    {
+      "id": "T24", "wave": "w3", "lane": "reglas", "kind": "reto",
+      "title": "find_provider con los pares casi iguales",
+      "problems": [3], "points": 2, "size": "1 h", "blocked_by": ["T04"],
+      "files": ["vortex/rules/tools.py"],
+      "done": "Sáez/Sáenz e Iglesias/Iglesia devuelven un rechazo que pide confirmación, nunca una elección silenciosa. Casos de eval para los dos pares.",
+      "why": "Un apellido casi igual es la trampa publicada del reto 3. Elegir al que suena parecido es fallar con el hueco correcto."
+    },
+    {
+      "id": "T25", "wave": "w3", "lane": "reglas", "kind": "reto",
+      "title": "Médico de baja, y médico que ese día está en otra sede",
+      "problems": [3], "points": 0, "size": "1 h", "blocked_by": ["T24"],
+      "files": ["vortex/rules/tools.py"],
+      "done": "Las dos formas salen con su reason exacta: provider_on_leave y la que corresponda por sede. Leídas de blocked, no adivinadas.",
+      "why": "La razón que devuelve la tool es la razón que enviamos, y nombra la regla que saltó. Nunca una frase para que el modelo la interprete."
+    },
+    {
+      "id": "T26", "wave": "w3", "lane": "agenda", "kind": "reto",
+      "title": "El repliegue cumple especialidad Y sede",
+      "problems": [3], "points": 0, "size": "1 h", "blocked_by": ["T12"],
+      "files": ["vortex/diary/tools.py"],
+      "done": "Un caso de eval comprueba que a quien solo puede llegar a Getafe nunca le ofrecemos un dermatólogo de Centro.",
+      "why": "Es la frase literal del enunciado. Un repliegue que cumple solo una de las dos condiciones es un caso fallado."
+    },
+    {
+      "id": "T27", "wave": "w3", "lane": "reglas", "kind": "reto",
+      "title": "Sin repliegue posible: NO_ACTION con la razón correcta",
+      "problems": [3, 7], "points": 0, "size": "45 min", "blocked_by": ["T25"],
+      "files": ["vortex/rules/tools.py", "vortex/line/submit.py"],
+      "done": "provider_not_found, provider_on_leave y no_availability salen cada una en su caso, y ninguna llamada acaba en silencio.",
+      "why": "Huecos vacíos con blocked vacío significa calendario lleno: no_availability. Si blocked trae algo, la razón es esa y no otra."
+    },
+    {
+      "id": "T28", "wave": "w3", "lane": "todos", "kind": "reto",
+      "title": "Pasar los 5 casos públicos del reto 3",
+      "problems": [3], "points": 2, "size": "1 h", "blocked_by": ["T24", "T25", "T26", "T27"],
+      "files": [],
+      "done": "Los cinco casos publicados dan el registro de su enunciado, en dos pasadas.",
+      "why": "Con el 1 y el 3 cerrados tenemos los 3 puntos que existen el viernes, y la base sobre la que se abre todo lo demás."
+    },
+
+    {
+      "id": "T29", "wave": "w4", "lane": "ident", "kind": "reto",
+      "title": "Reto 4 · Registro completo con la letra de control calculada",
+      "problems": [4], "points": 2, "size": "1 h 30", "blocked_by": ["T10"],
+      "files": ["vortex/identity/tools.py"],
+      "done": "validate_national_id hace el módulo 23 de verdad y build_registration rellena los ocho campos. Un documento mal oído y uno inventado se distinguen.",
+      "why": "Un carácter mal falla el caso. La letra se calcula a partir de los dígitos, así que un error de escucha es detectable y uno inventado también."
+    },
+    {
+      "id": "T30", "wave": "w4", "lane": "ident", "kind": "reto",
+      "title": "Reto 4 · El email se dicta y no se reserva nada al lado",
+      "problems": [4], "points": 0, "size": "45 min", "blocked_by": ["T29"],
+      "files": ["vortex/identity/tools.py", "vortex/conversation/prompt.py"],
+      "done": "\"ana punto garcia arroba gmail punto com\" sale bien escrito, y la llamada envía REGISTER a secas: un BOOK al lado falla el caso.",
+      "why": "El email no tiene letra de control: es el único campo donde no hay red. Y quien llama rechaza la cita si se la ofrecemos."
+    },
+    {
+      "id": "T31", "wave": "w4", "lane": "agenda", "kind": "reto",
+      "title": "Reto 5 · El vocabulario fijo de fechas",
+      "problems": [5], "points": 2, "size": "1 h 30", "blocked_by": ["T13"],
+      "files": ["vortex/diary/tools.py"],
+      "done": "Las siete formas publicadas resuelven a un minuto exacto contra ToolContext.now. Un día de la semana es el primero estrictamente posterior a hoy.",
+      "why": "Dicho un jueves, \"este jueves que viene\" es dentro de una semana. Es vocabulario cerrado y publicado: se resuelve con una tabla, no con el modelo."
+    },
+    {
+      "id": "T32", "wave": "w4", "lane": "agenda", "kind": "reto",
+      "title": "Reto 5 · Día cerrado → primer día abierto que cumpla el resto",
+      "problems": [5], "points": 0, "size": "1 h", "blocked_by": ["T31"],
+      "files": ["vortex/diary/tools.py"],
+      "done": "Sur cierra el viernes a mediodía, solo Centro abre el sábado, nadie el domingo y el 12 de octubre cierra la red entera. Un caso de eval por trampa.",
+      "why": "El salto tiene que conservar el resto de la petición: misma sede y misma franja. Saltar al primer hueco a secas falla el caso."
+    },
+    {
+      "id": "T33", "wave": "w4", "lane": "reglas", "kind": "reto",
+      "title": "Reto 6 · Leer blocked y nombrar la regla que saltó",
+      "problems": [6], "points": 3, "size": "2 h", "blocked_by": ["T04"],
+      "files": ["vortex/rules/tools.py"],
+      "done": "check_eligibility cubre las cinco formas de rechazo, cada una con su reason de la lista de once. Ningún valor se adivina.",
+      "why": "Los once primeros reason son espejo uno a uno de las restricciones de la clínica, justo para que la regla que saltó siempre tenga nombre."
+    },
+    {
+      "id": "T34", "wave": "w4", "lane": "reglas", "kind": "reto",
+      "title": "Reto 6 · El caso de control: un adulto con derivación reserva",
+      "problems": [6], "points": 0, "size": "30 min", "blocked_by": ["T33"],
+      "files": ["vortex/rules/tools.py"],
+      "done": "Hay un caso de eval que reserva normalmente y falla si el agente rechaza.",
+      "why": "Es el control que pilla al agente que aprendió a rechazarlo todo. Rechazar siempre saca la misma nota que no intentarlo."
+    },
+    {
+      "id": "T35", "wave": "w4", "lane": "agenda", "kind": "reto",
+      "title": "Reto 7 · Negociar lo más cercano, o no_availability",
+      "problems": [7], "points": 2, "size": "1 h", "blocked_by": ["T26"],
+      "files": ["vortex/diary/tools.py"],
+      "done": "Con la ventana vacía se ofrece el conjunto aceptable más cercano; con el calendario lleno sale no_availability y nada más.",
+      "why": "Huecos vacíos con blocked vacío es calendario lleno. Confundir eso con una regla de la clínica es enviar el reason equivocado."
+    },
+    {
+      "id": "T36", "wave": "w4", "lane": "agenda", "kind": "reto",
+      "title": "Reto 8 · Cancelar y cambiar, y dos cancelaciones en una llamada",
+      "problems": [8], "points": 2, "size": "1 h 30", "blocked_by": ["T12"],
+      "files": ["vortex/diary/tools.py", "vortex/line/submit.py"],
+      "done": "El appointment_id sale solo de /patients/{id}/appointments con when=upcoming, y dos cancelaciones salen como dos POST en la misma llamada.",
+      "why": "El id de una visita pasada nunca es respuesta. Y \"cancela la mía y la de mi hijo\" son dos acciones, no una."
+    },
+    {
+      "id": "T37", "wave": "w4", "lane": "ident", "kind": "reto",
+      "title": "Reto 9 · Reservar para el paciente, nunca para quien llama",
+      "problems": [9], "points": 3, "size": "1 h 30", "blocked_by": ["T11"],
+      "files": ["vortex/identity/tools.py", "vortex/conversation/prompt.py"],
+      "done": "Una madre que da sus datos primero acaba en un BOOK con el patient_id del hijo. Un caso de eval por cada forma: madre, hija, cuidador.",
+      "why": "Quien llama suele estar también en el fichero y suele dar sus datos primero. Reservarle a esa persona es el modo de fallo del reto."
+    },
+    {
+      "id": "T38", "wave": "w4", "lane": "reglas", "kind": "reto",
+      "title": "Reto 10 · Tabla de triaje publicada y las cinco banderas rojas",
+      "problems": [10], "points": 3, "size": "1 h 30", "blocked_by": ["T04"],
+      "files": ["vortex/rules/tools.py"],
+      "done": "Las quince filas de la tabla y las cinco banderas rojas tienen su caso en evals/logic/cases/triage.yaml y pasan. Las rojas van a ESCALATE, nunca a un calendario.",
+      "why": "Es una búsqueda en una lista publicada, no juicio clínico. Dejarlo al criterio del modelo es introducir varianza donde hay una tabla."
+    },
+    {
+      "id": "T39", "wave": "w4", "lane": "conv", "kind": "reto",
+      "title": "Reto 11 · Catalán, y cambio de idioma a media llamada",
+      "problems": [11], "points": 3, "size": "2 h", "blocked_by": ["T17"],
+      "files": ["vortex/conversation/language.py", "vortex/conversation/prompt.py"],
+      "done": "El agente cambia de idioma sin reiniciar la llamada, y cuando el caso fija un idioma el médico reservado lo habla. Solo cuatro médicos hablan catalán.",
+      "why": "Es el único reto cuyos casos públicos no representan el pool privado: en privado sale catalán mucho más a menudo que en los tres casos publicados."
+    },
+    {
+      "id": "T40", "wave": "w4", "lane": "conv", "kind": "reto",
+      "title": "Reto 12 · Ruido a 5 dB SNR: confirmar nombre y dígitos",
+      "problems": [12], "points": 3, "size": "2 h", "blocked_by": ["T17"],
+      "files": ["vortex/conversation/turns.py", "vortex/line/pipecat_voice.py"],
+      "done": "La capa 3 de evals mide WER limpio contra WER a 5 dB por proveedor, y el agente confirma el dato cuando la confianza baja.",
+      "why": "Es un reto 1 con ruido: si fallamos aquí y pasamos el resto, tenemos un problema de audio, no de razonamiento. Y ahí se elige proveedor con un número."
+    },
+    {
+      "id": "T41", "wave": "w4", "lane": "conv", "kind": "reto",
+      "title": "Reto 13 · Barge-in, silencios de 8 s y la petición final",
+      "problems": [13], "points": 4, "size": "2 h", "blocked_by": ["T17"],
+      "files": ["vortex/conversation/turns.py"],
+      "done": "El escenario de corrección de evals/conversation reserva lo último que pidió quien llama, no lo primero, y sobrevive a ocho segundos de silencio.",
+      "why": "Es el reto de cuatro puntos más barato: audio limpio, humano desordenado. Reservar la primera petición es el fallo."
+    },
+    {
+      "id": "T42", "wave": "w4", "lane": "conv", "kind": "reto",
+      "title": "Reto 14 · Rechazar inyecciones sin leer nunca un dato del paciente",
+      "problems": [14], "points": 4, "size": "1 h 30", "blocked_by": ["T18"],
+      "files": ["vortex/conversation/prompt.py"],
+      "done": "Inyección, datos de otro paciente, consejo médico y venta acaban en NO_ACTION(out_of_scope), y privacy_of pasa en los escenarios de evals.",
+      "why": "Es el único reto que lee la transcripción. Deletrear el DNI dígito a dígito cuenta igual que decirlo entero. El nombre no está protegido; el documento y el teléfono sí."
+    },
+    {
+      "id": "T43", "wave": "w4", "lane": "reglas", "kind": "reto",
+      "title": "Reto 15 · La sede más cercana que además pueda atender",
+      "problems": [15], "points": 3, "size": "1 h 30", "blocked_by": ["T33"],
+      "files": ["vortex/rules/tools.py"],
+      "done": "nearest_location geocodifica la dirección y ordena por distancia en línea recta a las coordenadas de /availability, saltando las sedes sin esa especialidad.",
+      "why": "La respuesta nunca es un rechazo. Si la más cercana no tiene a nadie para esa especialidad, la respuesta es la siguiente que sí."
+    },
+    {
+      "id": "T44", "wave": "w4", "lane": "reglas", "kind": "reto",
+      "title": "Reto 16 · Responder del catálogo, nunca de memoria",
+      "problems": [16], "points": 3, "size": "1 h", "blocked_by": ["T33"],
+      "files": ["vortex/rules/tools.py", "vortex/conversation/prompt.py"],
+      "done": "Las preguntas sobre sedes, médicos y horarios se contestan con una tool, y hay un caso de eval donde una respuesta falsa hace imposible la reserva.",
+      "why": "Se puntúa por la reserva, no por la transcripción. Si decimos que Norte abre el sábado y reservan Norte el sábado, el caso está perdido por lo que dijimos."
+    },
+    {
+      "id": "T45", "wave": "w4", "lane": "reglas", "kind": "reto",
+      "title": "Reto 17 · Preguntar por la segunda póliza y enviar su policy_id",
+      "problems": [17], "points": 4, "size": "1 h 30", "blocked_by": ["T33"],
+      "files": ["vortex/rules/tools.py", "vortex/conversation/prompt.py"],
+      "done": "Cuando la póliza del fichero no cubre, el agente pregunta, y el POST lleva el policy_id contra el que se factura el hueco. El caso de control no inventa una segunda póliza.",
+      "why": "La segunda póliza no está en ningún dato: solo preguntar en la llamada la saca. Hueco correcto con póliza equivocada es un caso fallado."
+    },
+    {
+      "id": "T46", "wave": "w4", "lane": "todos", "kind": "reto",
+      "title": "Reto 18 · La llamada real, dos intenciones en una lista de acciones",
+      "problems": [18], "points": 5, "size": "2 h", "blocked_by": ["T36", "T37", "T41"],
+      "files": [],
+      "done": "El escenario de la abuela en la cocina ruidosa envía la lista completa y correcta: mover la cita del nieto y reservar la suya.",
+      "why": "Es el reto más caro y necesita los cinco carriles. Solo pasa si La Línea aguanta, la voz entiende y las tres tools aciertan."
+    },
+
+    {
+      "id": "T47", "wave": "w5", "lane": "todos", "kind": "demo",
+      "title": "Cadencia de Run All: uno cada ~33 minutos",
+      "problems": [], "points": 0, "size": "toda la noche", "blocked_by": ["T20"],
+      "files": [],
+      "done": "Cada run lanzado, leído en standup de cinco minutos y anotado: qué falló y de quién fue. Uno a la vez, 15 min de enfriamiento.",
+      "why": "El ranking guarda el mejor run, no el último. Cuatro casos por reto es una muestra: más runs son más oportunidades, gratis."
+    },
+    {
+      "id": "T48", "wave": "w5", "lane": "todos", "kind": "demo",
+      "title": "Congelar el código el domingo a las 05:00",
+      "problems": [], "points": 0, "size": "5 min", "blocked_by": ["T47"],
+      "files": [],
+      "done": "Último despliegue a las 05:00, último lanzamiento útil sobre las 05:30, y nadie toca main hasta después del jurado.",
+      "why": "Solo cuentan los runs completados antes de las 06:00. Un run empezado a las 05:50 no cuenta para nada."
+    },
+    {
+      "id": "T49", "wave": "w5", "lane": "conv", "kind": "demo",
+      "title": "Que suene como si la clínica supiera quién llama",
+      "problems": [], "points": 0, "size": "1 h 30", "blocked_by": ["T17"],
+      "files": ["vortex/conversation/prompt.py"],
+      "done": "El agente lee la nota de la ficha y las visitas anteriores antes de preguntar, y lo demuestra en la llamada del jurado.",
+      "why": "No puntúa en el ranking y es casi toda la nota del jurado: cuánto se nota que hay una clínica detrás y no un formulario hablado."
+    },
+    {
+      "id": "T50", "wave": "w5", "lane": "todos", "kind": "demo",
+      "title": "La vista en directo responde \"¿por qué dijo eso?\"",
+      "problems": [], "points": 0, "size": "2 h", "blocked_by": ["T09"],
+      "files": ["vortex/observability/live.py", "vortex/observability/view.py"],
+      "done": "Para cualquier llamada del log se ve la transcripción, qué tools llamó, qué devolvieron y el JSON enviado, en la misma pantalla.",
+      "why": "El jurado puntúa la plataforma alrededor del agente. Un criterio que el jurado no puede observar no se puntúa."
+    },
+    {
+      "id": "T51", "wave": "w5", "lane": "todos", "kind": "demo",
+      "title": "Números para el jurado: coste por llamada, p50/p95 y pass^k",
+      "problems": [], "points": 0, "size": "1 h", "blocked_by": ["T40"],
+      "files": ["evals/voice/pricing.yaml", "docs/evals.md"],
+      "done": "Una pantalla con el coste por llamada a precio de tarifa, la latencia percibida p50 y p95, y pass^k por escenario, sacados de evals/results.",
+      "why": "El jurado puntúa rigor de ingeniería: harness, varianza y modos de fallo con nombre. Un número gana a una sensación."
+    },
+    {
+      "id": "T52", "wave": "w5", "lane": "todos", "kind": "demo",
+      "title": "Ensayar la demo entera con una llamada de verdad",
+      "problems": [], "points": 0, "size": "1 h", "blocked_by": ["T50", "T51"],
+      "files": [],
+      "done": "Quien conduce enseña, sin buscar nada: la llamada entrando, las tools disparando, el registro enviado y el tablero de evals. Ensayado dos veces.",
+      "why": "El jurado nos llama en directo el domingo a las 11:00. Buscar una pestaña delante de ellos gasta la mitad del tiempo que tenemos."
+    }
+  ]
+}

@@ -17,7 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -35,7 +35,11 @@ def slugify(method: str, path: str) -> str:
 
 
 def call(
-    client: httpx.Client, out_dir: Path, method: str, path: str, params: dict[str, Any] | None = None
+    client: httpx.Client,
+    out_dir: Path,
+    method: str,
+    path: str,
+    params: dict[str, Any] | None = None,
 ) -> Any:
     """Make one request, save the raw body, print a status line, return the parsed body."""
     clean = {k: v for k, v in (params or {}).items() if v not in (None, "", [])}
@@ -59,7 +63,9 @@ def call(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--date-from", help="availability window start (ISO date), default tomorrow")
+    parser.add_argument(
+        "--date-from", help="availability window start (ISO date), default tomorrow"
+    )
     parser.add_argument("--date-to", help="availability window end (ISO date), default +2 days")
     parser.add_argument("--provider-id")
     parser.add_argument("--specialty-id", help="default: first specialty from /api/v1/specialties")
@@ -77,7 +83,7 @@ def main() -> None:
         print("PLATFORM_API_KEY is not set in .env - nothing to call.", file=sys.stderr)
         raise SystemExit(1)
 
-    run_id = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H%M%SZ")
+    run_id = datetime.now(UTC).strftime("%Y-%m-%dT%H%M%SZ")
     out_dir = REPO_ROOT / "api_results" / run_id
     out_dir.mkdir(parents=True, exist_ok=True)
     print(f"base url: {settings.platform_api_base_url}")

@@ -1,0 +1,105 @@
+# Problems 1, 3, 5, 11: bookings that hinge on one hard thing.
+# The call connects Friday 18 September 2026, 09:00 Europe/Madrid.
+group: booking
+now: "2026-09-18T09:00:00+02:00"
+
+scenarios:
+  - id: p1.simple_booking_name_and_phone
+    problem: 1
+    from_number: "+34612345678"
+    caller:
+      - says: "Hola, buenos días. Soy Marta Ruiz López, quería pedir cita con medicina general lo antes posible."
+        means: {identify: {name: "Marta Ruiz López"}, request: {intent: book, specialty_id: general_practice}}
+      - says: "Sí, mi teléfono es el seis uno dos, tres cuatro cinco, seis siete ocho."
+        means: {identify: {phone: "612345678"}}
+      - says: "Perfecto, la primera que tenga me va bien."
+        means: {accept: true}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00042
+          appointment_type_id: review
+          provider_id: {$earliest_slot: {specialty_id: general_practice, patient_id: P00042, field: provider_id}}
+          slot: {$earliest_slot: {specialty_id: general_practice, patient_id: P00042}}
+          policy_id: sanitas
+      trajectory_contains: [find_patient, find_slots, prepare_booking, submit_action]
+      must_not_call: [build_registration, prepare_cancel]
+      privacy_of: [P00042]
+      max_tool_calls: 12
+
+  - id: p1.morning_at_norte_by_dni
+    problem: 1
+    caller:
+      - says: "Buenos días, llamo para una cita de medicina general en Arenal Norte, el lunes por la mañana si puede ser."
+        means: {request: {intent: book, specialty_id: general_practice, location_id: norte, when: "this coming Monday", part_of_day: morning}}
+      - says: "Soy Marta Ruiz, con DNI uno dos tres cuatro cinco seis siete ocho zeta."
+        means: {identify: {name: "Marta Ruiz", national_id: "12345678Z"}}
+      - says: "Vale, esa me viene bien."
+        means: {accept: true}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00042
+          location_id: norte
+          slot: {$earliest_slot: {specialty_id: general_practice, location_id: norte, on: "2026-09-21", part_of_day: morning, patient_id: P00042}}
+      privacy_of: [P00042]
+
+  - id: p3.named_doctor_on_leave
+    problem: 3
+    caller:
+      - says: "Hola, soy Marta Ruiz, nacida el doce de marzo del ochenta y cinco. Quiero cita con el doctor Requena."
+        means: {identify: {name: "Marta Ruiz", date_of_birth: "1985-03-12"}, request: {intent: book, provider: "doctor Requena"}}
+      - says: "Ah, vaya. Bueno, pues nada, ya llamaré. Gracias."
+        means: {end: true}
+    expect:
+      # Either honest answer passes: the rule that bit, or a redirect inside the specialty
+      # at the same site. Booking Requena himself fails.
+      actions:
+        - $one_of:
+            - {kind: no-action, reason: provider_on_leave}
+            - {kind: book, patient_id: P00042, provider_id: {$in: [PR02]}, location_id: norte}
+      trajectory_contains: [find_patient, find_provider]
+      privacy_of: [P00042]
+
+  - id: p3.unknown_doctor_is_not_invented
+    problem: 3
+    caller:
+      - says: "Quería cita con el doctor Vilar, el de dermatología. Soy Antonio Pérez Martín, NIE equis uno dos tres cuatro cinco seis siete ele."
+        means: {identify: {name: "Antonio Pérez Martín", national_id: "X1234567L"}, request: {intent: book, provider: "doctor Vilar", specialty_id: dermatology}}
+      - says: "¿Cómo que no está? Bueno, da igual, adiós."
+        means: {end: true}
+    expect:
+      actions:
+        - $one_of:
+            - {kind: no-action, reason: provider_not_found}
+            - {kind: book, patient_id: P00200}
+      privacy_of: [P00200]
+
+  - id: p5.first_thing_monday_12_october_moves_to_tuesday
+    problem: 5
+    caller:
+      - says: "Soy Marta Ruiz, doce del tres del ochenta y cinco. Necesito medicina general a primera hora del lunes doce de octubre."
+        means: {identify: {name: "Marta Ruiz", date_of_birth: "1985-03-12"}, request: {intent: book, specialty_id: general_practice, when: "first thing on Monday the twelfth of October", part_of_day: morning}}
+      - says: "Si está cerrado, pues el siguiente día que abran, a primera hora."
+        means: {accept: true}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00042
+          slot: {$earliest_slot: {specialty_id: general_practice, on: "2026-10-13", part_of_day: morning, patient_id: P00042}}
+      privacy_of: [P00042]
+
+  - id: p11.catalan_speaker_wants_a_catalan_doctor
+    problem: 11
+    caller:
+      - says: "Bon dia. Sóc la Marta Ruiz, nascuda el dotze de març del vuitanta-cinc. Voldria hora amb un metge de capçalera que parli català, si us plau."
+        means: {identify: {name: "Marta Ruiz", date_of_birth: "1985-03-12"}, request: {intent: book, specialty_id: general_practice, language: ca}}
+      - says: "Perfecte, la primera que tingui."
+        means: {accept: true}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00042
+          provider_id: PR02
+          slot: {$earliest_slot: {provider_id: PR02, patient_id: P00042}}
+      privacy_of: [P00042]
