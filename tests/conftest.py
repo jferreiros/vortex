@@ -9,6 +9,10 @@ import pytest
 
 from vortex import settings as settings_module
 
+# NiceGUI's simulated user for the console page tests; it registers the
+# `main_file` ini option, so it has to load from conftest, not a test module.
+pytest_plugins = ["nicegui.testing.user_plugin"]
+
 
 @pytest.fixture
 def offline_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> settings_module.Settings:
