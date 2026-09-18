@@ -569,6 +569,11 @@ class AvailabilityResult(BaseModel):
     slots: list[Slot] = Field(default_factory=list)
     blocked: list[BlockedProvider] = Field(default_factory=list)
     appointment_type: AppointmentTypeRecord | None = None
+    #: Filled only when ``slots`` is empty and no rule blocked anyone: the
+    #: closest free slots outside the asked window that keep every other
+    #: constraint (problem 7). Offer them; book one only if the caller agrees.
+    #: Empty together with ``slots`` and ``blocked`` means the calendar is full.
+    nearest: list[Slot] = Field(default_factory=list)
     rejection: Rejection | None = None
 
 
