@@ -25,7 +25,7 @@ from vortex.line.twilio import BYTES_PER_FRAME, FRAME_MS  # noqa: E402
 from vortex.line.ulaw import pcm16_to_ulaw, silence  # noqa: E402
 
 
-def load_audio(wav: str | None, seconds: float) -> list[bytes]:
+def load_audio(wav: str | None, seconds: float, tail: float = 0.0) -> list[bytes]:
     if wav:
         with wave.open(wav, "rb") as fh:
             assert fh.getnchannels() == 1 and fh.getframerate() == 8000 and fh.getsampwidth() == 2
@@ -33,6 +33,8 @@ def load_audio(wav: str | None, seconds: float) -> list[bytes]:
         ulaw = pcm16_to_ulaw(pcm)
     else:
         ulaw = silence(int(seconds * 1000))
+    # Keep the line open after the speech so the agent's answer has time to arrive.
+    ulaw += silence(int(tail * 1000))
     frames = [ulaw[i : i + BYTES_PER_FRAME] for i in range(0, len(ulaw), BYTES_PER_FRAME)]
     return [f for f in frames if len(f) == BYTES_PER_FRAME]
 
@@ -105,9 +107,12 @@ async def main() -> None:
     parser.add_argument("--calls", type=int, default=1)
     parser.add_argument("--seconds", type=float, default=3.0, help="silence length without --wav")
     parser.add_argument("--wav", default=None, help="8 kHz mono 16-bit PCM WAV to stream")
+    parser.add_argument(
+        "--tail", type=float, default=8.0, help="seconds of silence streamed after the audio"
+    )
     parser.add_argument("--from-number", default="+34612345678")
     args = parser.parse_args()
-    frames = load_audio(args.wav, args.seconds)
+    frames = load_audio(args.wav, args.seconds, args.tail)
     await asyncio.gather(
         *(one_call(args.url, n, frames, args.from_number) for n in range(args.calls))
     )
