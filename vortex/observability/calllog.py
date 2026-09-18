@@ -107,7 +107,7 @@ class CallLog:
 
 
 def read_recent(path: Path, limit: int = 200) -> list[dict[str, Any]]:
-    """The last ``limit`` events, oldest first. For /calls and the live view."""
+    """Last ``limit`` events, oldest first; zero reads the complete retained history."""
     if not path.exists():
         return []
     with path.open("r", encoding="utf-8") as fh:

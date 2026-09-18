@@ -275,3 +275,235 @@ body,
   font-weight: 600 !important;
   letter-spacing: 0.04em;
 }
+
+/* Public jury overview. Scoped to avoid changing the private ops layout. */
+.jury-shell {
+  width: 100%;
+}
+
+.jury-top {
+  flex-wrap: wrap;
+}
+
+.jury-link {
+  text-decoration: none;
+  color: inherit;
+}
+
+.jury-main {
+  padding: 24px;
+  max-width: 1920px;
+  margin: 0 auto;
+}
+
+.jury-muted {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.jury-title {
+  font-size: 22px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.jury-hero {
+  display: flex;
+  align-items: center;
+  gap: 48px;
+  padding: 12px 0 28px;
+}
+
+.jury-active-count {
+  color: var(--live);
+  font-size: 76px;
+  line-height: 1;
+  font-weight: 600;
+}
+
+.jury-states {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.jury-state {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-top: 3px solid var(--live);
+  border-radius: 6px;
+  padding: 14px;
+  min-width: 0;
+}
+
+.jury-state.state-emergency {
+  border-top-color: var(--bad);
+}
+
+.jury-state.state-finished {
+  border-top-color: var(--ok);
+}
+
+.jury-state-heading,
+.jury-call-meta,
+.jury-bar-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.jury-state-heading {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.jury-state-description {
+  color: var(--muted);
+  font-size: 12px;
+  min-height: 52px;
+  padding-top: 8px;
+}
+
+.jury-state-calls {
+  min-height: 120px;
+  max-height: 330px;
+  overflow-y: auto;
+}
+
+.jury-state-empty {
+  color: var(--muted);
+  border: 1px dashed var(--line);
+  padding: 28px 12px;
+  text-align: center;
+  font-size: 12px;
+}
+
+.jury-call {
+  display: block;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  margin-bottom: 8px;
+  background: var(--bg);
+  overflow-wrap: anywhere;
+}
+
+.jury-call:hover,
+.jury-call:focus-visible {
+  border-color: var(--accent);
+  background: #182033;
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.jury-call-name {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.jury-call-id,
+.jury-call-meta {
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 6px;
+}
+
+.jury-outcome {
+  color: var(--ok);
+  font-size: 12px;
+  margin-top: 8px;
+}
+
+.jury-history {
+  border-top: 1px solid var(--line);
+  margin-top: 32px;
+  padding-top: 24px;
+}
+
+.jury-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin: 18px 0;
+}
+
+.jury-metric-value {
+  font-size: 28px;
+  margin-bottom: 8px;
+  overflow-wrap: anywhere;
+}
+
+.jury-distributions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.jury-bar-row {
+  margin-bottom: 14px;
+  font-size: 13px;
+}
+
+.jury-bar-label {
+  margin-bottom: 6px;
+}
+
+.jury-notice {
+  color: var(--warn);
+  font-size: 12px;
+  margin-top: 12px;
+}
+
+.jury-back {
+  color: var(--accent);
+  display: inline-block;
+  margin-bottom: 24px;
+}
+
+.jury-detail-id {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.jury-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  text-align: center;
+  min-height: 360px;
+  padding: 40px;
+  border: 2px dashed var(--line);
+  border-radius: 8px;
+  margin-top: 24px;
+}
+
+@media (max-width: 1200px) {
+  .jury-states {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 800px) {
+  .jury-states,
+  .jury-metrics,
+  .jury-distributions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .jury-hero {
+    gap: 24px;
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 500px) {
+  .jury-states,
+  .jury-metrics,
+  .jury-distributions {
+    grid-template-columns: 1fr;
+  }
+}

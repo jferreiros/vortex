@@ -14,6 +14,8 @@ from vortex.observability import auth
 from vortex.observability.calllog import read_recent
 from vortex.observability.demo import write_scripted_call
 from vortex.observability.view import CallCard, build_calls, flatten_grouped
+from vortex.observability.wall import build_wall_calls
+from vortex.observability.wall_ui import render_call_placeholder, render_dashboard
 from vortex.settings import REPO_ROOT, get_settings
 
 LINE_URL = os.environ.get("VORTEX_LINE_URL", "http://127.0.0.1:7860").rstrip("/")
@@ -37,12 +39,12 @@ def _log_path() -> Path:
     return get_settings().calls_log_path
 
 
-def _load_events() -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+def _load_events(limit: int = 800) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
     health: dict[str, Any] | None = None
     try:
         health = httpx.get(f"{LINE_URL}/health", timeout=0.35).json()
         grouped = (
-            httpx.get(f"{LINE_URL}/calls", params={"limit": 800}, timeout=0.5)
+            httpx.get(f"{LINE_URL}/calls", params={"limit": limit}, timeout=0.5)
             .json()
             .get("calls", {})
         )
@@ -50,7 +52,7 @@ def _load_events() -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
             return flatten_grouped(grouped), health
     except Exception:
         pass
-    return read_recent(_log_path(), limit=800), health
+    return read_recent(_log_path(), limit=limit), None
 
 
 def _feature(cards: list[CallCard]) -> CallCard | None:
@@ -276,20 +278,39 @@ def _ops_detail(card: CallCard | None) -> None:
 
 
 @ui.page("/wall")
-def wall_page() -> None:
+async def wall_page() -> None:
     _apply_chrome()
     ui.page_title("Vortex · wall")
-    stage = ui.element("div").classes("shell")
+    stage = ui.element("div").classes("shell jury-shell")
 
-    def redraw() -> None:
-        events, health = _load_events()
-        cards = build_calls(events)
+    async def redraw() -> None:
+        # Zero requests the complete retained log, not just the last 800 events.
+        # Blocking HTTP/file reads run off the UI event loop.
+        events, health = await asyncio.to_thread(_load_events, 0)
+        calls = build_wall_calls(events)
         stage.clear()
         with stage:
-            _wall_body(_feature(cards), health is not None)
+            render_dashboard(calls, health is not None)
 
-    redraw()
-    ui.timer(0.4, redraw)
+    await redraw()
+    ui.timer(1.0, redraw)
+
+
+@ui.page("/wall/call")
+async def wall_call_page(call_id: str) -> None:
+    _apply_chrome()
+    ui.page_title("Vortex · call")
+    stage = ui.element("div").classes("shell jury-shell")
+
+    async def redraw() -> None:
+        events, health = await asyncio.to_thread(_load_events, 0)
+        call = next((c for c in build_wall_calls(events) if c.card.call_id == call_id), None)
+        stage.clear()
+        with stage:
+            render_call_placeholder(call_id, call, health is not None)
+
+    await redraw()
+    ui.timer(1.0, redraw)
 
 
 @ui.page("/call/{call_id}")
