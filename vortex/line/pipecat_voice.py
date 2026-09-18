@@ -30,8 +30,6 @@ TODO(line):
 - Confirm the 8 kHz µ-law path: serializer ``twilio_sample_rate=8000`` in, and
   the TTS asked for 8 kHz PCM out (Google LINEAR16 @ 8000, ElevenLabs
   ``pcm_8000``). Check for choppy audio.
-- Decide the idle policy: the platform cuts a call that goes quiet. Keep a
-  user-idle prompt so the agent is never silent for long.
 - Hang up from our side when the agent says goodbye (send EndFrame, let the
   platform close the socket). auto_hang_up stays False: no Twilio account.
 """
@@ -45,9 +43,13 @@ from fastapi import WebSocket
 
 from vortex import tools as registry
 from vortex.conversation.language import DEFAULT_LANGUAGE, detect_language, tts_voice_for
-from vortex.conversation.prompt import GREETING, initial_messages
+from vortex.conversation.prompt import GREETING, idle_prompt_for, initial_messages
 from vortex.conversation.stt_context import stt_context_text, stt_terms
-from vortex.conversation.turns import TurnSettings, default_turn_settings
+from vortex.conversation.turns import (
+    TurnSettings,
+    default_turn_settings,
+    user_turn_strategies,
+)
 from vortex.line.session import CallSession
 
 log = logging.getLogger(__name__)
@@ -75,17 +77,12 @@ async def run_pipecat_call(
 ) -> str:
     from pipecat.adapters.schemas.function_schema import FunctionSchema
     from pipecat.adapters.schemas.tools_schema import ToolsSchema
-    from pipecat.audio.vad.silero import SileroVADAnalyzer
-    from pipecat.audio.vad.vad_analyzer import VADParams
     from pipecat.frames.frames import TTSSpeakFrame
     from pipecat.pipeline.pipeline import Pipeline
     from pipecat.pipeline.runner import PipelineRunner
     from pipecat.pipeline.task import PipelineParams, PipelineTask
     from pipecat.processors.aggregators.llm_context import LLMContext
-    from pipecat.processors.aggregators.llm_response_universal import (
-        LLMContextAggregatorPair,
-        LLMUserAggregatorParams,
-    )
+    from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
     from pipecat.serializers.twilio import TwilioFrameSerializer
     from pipecat.services.llm_service import FunctionCallParams
     from pipecat.services.openai.llm import OpenAILLMService
@@ -155,7 +152,10 @@ async def run_pipecat_call(
     def make_handler(tool_name: str):
         async def handler(params: FunctionCallParams) -> None:
             try:
-                result = await registry.call_tool(tool_name, ctx, dict(params.arguments))
+                # Through the session, not the registry: it remembers what the
+                # end-of-call fallback needs (the last refusal, the last
+                # prepared action) and records the model's own submissions.
+                result = await session.call_tool(tool_name, dict(params.arguments))
                 await params.result_callback(result.model_dump(mode="json"))
             except Exception as exc:  # the model must hear about failures, typed
                 await params.result_callback({"error": f"{type(exc).__name__}: {exc}"})
@@ -180,20 +180,7 @@ async def run_pipecat_call(
         llm.register_function(fn["name"], make_handler(fn["name"]))
 
     context = LLMContext(initial_messages(ctx.now), tools=ToolsSchema(standard_tools=schemas))
-    aggregators = LLMContextAggregatorPair(
-        context,
-        user_params=LLMUserAggregatorParams(
-            vad_analyzer=SileroVADAnalyzer(
-                params=VADParams(
-                    confidence=turns.vad_confidence,
-                    start_secs=turns.vad_start_secs,
-                    stop_secs=turns.vad_stop_secs,
-                    min_volume=turns.vad_min_volume,
-                )
-            ),
-            user_idle_timeout=turns.user_idle_secs,
-        ),
-    )
+    aggregators = LLMContextAggregatorPair(context, user_params=_user_aggregator_params(turns))
 
     stages: list[Any] = [transport.input(), stt]
     if settings.tts_supports_language_switch:
@@ -228,10 +215,9 @@ async def run_pipecat_call(
         ctx.log.event("voice.client_disconnected")
         await task.cancel()
 
-    @aggregators.user().event_handler("on_user_turn_idle")
-    async def _on_user_idle(aggregator: Any, *args: Any) -> None:
-        # TODO(conversation): the "are you still there?" prompt lives here.
-        ctx.log.event("voice.user_idle")
+    aggregators.user().add_event_handler(
+        "on_user_turn_idle", _make_idle_speaker(session, language_state, task)
+    )
 
     runner = PipelineRunner(handle_sigint=False)
     await runner.run(task)
@@ -245,6 +231,35 @@ def _providers(settings: Any) -> dict[str, object]:
         "tts": settings.tts_provider,
         "tts_alt": settings.tts_provider_alt,
     }
+
+
+def _user_aggregator_params(turns: TurnSettings) -> Any:
+    """The user aggregator's params: VAD, idle timeout and the turn strategies.
+
+    In VAD mode the turn strategies must come from the conversation lane, or
+    the aggregator falls back to its defaults, which load the smart-turn v3
+    model and ignore ``enable_interruptions``. In Soniox mode they stay
+    ``None``: the STT service installs ``ExternalUserTurnStrategies`` itself,
+    and a value here would override it and break turn endings.
+
+    Imports pipecat lazily so the server starts without the keys.
+    """
+    from pipecat.audio.vad.silero import SileroVADAnalyzer
+    from pipecat.audio.vad.vad_analyzer import VADParams
+    from pipecat.processors.aggregators.llm_response_universal import LLMUserAggregatorParams
+
+    return LLMUserAggregatorParams(
+        vad_analyzer=SileroVADAnalyzer(
+            params=VADParams(
+                confidence=turns.vad_confidence,
+                start_secs=turns.vad_start_secs,
+                stop_secs=turns.vad_stop_secs,
+                min_volume=turns.vad_min_volume,
+            )
+        ),
+        user_idle_timeout=turns.user_idle_secs,
+        user_turn_strategies=user_turn_strategies(turns),
+    )
 
 
 class _LanguageState:
@@ -432,7 +447,11 @@ def _LanguageWatcher(  # noqa: N802 - factory that returns a processor
         async def _maybe_switch(self, frame: TranscriptionFrame) -> None:
             try:
                 settings = session.settings
-                language = detect_language(frame.text, hint=frame.language)
+                # ``current`` is the detector's memory of the call's language:
+                # without it a short turn with no markers re-detects English.
+                language = detect_language(
+                    frame.text, hint=frame.language, current=self._state.language
+                )
                 if language == self._state.language:
                     return
                 provider = settings.tts_provider_for(language)
@@ -453,6 +472,24 @@ def _LanguageWatcher(  # noqa: N802 - factory that returns a processor
                 log.warning("language switch failed: %s", exc)
 
     return LanguageWatcher()
+
+
+def _make_idle_speaker(session: CallSession, state: _LanguageState, task: Any) -> Any:
+    """The handler the user aggregator fires when the caller goes quiet.
+
+    Speaks ``prompt.idle_prompt_for`` in the language the call is in now — the
+    platform cuts a call that goes quiet, so silence has to answer — and keeps
+    the ``voice.user_idle`` event on the call log. The prompt is read at fire
+    time, so a mid-call language switch moves it, and the TTS router reads the
+    same state, so it comes out on the right voice.
+    """
+    from pipecat.frames.frames import TTSSpeakFrame
+
+    async def _on_user_idle(aggregator: Any, *args: Any) -> None:
+        session.ctx.log.event("voice.user_idle")
+        await task.queue_frames([TTSSpeakFrame(idle_prompt_for(state.language))])
+
+    return _on_user_idle
 
 
 def _CallLogObserver(session: CallSession):  # noqa: N802 - factory that returns an observer

@@ -30,10 +30,12 @@ Local Discord RPC on `127.0.0.1:6463` is Rich Presence, not server admin.
 
 ```bash
 scripts/notify-discord.sh '**eval** 12/17 pass · https://vortex.167.233.80.47.sslip.io/wall'
+scripts/notify-discord.sh --evals     # embed from evals/results/summary.json
 ```
 
 Keep dumps short: score, case id, wall/evals link. Do not paste ops passwords
-or `PLATFORM_API_KEY`.
+or `PLATFORM_API_KEY`. GitHub Actions cannot post here (Discord 403s runner
+IPs); run `--evals` on a laptop or the VPS after `make evals`.
 
 ## Confirm GitHub → Discord
 

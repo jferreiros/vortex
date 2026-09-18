@@ -1,4 +1,4 @@
-.PHONY: install run smoke test call try-api tunnel tail lint fmt board rehearse
+.PHONY: install run smoke test call try-api tunnel tail lint fmt board design-sync rehearse evals evals-logic evals-conversation evals-voice evals-report evals-accept evals-selftest evals-discord
 
 PORT ?= 7860
 BOARD_PORT ?= 8080
@@ -41,11 +41,14 @@ rehearse:         ## text rehearsal of the prompt against the real LLM: ONLY=p1|
 lint:
 	uv run ruff check .
 
+design-sync:      ## copy the design tokens to docs/ (GitHub Pages serves only docs/); see DESIGN.md
+	cp vortex/observability/design.css docs/design.css
+
 fmt:
 	uv run ruff format . && uv run ruff check --fix .
 
 # ---- evals (see docs/evals.md) ---------------------------------------------
-.PHONY: evals evals-logic evals-conversation evals-voice evals-report evals-accept evals-selftest
+.PHONY: evals evals-logic evals-conversation evals-voice evals-report evals-accept evals-selftest evals-discord
 
 evals:            ## layers 1 + 2 + 4, no keys needed; the CI entry point (exit 1 on failure)
 	uv run python -m evals ci
@@ -79,6 +82,9 @@ evals-accept:     ## promote the latest run(s) to evals/baselines/ (LAYER=logic|
 
 evals-selftest:   ## the harness tests itself
 	uv run pytest evals/selftest -q
+
+evals-discord:    ## post the latest summary.json to #github (needs DISCORD_WEBHOOK_URL)
+	scripts/notify-discord.sh --evals
 
 # ---- task board (see docs/tasks.json) --------------------------------------
 .PHONY: tasks
