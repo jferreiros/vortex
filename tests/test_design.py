@@ -1,0 +1,42 @@
+"""The design tokens have one source. docs/ carries a copy because GitHub Pages
+serves only that folder. This test fails when the copy is stale: run
+`make design-sync`. See DESIGN.md."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[1]
+SOURCE = REPO / "vortex" / "observability" / "design.css"
+COPY = REPO / "docs" / "design.css"
+
+
+def test_docs_copy_matches_source() -> None:
+    assert SOURCE.read_text(encoding="utf-8") == COPY.read_text(encoding="utf-8"), (
+        "docs/design.css is stale: run `make design-sync`"
+    )
+
+
+def test_every_design_md_color_is_a_css_token() -> None:
+    """Each colour in DESIGN.md's front matter exists as a CSS custom property."""
+    front = (REPO / "DESIGN.md").read_text(encoding="utf-8").split("---")[1]
+    css = SOURCE.read_text(encoding="utf-8")
+    in_colors = False
+    names: list[str] = []
+    for line in front.splitlines():
+        if line.startswith("colors:"):
+            in_colors = True
+            continue
+        if in_colors and line and not line.startswith(" "):
+            break
+        if in_colors and line.strip():
+            names.append(line.split(":", 1)[0].strip())
+    assert names, "no colors block in DESIGN.md"
+    missing = [n for n in names if f"--{n}:" not in css]
+    assert not missing, f"tokens in DESIGN.md but not in design.css: {missing}"
+
+
+def test_static_pages_load_the_tokens() -> None:
+    for page in ("index.html", "tasks.html"):
+        text = (REPO / "docs" / page).read_text(encoding="utf-8")
+        assert 'href="design.css"' in text, f"docs/{page} does not load design.css"

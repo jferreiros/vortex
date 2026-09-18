@@ -1,0 +1,808 @@
+/*
+ * Vortex design system — the one stylesheet every front end loads first.
+ *
+ * Source of truth: DESIGN.md at the repo root. Tokens here mirror its YAML
+ * front matter one to one. Change a value there, then here, then run
+ * `make design-sync` so docs/design.css matches (tests/test_design.py checks).
+ *
+ * Who loads it:
+ *   - vortex/observability/live.py   (ops board `/` and jury wall `/wall`)
+ *   - vortex/line/server.py          (served at GET /design.css for /mic)
+ *   - evals/common/report.py         (inlined into evals/results/report.html)
+ *   - docs/*.html                    (as docs/design.css, the synced copy)
+ *
+ * Rules in one breath: paper-white canvas, black pills for every action,
+ * hairline cards, one dark surface per page, no shadows, no gradients,
+ * no brand colour. Status uses the traffic-light trio and nothing else.
+ */
+
+@import url("https://fonts.googleapis.com/css2?family=Nunito:wght@500;600&display=swap");
+
+/* ------------------------------------------------------------------ */
+/* Tokens                                                              */
+/* ------------------------------------------------------------------ */
+
+:root {
+  /* colors */
+  --primary: #000000;
+  --on-primary: #ffffff;
+  --ink: #000000;
+  --ink-deep: #090909;
+  --charcoal: #525252;
+  --body: #737373;
+  --mute: #a3a3a3;
+  --canvas: #ffffff;
+  --surface-soft: #fafafa;
+  --surface-card: #ffffff;
+  --hairline: #e5e5e5;
+  --hairline-strong: #d4d4d4;
+  --on-dark: #ffffff;
+  --on-dark-mute: rgba(255, 255, 255, 0.7);
+  --surface-dark: #171717;
+  --focus-ring: rgba(59, 130, 246, 0.5);
+  --link: #000000;
+  --link-mute: #737373;
+  --terminal-red: #ff5f56;
+  --terminal-yellow: #ffbd2e;
+  --terminal-green: #27c93f;
+
+  /* font families */
+  --font-display: "SF Pro Rounded", ui-rounded, "Nunito", system-ui, -apple-system, sans-serif;
+  --font-body: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  /* typography: `font` shorthand values, ready for `font: var(--text-…)` */
+  --text-display-xl: 500 36px/1.11 var(--font-display);
+  --text-display-lg: 500 30px/1.2 var(--font-display);
+  --text-heading-lg: 600 24px/1.33 var(--font-display);
+  --text-heading-md: 500 20px/1.4 var(--font-body);
+  --text-heading-sm: 500 18px/1.56 var(--font-body);
+  --text-body-md: 400 16px/1.5 var(--font-body);
+  --text-body-strong: 500 16px/1.5 var(--font-body);
+  --text-body-sm: 400 14px/1.43 var(--font-body);
+  --text-body-sm-strong: 500 14px/1.43 var(--font-body);
+  --text-caption-sm: 400 12px/1.33 var(--font-body);
+  --text-code-md: 400 16px/1.5 var(--font-mono);
+  --text-code-sm: 400 14px/1.43 var(--font-mono);
+  --text-button-md: 500 14px/1 var(--font-body);
+
+  /* rounded */
+  --rounded-none: 0px;
+  --rounded-sm: 6px;
+  --rounded-md: 8px;
+  --rounded-lg: 12px;
+  --rounded-full: 9999px;
+
+  /* spacing */
+  --space-xxs: 2px;
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 12px;
+  --space-lg: 16px;
+  --space-xl: 24px;
+  --space-xxl: 32px;
+  --space-section: 88px;
+
+  /* layout */
+  --column: 720px;
+  --column-wide: 960px;
+  --nav-height: 56px;
+
+  color-scheme: light;
+}
+
+@media (max-width: 850px) {
+  :root {
+    --space-section: 64px;
+  }
+}
+
+@media (max-width: 640px) {
+  :root {
+    --space-section: 48px;
+    --text-display-xl: 500 28px/1.15 var(--font-display);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Base                                                                */
+/* ------------------------------------------------------------------ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--canvas);
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--canvas);
+  color: var(--ink);
+  font: var(--text-body-md);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3,
+h4,
+p,
+ul,
+ol,
+figure {
+  margin: 0;
+}
+
+h1 {
+  font: var(--text-display-xl);
+}
+
+h2 {
+  font: var(--text-display-lg);
+}
+
+h3 {
+  font: var(--text-heading-lg);
+}
+
+h4 {
+  font: var(--text-heading-md);
+}
+
+p {
+  color: var(--body);
+}
+
+a {
+  color: var(--link);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+code,
+kbd,
+samp {
+  font: var(--text-code-sm);
+}
+
+img,
+svg {
+  max-width: 100%;
+  display: block;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: var(--ink);
+  color: var(--on-primary);
+}
+
+/* ------------------------------------------------------------------ */
+/* Layout                                                              */
+/* ------------------------------------------------------------------ */
+
+.container {
+  max-width: var(--column);
+  margin: 0 auto;
+  padding: 0 var(--space-lg);
+}
+
+.container-wide {
+  max-width: var(--column-wide);
+  margin: 0 auto;
+  padding: 0 var(--space-lg);
+}
+
+.container-full {
+  padding: 0 var(--space-xl);
+}
+
+.section {
+  margin-top: var(--space-section);
+}
+
+.section-head {
+  max-width: 66ch;
+  margin-bottom: var(--space-xl);
+}
+
+.section-head p {
+  margin-top: var(--space-sm);
+}
+
+.hairline {
+  border: 0;
+  border-top: 1px solid var(--hairline);
+  margin: var(--space-xl) 0;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+
+.grow {
+  flex: 1 1 auto;
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+.center {
+  text-align: center;
+}
+
+/* ------------------------------------------------------------------ */
+/* Text roles                                                          */
+/* ------------------------------------------------------------------ */
+
+.display-xl { font: var(--text-display-xl); color: var(--ink); }
+.display-lg { font: var(--text-display-lg); color: var(--ink); }
+.heading-lg { font: var(--text-heading-lg); color: var(--ink); }
+.heading-md { font: var(--text-heading-md); color: var(--ink); }
+.heading-sm { font: var(--text-heading-sm); color: var(--ink); }
+.body-md { font: var(--text-body-md); color: var(--body); }
+.body-strong { font: var(--text-body-strong); color: var(--ink); }
+.body-sm { font: var(--text-body-sm); color: var(--body); }
+.body-sm-strong { font: var(--text-body-sm-strong); color: var(--ink); }
+.caption-sm { font: var(--text-caption-sm); color: var(--body); }
+.code-md { font: var(--text-code-md); color: var(--ink); }
+.code-sm { font: var(--text-code-sm); color: var(--ink); }
+
+/* A section label above a list. body-sm-strong in body grey; no caps, no tracking. */
+.kicker {
+  font: var(--text-body-sm-strong);
+  color: var(--body);
+  margin-bottom: var(--space-md);
+}
+
+.lede {
+  font: var(--text-heading-sm);
+  font-weight: 400;
+  color: var(--body);
+  max-width: 58ch;
+}
+
+.empty {
+  font: var(--text-body-sm);
+  color: var(--mute);
+  padding: var(--space-xl) 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Buttons                                                             */
+/* ------------------------------------------------------------------ */
+
+.button-primary,
+.button-secondary,
+.button-pill-on-dark,
+.button-disabled {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  height: 36px;
+  padding: 8px 20px;
+  border-radius: var(--rounded-full);
+  border: 1px solid transparent;
+  font: var(--text-button-md);
+  text-decoration: none;
+  cursor: pointer;
+  white-space: nowrap;
+  appearance: none;
+}
+
+.button-primary {
+  background: var(--primary);
+  color: var(--on-primary);
+  border-color: var(--primary);
+}
+
+.button-primary:active {
+  background: var(--ink-deep);
+}
+
+.button-secondary {
+  background: var(--canvas);
+  color: var(--ink);
+  border-color: var(--hairline-strong);
+}
+
+.button-secondary:active {
+  border-color: var(--ink);
+}
+
+.button-pill-on-dark {
+  background: var(--canvas);
+  color: var(--ink);
+  border-color: var(--canvas);
+}
+
+.button-disabled,
+.button-primary:disabled,
+.button-secondary:disabled {
+  background: var(--surface-soft);
+  color: var(--mute);
+  border-color: var(--surface-soft);
+  cursor: not-allowed;
+}
+
+/* ------------------------------------------------------------------ */
+/* Inputs                                                              */
+/* ------------------------------------------------------------------ */
+
+.search-pill,
+.text-input {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  border-radius: var(--rounded-full);
+  color: var(--ink);
+  appearance: none;
+  outline: none;
+}
+
+.search-pill {
+  height: 36px;
+  padding: 8px 16px;
+  background: var(--surface-soft);
+  border: 1px solid transparent;
+  font: var(--text-body-sm);
+}
+
+.search-pill:focus,
+.search-pill:focus-within {
+  background: var(--canvas);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.text-input {
+  height: 40px;
+  padding: 8px 16px;
+  background: var(--canvas);
+  border: 1px solid var(--hairline);
+  font: var(--text-body-md);
+}
+
+.text-input:focus,
+.text-input:focus-within {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.text-input::placeholder,
+.search-pill::placeholder {
+  color: var(--mute);
+}
+
+/* ------------------------------------------------------------------ */
+/* Code surfaces                                                       */
+/* ------------------------------------------------------------------ */
+
+.install-snippet {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  min-height: 48px;
+  padding: 12px 20px;
+  background: var(--surface-soft);
+  color: var(--ink);
+  border-radius: var(--rounded-full);
+  font: var(--text-code-md);
+  overflow-wrap: anywhere;
+}
+
+.command-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  background: var(--surface-soft);
+  color: var(--ink);
+  border-radius: var(--rounded-full);
+  font: var(--text-code-sm);
+  white-space: nowrap;
+}
+
+.terminal-card {
+  background: var(--canvas);
+  color: var(--ink);
+  border: 1px solid var(--hairline);
+  border-radius: var(--rounded-lg);
+  padding: var(--space-lg);
+  font: var(--text-code-sm);
+}
+
+.terminal-card .comment {
+  color: var(--mute);
+}
+
+.terminal-traffic-lights {
+  display: flex;
+  gap: var(--space-xs);
+  margin-bottom: var(--space-md);
+}
+
+.terminal-traffic-lights i {
+  width: 12px;
+  height: 12px;
+  border-radius: var(--rounded-full);
+  display: block;
+}
+
+.terminal-traffic-lights i:nth-child(1) { background: var(--terminal-red); }
+.terminal-traffic-lights i:nth-child(2) { background: var(--terminal-yellow); }
+.terminal-traffic-lights i:nth-child(3) { background: var(--terminal-green); }
+
+.terminal-card pre {
+  margin: 0;
+  white-space: pre-wrap;
+  font: inherit;
+}
+
+/* ------------------------------------------------------------------ */
+/* Cards                                                               */
+/* ------------------------------------------------------------------ */
+
+.card {
+  background: var(--surface-card);
+  color: var(--ink);
+  border: 1px solid var(--hairline);
+  border-radius: var(--rounded-lg);
+  padding: var(--space-xxl);
+}
+
+.card-compact {
+  padding: var(--space-lg);
+}
+
+/* The single inverted surface. One per page. */
+.card-dark {
+  background: var(--surface-dark);
+  color: var(--on-dark);
+  border: 1px solid var(--surface-dark);
+  border-radius: var(--rounded-lg);
+  padding: var(--space-xxl);
+}
+
+.card-dark p,
+.card-dark .body,
+.card-dark .caption-sm,
+.card-dark .body-sm {
+  color: var(--on-dark-mute);
+}
+
+.cta-strip-dark {
+  background: var(--surface-dark);
+  color: var(--on-dark);
+  border-radius: var(--rounded-lg);
+  padding: 24px 32px;
+  font: var(--text-heading-lg);
+}
+
+.feature-bullet {
+  display: flex;
+  gap: var(--space-sm);
+  font: var(--text-body-sm);
+  color: var(--charcoal);
+}
+
+.feature-bullet::before {
+  content: "✓";
+  color: var(--ink);
+  flex: 0 0 auto;
+}
+
+.faq-row {
+  padding: var(--space-lg) 0;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.faq-row .q {
+  font: var(--text-heading-sm);
+  color: var(--ink);
+}
+
+.faq-row .a {
+  font: var(--text-body-md);
+  color: var(--body);
+  margin-top: var(--space-xs);
+}
+
+/* Stat tile: a number and its label inside a hairline grid. */
+.stat-grid {
+  display: grid;
+  gap: 1px;
+  background: var(--hairline);
+  border: 1px solid var(--hairline);
+  border-radius: var(--rounded-lg);
+  overflow: hidden;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+}
+
+.stat {
+  background: var(--canvas);
+  padding: var(--space-lg);
+  min-width: 0;
+}
+
+.stat .n {
+  font: var(--text-display-lg);
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.stat .l {
+  font: var(--text-caption-sm);
+  color: var(--body);
+  margin-top: var(--space-xs);
+}
+
+/* Key/value row inside a card or column. */
+.kv {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding: var(--space-sm) 0;
+  border-bottom: 1px solid var(--hairline);
+  font: var(--text-body-sm);
+}
+
+.kv > :first-child {
+  color: var(--body);
+}
+
+.kv > :last-child {
+  color: var(--ink);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+/* ------------------------------------------------------------------ */
+/* Pills and status                                                    */
+/* ------------------------------------------------------------------ */
+
+/* A neutral tag: hairline border, ink text. Not a button. */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--rounded-full);
+  background: var(--canvas);
+  color: var(--ink);
+  font: var(--text-body-sm-strong);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.pill.soft {
+  background: var(--surface-soft);
+  border-color: transparent;
+}
+
+.pill.dark {
+  background: var(--surface-dark);
+  border-color: var(--surface-dark);
+  color: var(--on-dark);
+}
+
+.pill.mute {
+  color: var(--body);
+}
+
+/*
+ * Status dots: the only colour in the system besides black and grey.
+ * They borrow the terminal traffic lights, so they never introduce a hue.
+ *   ok   = green   (submitted, line up, test pass)
+ *   warn = yellow  (refused, escalated, unverified)
+ *   bad  = red     (failed, line down)
+ *   live = black, pulsing (a call in progress)
+ *   off  = grey    (idle, skipped)
+ */
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--rounded-full);
+  background: var(--mute);
+  display: inline-block;
+  flex: 0 0 auto;
+}
+
+.dot.ok { background: var(--terminal-green); }
+.dot.warn { background: var(--terminal-yellow); }
+.dot.bad { background: var(--terminal-red); }
+.dot.off { background: var(--hairline-strong); }
+
+.dot.live {
+  background: var(--ink);
+  animation: ds-pulse 1.2s ease-in-out infinite;
+}
+
+.pill.dark .dot.live {
+  background: var(--on-dark);
+}
+
+@keyframes ds-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dot.live {
+    animation: none;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Navigation and footer                                               */
+/* ------------------------------------------------------------------ */
+
+.primary-nav {
+  display: flex;
+  align-items: center;
+  gap: var(--space-lg);
+  height: var(--nav-height);
+  padding: 0 var(--space-xl);
+  background: var(--canvas);
+  color: var(--ink);
+  border-bottom: 1px solid var(--hairline);
+  font: var(--text-body-sm-strong);
+}
+
+.primary-nav .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font: var(--text-heading-sm);
+  font-weight: 600;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.primary-nav .brand img,
+.brand-mark {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--rounded-full);
+}
+
+.primary-nav a {
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.primary-nav .nav-mute {
+  color: var(--body);
+}
+
+.footer-section {
+  margin-top: var(--space-section);
+  padding: 32px 24px;
+  border-top: 1px solid var(--hairline);
+  font: var(--text-caption-sm);
+  color: var(--body);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm) var(--space-lg);
+  justify-content: center;
+}
+
+.footer-section a {
+  color: var(--body);
+}
+
+/* Inline nav chips, e.g. a sticky section index. Pills, never tabs. */
+.chip-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--rounded-full);
+  background: var(--canvas);
+  color: var(--ink);
+  font: var(--text-body-sm-strong);
+  text-decoration: none;
+  cursor: pointer;
+  white-space: nowrap;
+  appearance: none;
+}
+
+.chip[aria-pressed="true"],
+.chip.on {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--on-primary);
+}
+
+/* ------------------------------------------------------------------ */
+/* Tables                                                              */
+/* ------------------------------------------------------------------ */
+
+table.ds {
+  width: 100%;
+  border-collapse: collapse;
+  font: var(--text-body-sm);
+}
+
+table.ds th,
+table.ds td {
+  padding: var(--space-sm) var(--space-md);
+  border-bottom: 1px solid var(--hairline);
+  text-align: left;
+  vertical-align: top;
+}
+
+table.ds th {
+  font: var(--text-body-sm-strong);
+  color: var(--body);
+}
+
+table.ds td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------------ */
+/* Conversation transcript (wall, ops)                                 */
+/* ------------------------------------------------------------------ */
+
+.turn {
+  max-width: 40ch;
+  margin-bottom: var(--space-md);
+}
+
+.turn.user {
+  margin-left: auto;
+}
+
+.turn .who {
+  font: var(--text-caption-sm);
+  color: var(--body);
+  margin-bottom: var(--space-xs);
+}
+
+.turn .bubble {
+  font: var(--text-body-md);
+  color: var(--ink);
+  background: var(--surface-soft);
+  border-radius: var(--rounded-lg);
+  padding: 10px 14px;
+}
+
+.turn.user .bubble {
+  background: var(--canvas);
+  border: 1px solid var(--hairline);
+}

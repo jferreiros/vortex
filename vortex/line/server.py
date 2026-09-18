@@ -19,7 +19,7 @@ from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse
 
 from vortex.line import twilio
 from vortex.line.session import CallSession
@@ -27,6 +27,7 @@ from vortex.observability.calllog import group_by_call, read_recent
 from vortex.settings import Settings, get_settings
 
 log = logging.getLogger("vortex.line")
+DESIGN_CSS = Path(__file__).resolve().parent.parent / "observability" / "design.css"
 
 
 class HandshakeError(RuntimeError):
@@ -63,6 +64,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def mic() -> str:
         """Talk to the agent from a browser: mic in, agent audio out, Twilio wire."""
         return (Path(__file__).parent / "mic.html").read_text(encoding="utf-8")
+
+    @app.get("/design.css")
+    async def design_css() -> PlainTextResponse:
+        """The design tokens for /mic. One source: vortex/observability/design.css."""
+        return PlainTextResponse(DESIGN_CSS.read_text(encoding="utf-8"), media_type="text/css")
 
     @app.websocket(settings.ws_path)
     async def call_socket(ws: WebSocket) -> None:

@@ -1,22 +1,34 @@
 <!doctype html>
-<html lang="es">
+<html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Vortex — mic test</title>
+<link rel="stylesheet" href="/design.css">
 <style>
-  body { font: 15px system-ui, sans-serif; margin: 2rem auto; max-width: 720px; color: #eee; background: #111; }
-  button { font-size: 1.1rem; padding: .6rem 1.4rem; margin-right: .6rem; border-radius: 8px; border: 0; cursor: pointer; }
-  #call { background: #2f8f4e; color: #fff; } #hang { background: #b33; color: #fff; }
-  #log { white-space: pre-wrap; background: #000; padding: 1rem; border-radius: 8px; min-height: 12rem; font-family: ui-monospace, monospace; font-size: 13px; }
-  .meter { height: 8px; background: #333; border-radius: 4px; margin: .5rem 0 1rem; } .meter > div { height: 100%; width: 0; background: #2f8f4e; border-radius: 4px; }
+  /* Page layout only. Tokens and components come from /design.css (DESIGN.md). */
+  main.container { padding-top: var(--space-section); padding-bottom: var(--space-section); }
+  .lede { margin-top: var(--space-md); }
+  .actions { margin-top: var(--space-xl); }
+  .meter { height: 8px; background: var(--surface-soft); border-radius: var(--rounded-full); margin: var(--space-lg) 0 var(--space-xl); overflow: hidden; }
+  .meter > div { height: 100%; width: 0; background: var(--ink); border-radius: var(--rounded-full); }
+  #log { min-height: 12rem; }
 </style>
 </head>
 <body>
-<h2>Vortex — talk to the agent</h2>
-<p>Speaks the Twilio Media Streams wire to <code id="url"></code>: mic → 8 kHz µ-law → agent; agent audio → speaker.</p>
-<button id="call">Call</button><button id="hang" disabled>Hang up</button>
-<div class="meter"><div id="mic"></div></div>
-<div id="log"></div>
+<main class="container">
+  <h1>Talk to the agent</h1>
+  <p class="lede">Speaks the Twilio Media Streams wire to <code id="url"></code>: mic → 8 kHz µ-law → agent; agent audio → speaker.</p>
+  <div class="row actions">
+    <button id="call" class="button-primary">Call</button>
+    <button id="hang" class="button-secondary" disabled>Hang up</button>
+  </div>
+  <div class="meter"><div id="mic"></div></div>
+  <div class="terminal-card">
+    <div class="terminal-traffic-lights"><i></i><i></i><i></i></div>
+    <pre id="log"></pre>
+  </div>
+</main>
 <script>
 const WS_URL = (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws";
 document.getElementById("url").textContent = WS_URL;
