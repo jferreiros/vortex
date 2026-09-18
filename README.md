@@ -15,9 +15,9 @@
 | vortex/diary/tools.py                |       15 |        0 |    100% |           |
 | vortex/identity/tools.py             |        9 |        0 |    100% |           |
 | vortex/line/pipecat\_voice.py        |       84 |       84 |      0% |    26-210 |
-| vortex/line/server.py                |       59 |       16 |     73% |42-44, 57-58, 66-68, 75-77, 82-87 |
-| vortex/line/session.py               |       62 |        6 |     90% |60, 94, 109-110, 125-126 |
-| vortex/line/stub\_voice.py           |       43 |        7 |     84% | 34, 57-62 |
+| vortex/line/server.py                |       59 |       14 |     76% |42-44, 57-58, 66-68, 75-77, 83, 85-87 |
+| vortex/line/session.py               |       62 |        4 |     94% |60, 94, 109-110 |
+| vortex/line/stub\_voice.py           |       43 |        6 |     86% |34, 57-60, 62 |
 | vortex/line/submit.py                |       47 |       22 |     53% |41, 48-66, 69, 89 |
 | vortex/line/twilio.py                |       77 |        3 |     96% |61, 153, 160 |
 | vortex/line/ulaw.py                  |       49 |       12 |     76% |22, 34-40, 53-56 |
@@ -30,7 +30,7 @@
 | vortex/rules/tools.py                |       11 |        0 |    100% |           |
 | vortex/settings.py                   |       50 |        4 |     92% |69, 72, 77, 80 |
 | vortex/tools.py                      |       51 |        9 |     82% |182, 185-187, 193-195, 197, 210 |
-| **TOTAL**                            | **1780** |  **626** | **65%** |           |
+| **TOTAL**                            | **1780** |  **621** | **65%** |           |
 
 6 empty files skipped.
 
