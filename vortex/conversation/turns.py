@@ -2,23 +2,41 @@
 
 Owner: the conversation lane.
 
-Interruption handling is entirely ours (the platform does no barge-in). The
-VAD decides when the caller starts and stops; ``enable_interruptions`` lets a
-caller talk over the agent while it reads options.
+Interruption handling is entirely ours (the platform does no barge-in).
 
-TODO(conversation):
-- Tune ``vad_stop_secs`` and the Soniox endpoint knobs for Spanish speakers
-  and the 8 kHz line; noise
-  (problem 12) and 8-second silences (problem 13) both live here.
-- Decide whether the model sees every tool at once or a staged subset.
-- Add a user-idle prompt ("¿Sigue ahí?") after N seconds of silence.
+**Where interruptions live in pipecat 1.11.** ``PipelineParams`` no longer has
+``allow_interruptions``: passing it is accepted and silently ignored. The
+switch now belongs to the *user turn strategies* the user aggregator runs
+(``pipecat.turns``). Two paths, chosen by ``soniox_turn_detection``:
+
+- ``True`` (default): Soniox's own endpoint detection ends the turn. The STT
+  service is built with ``vad_force_turn_endpoint=False`` and
+  ``should_interrupt=enable_interruptions``; it then installs
+  ``ExternalUserTurnStrategies(enable_interruptions=...)`` on the aggregator
+  itself through its metadata frame. Nothing else to wire.
+- ``False``: pipecat's VAD starts and ends the turn. Then the aggregator must
+  be given ``user_turn_strategies=user_turn_strategies(settings)`` (below), or
+  it falls back to its defaults, which load the smart-turn v3 model and ignore
+  ``enable_interruptions``.
+
+Either way the line lane passes the strategies, never a ``PipelineParams``
+flag. ``LLMUserAggregatorParams(user_turn_strategies=...)`` is the argument.
+
+Noise (problem 12) and the eight-second silence (problem 13) both live here:
+the VAD thresholds keep a passing bus from becoming a barge-in, and
+``user_idle_secs`` is when the aggregator fires ``on_user_turn_idle`` so the
+agent can ask "are you still there?" (``prompt.idle_prompt_for``) instead of
+letting the platform cut a quiet call.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
-# Every tool in vortex/tools.py plus submit_action. Trim to stage the flow.
+# Every tool in vortex/tools.py plus submit_action. The model sees all of
+# them at once: the flow is short and staging would cost a round trip per
+# stage on a three-minute call.
 DEFAULT_EXPOSED_TOOLS: list[str] = [
     "find_patient",
     "validate_national_id",
@@ -39,29 +57,38 @@ DEFAULT_EXPOSED_TOOLS: list[str] = [
 
 @dataclass(frozen=True)
 class TurnSettings:
+    # The caller may talk over the agent while it reads options (problem 13).
     enable_interruptions: bool = True
+    # In VAD mode, words the caller must say before a barge-in counts. One
+    # word is "uh-huh" or the television; two is a correction.
+    interrupt_min_words: int = 2
     # Noisy-caller settings (problem 12): a higher bar before Silero calls it
-    # speech, so a bus going past does not become a barge-in. Smart-turn v3
-    # (loaded by the user aggregator) then rejects non-turns Silero lets
-    # through. No denoiser in front of STT: Deepgram/AssemblyAI both document
-    # worse WER after suppression, and Soniox v5 is trained for telephony noise.
+    # speech, so a bus going past does not become a barge-in. No denoiser in
+    # front of STT: Deepgram/AssemblyAI both document worse WER after
+    # suppression, and Soniox v5 is trained for telephony noise.
     vad_confidence: float = 0.85
     vad_start_secs: float = 0.3
     vad_stop_secs: float = 0.4
     vad_min_volume: float = 0.7
+    # In VAD mode, seconds of silence after speech before the turn is over.
+    # Longer than the mid-id pause ("one two, three four ... five six").
+    user_speech_timeout_secs: float = 1.2
     # Seconds of caller silence before the agent prompts again. 0 disables.
-    user_idle_secs: float = 8.0
+    # The difficult caller goes quiet for about eight seconds; the platform's
+    # own cut-off for a quiet line is unpublished, so nudge before it could.
+    user_idle_secs: float = 6.0
     exposed_tools: list[str] = field(default_factory=lambda: list(DEFAULT_EXPOSED_TOOLS))
 
     # --- Soniox STT ---------------------------------------------------------
     # Hints, not a lock: stt-rt-v5 still transcribes anything it hears, and with
     # language identification on it tags every token with the language it heard.
-    stt_language_hints: tuple[str, ...] = ("es", "ca")
+    # English first: it is the clinic's default and 69 of 73 public cases.
+    stt_language_hints: tuple[str, ...] = ("en", "es", "ca")
     # True  -> Soniox's own endpoint detection ends the turn (vad_force_turn_endpoint=False)
     # False -> pipecat's VAD ends the turn and finalises Soniox
     soniox_turn_detection: bool = True
     # The three below only bite when soniox_turn_detection is True.
-    # 1500 ms tolerates the pause callers make mid-DNI ("doce, treinta y cuatro...").
+    # 1500 ms tolerates the pause callers make mid-DNI ("twelve, thirty-four ...").
     stt_max_endpoint_delay_ms: int = 1500
     stt_endpoint_sensitivity: float = 0.3
     stt_endpoint_latency_adjustment_level: int = 2
@@ -69,3 +96,38 @@ class TurnSettings:
 
 def default_turn_settings() -> TurnSettings:
     return TurnSettings()
+
+
+def user_turn_strategies(settings: TurnSettings | None = None) -> Any | None:
+    """The pipecat ``UserTurnStrategies`` for these settings, or ``None``.
+
+    ``None`` in Soniox turn-detection mode: the STT service installs
+    ``ExternalUserTurnStrategies`` itself, and a value passed here would
+    override it and break turn endings. In VAD mode it returns a VAD start
+    strategy gated on ``interrupt_min_words`` while the bot speaks, and a
+    speech-timeout stop strategy, both honouring ``enable_interruptions``.
+
+    Imports pipecat lazily so the server and the tests start without it.
+    """
+    turns = settings or default_turn_settings()
+    if turns.soniox_turn_detection:
+        return None
+    from pipecat.turns.user_start import (
+        MinWordsUserTurnStartStrategy,
+        VADUserTurnStartStrategy,
+    )
+    from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
+    from pipecat.turns.user_turn_strategies import UserTurnStrategies
+
+    start: list[Any] = [
+        VADUserTurnStartStrategy(enable_interruptions=turns.enable_interruptions),
+    ]
+    if turns.interrupt_min_words > 1:
+        start.append(
+            MinWordsUserTurnStartStrategy(
+                min_words=turns.interrupt_min_words,
+                enable_interruptions=turns.enable_interruptions,
+            )
+        )
+    stop = [SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=turns.user_speech_timeout_secs)]
+    return UserTurnStrategies(start=start, stop=stop)

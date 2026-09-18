@@ -1,0 +1,112 @@
+# Problem 11: languages. The clinic answers in English; the caller who speaks
+# Spanish or Catalan is the exception. Language constrains the booking only
+# when the caller asks for a doctor they can talk to.
+# The call connects Friday 18 September 2026, 09:00 Europe/Madrid.
+group: languages
+problem: 11
+now: "2026-09-18T09:00:00+02:00"
+
+scenarios:
+  - id: p11.catalan_speaker_wants_a_catalan_doctor
+    caller:
+      - says: "Bon dia. Sóc la Marta Ruiz, nascuda el dotze de març del vuitanta-cinc. Voldria hora amb un metge de capçalera que parli català, si us plau."
+        means: {identify: {name: "Marta Ruiz", date_of_birth: "1985-03-12"}, request: {intent: book, specialty_id: general_practice, language: ca}}
+      - says: "Perfecte, la primera que tingui."
+        means: {accept: true}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00042
+          provider_id: PR02
+          slot: {$earliest_slot: {provider_id: PR02, patient_id: P00042}}
+      privacy_of: [P00042]
+
+  - id: p11.spanish_only_caller_books_general_practice
+    # Public case shape: Spanish throughout, earliest GP, identifies by DNI.
+    caller:
+      - says: "Hola, buenos días. Quería la primera cita libre de medicina general, es para revisar unos análisis."
+        means: {request: {intent: book, specialty_id: general_practice}}
+      - says: "Marta Ruiz López. El DNI es uno dos tres cuatro cinco seis siete ocho zeta."
+        means: {identify: {name: "Marta Ruiz López", national_id: "12345678Z"}}
+      - says: "Vale, esa me va bien. Gracias."
+        means: {accept: true}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00042
+          appointment_type_id: review
+          provider_id: {$earliest_slot: {specialty_id: general_practice, patient_id: P00042, field: provider_id}}
+          slot: {$earliest_slot: {specialty_id: general_practice, patient_id: P00042}}
+          policy_id: sanitas
+      trajectory_contains: [find_patient, find_slots, prepare_booking, submit_action]
+      must_not_call: [build_registration]
+      privacy_of: [P00042]
+      max_tool_calls: 12
+
+  - id: p11.opens_in_english_then_switches_to_spanish
+    # Public case shape: a clumsy English opener, then Spanish for the rest of the call.
+    caller:
+      - says: "Hello... eh... I want... appointment? Sorry."
+        means: {request: {intent: book}}
+      - says: "Perdone, mejor en español. Soy Marta Ruiz García, quiero cita de medicina general, la primera que haya. Mi DNI es ocho siete seis cinco cuatro tres dos uno equis."
+        means: {identify: {name: "Marta Ruiz García", national_id: "87654321X"}, request: {intent: book, specialty_id: general_practice}}
+      - says: "Sí, perfecto, esa. Gracias."
+        means: {accept: true}
+    expect:
+      # Never seen: first_visit, not review.
+      actions:
+        - kind: book
+          patient_id: P00043
+          appointment_type_id: first_visit
+          slot: {$earliest_slot: {specialty_id: general_practice, patient_id: P00043}}
+          policy_id: adeslas
+      must_not_call: [build_registration]
+      privacy_of: [P00043, P00042]
+
+  - id: p11.spanish_speaker_wants_a_spanish_speaking_orthopaedist
+    # Public case shape: "alguien con quien pueda hablar en español" constrains the provider.
+    caller:
+      - says: "Buenos días. Soy Marta Ruiz, del doce de marzo del ochenta y cinco. Necesito traumatología, me duele la rodilla desde hace semanas, y que me atienda alguien con quien pueda hablar en español."
+        means: {identify: {name: "Marta Ruiz", date_of_birth: "1985-03-12"}, request: {intent: book, specialty_id: orthopaedics, language: es}}
+      - says: "La primera que tenga, sí."
+        means: {accept: true}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00042
+          provider_id: PR05
+          slot: {$earliest_slot: {provider_id: PR05, patient_id: P00042}}
+      privacy_of: [P00042]
+
+  - id: p11.catalan_speaker_wants_catalan_physiotherapy
+    # The one physiotherapist speaks Catalan; Sanitas covers him at Sur.
+    caller:
+      - says: "Bon dia. Sóc la Marta Ruiz López, nascuda el dotze de març del vuitanta-cinc. Necessito fisioteràpia i que m'atengui algú amb qui pugui parlar en català."
+        means: {identify: {name: "Marta Ruiz López", date_of_birth: "1985-03-12"}, request: {intent: book, specialty_id: physiotherapy, language: ca}}
+      - says: "D'acord, la primera hora que tingui."
+        means: {accept: true}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00042
+          provider_id: PR06
+          location_id: sur
+          slot: {$earliest_slot: {provider_id: PR06, patient_id: P00042}}
+      privacy_of: [P00042]
+
+  - id: p11.english_caller_never_gets_a_language_filter
+    # The control: an English caller with no language request books any GP.
+    caller:
+      - says: "Hi, good morning. I'd like the earliest General Practice appointment you have, please."
+        means: {request: {intent: book, specialty_id: general_practice}}
+      - says: "Marta Ruiz López, and my phone is six one two, three four five, six seven eight."
+        means: {identify: {name: "Marta Ruiz López", phone: "612345678"}}
+      - says: "Yes, that works. Thank you."
+        means: {accept: true}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00042
+          provider_id: {$earliest_slot: {specialty_id: general_practice, patient_id: P00042, field: provider_id}}
+          slot: {$earliest_slot: {specialty_id: general_practice, patient_id: P00042}}
+      privacy_of: [P00042]

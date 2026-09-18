@@ -161,7 +161,7 @@ def test_service_settings_take_our_shape() -> None:
         endpoint_sensitivity=turns.stt_endpoint_sensitivity,
         endpoint_latency_adjustment_level=turns.stt_endpoint_latency_adjustment_level,
     )
-    assert stt.language_hints == [Language.ES, Language.CA]
+    assert stt.language_hints == [Language.EN, Language.ES, Language.CA]
 
     from vortex.line.pipecat_voice import _llm_extra_body
     from vortex.settings import Settings
@@ -192,16 +192,19 @@ def test_language_switch_picks_the_catalan_voice(voice_settings) -> None:
     settings = voice_settings()  # google on both sides
     assert detect_language("bon dia, voldria una hora", hint=Language.CA) == "ca"
     assert detect_language("buenos días", hint=Language.ES_ES) == "es"
-    # No hint: the marker list carries it.
+    # No hint: the marker vote carries it. Nothing to vote on: English, the default.
     assert detect_language("bon dia, si us plau") == "ca"
-    assert detect_language("") == "es"
+    assert detect_language("") == "en"
 
     voice, language = tts_voice_for("ca", settings)
     assert voice == settings.google_tts_voice_ca
     assert language == Language.CA_ES
+    # Unsupported falls back to English, the clinic's default.
+    from vortex.conversation.language import DEFAULT_GOOGLE_VOICE_EN
+
     voice, language = tts_voice_for("de", settings)
-    assert voice == settings.google_tts_voice_es
-    assert language == Language.ES_ES
+    assert voice == DEFAULT_GOOGLE_VOICE_EN
+    assert language == Language.EN_GB
 
 
 def test_stt_terms_boost_the_clinic_vocabulary() -> None:
@@ -349,10 +352,13 @@ def test_make_tts_builds_the_google_service(voice_settings) -> None:
     settings = voice_settings(GOOGLE_TTS_CREDENTIALS_JSON=fake_service_account_json())
     tts = _make_tts(settings)
 
+    from vortex.conversation.language import DEFAULT_GOOGLE_VOICE_EN
+
     assert isinstance(tts, google_tts.GoogleHttpTTSService)
     assert tts._init_sample_rate == 8000
-    assert tts._settings.voice == settings.google_tts_voice_es
-    assert tts._settings.language == "es-ES"
+    # The call opens in English, the clinic's default; the watcher moves it later.
+    assert tts._settings.voice == DEFAULT_GOOGLE_VOICE_EN
+    assert tts._settings.language == "en-GB"
 
 
 def test_make_tts_builds_the_elevenlabs_service(voice_settings) -> None:
@@ -374,8 +380,9 @@ def test_make_tts_builds_the_elevenlabs_service(voice_settings) -> None:
     assert elevenlabs_tts.output_format_from_sample_rate(8000) == "pcm_8000"
     assert tts._settings.voice == "voice-1"
     assert tts._settings.model == "eleven_flash_v2_5"
-    # A bare "es": the regional code only earns a "not verified" warning.
-    assert tts._settings.language == "es"
+    # A bare code: the regional one only earns a "not verified" warning.
+    # English first; the one multilingual voice id speaks both.
+    assert tts._settings.language == "en"
     # No override -> the service's own origin.
     assert tts._url == "wss://api.elevenlabs.io"
 
@@ -443,9 +450,11 @@ def test_a_mixed_pair_builds_a_router(voice_settings) -> None:
     assert isinstance(alt_filter, FunctionFilter)
     assert isinstance(primary, elevenlabs_tts.ElevenLabsTTSService)
     assert isinstance(alternate, google_tts.GoogleHttpTTSService)
-    # Each service starts on its own Spanish voice; the watcher moves it later.
+    # Each service starts on its own English voice; the watcher moves it later.
+    from vortex.conversation.language import DEFAULT_GOOGLE_VOICE_EN
+
     assert primary._settings.voice == "voice-1"
-    assert alternate._settings.voice == settings.google_tts_voice_es
+    assert alternate._settings.voice == DEFAULT_GOOGLE_VOICE_EN
 
 
 async def test_the_router_sends_each_language_to_one_branch(voice_settings) -> None:
@@ -465,7 +474,7 @@ async def test_the_router_sends_each_language_to_one_branch(voice_settings) -> N
         GOOGLE_TTS_CREDENTIALS_JSON=fake_service_account_json(),
     )
     state = _LanguageState()
-    assert state.language == "es"
+    assert state.language == "en"
 
     (primary_filter, _), (alt_filter, _) = _router_branches(_make_tts_stage(settings, state))
 
