@@ -412,9 +412,34 @@ RESTRICTIONS: list[dict[str, str]] = [
     },
 ]
 
+#: The two plan rules the catalogue cannot express. ``ClinicPlanResponse`` has
+#: no referral or allowance field, so on a live call these reach us only as
+#: ``/availability``'s ``blocked[].restriction``. The fake answers the same way:
+#: a provider these tables stop is listed in ``blocked`` with the restriction
+#: id, and none of their slots are offered.
+#:
+#: A plan that demands its own referral for a specialty, on top of anything the
+#: specialty itself asks. Orthopaedics needs none, so here the plan's rule is
+#: the only one that can bite. A referral on the record for that specialty
+#: satisfies it.
+PLAN_REFERRALS: list[dict[str, str]] = [
+    {
+        "insurer": "mapfre",
+        "specialty_id": "orthopaedics",
+        "restriction": "insurer_referral_required",
+    },
+]
+
+#: A plan a patient has used up for the year. The visits that spent it are not
+#: in ``APPOINTMENTS`` on purpose: the platform's history is older than this
+#: year, so nothing we can read disagrees with the plan's own count.
+EXHAUSTED_ALLOWANCES: list[dict[str, str]] = [
+    {"patient_id": "P00301", "insurer": "caser", "restriction": "allowance_exhausted"},
+]
+
 CLINIC: dict[str, Any] = {
     "clinic_name": "Clínica Arenal (fixtures)",
-    "patient_count": 4,
+    "patient_count": 6,
     "calendar": {
         "starts": "2026-09-07",
         "ends": "2026-10-16",
@@ -563,6 +588,40 @@ PATIENTS: list[dict[str, Any]] = [
         "insurer": "dkv",
         "referrals": ["dermatology"],
         "note": "Fake record. Hard of hearing; speak slowly. Holds a dermatology referral.",
+        "match_score": 1.0,
+        "matched_fields": ["name"],
+    },
+    {
+        # Her plan demands its own referral for orthopaedics (PLAN_REFERRALS).
+        "patient_id": "P00300",
+        "given_name": "Carmen",
+        "first_surname": "Delgado",
+        "second_surname": "Soto",
+        "national_id": "45678912S",
+        "date_of_birth": "1970-05-05",
+        "phone": "611222333",
+        "sex": "F",
+        "has_visited_before": True,
+        "insurer": "mapfre",
+        "referrals": [],
+        "note": "Fake record. Seen once by Dra. Ortiz at Arenal Norte.",
+        "match_score": 1.0,
+        "matched_fields": ["name"],
+    },
+    {
+        # His plan is out of visits for the year (EXHAUSTED_ALLOWANCES).
+        "patient_id": "P00301",
+        "given_name": "Rafael",
+        "first_surname": "Moreno",
+        "second_surname": "Vidal",
+        "national_id": "78912345N",
+        "date_of_birth": "1966-08-14",
+        "phone": "622333444",
+        "sex": "M",
+        "has_visited_before": True,
+        "insurer": "caser",
+        "referrals": [],
+        "note": "Fake record. Regular at Arenal Centro. Prefers mornings.",
         "match_score": 1.0,
         "matched_fields": ["name"],
     },

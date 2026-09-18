@@ -17,16 +17,22 @@ Each returns the one ``DeclineReason`` that names it, which is why the closed
 vocabulary's first eleven values map one-for-one onto the clinic's
 restrictions: there is always a value for the rule that actually bit.
 
-The five insurance refusal shapes of problem 6 are all here, and they are not
-interchangeable:
+The five insurance refusal shapes of problem 6 are not interchangeable, and
+they do not all come from the same place:
 
-===========================  ================================
-plan refuses the specialty   ``specialty_not_covered``
-plan refuses the site        ``location_not_covered``
-provider refuses the plan    ``provider_not_in_network``
-plan demands its own         ``insurer_referral_required``
-plan out of visits this year ``allowance_exhausted``
-===========================  ================================
+===========================  ==============================  ================
+plan refuses the specialty   ``specialty_not_covered``       catalogue, here
+plan refuses the site        ``location_not_covered``        catalogue, here
+provider refuses the plan    ``provider_not_in_network``     catalogue, here
+plan demands its own         ``insurer_referral_required``   ``blocked`` only
+plan out of visits this year ``allowance_exhausted``         ``blocked`` only
+===========================  ==============================  ================
+
+The last two are rules ``/clinic`` has no field for (``ClinicPlanResponse``
+carries no referral flag and no allowance), so nothing here derives them: the
+restriction id ``/availability`` names is the reason, read as-is by
+``rules.tools.check_eligibility``. Deriving them from a count of this year's
+appointments would be a guess, and a guessed reason fails the case.
 
 The order the checks run in is the order the clinic would hit them, widest
 first: an under-14 asking for general practice is an age refusal whatever their
@@ -178,12 +184,12 @@ def check_patient_rules(
     location_id: str | None,
     plan: InsurancePlanRecord | None,
     today: date,
-    visits_this_year: int | None = None,
 ) -> RuleVerdict | None:
     """The rules that bite before any particular doctor is chosen.
 
-    ``None`` means these rules allow it — not that a slot exists, which only
-    ``/availability`` knows.
+    ``None`` means these rules allow it — not that a slot exists, and not that
+    the plan's own referral or allowance rules do, which only ``/availability``
+    knows.
     """
     specialty = next((s for s in catalogue.specialties if s.specialty_id == specialty_id), None)
 
@@ -245,26 +251,9 @@ def check_patient_rules(
                 detail=f"{plan.name} does not cover {specialty_id}{named}",
             )
 
-    # 5. The plan demands its own referral, on top of the specialty's.
-    if plan.referral_required and not holds_referral(patient, specialty_id):
-        return RuleVerdict(
-            reason="insurer_referral_required",
-            detail=f"{plan.name} requires its own referral",
-        )
-
-    # 6. The plan has run out of visits for the year.
-    if (
-        plan.yearly_allowance is not None
-        and visits_this_year is not None
-        and visits_this_year >= plan.yearly_allowance
-    ):
-        return RuleVerdict(
-            reason="allowance_exhausted",
-            detail=(
-                f"{plan.name} allows {plan.yearly_allowance} visits a year; "
-                f"{visits_this_year} are used"
-            ),
-        )
+    # 5 and 6, the plan's own referral and its yearly allowance, are not here:
+    #    the catalogue publishes neither, and ``/availability`` names them in
+    #    ``blocked``. See the module docstring.
     return None
 
 
