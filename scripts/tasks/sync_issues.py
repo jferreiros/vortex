@@ -121,8 +121,10 @@ def body_for(task: dict[str, Any], data: dict[str, Any], numbers: dict[str, int]
     wave = next(w for w in data["waves"] if w["id"] == task["wave"])
     # Bare "#3" would link to issue 3, so problem numbers stay unprefixed.
     problems = ", ".join(str(p) for p in task["problems"]) or "—"
-    if task["points"]:
-        problems += f" · vale {task['points']} pts"
+    if task["weight"]:
+        # weight is per case; a Run All dials four private cases per problem.
+        at_stake = task["weight"] * data.get("cases_per_run", 4)
+        problems += f" · peso {task['weight']}, hasta {at_stake} pts por corrida"
     blocked = ", ".join(f"#{numbers[dep]}" if dep in numbers else dep for dep in task["blocked_by"])
     files = " · ".join(f"`{f}`" for f in task["files"]) or "—"
 
