@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Vortex model bench: every candidate model on the same clinic-call scenarios, every run kept, and the model each role runs with the reason.">
+<title>Vortex bench</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="design.css">
+<style>
+  /* Layout only. Tokens and components come from design.css; see DESIGN.md. */
+  .wrap{max-width:var(--column-wide); margin:0 auto; padding-inline:var(--space-lg); padding-block:0 var(--space-section)}
+  @media (min-width:700px){ .wrap{padding-inline:var(--space-xl)} }
+  h1,h2,h3{text-wrap:balance; margin:0}
+  h1{font:var(--text-display-xl)}
+  h2{font:var(--text-display-lg)}
+  h3{font:var(--text-heading-md)}
+  b{font-weight:500}
+  .eyebrow{font:var(--text-body-sm-strong); color:var(--body)}
+  .masthead{padding-block:var(--space-xxl) var(--space-xl)}
+  .masthead .eyebrow{display:block; margin-bottom:var(--space-lg)}
+  .masthead h1{max-width:20ch}
+  .masthead .lede{max-width:60ch; margin-top:var(--space-lg)}
+  .masthead .stat-grid{margin-top:var(--space-xl)}
+  section{margin-top:var(--space-section); scroll-margin-top:64px}
+  .section-head{margin-bottom:var(--space-lg)}
+  .nav ol{list-style:none; margin:var(--space-lg) 0 0; padding:0; display:flex; flex-wrap:wrap; gap:var(--space-sm) var(--space-lg)}
+  .nav a{font:var(--text-body-sm-strong); color:var(--ink); text-decoration:none}
+  .nav a:hover{text-decoration:underline}
+
+  /* routing: the one dark surface */
+  .routing{display:grid; gap:var(--space-lg)}
+  @media (min-width:760px){ .routing{grid-template-columns:repeat(2,minmax(0,1fr))} }
+  .role{display:grid; gap:var(--space-sm)}
+  .role .r{font:var(--text-caption-sm); color:var(--on-dark-mute)}
+  .role .m{font:var(--text-heading-lg); color:var(--on-dark); overflow-wrap:anywhere}
+  .role .m code{font-family:var(--font-mono); font-size:.85em}
+  .role .why{font:var(--text-body-sm); color:var(--on-dark-mute)}
+  .role .why b{color:var(--on-dark)}
+
+  /* tables */
+  .table-wrap{overflow-x:auto; border:1px solid var(--hairline); border-radius:var(--rounded-lg)}
+  table{width:100%; border-collapse:collapse; font:var(--text-body-sm); min-width:640px}
+  th,td{padding:var(--space-sm) var(--space-md); border-bottom:1px solid var(--hairline); text-align:left; vertical-align:top; white-space:nowrap}
+  tr:last-child td{border-bottom:0}
+  th{font:var(--text-body-sm-strong); color:var(--body); background:var(--surface-soft)}
+  td.num,th.num{text-align:right; font-variant-numeric:tabular-nums}
+  td .sub{display:block; font:var(--text-caption-sm); color:var(--body); white-space:normal}
+  td.cell{text-align:center}
+  td .dot{vertical-align:middle; margin-right:6px}
+  tr.routed td:first-child{border-left:3px solid var(--ink)}
+  .clickable{cursor:pointer}
+  .clickable:hover td{background:var(--surface-soft)}
+  tr.selected td{background:var(--surface-soft)}
+
+  /* trend */
+  .trend{border:1px solid var(--hairline); border-radius:var(--rounded-lg); padding:var(--space-lg); overflow:hidden}
+  .trend svg{width:100%; height:auto; display:block}
+  .trend text{font:var(--text-caption-sm); fill:var(--body)}
+  .trend .axis{stroke:var(--hairline); stroke-width:1}
+  .trend .line{fill:none; stroke:var(--mute); stroke-width:1.5}
+  .trend .line.routed{stroke:var(--ink); stroke-width:2.5}
+  .trend .pt{fill:var(--canvas); stroke:var(--mute); stroke-width:1.5}
+  .trend .pt.routed{stroke:var(--ink)}
+  .trend .label{fill:var(--ink)}
+
+  /* scenarios drill-down */
+  .scenario-detail{white-space:normal; font:var(--text-caption-sm); color:var(--body); max-width:52ch}
+  .legend{display:flex; gap:var(--space-lg); flex-wrap:wrap; font:var(--text-caption-sm); color:var(--body); margin-top:var(--space-sm)}
+  .legend span{display:inline-flex; align-items:center; gap:6px}
+  .muted{color:var(--body)}
+  .note{font:var(--text-body-sm); color:var(--body); margin-top:var(--space-md); max-width:70ch}
+  #status{margin-top:var(--space-lg)}
+  footer{margin-top:var(--space-section); border-top:1px solid var(--hairline); padding-top:var(--space-lg); display:flex; justify-content:space-between; gap:var(--space-md); flex-wrap:wrap; font:var(--text-caption-sm); color:var(--body)}
+  footer a{color:var(--body)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="masthead">
+    <span class="eyebrow">Vortex · evals · layer 5 · the model bench</span>
+    <h1>Which model for which job.</h1>
+    <p class="lede">Every candidate model plays the <b>same clinic-call scenarios</b> through the real system prompt and the real tools, scored by final state like the leaderboard. Every run is kept. The routing below is what the phone line runs today, next to what the numbers say.</p>
+    <div class="stat-grid" id="stats" aria-label="Latest run">
+      <div class="stat"><div class="n" id="s-models">–</div><div class="l">models compared</div></div>
+      <div class="stat"><div class="n" id="s-scenarios">–</div><div class="l">scenarios each</div></div>
+      <div class="stat"><div class="n" id="s-runs">–</div><div class="l">bench runs kept</div></div>
+      <div class="stat"><div class="n" id="s-when">–</div><div class="l" id="s-when-l">latest run</div></div>
+    </div>
+    <nav class="nav" aria-label="Sections">
+      <ol>
+        <li><a href="#routing">Routing</a></li>
+        <li><a href="#matrix">Model matrix</a></li>
+        <li><a href="#problems">Per problem</a></li>
+        <li><a href="#trend">Trend</a></li>
+        <li><a href="#scenarios">Scenarios</a></li>
+        <li><a href="#runs">Every run</a></li>
+        <li><a href="#how">How to run it</a></li>
+      </ol>
+    </nav>
+    <div id="status" class="empty" hidden></div>
+  </header>
+
+  <section id="routing">
+    <div class="section-head">
+      <h2>Routing</h2>
+      <p class="muted">One model per role. The environment decides (<code>LLM_PROVIDER</code>, <code>ARBITER_PROVIDER</code>); the bench recommends. A recommendation is a number to argue with, not an order.</p>
+    </div>
+    <div class="card-dark">
+      <div class="routing" id="routing-body"><span class="body-sm">Loading…</span></div>
+    </div>
+    <p class="note" id="policy"></p>
+  </section>
+
+  <section id="matrix">
+    <div class="section-head">
+      <h2>Model matrix</h2>
+      <p class="muted">Weighted = pass rate with each scenario weighted by its problem's points. p50/p95 = LLM round trip per model call. No submit = the model hung up with nothing submitted. Cut = replies the token cap truncated. Click a row to see its scenarios.</p>
+    </div>
+    <div class="table-wrap"><table id="matrix-table"><thead><tr>
+      <th>model</th><th class="num">pass</th><th class="num">weighted</th><th class="num">p50</th><th class="num">p95</th>
+      <th class="num">tokens in / scenario</th><th class="num">no submit</th><th class="num">cut</th><th class="num">€ / call (list)</th>
+    </tr></thead><tbody><tr><td colspan="9" class="muted">Loading…</td></tr></tbody></table></div>
+    <p class="note" id="latency-note"></p>
+  </section>
+
+  <section id="problems">
+    <div class="section-head">
+      <h2>Per problem</h2>
+      <p class="muted">Passes over scenarios, per problem, per model. Weight in the header is what one passed private case is worth on the leaderboard.</p>
+    </div>
+    <div class="table-wrap"><table id="problems-table"><thead></thead><tbody><tr><td class="muted">Loading…</td></tr></tbody></table></div>
+    <div class="legend"><span><i class="dot ok"></i> every scenario passed</span><span><i class="dot warn"></i> some</span><span><i class="dot bad"></i> none</span><span><i class="dot off"></i> no scenario</span></div>
+  </section>
+
+  <section id="trend">
+    <div class="section-head">
+      <h2>Trend</h2>
+      <p class="muted">Weighted pass rate per model across every published bench run. The heavy line is the model the receptionist runs today.</p>
+    </div>
+    <div class="trend" id="trend-body"><span class="body-sm muted">Loading…</span></div>
+  </section>
+
+  <section id="scenarios">
+    <div class="section-head">
+      <h2>Scenarios</h2>
+      <p class="muted" id="scenarios-lead">Pick a model in the matrix. Every scenario, its status and the first thing the harness had to say.</p>
+    </div>
+    <div class="chip-row" id="model-chips"></div>
+    <div class="table-wrap"><table id="scenarios-table"><thead><tr><th></th><th>scenario</th><th class="num">problem</th><th class="num">rounds</th><th class="num">tokens in</th><th>note</th></tr></thead><tbody><tr><td colspan="6" class="muted">No model selected.</td></tr></tbody></table></div>
+  </section>
+
+  <section id="runs">
+    <div class="section-head">
+      <h2>Every run</h2>
+      <p class="muted">Every layer anyone published, newest first. The JSON has every case and every transcript.</p>
+    </div>
+    <div class="table-wrap"><table id="runs-table"><thead><tr><th>when</th><th>layer</th><th>verdict</th><th>commit</th><th>headline</th><th></th></tr></thead><tbody><tr><td colspan="6" class="muted">Loading…</td></tr></tbody></table></div>
+  </section>
+
+  <section id="how">
+    <div class="section-head">
+      <h2>How to run it</h2>
+    </div>
+    <div class="terminal-card">
+      <div class="terminal-traffic-lights"><i></i><i></i><i></i></div>
+      <pre><span class="comment"># every default model with a key, all scenarios</span>
+make bench
+<span class="comment"># two models, pass^3, one problem</span>
+make bench MODELS=helmcode/qwen3.6,helmcode/deepseek-v4-flash K=3 ONLY=p4.
+<span class="comment"># keep it: push the run to the bench-results branch (this page reads it)</span>
+make bench-publish
+<span class="comment"># tell the team</span>
+make bench-discord</pre>
+    </div>
+    <p class="note">Candidates and prices live in <code>evals/bench/models.yaml</code>. The policy behind the recommendation is in <code>evals/bench/runner.py</code>, function <code>recommend</code>. The GitHub Actions workflow <code>bench</code> runs it on a schedule and on every change to the prompt or the tools. Details: <a href="https://github.com/jferreiros/vortex/blob/main/docs/evals.md">docs/evals.md</a>.</p>
+  </section>
+
+  <footer>
+    <span>Team Vortex · HackSpain 2026</span>
+    <span><a href="index.html">The plan</a> · <a href="tasks.html">Tasks</a> · <a href="https://github.com/jferreiros/vortex/tree/bench-results">bench-results branch</a> · <a href="https://github.com/jferreiros/vortex">Repo</a></span>
+  </footer>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var params = new URLSearchParams(location.search);
+  var REPO = "jferreiros/vortex";
+  var BRANCH = params.get("branch") || "bench-results";
+  var BASE = params.get("src") || ("https://raw.githubusercontent.com/" + REPO + "/" + BRANCH + "/");
+  var BLOB = "https://github.com/" + REPO + "/blob/" + BRANCH + "/";
+
+  var $ = function (id) { return document.getElementById(id); };
+  var esc = function (s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); };
+  var pct = function (x) { return (Math.round((x || 0) * 100)) + "%"; };
+  var ms = function (v) { v = v || 0; return v >= 1000 ? (v / 1000).toFixed(1) + " s" : Math.round(v) + " ms"; };
+  var when = function (iso) { var d = new Date(iso); if (isNaN(d)) return iso || ""; return d.toLocaleString("en-GB", { timeZone: "Europe/Madrid", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }); };
+  var cost = function (m) { if (m.perk) return "perk"; if (m.list_cost_per_call_eur == null) return "n/a"; return m.list_cost_per_call_eur.toFixed(3) + " €"; };
+  var dotFor = function (p, t) { if (!t) return "off"; if (p === t) return "ok"; if (p > 0) return "warn"; return "bad"; };
+  var verdictDot = function (v) { return { PASS: "ok", FAIL: "bad", UNVERIFIED: "warn" }[v] || "off"; };
+
+  function status(text, isError) {
+    var el = $("status");
+    el.hidden = !text;
+    el.textContent = text || "";
+    el.className = isError ? "empty" : "note";
+  }
+
+  function fetchJson(path) {
+    return fetch(BASE + path, { cache: "no-store" }).then(function (r) {
+      if (!r.ok) throw new Error(r.status + " on " + path);
+      return r.json();
+    });
+  }
+
+  // ---- routing ------------------------------------------------------------
+  function renderRouting(entry) {
+    var body = $("routing-body");
+    var routing = (entry && entry.routing) || {};
+    var cur = routing.current || {};
+    var rec = routing.recommended || {};
+    var roles = Object.keys(cur).length ? Object.keys(cur) : Object.keys(rec);
+    if (!roles.length) { body.innerHTML = '<span class="body-sm">No routing in the latest run.</span>'; return; }
+    body.innerHTML = roles.map(function (role) {
+      var now = cur[role] || "?";
+      var r = rec[role];
+      var verdict, why;
+      if (!r) { verdict = "no recommendation"; why = ""; }
+      else if (r.id === now) { verdict = "bench agrees"; why = r.reason; }
+      else { verdict = "bench says <b><code>" + esc(r.id) + "</code></b>"; why = r.reason; }
+      return '<div class="role"><span class="r">' + esc(role) + ' · runs today</span>' +
+        '<span class="m"><code>' + esc(now) + '</code></span>' +
+        '<span class="why">' + verdict + (why ? " · " + esc(why) : "") + (r && r.runner_up ? ' · runner-up <code>' + esc(r.runner_up) + '</code>' : "") + '</span></div>';
+    }).join("");
+  }
+
+  // ---- matrix -------------------------------------------------------------
+  var selectedModel = null;
+  function renderMatrix(entry, routedId) {
+    var tb = $("matrix-table").querySelector("tbody");
+    var models = (entry && entry.models) || [];
+    if (!models.length) { tb.innerHTML = '<tr><td colspan="9" class="muted">No models in the latest run.</td></tr>'; return; }
+    tb.innerHTML = models.map(function (m) {
+      var routed = m.id === routedId ? " routed" : "";
+      if (m.status !== "ran") {
+        return '<tr class="' + routed + '"><td><i class="dot off"></i><b>' + esc(m.id) + '</b><span class="sub">' + esc(m.label || "") + '</span></td>' +
+          '<td colspan="8" class="muted">skipped · ' + esc(m.skip_reason || "") + '</td></tr>';
+      }
+      var d = m.weighted_pass_rate >= 0.8 ? "ok" : (m.weighted_pass_rate >= 0.5 ? "warn" : "bad");
+      return '<tr class="clickable' + routed + '" data-model="' + esc(m.id) + '">' +
+        '<td><i class="dot ' + d + '"></i><b>' + esc(m.id) + '</b><span class="sub">' + esc(m.label || "") + (routed ? " · runs the receptionist today" : "") + '</span></td>' +
+        '<td class="num">' + m.pass + "/" + m.scenarios + " (" + pct(m.pass_rate) + ")</td>" +
+        '<td class="num"><b>' + pct(m.weighted_pass_rate) + "</b></td>" +
+        '<td class="num">' + ms(m.llm_p50_ms) + "</td>" +
+        '<td class="num">' + ms(m.llm_p95_ms) + "</td>" +
+        '<td class="num">' + (m.tokens_in_per_scenario || 0).toLocaleString("en-GB") + "</td>" +
+        '<td class="num">' + pct(m.fallback_rate) + "</td>" +
+        '<td class="num">' + (m.cut_by_max_tokens || 0) + "</td>" +
+        '<td class="num">' + esc(cost(m)) + "</td></tr>";
+    }).join("");
+    Array.prototype.forEach.call(tb.querySelectorAll("tr.clickable"), function (tr) {
+      tr.addEventListener("click", function () { selectModel(tr.getAttribute("data-model")); location.hash = "scenarios"; });
+    });
+  }
+
+  // ---- per problem --------------------------------------------------------
+  function renderProblems(entry) {
+    var table = $("problems-table");
+    var models = ((entry && entry.models) || []).filter(function (m) { return m.status === "ran"; });
+    var problems = {};
+    models.forEach(function (m) { Object.keys(m.by_problem || {}).forEach(function (p) { problems[p] = m.by_problem[p].weight; }); });
+    var keys = Object.keys(problems).sort(function (a, b) { return +a - +b; });
+    if (!models.length || !keys.length) { table.querySelector("thead").innerHTML = ""; table.querySelector("tbody").innerHTML = '<tr><td class="muted">Nothing ran.</td></tr>'; return; }
+    table.querySelector("thead").innerHTML = "<tr><th>model</th>" + keys.map(function (p) { return '<th class="cell">p' + esc(p) + '<span class="sub">w' + esc(problems[p]) + "</span></th>"; }).join("") + "</tr>";
+    table.querySelector("tbody").innerHTML = models.map(function (m) {
+      return "<tr><td><b>" + esc(m.id) + "</b></td>" + keys.map(function (p) {
+        var row = (m.by_problem || {})[p];
+        if (!row) return '<td class="cell"><i class="dot off"></i></td>';
+        return '<td class="cell"><i class="dot ' + dotFor(row.pass, row.total) + '"></i>' + row.pass + "/" + row.total + "</td>";
+      }).join("") + "</tr>";
+    }).join("");
+  }
+
+  // ---- trend --------------------------------------------------------------
+  function renderTrend(benchRuns, routedId) {
+    var box = $("trend-body");
+    var runs = benchRuns.slice().reverse(); // oldest first
+    var series = {};
+    runs.forEach(function (r, i) {
+      (r.models || []).forEach(function (m) {
+        if (m.status !== "ran") return;
+        (series[m.id] = series[m.id] || []).push({ i: i, y: m.weighted_pass_rate, when: r.started_at, sha: r.sha });
+      });
+    });
+    var ids = Object.keys(series);
+    if (!ids.length) { box.innerHTML = '<span class="body-sm muted">No bench run yet.</span>'; return; }
+    var W = 960, H = 300, L = 44, R = 200, T = 16, B = 40;
+    var n = Math.max(runs.length - 1, 1);
+    var x = function (i) { return L + (i / n) * (W - L - R); };
+    var y = function (v) { return T + (1 - v) * (H - T - B); };
+    var svg = '<svg viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="Weighted pass rate per model over runs">';
+    [0, 0.25, 0.5, 0.75, 1].forEach(function (v) {
+      svg += '<line class="axis" x1="' + L + '" x2="' + (W - R) + '" y1="' + y(v) + '" y2="' + y(v) + '"/>';
+      svg += '<text x="' + (L - 8) + '" y="' + (y(v) + 4) + '" text-anchor="end">' + Math.round(v * 100) + "%</text>";
+    });
+    runs.forEach(function (r, i) {
+      if (runs.length > 12 && i % Math.ceil(runs.length / 12) !== 0 && i !== runs.length - 1) return;
+      svg += '<text x="' + x(i) + '" y="' + (H - B + 18) + '" text-anchor="middle">' + esc(when(r.started_at)) + "</text>";
+      svg += '<text x="' + x(i) + '" y="' + (H - B + 32) + '" text-anchor="middle" class="mono">' + esc((r.sha || "").slice(0, 7)) + "</text>";
+    });
+    var dashes = ["", "6 4", "2 3", "10 4 2 4", "4 2"];
+    var labelYs = [];
+    ids.sort(function (a, b) { var la = series[a][series[a].length - 1].y, lb = series[b][series[b].length - 1].y; return lb - la; });
+    ids.forEach(function (id, k) {
+      var pts = series[id];
+      var routed = id === routedId;
+      var d = pts.map(function (p, j) { return (j ? "L" : "M") + x(p.i).toFixed(1) + " " + y(p.y).toFixed(1); }).join(" ");
+      svg += '<path class="line' + (routed ? " routed" : "") + '" d="' + d + '"' + (routed ? "" : ' stroke-dasharray="' + dashes[k % dashes.length] + '"') + "/>";
+      pts.forEach(function (p) { svg += '<circle class="pt' + (routed ? " routed" : "") + '" r="3.5" cx="' + x(p.i).toFixed(1) + '" cy="' + y(p.y).toFixed(1) + '"><title>' + esc(id) + " · " + esc(when(p.when)) + " · " + pct(p.y) + "</title></circle>"; });
+      var last = pts[pts.length - 1];
+      var ly = y(last.y);
+      while (labelYs.some(function (v) { return Math.abs(v - ly) < 14; })) ly += 14;
+      labelYs.push(ly);
+      svg += '<text class="label" x="' + (W - R + 10) + '" y="' + (ly + 4) + '">' + esc(id) + " " + pct(last.y) + "</text>";
+    });
+    svg += "</svg>";
+    box.innerHTML = svg;
+  }
+
+  // ---- scenarios ----------------------------------------------------------
+  var latestFull = null;
+  function selectModel(id) {
+    selectedModel = id;
+    Array.prototype.forEach.call(document.querySelectorAll("#matrix-table tr[data-model]"), function (tr) { tr.classList.toggle("selected", tr.getAttribute("data-model") === id); });
+    Array.prototype.forEach.call(document.querySelectorAll("#model-chips .chip"), function (c) { c.setAttribute("aria-pressed", c.getAttribute("data-model") === id ? "true" : "false"); });
+    var tb = $("scenarios-table").querySelector("tbody");
+    if (!latestFull) { tb.innerHTML = '<tr><td colspan="6" class="muted">Loading the run…</td></tr>'; return; }
+    var cases = (latestFull.cases || []).filter(function (c) { return c.group === id && c.status !== "skipped"; });
+    $("scenarios-lead").textContent = id + " · " + cases.length + " scenarios";
+    if (!cases.length) { tb.innerHTML = '<tr><td colspan="6" class="muted">No scenarios for this model.</td></tr>'; return; }
+    tb.innerHTML = cases.map(function (c) {
+      var d = { pass: "ok", fail: "bad", error: "bad", unverified: "warn" }[c.status] || "off";
+      var ex = c.extra || {};
+      var note = (c.details || [])[0] || "";
+      var scn = ex.scenario || c.id.split("::")[1] || c.id;
+      return "<tr><td><i class=\"dot " + d + "\"></i>" + esc(c.status) + "</td><td><code>" + esc(scn) + "</code><span class=\"sub\">" + esc(ex.scenario_group || "") + "</span></td>" +
+        '<td class="num">' + esc(c.problem || "") + "</td>" +
+        '<td class="num">' + ((ex.llm_ms || []).length) + "</td>" +
+        '<td class="num">' + (((ex.tokens || {}).in) || 0).toLocaleString("en-GB") + "</td>" +
+        '<td><span class="scenario-detail">' + esc(note) + "</span></td></tr>";
+    }).join("");
+  }
+  function renderChips(entry) {
+    var models = ((entry && entry.models) || []).filter(function (m) { return m.status === "ran"; });
+    $("model-chips").innerHTML = models.map(function (m) { return '<button type="button" class="chip" data-model="' + esc(m.id) + '" aria-pressed="false">' + esc(m.id) + "</button>"; }).join("");
+    Array.prototype.forEach.call(document.querySelectorAll("#model-chips .chip"), function (c) { c.addEventListener("click", function () { selectModel(c.getAttribute("data-model")); }); });
+  }
+
+  // ---- every run ----------------------------------------------------------
+  function headline(r) {
+    if (r.layer === "bench") {
+      var ran = (r.models || []).filter(function (m) { return m.status === "ran"; });
+      if (!ran.length) return "nothing ran";
+      var best = ran.slice().sort(function (a, b) { return b.weighted_pass_rate - a.weighted_pass_rate; })[0];
+      return ran.length + " models · best " + best.id + " " + pct(best.weighted_pass_rate) + (r.mode && r.mode.repeat > 1 ? " · pass^" + r.mode.repeat : "");
+    }
+    var t = r.totals || {};
+    var bits = [(t.pass || 0) - (t.hollow || 0) + " pass"];
+    if (t.hollow) bits.push(t.hollow + " hollow");
+    if (t.fail) bits.push(t.fail + " fail");
+    if (t.error) bits.push(t.error + " error");
+    if (t.unverified) bits.push(t.unverified + " unverified");
+    if (r.mode && r.mode.brain) bits.push("brain " + r.mode.brain + (r.mode.model ? " " + r.mode.model : ""));
+    return bits.join(" · ");
+  }
+  function renderRuns(index) {
+    var tb = $("runs-table").querySelector("tbody");
+    var runs = (index.runs || []).slice(0, 200);
+    if (!runs.length) { tb.innerHTML = '<tr><td colspan="6" class="muted">Nothing published yet.</td></tr>'; return; }
+    tb.innerHTML = runs.map(function (r) {
+      return "<tr><td>" + esc(when(r.started_at)) + "</td><td>" + esc(r.layer) + '</td><td><i class="dot ' + verdictDot(r.verdict) + '"></i>' + esc(r.verdict) + "</td>" +
+        '<td><code>' + esc((r.sha || "").slice(0, 7)) + "</code>" + (r.dirty === "yes" ? '<span class="sub">dirty tree</span>' : "") + "</td>" +
+        "<td>" + esc(headline(r)) + "</td>" +
+        '<td><a href="' + BLOB + esc(r.path) + '">json</a></td></tr>';
+    }).join("");
+  }
+
+  // ---- boot ---------------------------------------------------------------
+  fetchJson("index.json").then(function (index) {
+    var runs = index.runs || [];
+    var bench = runs.filter(function (r) { return r.layer === "bench"; });
+    var latest = bench[0];
+    $("s-runs").textContent = bench.length;
+    renderRuns(index);
+    if (!latest) {
+      status("No bench run published yet. Run `make bench` and then `make bench-publish`.", false);
+      renderRouting(null); renderMatrix(null); renderProblems(null); renderTrend([], null); renderChips(null);
+      return;
+    }
+    var routedId = (latest.routing && latest.routing.current && latest.routing.current.receptionist) || null;
+    var ran = (latest.models || []).filter(function (m) { return m.status === "ran"; });
+    $("s-models").textContent = ran.length;
+    $("s-scenarios").textContent = (latest.mode && latest.mode.scenarios) || (ran[0] && ran[0].scenarios) || "–";
+    $("s-when").textContent = when(latest.started_at);
+    $("s-when-l").textContent = "latest run · " + (latest.sha || "").slice(0, 7);
+    renderRouting(latest);
+    var pol = latest.routing && latest.routing.recommended;
+    $("policy").textContent = pol ? "Policy: receptionist = highest weighted pass rate with LLM p95 under the cap, ties to the lower p50 then the lower list price. Arbiter = highest weighted pass rate, latency ignored." : "";
+    renderMatrix(latest, routedId);
+    renderProblems(latest);
+    renderTrend(bench, routedId);
+    renderChips(latest);
+    return fetchJson(latest.path).then(function (full) {
+      latestFull = full;
+      $("latency-note").textContent = (full.summary && full.summary.latency_note) || "";
+      selectModel(routedId && ran.some(function (m) { return m.id === routedId; }) ? routedId : (ran[0] && ran[0].id));
+    });
+  }).catch(function (err) {
+    status("Could not load the results branch (" + err.message + "). The page reads " + BASE + "index.json; publish a run with `make bench-publish`.", true);
+    renderRouting(null); renderMatrix(null); renderProblems(null); renderTrend([], null);
+  });
+})();
+</script>
+</body>
+</html>
