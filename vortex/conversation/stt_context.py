@@ -72,6 +72,24 @@ def _fallback_terms() -> list[str]:
     return terms
 
 
+# Free-text context for Soniox (up to 8k tokens). The shape of a Spanish
+# national id and the check alphabet bias digit and letter recognition; the
+# letters I, O, U and Ñ never occur, which the identity lane also enforces.
+STT_CONTEXT_TEXT = (
+    "Llamada telefónica a la recepción de una clínica en España para pedir, "
+    "cambiar o anular una cita médica. El paciente dice su nombre, apellidos, "
+    "fecha de nacimiento, teléfono y su DNI o NIE. Un DNI son ocho dígitos "
+    "seguidos de una letra de control; un NIE empieza por X, Y o Z, seguido de "
+    "siete dígitos y una letra. Letras de control posibles: "
+    "T R W A G M Y F P D X B N J Z S Q V H L C K E. "
+    "Los números se dictan a menudo en pares: doce, treinta y cuatro, cincuenta y seis."
+)
+
+
+def stt_context_text() -> str:
+    return STT_CONTEXT_TEXT
+
+
 def stt_terms(ctx: Any) -> list[str]:
     """Clinic vocabulary to boost, deduplicated and order-stable. Never raises."""
     terms = list(SPOKEN_TERMS)
