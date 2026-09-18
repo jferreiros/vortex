@@ -64,6 +64,9 @@ evals-corpus:     ## layer 4: the organisers' 73 published cases and the surface
 evals-coverage:   ## where the 196 points are, and what the public cases never show
 	uv run python -m evals corpus --coverage
 
+evals-verify:     ## do the published answers exist in the API we snapshotted?
+	uv run python -m evals corpus --verify-roster --only world
+
 evals-fetch:      ## refresh evals/corpus/cases/public-cases.json (run it each morning)
 	uv run python -m evals.corpus.fetch
 
