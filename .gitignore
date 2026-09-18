@@ -30,6 +30,8 @@ venv/
 logs/*
 !logs/.gitkeep
 api_results/
+database/processed/*
+!database/processed/.gitkeep
 
 # Coverage (CI job `coverage`, and local `pytest --cov`)
 .coverage
