@@ -29,9 +29,178 @@ from vortex.contract import (
     AvailabilityResponse,
     BlockedProvider,
     Catalogue,
+    LeaveRecord,
+    OpeningHours,
     PatientRecord,
     Slot,
 )
+
+WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+
+
+def _adapt_slot(raw: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "start": raw["start_time"],
+        "provider_id": raw["provider_id"],
+        "location_id": raw["location_id"],
+        "appointment_type_id": raw["appointment_type_id"],
+        "duration_minutes": raw["duration_minutes"],
+    }
+
+
+def _adapt_appointment_type(raw: dict[str, Any]) -> dict[str, Any]:
+    requirement = raw.get("new_patient_requirement")
+    for_new = {"new_only": True, "existing_only": False}.get(requirement)
+    return {
+        "appointment_type_id": raw["id"],
+        "name": raw["name"],
+        "specialty_id": raw.get("specialty_id"),
+        "duration_minutes": raw["duration_minutes"],
+        "for_new_patients": for_new,
+        "guidance": raw.get("guidance", ""),
+    }
+
+
+def _adapt_blocked(raw: dict[str, Any]) -> dict[str, Any]:
+    return {"provider_id": raw["provider_id"], "reason": raw["restriction"]}
+
+
+def _adapt_appointment(raw: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "appointment_id": raw["appointment_id"],
+        "patient_id": raw["patient_id"],
+        "provider_id": raw["provider_id"],
+        "location_id": raw["location_id"],
+        "appointment_type_id": raw["appointment_type_id"],
+        "start": raw["start_time"],
+    }
+
+
+def _adapt_hours(raw_hours: list[dict[str, Any]]) -> list[OpeningHours]:
+    """One ``OpeningHours`` per interval; a lunch-closed day yields two."""
+    hours: list[OpeningHours] = []
+    for day in raw_hours:
+        weekday = WEEKDAYS.index(day["weekday"].lower())
+        for interval in day["intervals"]:
+            opens_s, closes_s = interval.split("–")
+            hours.append(
+                OpeningHours(
+                    weekday=weekday,
+                    opens=time.fromisoformat(opens_s.strip()),
+                    closes=time.fromisoformat(closes_s.strip()),
+                )
+            )
+    return hours
+
+
+def _adapt_catalogue(raw: dict[str, Any]) -> dict[str, Any]:
+    """Raw ``GET /api/v1/clinic`` -> the shape ``Catalogue`` expects.
+
+    The raw API cross-references providers/locations/appointment types by
+    *name*; the contract wants ids. Build id lookups from each list's own
+    ``id``/``name`` pair first, then rewrite every cross-reference through them.
+    """
+    provider_by_name = {p["name"]: p["id"] for p in raw["providers"]}
+    location_by_name = {loc["name"]: loc["id"] for loc in raw["locations"]}
+    appt_type_by_name = {a["name"]: a["id"] for a in raw["appointment_types"]}
+    specialty_by_name = {s["name"]: s["id"] for s in raw["specialties"]}
+
+    providers = []
+    for p in raw["providers"]:
+        leave_raw = p.get("leave")
+        providers.append(
+            {
+                "provider_id": p["id"],
+                "name": p["name"],
+                "specialty_id": p["specialty_id"],
+                "languages": p.get("languages", []),
+                "appointment_type_ids": [
+                    appt_type_by_name.get(n, n) for n in p.get("appointment_type_names", [])
+                ],
+                "location_ids": [
+                    location_by_name.get(n, n) for n in p.get("location_names", [])
+                ],
+                "insurer_ids_accepted": [i["id"] for i in p.get("accepted_insurers", [])],
+                "insurer_ids_refused": [i["id"] for i in p.get("refused_insurers", [])],
+                "leave": (
+                    [
+                        LeaveRecord(
+                            date_from=leave_raw["start"],
+                            date_to=leave_raw["end"],
+                            reason=leave_raw.get("reason", ""),
+                        )
+                    ]
+                    if leave_raw
+                    else []
+                ),
+            }
+        )
+
+    locations = []
+    for loc in raw["locations"]:
+        locations.append(
+            {
+                "location_id": loc["id"],
+                "name": loc["name"],
+                "address": loc.get("address", ""),
+                "latitude": loc.get("latitude"),
+                "longitude": loc.get("longitude"),
+                "hours": _adapt_hours(loc.get("hours", [])),
+                "provider_ids": [
+                    provider_by_name.get(n, n) for n in loc.get("provider_names", [])
+                ],
+                "insurer_ids": [i["id"] for i in loc.get("covered_by", [])],
+            }
+        )
+
+    specialties = []
+    for s in raw["specialties"]:
+        specialties.append(
+            {
+                "specialty_id": s["id"],
+                "name": s["name"],
+                "min_age_months": s.get("min_age_months"),
+                "max_age_months": s.get("max_age_months"),
+                "referral_required": s.get("referral_required", False),
+                "insurer_ids": [i["id"] for i in s.get("covered_by", [])],
+            }
+        )
+
+    appointment_types = [_adapt_appointment_type(a) for a in raw["appointment_types"]]
+
+    insurance_plans = []
+    for pl in raw["plans"]:
+        insurance_plans.append(
+            {
+                "insurer_id": pl["id"],
+                "name": pl["name"],
+                "specialty_ids": [
+                    specialty_by_name.get(n, n) for n in pl.get("covered_specialty_names", [])
+                ],
+                "location_ids": [
+                    location_by_name.get(n, n) for n in pl.get("covered_location_names", [])
+                ],
+                "provider_ids": [provider_by_name.get(n, n) for n in pl.get("accepted_by", [])],
+            }
+        )
+
+    restrictions = [
+        {"rule_id": r["id"], "reason": r["id"], "description": r["title"]}
+        for r in raw.get("restrictions", [])
+    ]
+
+    calendar = raw.get("calendar", {})
+    return {
+        "locations": locations,
+        "providers": providers,
+        "specialties": specialties,
+        "appointment_types": appointment_types,
+        "insurance_plans": insurance_plans,
+        "restrictions": restrictions,
+        "bookable_from": calendar.get("starts"),
+        "bookable_to": calendar.get("ends"),
+        "closure_days": calendar.get("closure_days", []),
+    }
 
 
 class ClinicApi(Protocol):
@@ -106,7 +275,7 @@ class ClinicClient:
         async with self._catalogue_lock:
             if self._catalogue is None:
                 data = await self._get("/api/v1/clinic")
-                self._catalogue = Catalogue.model_validate(data)
+                self._catalogue = Catalogue.model_validate(_adapt_catalogue(data))
             return self._catalogue
 
     async def directory(
@@ -124,7 +293,7 @@ class ClinicClient:
             "date_of_birth": date_of_birth.isoformat() if date_of_birth else None,
         }
         data = await self._get("/api/v1/directory", params)
-        items = data.get("patients", data) if isinstance(data, dict) else data
+        items = data.get("matches", data) if isinstance(data, dict) else data
         return [PatientRecord.model_validate(item) for item in items]
 
     async def availability(
@@ -149,12 +318,21 @@ class ClinicClient:
         if insurer:
             params["insurer"] = insurer  # httpx repeats list params: ?insurer=a&insurer=b
         data = await self._get("/api/v1/availability", params)
-        return AvailabilityResponse.model_validate(data)
+        adapted = {
+            "slots": [_adapt_slot(s) for s in data.get("slots", [])],
+            "blocked": [_adapt_blocked(b) for b in data.get("blocked", [])],
+            "appointment_type": (
+                _adapt_appointment_type(data["appointment_type"])
+                if data.get("appointment_type")
+                else None
+            ),
+        }
+        return AvailabilityResponse.model_validate(adapted)
 
     async def appointments(self, patient_id: str, *, when: str = "upcoming") -> list[Appointment]:
         data = await self._get(f"/api/v1/patients/{patient_id}/appointments", {"when": when})
         items = data.get("appointments", data) if isinstance(data, dict) else data
-        return [Appointment.model_validate(item) for item in items]
+        return [Appointment.model_validate(_adapt_appointment(item)) for item in items]
 
     async def aclose(self) -> None:
         await self._http.aclose()
