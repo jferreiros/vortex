@@ -556,11 +556,7 @@ def _ops_detail(card: CallCard | None) -> None:
 def _ops_tool_step(card: CallCard, item: dict[str, Any]) -> None:
     called, res = item["called"], item["result"]
     name = (called or res or {}).get("tool", "tool")
-    status = (
-        "ok"
-        if res and res.get("kind") == "tool.returned"
-        else ("bad" if res else "running")
-    )
+    status = "ok" if res and res.get("kind") == "tool.returned" else ("bad" if res else "running")
     args = (called or {}).get("args")
     result = (res or {}).get("result")
     with ui.element("div").classes("step"):
