@@ -498,6 +498,25 @@ PATIENTS: list[dict[str, Any]] = [
         "match_score": 1.0,
         "matched_fields": ["name"],
     },
+    {
+        # Problem 17 (second policy): ASISA never covers Sur, the physiotherapist's
+        # only site. The API carries one plan per patient; a second one exists only
+        # if the caller names it, which is what this fixture is here to exercise.
+        "patient_id": "P00250",
+        "given_name": "Elena",
+        "first_surname": "Molina",
+        "second_surname": "Torres",
+        "national_id": "23456789D",
+        "date_of_birth": "1979-05-04",
+        "phone": "677111222",
+        "sex": "F",
+        "has_visited_before": True,
+        "insurer": "asisa",
+        "referrals": [],
+        "note": "Fake record. On ASISA only on file; holds Sanitas too but never volunteers it.",
+        "match_score": 1.0,
+        "matched_fields": ["name"],
+    },
 ]
 
 #: ``AppointmentOut``. The platform sends no status: ``when=upcoming`` is the
