@@ -21,6 +21,9 @@ mode="text"
 if [[ "${1:-}" == "--evals" ]]; then
   mode="evals"
   shift
+elif [[ "${1:-}" == "--bench" ]]; then
+  mode="bench"
+  shift
 elif [[ "${1:-}" == "--json" ]]; then
   mode="json"
   shift
@@ -38,19 +41,17 @@ from pathlib import Path
 url = os.environ["DISCORD_WEBHOOK_URL"]
 mode = os.environ["MODE"]
 root = Path(os.environ["ROOT"])
-if mode == "evals":
-    payload = json.loads(
-        subprocess.check_output(
-            ["uv", "run", "python", "-m", "evals", "discord"],
-            cwd=root,
-        )
-    )
+if mode in ("evals", "bench"):
+    args = ["uv", "run", "python", "-m", "evals", "discord"]
+    if mode == "bench":
+        args.append("--bench")
+    payload = json.loads(subprocess.check_output(args, cwd=root))
 elif mode == "json":
     payload = json.loads(sys.stdin.read())
 else:
     text = os.environ.get("TEXT") or ""
     if not text:
-        sys.stderr.write("usage: notify-discord.sh [--evals | --json | <message>]\n")
+        sys.stderr.write("usage: notify-discord.sh [--evals | --bench | --json | <message>]\n")
         sys.exit(2)
     payload = {"username": "Vortex", "content": text[:1900]}
 

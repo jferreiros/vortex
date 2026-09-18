@@ -10,6 +10,7 @@ layers, each runnable on its own.
 | 1 `evals/logic` | one tool, or a flow of tools, through `vortex/tools.py` | nothing | 0 | every PR |
 | 2 `evals/conversation` | a scripted caller, turn by turn, as text | nothing (`rules` brain); `OPENAI_API_KEY` for the model | cents | every PR |
 | 3 `evals/voice` | real STT/LLM/TTS providers on the same utterances | provider keys, `--real` | real money | by hand |
+| 5 `evals/bench` | every candidate model on the layer-2 scenarios, one matrix | one provider key per model | perk models 0; the OpenAI reference ~1 € | schedule, by hand, and on prompt changes |
 
 Every run writes `evals/results/<layer>/latest.json`, then rebuilds
 `evals/results/summary.md` (for CI) and `evals/results/report.html` (for a
@@ -125,12 +126,17 @@ Three brains play the receptionist:
   tools the way the system prompt tells the model to. It proves the harness,
   the tools and the state threading. It says nothing about the model, and
   the report banner says exactly that.
-- **`openai`** (`--brain openai`, needs `OPENAI_API_KEY`). The real model in
-  text mode: the lane's system prompt, the lane's exposed tools, the caller's
-  words. Same tool registry, same fake clinic. `--record` saves every model
-  answer to `evals/conversation/cassettes/<scenario>.json`. `--repeat k`
-  runs each scenario k times and reports pass^k (τ-bench's reliability
-  metric): a scenario passes only if all k runs pass.
+- **`model`** (`--brain model`). The real model in text mode: the lane's
+  system prompt, the lane's exposed tools, the caller's words, the runtime's
+  request settings. Same tool registry, same fake clinic. Without `--model`
+  it plays the receptionist the environment routes (`LLM_PROVIDER`), so it
+  measures what the phone line runs; `--model provider/model` plays any
+  other (`helmcode/deepseek-v4-flash`, `openai/gpt-4.1`). `--record` saves
+  every answer under `evals/conversation/cassettes/<model slug>/`.
+  `--repeat k` runs each scenario k times and reports pass^k (τ-bench's
+  reliability metric): a scenario passes only if all k runs pass.
+- **`openai`** (`--brain openai`, needs `OPENAI_API_KEY`). The same brain
+  pinned to api.openai.com; what `auto` picks when that key is set.
 - **`replay`** (`--brain replay`). Answers from the cassette, never calls the
   API, deterministic. If the prompt, the tools or the script changed since
   the recording, the scenario is `unverified`, never a silent pass. This is
@@ -167,6 +173,77 @@ run: one stack, one language, `--max-eur 0.05`.
 make evals-voice                                  # fake, free
 make evals-voice REAL=1 MAX_EUR=0.10 STACKS=dg-41mini-oai
 ```
+
+## Layer 5 — the model bench (`evals/bench`)
+
+The question this layer answers: **which model for which job**, with a
+number, so the routing in `.env` is a decision and not a habit.
+
+```bash
+make bench                                   # every default model with a key
+make bench MODELS=helmcode/qwen3.6,helmcode/deepseek-v4-flash K=3 ONLY=p4.
+make bench-publish                           # keep it: push to the bench-results branch
+make bench-discord                           # tell the team
+```
+
+Every candidate in `evals/bench/models.yaml` plays the layer-2 scenarios
+through the model brain: the lane's real system prompt, the lane's exposed
+tools, the fake clinic, and the **runtime's request settings** (temperature,
+token cap, reasoning off) from `vortex.models`. Scoring is layer 2's, by
+final state. The bench adds the comparison, per model:
+
+| Column | Meaning |
+| --- | --- |
+| pass | scenarios passed / played |
+| weighted | pass rate with each scenario weighted by its problem's points (`evals/corpus/catalogue.py`) |
+| p50 / p95 | LLM round trip per model call, request to complete reply. Not TTFT: the runtime streams, so the caller hears the first sentence earlier |
+| tokens in / scenario | prompt tokens per scenario; the system prompt plus tools is ~18k per round |
+| no submit | scenarios where the model hung up with nothing submitted (the session fallback fired) |
+| cut | replies the `LLM_MAX_TOKENS` cap truncated |
+| €/call (list) | one scored call at list price from the call profile; `perk` when the hackathon allowance pays, `n/a` when nobody verified a price |
+
+Per problem and per scenario group the same counts are kept, so a model
+that wins overall and loses problem 4 shows it.
+
+**Routing.** `vortex/models.py` resolves one `ModelSpec` per role from the
+environment: `receptionist` from `LLM_PROVIDER`/`LLM_MODEL`, `arbiter` from
+`ARBITER_PROVIDER`/`ARBITER_MODEL`, any new role from
+`LLM_<ROLE>_PROVIDER`/`LLM_<ROLE>_MODEL` with the receptionist as fallback.
+The bench prints that routing next to its recommendation:
+
+- receptionist: highest weighted pass rate among models whose LLM p95 stays
+  under 4 s; ties go to the lower p50, then the lower list price.
+- arbiter: highest weighted pass rate, latency ignored.
+
+A recommendation is a number to argue with. The routing itself stays in
+`.env`; nothing changes it for you.
+
+**Persistence.** `evals/results/` is git-ignored, so `make bench-publish`
+(`python -m evals publish`) pushes the latest run of every layer to the
+`bench-results` branch: `runs/<layer>/<stamp>-<sha>.json` in full,
+`latest/<layer>.json`, and `index.json` with the headline numbers. It builds
+the commit with git plumbing, never touches your working tree, and retries
+when someone else published first. The page at
+**https://jferreiros.github.io/vortex/bench.html** reads that branch: routing,
+matrix, per-problem table, trend across runs, per-scenario drill-down, and
+every run ever published with a link to its JSON.
+
+**GitHub and Discord.** The `bench` workflow runs on a schedule, by hand
+(`workflow_dispatch` with models/repeat/only/max-eur), and when `main`
+changes the prompt, the tools or the bench. It writes the matrix to the job
+summary, uploads the report, publishes to the branch, and tries Discord.
+Discord has refused Actions runner IPs before; `make bench-discord` from a
+laptop or the VPS always works. The workflow needs the provider keys as
+repository secrets (`HELMCODE_API_KEY` at least); without them every model
+is skipped and the run says so.
+
+**The brake.** `--max-eur` (default 1 €) refuses a run whose list-price
+estimate is above it, at 90k input tokens per scenario. Perk models estimate
+0. The OpenAI reference row costs about 1 € for 38 scenarios.
+
+**Cassettes per model.** `--record` saves answers under
+`evals/conversation/cassettes/<model slug>/`, so `--brain replay` can check
+one model's decisions without a key.
 
 ## Baselines and diffs
 
