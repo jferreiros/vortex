@@ -77,7 +77,7 @@ def main():
             elif kind == "tool.called":
                 tool = ev["tool"]
                 print(f"[{ts}]   -> TOOL {tool}  args={short(ev['args'], 200)}")
-                print(f"             triggered by: \"{last_user[:110]}\"")
+                print(f'             triggered by: "{last_user[:110]}"')
                 print(f"             hits: {ENDPOINTS.get(tool, '?')}")
             elif kind == "tool.returned":
                 tool_stats[ev["tool"]].append(ev["ms"])
