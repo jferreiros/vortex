@@ -28,6 +28,9 @@ def env(monkeypatch: pytest.MonkeyPatch):
         "OPENAI_BASE_URL",
         "LLM_SUMMARY_PROVIDER",
         "LLM_SUMMARY_MODEL",
+        "LANGFUSE_PUBLIC_KEY",
+        "LANGFUSE_SECRET_KEY",
+        "LANGFUSE_BASE_URL",
     ):
         monkeypatch.delenv(var, raising=False)
     reset_settings()
