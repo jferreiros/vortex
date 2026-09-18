@@ -47,7 +47,7 @@ WAVE_DUE = {
 
 def gh(*args: str, check: bool = True) -> str:
     """Run gh and return stdout. Raises with gh's own message on failure."""
-    proc = subprocess.run(["gh", *args], capture_output=True, text=True)
+    proc = subprocess.run(["gh", *args], capture_output=True, text=True, check=False)
     if check and proc.returncode != 0:
         raise RuntimeError(f"gh {' '.join(args)}\n{proc.stderr.strip()}")
     return proc.stdout
