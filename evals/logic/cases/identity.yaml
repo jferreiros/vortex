@@ -39,8 +39,8 @@ cases:
   - id: identity.nie.z_prefix_counts_as_two
     problem: 4
     tool: validate_national_id
-    # Z1234567 -> 21234567 % 23 = 3 -> "A"
-    args: {value: "Z1234567A"}
+    # Z1234567 -> 21234567 % 23 = 1 -> "R"
+    args: {value: "Z1234567R"}
     expect: {kind: nie, valid: true}
 
   - id: identity.id.garbage_is_invalid
@@ -164,7 +164,114 @@ cases:
       date_of_birth: "1990-01-02"
       phone: "+34612000111"
       email: "ana@example.com"
-      insurer: mapfre_health
+      insurer: "Mutua Madrileña"
     expect:
       action: {$absent: true}
       rejection: {$present: true}
+
+  - id: identity.register.spoken_insurer_folds_to_plan_id
+    problem: 4
+    tool: build_registration
+    # The register route takes an enum: "Mapfre Salud" as spoken is "mapfre" on the wire.
+    args:
+      given_name: Sergio
+      first_surname: Martínez
+      second_surname: Ramírez
+      national_id: "3 1 4 2 6 0 1 2 P"
+      date_of_birth: "2005-08-10"
+      phone: "792919982"
+      email: "sergio_martinez77@gmail.com"
+      insurer: "Mapfre Salud"
+    expect:
+      rejection: {$absent: true}
+      action: {national_id: "31426012P", insurer: mapfre, phone: "+34792919982"}
+
+  - id: identity.register.paying_privately_is_privado
+    problem: 4
+    tool: build_registration
+    args:
+      given_name: Ana
+      first_surname: García
+      second_surname: Pérez
+      national_id: "X0500252W"
+      date_of_birth: "1990-01-02"
+      phone: "+34612000111"
+      email: "ana@example.com"
+      insurer: "paying privately"
+    expect:
+      rejection: {$absent: true}
+      action: {insurer: privado, national_id: "X0500252W"}
+
+  - id: identity.register.dictated_email_becomes_an_address
+    problem: 4
+    tool: build_registration
+    # No check letter saves an email: the dictated form has to become the address.
+    args:
+      given_name: Natalia
+      first_surname: Muñoz
+      second_surname: González
+      national_id: "50454876Y"
+      date_of_birth: "1988-12-13"
+      phone: "797574941"
+      email: "natalia dot munoz 86 at hotmail dot com"
+      insurer: Sanitas
+    expect:
+      rejection: {$absent: true}
+      action: {email: "natalia.munoz86@hotmail.com", insurer: sanitas}
+
+  - id: identity.register.rejection_names_the_field_to_ask_again
+    problem: 4
+    tool: build_registration
+    args:
+      given_name: Ana
+      first_surname: García
+      second_surname: Pérez
+      national_id: "12345678A"
+      date_of_birth: "1990-01-02"
+      phone: "+34612000111"
+      email: "ana@example.com"
+      insurer: adeslas
+    expect:
+      action: {$absent: true}
+      rejection: {detail: {$regex: "^national_id:"}}
+
+  - id: identity.lookup.dictated_id_is_normalised_before_the_query
+    problem: 1
+    tool: find_patient
+    args: {national_id: "8 7 6 5 4 3 2 1 x"}
+    expect: {status: found, patient: {patient_id: P00043}}
+
+  - id: identity.lookup.ask_for_is_the_field_that_splits
+    problem: 1
+    tool: find_patient
+    # Both Marta Ruiz have a different birth date: that is the question to ask.
+    args: {name: "Marta Ruiz"}
+    expect: {status: ambiguous, ask_for: date_of_birth}
+
+  - id: identity.lookup.line_owner_is_listed_first_but_not_picked
+    problem: 9
+    from_number: "+34699000111"
+    tool: find_patient
+    # P00043 owns the calling line. Still ambiguous: the line is a hint, not an id.
+    args: {name: "Marta Ruiz"}
+    expect: {status: ambiguous, candidates: [{patient_id: P00043}, {patient_id: P00042}]}
+
+  - id: identity.lookup.misheard_id_surfaces_near_misses
+    problem: 1
+    tool: find_patient
+    # The exact query finds nobody; dropping the id names who the rest found.
+    args: {name: "Marta Ruiz López", national_id: "12345679Z"}
+    expect: {status: not_found, patient: {$absent: true}, candidates: [{patient_id: P00042}]}
+
+  - id: identity.lookup.nothing_given_and_no_line_is_not_found
+    problem: 1
+    tool: find_patient
+    args: {}
+    expect: {status: not_found}
+
+  - id: identity.lookup.nothing_given_uses_the_line
+    problem: 9
+    from_number: "+34655555555"
+    tool: find_patient
+    args: {}
+    expect: {status: found, patient: {patient_id: P00200}}

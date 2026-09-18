@@ -1,7 +1,6 @@
 """identity/ tools - who is calling.
 
-Owner: the identity lane. Replace each ``stub_*`` call with the real logic.
-Keep the signatures exactly as ``vortex/contract.py`` declares them.
+Owner: the identity lane. Signatures are frozen in ``vortex/contract.py``.
 
 What the docs say this lane must get right (clinic docs, "Six things worth knowing"):
 
@@ -15,23 +14,39 @@ What the docs say this lane must get right (clinic docs, "Six things worth knowi
 - DNI: 8 digits + letter. NIE: X/Y/Z + 7 digits + letter. The letter is
   ``"TRWAGMYFPDXBNJZSQVHLCKE"[number % 23]`` where a NIE's leading X/Y/Z
   counts as 0/1/2. A wrong letter is a 422 at submit time.
+
+How the conversation should read what comes back:
+
+- ``FindPatientResult.status == "ambiguous"``: ask for ``ask_for``; it is the
+  first unfilled field that actually tells the candidates apart.
+- ``status == "not_found"`` with ``candidates``: the exact query found nobody,
+  but dropping the field most often misheard (the id, then the phone) found
+  these near misses. They are a prompt to ask the caller to repeat that field.
+  Never book one of them without a fresh exact lookup.
+- ``RegistrationResult.rejection``: the record cannot be submitted as dictated.
+  ``detail`` starts with the field to ask again (``national_id: ...``,
+  ``insurer: ...``). It is an "ask again" signal, not a reason to end the call.
 """
 
 from __future__ import annotations
 
 import asyncio
 import re
+import unicodedata
+from datetime import date
 from typing import Any
 
 from vortex.contract import (
     Appointment,
     BuildRegistrationInput,
+    Catalogue,
     FindPatientInput,
     FindPatientResult,
     NationalIdCheck,
     PatientRecord,
     RegisterAction,
     RegistrationResult,
+    Rejection,
     ToolContext,
     ValidateNationalIdInput,
 )
@@ -40,9 +55,264 @@ _CHECK_LETTERS = "TRWAGMYFPDXBNJZSQVHLCKE"
 _NIE_PREFIX_DIGIT = {"X": "0", "Y": "1", "Z": "2"}
 _DNI_RE = re.compile(r"\d{8}[A-Z]")
 _NIE_RE = re.compile(r"[XYZ]\d{7}[A-Z]")
+_ID_SEPARATORS = re.compile(r"[\s.\-]+")
+_NON_DIGIT = re.compile(r"\D")
+_WS = re.compile(r"\s+")
+
+#: The ``insurer`` enum the register route accepts (docs/api/openapi.json). The
+#: live catalogue lists the same plans; the offline fixtures list only five, so
+#: the union keeps offline behaviour identical to the platform's.
+KNOWN_INSURERS: tuple[str, ...] = (
+    "sanitas",
+    "adeslas",
+    "dkv",
+    "asisa",
+    "mapfre",
+    "caser",
+    "cigna",
+    "axa",
+    "nueva_mutua",
+    "privado",
+)
+
+#: Spoken forms that do not fold to a plan id or name by themselves.
+_INSURER_ALIASES: dict[str, str] = {
+    "mapfre salud": "mapfre",
+    "mapfre health": "mapfre",
+    "nueva mutua": "nueva_mutua",
+    "nueva mutua sanitaria": "nueva_mutua",
+    "axa health": "axa",
+    "axa salud": "axa",
+    "cigna health": "cigna",
+    "caser salud": "caser",
+    "private": "privado",
+    "privately": "privado",
+    "paying privately": "privado",
+    "self pay": "privado",
+    "self-pay": "privado",
+    "no insurance": "privado",
+    "none": "privado",
+    "particular": "privado",
+    "sin seguro": "privado",
+    "privat": "privado",
+}
+
+#: Spoken email punctuation, longest phrase first so "guion bajo" beats "guion".
+_EMAIL_SPOKEN: tuple[tuple[str, str], ...] = (
+    ("guion bajo", "_"),
+    ("guio baix", "_"),
+    ("underscore", "_"),
+    ("arroba", "@"),
+    ("at sign", "@"),
+    ("at", "@"),
+    ("dot", "."),
+    ("punto", "."),
+    ("punt", "."),
+    ("hyphen", "-"),
+    ("dash", "-"),
+    ("minus", "-"),
+    ("guion", "-"),
+    ("guio", "-"),
+)
 
 PATIENT_POSTPROCESS_KEY = "patient_postprocess"
+PATIENT_PREFERENCES_KEY = "patient_preferences"
+IDENTITY_KEY = "identity"
 _MIN_SUPPORT = 2  # occurrences needed before a pattern is worth suggesting
+_MAX_NEAR_MISSES = 3  # more than this and a near-miss list is noise, not a hint
+
+# Fire-and-forget tasks need a strong reference until they finish, or the event
+# loop may drop them half-way. This holds nothing a call can read; it is not
+# shared state between calls, only garbage-collection insurance.
+_background: set[asyncio.Task[Any]] = set()
+
+
+# ---------------------------------------------------------------------------
+# National id
+# ---------------------------------------------------------------------------
+
+
+def normalize_national_id(value: str) -> str:
+    """As dictated -> the platform's shape: no spaces, dots or dashes, uppercase."""
+    return _ID_SEPARATORS.sub("", value.strip()).upper()
+
+
+def check_national_id(value: str) -> NationalIdCheck:
+    """Pure version of ``validate_national_id``: normalise, classify, re-derive the letter."""
+    normalized = normalize_national_id(value)
+    if _DNI_RE.fullmatch(normalized):
+        digits, letter, kind = normalized[:8], normalized[8], "dni"
+    elif _NIE_RE.fullmatch(normalized):
+        digits = _NIE_PREFIX_DIGIT[normalized[0]] + normalized[1:8]
+        letter, kind = normalized[8], "nie"
+    else:
+        return NationalIdCheck(normalized=normalized, kind="invalid", valid=False)
+    expected = _CHECK_LETTERS[int(digits) % 23]
+    return NationalIdCheck(
+        normalized=normalized, kind=kind, valid=letter == expected, expected_letter=expected
+    )
+
+
+async def validate_national_id(ctx: ToolContext, args: ValidateNationalIdInput) -> NationalIdCheck:
+    """Normalise a spoken DNI/NIE and check its letter (mod-23)."""
+    return check_national_id(args.value)
+
+
+# ---------------------------------------------------------------------------
+# Registration
+# ---------------------------------------------------------------------------
+
+
+def _fold(text: str) -> str:
+    """NFKD, strip combining marks, casefold, collapse whitespace."""
+    decomposed = unicodedata.normalize("NFKD", text)
+    stripped = "".join(c for c in decomposed if not unicodedata.combining(c))
+    return _WS.sub(" ", stripped).strip().casefold()
+
+
+def normalize_phone(phone: str) -> str:
+    """As dictated -> E.164. A bare 9-digit Spanish number gets the +34 prefix."""
+    digits = _NON_DIGIT.sub("", phone)
+    if phone.strip().startswith("+") and len(digits) > 9:
+        return f"+{digits}"
+    if digits.startswith("0034") and len(digits) == 13:
+        return f"+{digits[2:]}"
+    if digits.startswith("34") and len(digits) == 11:
+        return f"+{digits}"
+    if len(digits) == 9:
+        return f"+34{digits}"
+    return digits
+
+
+def normalize_email(email: str) -> str:
+    """As dictated -> an address. ``ana dot garcia at gmail dot com`` -> ``ana.garcia@gmail.com``.
+
+    Spoken punctuation is only translated when the text carries no ``@`` yet; an
+    address that is already an address just loses its spaces and its case, which
+    is exactly what the scorer does to it.
+    """
+    text = _fold(email)
+    if "@" not in text:
+        for spoken, symbol in _EMAIL_SPOKEN:
+            text = re.sub(rf"(?<![a-z0-9]){re.escape(spoken)}(?![a-z0-9])", symbol, text)
+    return _WS.sub("", text)
+
+
+def resolve_insurer(spoken: str, catalogue: Catalogue | None = None) -> str | None:
+    """The plan id for what the caller said, or ``None`` when no plan matches.
+
+    Matches, after folding case and accents: a plan id, a plan name from the
+    catalogue, a known alias ("Mapfre Salud", "paying privately"), and finally a
+    plan id spoken as the first word ("Cigna Global" -> ``cigna``).
+    """
+    text = _fold(spoken).replace("_", " ")
+    if not text:
+        return None
+    ids: dict[str, str] = {}
+    for plan_id in KNOWN_INSURERS:
+        ids[plan_id.replace("_", " ")] = plan_id
+    if catalogue is not None:
+        for plan in catalogue.insurance_plans:
+            ids[plan.insurer_id.replace("_", " ")] = plan.insurer_id
+            ids[_fold(plan.name)] = plan.insurer_id
+    if text in ids:
+        return ids[text]
+    if text in _INSURER_ALIASES:
+        return _INSURER_ALIASES[text]
+    first_word = text.split(" ")[0]
+    if first_word in ids and " " not in ids[first_word]:
+        return ids[first_word]
+    return None
+
+
+def _person_field(value: str) -> str:
+    return _WS.sub(" ", value).strip()
+
+
+async def build_registration(ctx: ToolContext, args: BuildRegistrationInput) -> RegistrationResult:
+    """Turn dictated demographics into a ``RegisterAction``, or say which field to ask again.
+
+    The id's check letter is re-derived here because the platform re-derives it
+    at submit time and a mismatch is a 422: better to ask the caller to repeat
+    the id than to post a record that cannot be accepted. The insurer is folded
+    to the plan id the register route's enum accepts.
+    """
+
+    def ask_again(field_name: str, why: str) -> RegistrationResult:
+        return Rejection(reason="out_of_scope", detail=f"{field_name}: {why}")
+
+    check = check_national_id(args.national_id)
+    if check.kind == "invalid":
+        rejection = ask_again(
+            "national_id",
+            f"{check.normalized!r} is neither a DNI (8 digits + letter) nor a NIE "
+            "(X/Y/Z + 7 digits + letter); ask the caller to repeat it",
+        )
+        return RegistrationResult(rejection=rejection)
+    if not check.valid:
+        rejection = ask_again(
+            "national_id",
+            f"check letter of {check.normalized} does not match its digits "
+            f"(they give {check.expected_letter}); a digit was misheard, ask again",
+        )
+        return RegistrationResult(rejection=rejection)
+
+    try:
+        catalogue = await ctx.clinic.catalogue()
+    except Exception as exc:  # the enum is known; the catalogue only adds names
+        ctx.log.event("identity.catalogue_unavailable", detail=f"{type(exc).__name__}: {exc}")
+        catalogue = None
+    insurer = resolve_insurer(args.insurer, catalogue)
+    if insurer is None:
+        rejection = ask_again(
+            "insurer",
+            f"{args.insurer!r} is not a plan the clinic registers "
+            f"({', '.join(KNOWN_INSURERS)}); ask which insurer, or whether they pay privately",
+        )
+        return RegistrationResult(rejection=rejection)
+
+    given = _person_field(args.given_name)
+    first = _person_field(args.first_surname)
+    second = _person_field(args.second_surname)
+    for field_name, value in (
+        ("given_name", given),
+        ("first_surname", first),
+        ("second_surname", second),
+    ):
+        if not value:
+            return RegistrationResult(
+                rejection=ask_again(field_name, "is empty; the record needs two surnames")
+            )
+
+    email = normalize_email(args.email)
+    if "@" not in email or "." not in email.split("@")[-1]:
+        return RegistrationResult(
+            rejection=ask_again("email", f"{email!r} is not an address; read it back and ask again")
+        )
+
+    phone = normalize_phone(args.phone)
+    if len(_NON_DIGIT.sub("", phone)) < 9:
+        return RegistrationResult(
+            rejection=ask_again("phone", f"{args.phone!r} has fewer than nine digits")
+        )
+
+    return RegistrationResult(
+        action=RegisterAction(
+            given_name=given,
+            first_surname=first,
+            second_surname=second,
+            national_id=check.normalized,
+            date_of_birth=args.date_of_birth,
+            phone=phone,
+            email=email,
+            insurer=insurer,
+        )
+    )
+
+
+# ---------------------------------------------------------------------------
+# Directory lookup
+# ---------------------------------------------------------------------------
 
 
 def _unanimous(values: list[str]) -> str | None:
@@ -53,7 +323,7 @@ def _unanimous(values: list[str]) -> str | None:
 def _mine_preferences(history: list[Appointment]) -> dict[str, Any]:
     """Patterns in past visits: where/who they always went to, per appointment type too.
 
-    Not a rejection or a rule — a set of soft defaults the conversation can offer
+    Not a rejection or a rule: a set of soft defaults the conversation can offer
     ("you're usually at Sur, want that again?") instead of asking cold.
     """
     locations = [a.location_id for a in history]
@@ -81,99 +351,160 @@ def _mine_preferences(history: list[Appointment]) -> dict[str, Any]:
     }
 
 
-async def _postprocess_patient(ctx: ToolContext, patient: PatientRecord) -> dict[str, Any]:
+async def _postprocess_patient(ctx: ToolContext, patient: PatientRecord) -> None:
     """Background work kicked off the moment a caller is identified.
 
-    Never raises: nothing on the happy path ever awaits this task, so an
-    unhandled exception would otherwise only surface as an asyncio "exception
-    never retrieved" warning, silently.
+    Writes the mined preferences to ``ctx.state[PATIENT_PREFERENCES_KEY]`` when
+    done. Never raises: nothing on the happy path awaits this task, so an
+    unhandled exception would only surface as an asyncio "exception never
+    retrieved" warning, silently.
     """
     try:
         history = await ctx.clinic.appointments(patient.patient_id, when="past")
-        return _mine_preferences(history)
+        ctx.state[PATIENT_PREFERENCES_KEY] = {
+            "patient_id": patient.patient_id,
+            **_mine_preferences(history),
+        }
     except Exception as exc:
         ctx.log.event("patient_postprocess.failed", detail=f"{type(exc).__name__}: {exc}")
-        return {}
+
+
+def _start_postprocess(ctx: ToolContext, patient: PatientRecord) -> None:
+    task = asyncio.create_task(_postprocess_patient(ctx, patient))
+    _background.add(task)
+    task.add_done_callback(_background.discard)
+
+
+def _digits9(phone: str) -> str:
+    return _NON_DIGIT.sub("", phone)[-9:]
+
+
+def _fields_given(args: FindPatientInput) -> list[str]:
+    return [
+        name
+        for name, value in (
+            ("name", args.name),
+            ("national_id", args.national_id),
+            ("phone", args.phone),
+            ("date_of_birth", args.date_of_birth),
+        )
+        if value
+    ]
+
+
+def _splitting_field(args: FindPatientInput, candidates: list[PatientRecord]) -> str:
+    """The first unfilled field whose values differ across the candidates.
+
+    date_of_birth is the go-to disambiguator: it is what the docs recommend and
+    the one thing a caller always knows. name is last since it is already given.
+    """
+    values: dict[str, list[Any]] = {
+        "date_of_birth": [p.date_of_birth for p in candidates],
+        "national_id": [normalize_national_id(p.national_id) for p in candidates],
+        "phone": [_digits9(p.phone) for p in candidates],
+        "name": [_fold(p.full_name) for p in candidates],
+    }
+    given = {
+        "date_of_birth": args.date_of_birth,
+        "national_id": args.national_id,
+        "phone": args.phone,
+        "name": args.name,
+    }
+    for field_name in ("date_of_birth", "national_id", "phone", "name"):
+        if given[field_name]:
+            continue
+        seen = [v for v in values[field_name] if v]
+        if len(set(seen)) > 1:
+            return field_name
+    for field_name in ("date_of_birth", "national_id", "phone", "name"):
+        if not given[field_name]:
+            return field_name
+    return ""
+
+
+def _line_owner_first(ctx: ToolContext, candidates: list[PatientRecord]) -> list[PatientRecord]:
+    """Order candidates so the owner of the calling line comes first. A hint, not a pick."""
+    if not ctx.from_number:
+        return candidates
+    line = _digits9(ctx.from_number)
+    return sorted(candidates, key=lambda p: 0 if p.phone and _digits9(p.phone) == line else 1)
+
+
+async def _lookup(
+    ctx: ToolContext,
+    *,
+    name: str | None,
+    national_id: str | None,
+    phone: str | None,
+    date_of_birth: date | None,
+) -> list[PatientRecord]:
+    return await ctx.clinic.directory(
+        name=name, national_id=national_id, phone=phone, date_of_birth=date_of_birth
+    )
 
 
 async def find_patient(ctx: ToolContext, args: FindPatientInput) -> FindPatientResult:
-    """Look the caller up in /directory and decide: found, ambiguous or not_found."""
-    phone = args.phone
-    gave_nothing = not any((args.name, args.national_id, args.phone, args.date_of_birth))
-    if gave_nothing:
-        # Caller gave nothing else to search on: fall back to the line's own number.
-        phone = ctx.from_number
+    """Look the caller up in /directory and decide: found, ambiguous or not_found.
 
-    candidates = await ctx.clinic.directory(
-        name=args.name, national_id=args.national_id, phone=phone, date_of_birth=args.date_of_birth
+    Every field given is an exact filter: one that does not match excludes the
+    patient. When nothing is given the calling line is searched instead, which
+    finds the line's owner, not necessarily the patient being booked for.
+    """
+    name = _person_field(args.name) if args.name else None
+    national_id = normalize_national_id(args.national_id) if args.national_id else None
+    phone = args.phone.strip() if args.phone else None
+    dob = args.date_of_birth
+    given = _fields_given(args)
+    if not given:
+        # Caller gave nothing to search on: fall back to the line's own number.
+        phone = ctx.from_number
+        if not phone:
+            return FindPatientResult(status="not_found")
+
+    candidates = await _lookup(
+        ctx, name=name, national_id=national_id, phone=phone, date_of_birth=dob
     )
-    if not candidates:
-        return FindPatientResult(status="not_found")
+
     if len(candidates) == 1:
         patient = candidates[0]
-        # Fire-and-forget: mine their visit history while the conversation carries
-        # on, so a preference is already there by the time it's needed.
-        ctx.state[PATIENT_POSTPROCESS_KEY] = asyncio.create_task(_postprocess_patient(ctx, patient))
+        ctx.state[IDENTITY_KEY] = {
+            "patient_id": patient.patient_id,
+            "matched_on": given or ["from_number"],
+        }
+        # Mine their visit history while the conversation carries on, so a
+        # preference is already there by the time it is needed.
+        _start_postprocess(ctx, patient)
         return FindPatientResult(status="found", patient=patient)
 
-    # Ambiguous: ask for whichever unfilled field would split the candidates.
-    # date_of_birth is the go-to disambiguator; name is last since it's already given.
-    for field_name, given in (
-        ("date_of_birth", args.date_of_birth),
-        ("national_id", args.national_id),
-        ("phone", args.phone),
-        ("name", args.name),
-    ):
-        if given is None:
-            return FindPatientResult(status="ambiguous", candidates=candidates, ask_for=field_name)
-    return FindPatientResult(status="ambiguous", candidates=candidates)
-
-
-async def validate_national_id(ctx: ToolContext, args: ValidateNationalIdInput) -> NationalIdCheck:
-    """Normalise a spoken DNI/NIE and check its letter (mod-23)."""
-    normalized = args.value.strip().upper().replace(" ", "").replace("-", "")
-    if _DNI_RE.fullmatch(normalized):
-        digits, letter, kind = normalized[:8], normalized[8], "dni"
-    elif _NIE_RE.fullmatch(normalized):
-        digits = _NIE_PREFIX_DIGIT[normalized[0]] + normalized[1:8]
-        letter, kind = normalized[8], "nie"
-    else:
-        return NationalIdCheck(normalized=normalized, kind="invalid", valid=False)
-    expected = _CHECK_LETTERS[int(digits) % 23]
-    return NationalIdCheck(
-        normalized=normalized, kind=kind, valid=letter == expected, expected_letter=expected
-    )
-
-
-def _normalize_phone(phone: str) -> str:
-    """As dictated -> E.164. A bare 9-digit Spanish number gets the +34 prefix."""
-    had_plus = phone.strip().startswith("+")
-    digits = "".join(ch for ch in phone if ch.isdigit())
-    if had_plus:
-        return f"+{digits}"
-    if len(digits) == 9:
-        return f"+34{digits}"
-    return digits
-
-
-async def build_registration(ctx: ToolContext, args: BuildRegistrationInput) -> RegistrationResult:
-    """Turn dictated demographics into a ``RegisterAction``.
-
-    The national id's check letter is not re-validated here: the conversation
-    is expected to have already confirmed it with ``validate_national_id``
-    (asking the caller to repeat a wrong digit) before demographics are
-    complete enough to call this. A malformed id still 422s at submit time.
-    """
-    check = await validate_national_id(ctx, ValidateNationalIdInput(value=args.national_id))
-    return RegistrationResult(
-        action=RegisterAction(
-            given_name=args.given_name,
-            first_surname=args.first_surname,
-            second_surname=args.second_surname,
-            national_id=check.normalized,
-            date_of_birth=args.date_of_birth,
-            phone=_normalize_phone(args.phone),
-            email=args.email.strip().lower(),
-            insurer=args.insurer,
+    if candidates:
+        ordered = _line_owner_first(ctx, candidates)
+        return FindPatientResult(
+            status="ambiguous", candidates=ordered, ask_for=_splitting_field(args, ordered)
         )
-    )
+
+    # Nobody matched every field. The id and the phone are the fields most
+    # often misheard: drop the one given and see who the rest of the query
+    # finds, so the conversation can ask for that field again with a name in
+    # hand. These are near misses, never an identification.
+    near: list[PatientRecord] = []
+    if len(given) >= 2:
+        for dropped in ("national_id", "phone"):
+            if dropped not in given:
+                continue
+            near = await _lookup(
+                ctx,
+                name=name,
+                national_id=None if dropped == "national_id" else national_id,
+                phone=None if dropped == "phone" else phone,
+                date_of_birth=dob,
+            )
+            if near:
+                break
+    if near and len(near) <= _MAX_NEAR_MISSES:
+        ctx.log.event(
+            "identity.near_miss",
+            given=given,
+            candidates=[p.patient_id for p in near],
+        )
+        return FindPatientResult(status="not_found", candidates=_line_owner_first(ctx, near))
+    return FindPatientResult(status="not_found")
