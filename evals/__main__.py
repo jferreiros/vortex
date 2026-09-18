@@ -18,6 +18,7 @@ evals/results/summary.md and report.html.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -142,6 +143,17 @@ def cmd_accept(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_discord(args: argparse.Namespace) -> int:
+    from evals.common.discord_msg import load_summary, pr_comment, webhook_body
+
+    summary = load_summary(args.results_dir)
+    if args.pr:
+        print(pr_comment(summary))
+        return 0
+    print(json.dumps(webhook_body(summary), ensure_ascii=False))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m evals", description=__doc__)
     parser.add_argument("--results-dir", type=Path, default=RESULTS_DIR)
@@ -185,6 +197,10 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("accept", help="promote the latest run(s) to the baseline")
     p.add_argument("layer", nargs="?", choices=LAYERS)
     p.set_defaults(fn=cmd_accept)
+
+    p = sub.add_parser("discord", help="JSON embed (or --pr markdown) from the latest summary")
+    p.add_argument("--pr", action="store_true", help="print the GitHub PR comment instead")
+    p.set_defaults(fn=cmd_discord)
 
     args = parser.parse_args(argv)
     return args.fn(args)
