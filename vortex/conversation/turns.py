@@ -40,10 +40,15 @@ DEFAULT_EXPOSED_TOOLS: list[str] = [
 @dataclass(frozen=True)
 class TurnSettings:
     enable_interruptions: bool = True
-    vad_confidence: float = 0.7
-    vad_start_secs: float = 0.2
-    vad_stop_secs: float = 0.8
-    vad_min_volume: float = 0.6
+    # Noisy-caller settings (problem 12): a higher bar before Silero calls it
+    # speech, so a bus going past does not become a barge-in. Smart-turn v3
+    # (loaded by the user aggregator) then rejects non-turns Silero lets
+    # through. No denoiser in front of STT: Deepgram/AssemblyAI both document
+    # worse WER after suppression, and Soniox v5 is trained for telephony noise.
+    vad_confidence: float = 0.85
+    vad_start_secs: float = 0.3
+    vad_stop_secs: float = 0.4
+    vad_min_volume: float = 0.7
     # Seconds of caller silence before the agent prompts again. 0 disables.
     user_idle_secs: float = 8.0
     exposed_tools: list[str] = field(default_factory=lambda: list(DEFAULT_EXPOSED_TOOLS))
@@ -56,7 +61,8 @@ class TurnSettings:
     # False -> pipecat's VAD ends the turn and finalises Soniox
     soniox_turn_detection: bool = True
     # The three below only bite when soniox_turn_detection is True.
-    stt_max_endpoint_delay_ms: int = 800
+    # 1500 ms tolerates the pause callers make mid-DNI ("doce, treinta y cuatro...").
+    stt_max_endpoint_delay_ms: int = 1500
     stt_endpoint_sensitivity: float = 0.3
     stt_endpoint_latency_adjustment_level: int = 2
 
