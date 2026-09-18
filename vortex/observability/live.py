@@ -722,31 +722,30 @@ def call_page(call_id: str) -> None:
 
 
 def _login_form() -> None:
-    with ui.element("main").classes("page"):
-        with ui.element("div").classes("card login"):
-            ui.label("Team sign-in").classes("heading-lg")
-            ui.label("The public wall is at /wall. This side is for the team.").classes("body-sm")
-            ui.element("div").style("height: 16px")
-            password = ui.input(placeholder="password", password=True).props("dense outlined")
-            password.classes("w-full")
-            status = ui.label("").classes("error")
+    with ui.element("main").classes("page"), ui.element("div").classes("card login"):
+        ui.label("Team sign-in").classes("heading-lg")
+        ui.label("The public wall is at /wall. This side is for the team.").classes("body-sm")
+        ui.element("div").style("height: 16px")
+        password = ui.input(placeholder="password", password=True).props("dense outlined")
+        password.classes("w-full")
+        status = ui.label("").classes("error")
 
-            def submit() -> None:
-                ip = _client_ip()
-                if not auth.login_allowed(ip):
-                    status.set_text("Too many attempts. Wait ten minutes.")
-                    return
-                auth.record_login_attempt(ip)
-                if auth.check_password(password.value or ""):
-                    app.storage.user["ops"] = True
-                    ui.navigate.to("/")
-                    return
-                status.set_text("Wrong password.")
+        def submit() -> None:
+            ip = _client_ip()
+            if not auth.login_allowed(ip):
+                status.set_text("Too many attempts. Wait ten minutes.")
+                return
+            auth.record_login_attempt(ip)
+            if auth.check_password(password.value or ""):
+                app.storage.user["ops"] = True
+                ui.navigate.to("/")
+                return
+            status.set_text("Wrong password.")
 
-            ui.button("Sign in", on_click=submit).props("unelevated no-caps").classes(
-                "button-primary"
-            )
-            password.on("keydown.enter", submit)
+        ui.button("Sign in", on_click=submit).props("unelevated no-caps").classes(
+            "button-primary"
+        )
+        password.on("keydown.enter", submit)
 
 
 def _logout() -> None:
@@ -892,10 +891,9 @@ def _team_page(path: str, title: str, sub: str, body) -> None:
         return
     _nav(path, team=True)
     with ui.element("main").classes("page"):
-        with ui.element("div").classes("page-head"):
-            with ui.element("div"):
-                ui.label(title).classes("title")
-                ui.label(sub).classes("sub")
+        with ui.element("div").classes("page-head"), ui.element("div"):
+            ui.label(title).classes("title")
+            ui.label(sub).classes("sub")
         body()
     _footer()
 
