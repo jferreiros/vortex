@@ -44,35 +44,125 @@ scenarios:
           slot: {$earliest_slot: {specialty_id: general_practice, location_id: norte, "on": "2026-09-21", part_of_day: morning, patient_id: P00042}}
       privacy_of: [P00042]
 
-  - id: p3.named_doctor_on_leave
+  # ---- problem 3, one scenario per published doctor_and_site case -----------
+  # Source: evals/corpus/cases/public-cases.json, problem_id doctor_and_site.
+  # The published cases' own ids (patients, providers, sites) belong to the
+  # platform's world, not our fixtures, so each is re-cast onto our own
+  # patients and providers while keeping the trap the case tests.
+
+  - id: p3.provider_and_site_both_named_match
     problem: 3
+    # doctor_and_site-2fe62ca2872f: usual doctor, usual site, both correct
+    # together -- the doctor really does sit there, so there is nothing to
+    # redirect. Marta Ruiz's own record already says Dra. Ortiz at Centro.
     caller:
-      - says: "Hola, soy Marta Ruiz, nacida el doce de marzo del ochenta y cinco. Quiero cita con el doctor Requena."
-        means: {identify: {name: "Marta Ruiz", date_of_birth: "1985-03-12"}, request: {intent: book, provider: "doctor Requena"}}
-      - says: "Ah, vaya. Bueno, pues nada, ya llamaré. Gracias."
-        means: {end: true}
+      - says: "Hola, buenos días. Soy Marta Ruiz, nacida el doce de marzo del ochenta y cinco. Quiero cita con la doctora Ortiz en Arenal Centro, la de siempre. Se me está acabando la receta y necesito que me la renueve."
+        means: {identify: {name: "Marta Ruiz", date_of_birth: "1985-03-12"}, request: {intent: book, provider: "doctora Ortiz", location_id: centro}}
+      - says: "Vale, esa me viene bien. Gracias."
+        means: {accept: true}
     expect:
-      # Either honest answer passes: the rule that bit, or a redirect inside the specialty
-      # at the same site. Booking Requena himself fails.
       actions:
-        - $one_of:
-            - {kind: no-action, reason: provider_on_leave}
-            - {kind: book, patient_id: P00042, provider_id: {$in: [PR02]}, location_id: norte}
-      trajectory_contains: [find_patient, find_provider]
+        - kind: book
+          patient_id: P00042
+          provider_id: PR01
+          location_id: centro
+          appointment_type_id: review
+          slot: {$earliest_slot: {provider_id: PR01, patient_id: P00042}}
+          policy_id: sanitas
+      trajectory_contains: [find_patient, find_provider, find_slots, prepare_booking, submit_action]
       privacy_of: [P00042]
 
-  - id: p3.unknown_doctor_is_not_invented
+  - id: p3.surname_near_miss_gp_not_paediatrician
     problem: 3
+    # doctor_and_site-057078bb5b44: caller knows the surname and the kind of
+    # doctor, not that a near-miss surname exists at the clinic. "Sáez" (GP)
+    # must not resolve to "Sáenz" (paediatrics) just because they sound alike.
     caller:
-      - says: "Quería cita con el doctor Vilar, el de dermatología. Soy Antonio Pérez Martín, NIE equis uno dos tres cuatro cinco seis siete ele."
-        means: {identify: {name: "Antonio Pérez Martín", national_id: "X1234567L"}, request: {intent: book, provider: "doctor Vilar", specialty_id: dermatology}}
-      - says: "¿Cómo que no está? Bueno, da igual, adiós."
-        means: {end: true}
+      - says: "Buenos días. Soy Marta Ruiz, nacida el doce de marzo del ochenta y cinco. Quería cita con el doctor Sáez, el de medicina general. Tengo la tensión alta."
+        means: {identify: {name: "Marta Ruiz", date_of_birth: "1985-03-12"}, request: {intent: book, provider: "doctor Sáez", specialty_id: general_practice}}
+      - says: "Sí, el doctor Sáez, el de medicina general. No la pediatra. La primera que tenga con él."
+        means: {accept: true}
     expect:
       actions:
-        - $one_of:
-            - {kind: no-action, reason: provider_not_found}
-            - {kind: book, patient_id: P00200}
+        - kind: book
+          patient_id: P00042
+          provider_id: PR02
+          location_id: norte
+          appointment_type_id: review
+          slot: {$earliest_slot: {provider_id: PR02, patient_id: P00042}}
+          policy_id: sanitas
+      trajectory_contains: [find_patient, find_provider, find_slots, prepare_booking, submit_action]
+      privacy_of: [P00042]
+
+  - id: p3.named_doctor_on_leave_redirects_within_specialty_at_same_site
+    problem: 3
+    # doctor_and_site-d5b4f04886c5: told the named doctor is away, the caller
+    # explicitly asks for the earliest slot with a colleague of the same kind
+    # at the same site, and accepts the first one offered. A named site plus
+    # an explicit ask for an alternative there is a booking to make, not a
+    # bare refusal: Norte's only other GP is Sáez.
+    caller:
+      - says: "Buenos días. Soy Marta Ruiz, nacida el doce de marzo del ochenta y cinco. Quiero cita con el doctor Requena, en Arenal Norte. Llevo un par de meses durmiendo mal."
+        means: {identify: {name: "Marta Ruiz", date_of_birth: "1985-03-12"}, request: {intent: book, provider: "doctor Requena", location_id: norte}}
+      - says: "Ah, vale, no pasa nada. Pues la primera cita que tengan ahí en Norte, con cualquier otro médico de medicina general."
+        means: {request: {intent: book, specialty_id: general_practice, location_id: norte}, accept: true}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00042
+          provider_id: PR02
+          location_id: norte
+          appointment_type_id: review
+          slot: {$earliest_slot: {provider_id: PR02, patient_id: P00042}}
+          policy_id: sanitas
+      trajectory_contains: [find_patient, find_provider, find_slots, prepare_booking, submit_action]
+      must_not_call: [prepare_cancel]
+      privacy_of: [P00042]
+
+  - id: p3.provider_and_site_fixed_day_dropped
+    problem: 3
+    # doctor_and_site-9904a6d96cdd: doctor and site matter far more than the
+    # day the caller guessed at. Our fixtures give every provider one site
+    # open every weekday, so there is no weekday the provider is simply not
+    # there; the equivalent trap here is a site closed on the guessed day
+    # (Sur never opens Saturday). Provider and site stay fixed; the day does
+    # not. Never seen before, so a first visit.
+    caller:
+      - says: "Hola, soy Marta Ruiz García. Quiero cita con el doctor Iglesia, el traumatólogo, en Arenal Sur. Había pensado venir el sábado. Me duele la rodilla desde hace semanas."
+        means: {identify: {name: "Marta Ruiz García"}, request: {intent: book, provider: "doctor Iglesia", specialty_id: orthopaedics, location_id: sur, when: Saturday}}
+      - says: "Nací el dos de noviembre de mil novecientos noventa y dos."
+        means: {identify: {date_of_birth: "1992-11-02"}}
+      - says: "¿Cerrado el sábado en Sur? Vale, no importa el día. La primera que tengan con él ahí, cualquier día."
+        means: {request: {intent: book, provider: "doctor Iglesia", specialty_id: orthopaedics, location_id: sur}, accept: true}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00043
+          provider_id: PR05
+          location_id: sur
+          appointment_type_id: first_visit
+          slot: {$earliest_slot: {provider_id: PR05, patient_id: P00043}}
+          policy_id: adeslas
+      trajectory_contains: [find_patient, find_provider, find_slots, prepare_booking, submit_action]
+      privacy_of: [P00043]
+
+  - id: p3.provider_not_found_is_never_invented
+    problem: 3
+    # doctor_and_site-570e40a3f718: the named doctor does not exist, and the
+    # caller will see nobody else -- spells the surname once, then declines
+    # any alternative. The only honest answer is the rule that bit, never a
+    # booking made up to have something to submit.
+    caller:
+      - says: "Buenos días. Soy Antonio Pérez Martín, con NIE equis uno dos tres cuatro cinco seis siete ele. Quería cita con el doctor Fuentes, el traumatólogo. Me duele la rodilla después de caminar un rato, desde hace semanas."
+        means: {identify: {name: "Antonio Pérez Martín", national_id: "X1234567L"}, request: {intent: book, provider: "doctor Fuentes", specialty_id: orthopaedics}}
+      - says: "Fuentes. Efe, u, e, n, t, e, s."
+        means: {request: {provider: "doctor Fuentes"}}
+      - says: "Ya veo. Pues nada, solo quería con él. Gracias, adiós."
+        means: {decline: true, end: true}
+    expect:
+      actions:
+        - {kind: no-action, reason: provider_not_found}
+      must_not_call: [prepare_booking]
       privacy_of: [P00200]
 
   - id: p5.first_thing_monday_12_october_moves_to_tuesday
