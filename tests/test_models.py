@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from vortex import models
-from vortex.settings import Settings, reset_settings
+from vortex.settings import LLM_PRESETS, Settings, reset_settings
 
 
 @pytest.fixture
@@ -54,7 +54,9 @@ def test_model_part_may_carry_slashes(env: pytest.MonkeyPatch) -> None:
 
 def test_bare_provider_takes_the_preset_default(env: pytest.MonkeyPatch) -> None:
     spec = models.resolve("helmcode", Settings())
-    assert spec.model == "qwen3.6"
+    # Read the default off the preset. Naming the model here makes the test
+    # fail every time someone picks a better one, which is not what it checks.
+    assert spec.model == LLM_PRESETS["helmcode"].model
     assert not spec.available  # no key
 
 
