@@ -25,6 +25,7 @@ uncapped; this turns them into the feedback ``Run All`` refuses to give.
 from __future__ import annotations
 
 import asyncio
+import datetime
 import json
 import time
 import traceback
@@ -323,6 +324,16 @@ def _judge_cases(
     calls = _read_call_log(log_path)
     if not calls:
         return [], [f"{log_path} holds no call events"]
+    anchor = roster.cases[0].now.date() if roster.cases else None
+    today = datetime.datetime.now(probes.MADRID).date()
+    if anchor and anchor != today:
+        notes.append(
+            f"the roster is the export anchored to {anchor}, and today is {today}. "
+            "'The earliest appointment' means the earliest from the day after the "
+            "call, so every BOOK answer that asked for the earliest has moved. "
+            "A slot mismatch on such a case is the anchor, not the agent — "
+            "the problem page shows today's answer, the exported file does not."
+        )
     forced = roster.get(case_id) if case_id else None
     if case_id and forced is None:
         return [], [f"no public case matches {case_id!r}"]
