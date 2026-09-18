@@ -32,15 +32,16 @@ the commit that added this section (warm cache):
 
 | Job | Cold cache | Warm cache |
 | --- | --- | --- |
-| whole workflow, wall clock | 34 s | see the Actions tab, expected under 30 s |
-| `test` | 19 s | |
-| `coverage` | 30 s | |
-| `lint` | 8 s | |
-| `format` | 10 s | |
-| `gate` | 4 s | |
+| whole workflow, wall clock | 34 s | 56 s (includes 40 s queued for a runner) |
+| `test` | 19 s | 14 s |
+| `coverage` | 30 s | 32 s |
+| `lint` | 8 s | 10 s |
+| `format` | 10 s | 13 s |
+| `gate` | 4 s | 4 s |
 
-Locally the whole thing is a few seconds. Most CI time is runner start and
-checkout; the uv cache keyed on `uv.lock` removes the dependency download.
+Locally the whole thing is a few seconds. Most CI time is waiting for a runner,
+runner start and checkout; the uv cache keyed on `uv.lock` only shaves the
+dependency download, which is small for this lock.
 
 ## Coverage
 
