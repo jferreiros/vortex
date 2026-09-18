@@ -78,6 +78,23 @@ the default alternate gives ElevenLabs Spanish and Google ca/gl/eu.
 
 STT is Soniox `stt-rt-v5` throughout: language identification on, clinic
 vocabulary boosted, `SONIOX_API_KEY` and `SONIOX_STT_MODEL`.
+## Design
+
+Every screen (the jury wall, the ops board, the docs pages, `/mic`, the evals
+report) follows one system: [`DESIGN.md`](DESIGN.md). White canvas, black
+pills, hairline cards, system fonts, one dark surface per page, status as
+traffic-light dots and nothing else in colour.
+
+The tokens live in `vortex/observability/design.css`. Every front end loads
+that file first. `docs/design.css` is a copy for GitHub Pages:
+
+```bash
+make design-sync            # refresh docs/design.css after you edit the tokens
+make test                   # tests/test_design.py fails when the copy is stale
+```
+
+Before you add a colour, a font or a shadow, read `DESIGN.md`. The answer is no.
+
 ## The board — what to do next
 
 Every task is one GitHub issue. The priority order is published as a page:

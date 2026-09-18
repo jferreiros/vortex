@@ -258,41 +258,63 @@ def render_markdown(sections: list[tuple[RunResult, Diff, Diff]]) -> str:
 # HTML
 # ---------------------------------------------------------------------------
 
+# The tokens come from the design system; only the report's own layout lives here.
+# See DESIGN.md at the repo root.
+_DESIGN_CSS = (
+    Path(__file__).resolve().parents[2] / "vortex" / "observability" / "design.css"
+).read_text(encoding="utf-8")
+
 _CSS = """
-:root{--bg:#0f1115;--card:#171a21;--fg:#e6e8ee;--mute:#8b93a7;--ok:#3ddc84;--bad:#ff5d5d;
---warn:#ffcc4d;--hollow:#8fd3ff;--line:#262b36;font-family:ui-sans-serif,system-ui,-apple-system,
-"Segoe UI",Roboto,sans-serif}
-body{margin:0;background:var(--bg);color:var(--fg);font-size:15px}
-main{max-width:1180px;margin:0 auto;padding:28px 20px 60px}
-h1{font-size:34px;margin:0 0 6px}h2{font-size:20px;margin:28px 0 8px}
-h3{font-size:15px;color:var(--mute);margin:18px 0 6px;text-transform:uppercase;
-letter-spacing:.06em}
-.verdict{display:inline-block;padding:4px 14px;border-radius:999px;font-weight:700;font-size:18px}
-.PASS{background:rgba(61,220,132,.15);color:var(--ok)}.FAIL{background:rgba(255,93,93,.15);color:var(--bad)}
-.UNVERIFIED,.EMPTY{background:rgba(255,204,77,.15);color:var(--warn)}
-.sub{color:var(--mute);margin:4px 0 20px}
-.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;
-margin:10px 0 6px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
-.card .n{font-size:30px;font-weight:700;line-height:1}
-.card .l{color:var(--mute);font-size:12px;margin-top:4px}
-.ok{color:var(--ok)}.bad{color:var(--bad)}.warn{color:var(--warn)}.hol{color:var(--hollow)}
-table{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px}
-th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
-th{color:var(--mute);font-weight:600}td.num{text-align:right;font-variant-numeric:tabular-nums}
-code{background:#0b0d11;padding:1px 5px;border-radius:5px;font-size:12px}
-.pill{display:inline-block;min-width:54px;text-align:center;border-radius:6px;padding:2px 6px;
-font-size:12px;font-weight:700}
-.p-pass{background:rgba(61,220,132,.18);color:var(--ok)}.p-fail{background:rgba(255,93,93,.18);color:var(--bad)}
-.p-error{background:rgba(255,93,93,.3);color:#ffb3b3}.p-unverified{background:rgba(255,204,77,.18);color:var(--warn)}
-.p-skipped{background:#2a2f3a;color:var(--mute)}.p-hollow{background:rgba(143,211,255,.15);color:var(--hollow)}
-.note{background:rgba(255,204,77,.08);border-left:3px solid var(--warn);padding:8px 12px;
-border-radius:6px;margin:8px 0;color:#f3e2b0}
-.diff{display:flex;gap:16px;flex-wrap:wrap;margin:8px 0}
-.diff div{background:var(--card);border:1px solid var(--line);border-radius:10px;
-padding:8px 12px;min-width:200px}
-details{margin-top:10px}summary{cursor:pointer;color:var(--mute)}
-.detail{color:var(--mute);font-size:12px;white-space:pre-wrap}
+main{max-width:var(--column-wide);margin:0 auto;padding:var(--space-xxl) var(--space-lg) 60px}
+h1{display:flex;align-items:center;gap:var(--space-md);flex-wrap:wrap}
+h2{display:flex;align-items:center;gap:var(--space-md);flex-wrap:wrap;
+margin-top:var(--space-section)}
+h3{font:var(--text-body-sm-strong);color:var(--body);margin:var(--space-xl) 0 var(--space-sm)}
+.verdict{display:inline-flex;align-items:center;gap:8px;height:28px;padding:0 12px;
+border:1px solid var(--hairline-strong);border-radius:var(--rounded-full);
+font:var(--text-body-sm-strong);color:var(--ink)}
+.verdict::before{content:"";width:8px;height:8px;border-radius:var(--rounded-full);
+background:var(--hairline-strong)}
+.verdict.PASS::before{background:var(--terminal-green)}
+.verdict.FAIL::before{background:var(--terminal-red)}
+.verdict.UNVERIFIED::before,.verdict.EMPTY::before{background:var(--terminal-yellow)}
+h1 .verdict{background:var(--surface-dark);border-color:var(--surface-dark);color:var(--on-dark)}
+.sub{font:var(--text-body-sm);color:var(--body);margin:var(--space-xs) 0 var(--space-xl)}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:1px;
+background:var(--hairline);border:1px solid var(--hairline);border-radius:var(--rounded-lg);
+overflow:hidden;margin:var(--space-md) 0}
+.card{background:var(--canvas);border:0;border-radius:0;padding:var(--space-lg)}
+.card .n{font:var(--text-display-lg);color:var(--ink);font-variant-numeric:tabular-nums}
+.card .l{font:var(--text-caption-sm);color:var(--body);margin-top:var(--space-xs)}
+.card .n.ok,.card .n.bad,.card .n.warn,.card .n.hol{color:var(--ink)}
+.ok::before,.bad::before,.warn::before,.hol::before{content:"";display:inline-block;
+width:8px;height:8px;border-radius:var(--rounded-full);margin-right:6px;vertical-align:middle}
+.ok::before{background:var(--terminal-green)}.bad::before{background:var(--terminal-red)}
+.warn::before{background:var(--terminal-yellow)}.hol::before{background:var(--hairline-strong)}
+table{width:100%;border-collapse:collapse;font:var(--text-body-sm);margin-top:var(--space-sm)}
+th,td{padding:var(--space-sm) var(--space-md);border-bottom:1px solid var(--hairline);
+text-align:left;vertical-align:top}
+th{font:var(--text-body-sm-strong);color:var(--body)}
+td.num{text-align:right;font-variant-numeric:tabular-nums}
+code{background:var(--surface-soft);padding:1px 6px;border-radius:var(--rounded-sm)}
+.pill{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 10px;
+border:1px solid var(--hairline-strong);border-radius:var(--rounded-full);
+font:var(--text-caption-sm);font-weight:500;color:var(--ink);white-space:nowrap}
+.pill::before{content:"";width:8px;height:8px;border-radius:var(--rounded-full);
+background:var(--hairline-strong)}
+.p-pass::before{background:var(--terminal-green)}
+.p-fail::before,.p-error::before{background:var(--terminal-red)}
+.p-unverified::before{background:var(--terminal-yellow)}
+.p-skipped{color:var(--body)}.p-hollow{color:var(--body)}
+.note{font:var(--text-body-sm);color:var(--ink);background:var(--surface-soft);
+border-radius:var(--rounded-lg);padding:var(--space-md) var(--space-lg);margin:var(--space-sm) 0}
+.diff{display:flex;gap:var(--space-lg);flex-wrap:wrap;margin:var(--space-sm) 0}
+.diff div{font:var(--text-body-sm);color:var(--ink);background:var(--canvas);
+border:1px solid var(--hairline);border-radius:var(--rounded-lg);padding:var(--space-md)
+var(--space-lg);min-width:200px}
+details{margin-top:var(--space-md)}
+summary{cursor:pointer;font:var(--text-body-sm-strong);color:var(--body)}
+.detail{font:var(--text-caption-sm);color:var(--body);white-space:pre-wrap}
 """
 
 
@@ -483,7 +505,8 @@ def render_html(sections: list[tuple[RunResult, Diff, Diff]]) -> str:
     return (
         "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-        f"<title>Vortex evals — {overall}</title><style>{_CSS}</style></head>"
+        f"<title>Vortex evals — {overall}</title>"
+        f"<style>{_DESIGN_CSS}</style><style>{_CSS}</style></head>"
         f"<body><main>{body}</main></body></html>"
     )
 

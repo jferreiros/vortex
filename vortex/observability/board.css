@@ -1,277 +1,359 @@
-@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap");
+/*
+ * board.css — the ops board (/) and the jury wall (/wall) on NiceGUI.
+ *
+ * Loaded after design.css. Two jobs only:
+ *   1. Make Quasar's chrome (buttons, inputs, notifications) follow DESIGN.md.
+ *   2. Lay out the wall's three columns and the ops split.
+ * Tokens live in design.css. Do not add a colour here.
+ */
 
-:root {
-  --bg: #0b0d10;
-  --bg-2: #12151a;
-  --line: #262b33;
-  --ink: #e8eaed;
-  --muted: #8b939e;
-  --live: #3d8bfd;
-  --ok: #3dd68c;
-  --warn: #f5a524;
-  --bad: #ff5c5c;
-  --accent: #7aa2ff;
-}
+/* ------------------------------------------------------------------ */
+/* Quasar chrome                                                       */
+/* ------------------------------------------------------------------ */
 
 html,
 body,
 #app,
 .q-layout,
+.q-page,
+.q-page-container,
 .nicegui-content {
-  background: var(--bg) !important;
+  background: var(--canvas) !important;
   color: var(--ink);
 }
 
 body,
 .q-page,
 .nicegui-content {
-  font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif !important;
+  font: var(--text-body-md) !important;
   margin: 0;
   padding: 0 !important;
 }
 
-.mono {
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
+/* NiceGUI lays the page out as a flex column that shrinks children to fit.
+   Our nav and grids want the full width. */
+.nicegui-content {
+  gap: 0 !important;
+  align-items: stretch !important;
 }
+
+/* Quasar's colour classes are !important inside a cascade layer, so a plain
+   override loses. live.py sets ui.colors(primary=black, ...) instead, and the
+   rules below only shape what the palette does not cover. */
+
+.q-btn {
+  height: 36px !important;
+  min-height: 36px !important;
+  padding: 0 20px !important;
+  border-radius: var(--rounded-full) !important;
+  font: var(--text-button-md) !important;
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+  box-shadow: none !important;
+}
+
+.q-btn .q-btn__content {
+  font: inherit;
+}
+
+.q-btn.button-primary:active {
+  background: var(--ink-deep) !important;
+}
+
+.q-btn.button-secondary.q-btn--outline::before {
+  border: 1px solid var(--hairline-strong);
+}
+
+.q-btn.button-quiet {
+  color: var(--body) !important;
+}
+
+.q-btn .q-focus-helper {
+  display: none;
+}
+
+.q-field--outlined .q-field__control {
+  height: 36px !important;
+  min-height: 36px !important;
+  padding: 0 16px !important;
+  border-radius: var(--rounded-full) !important;
+  background: var(--surface-soft);
+}
+
+.q-field--outlined .q-field__control::before {
+  border: 1px solid transparent !important;
+}
+
+.q-field--outlined .q-field__control::after {
+  border-width: 1px !important;
+  border-color: transparent !important;
+  border-radius: var(--rounded-full) !important;
+}
+
+.q-field--outlined.q-field--focused .q-field__control {
+  background: var(--canvas);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.q-field--outlined.q-field--focused .q-field__control::after {
+  border-color: var(--ink) !important;
+}
+
+.q-field--dense .q-field__control,
+.q-field--dense .q-field__native {
+  min-height: 36px !important;
+}
+
+.q-field__native {
+  font: var(--text-body-sm) !important;
+  color: var(--ink) !important;
+  padding: 0 !important;
+}
+
+.q-field__native::placeholder {
+  color: var(--mute);
+}
+
+.q-notification {
+  background: var(--surface-dark) !important;
+  color: var(--on-dark) !important;
+  border-radius: var(--rounded-lg) !important;
+  box-shadow: none !important;
+  font: var(--text-body-sm) !important;
+}
+
+.q-separator {
+  background: var(--hairline) !important;
+}
+
+/* ------------------------------------------------------------------ */
+/* Shared chrome                                                       */
+/* ------------------------------------------------------------------ */
 
 .shell {
   min-height: 100vh;
-  background: var(--bg);
+  background: var(--canvas);
   color: var(--ink);
 }
 
-.top {
+/* NiceGUI labels are <div>s; give the text roles their font explicitly. */
+.primary-nav .brand,
+.primary-nav .brand .q-link {
+  font: var(--text-heading-sm);
+  font-weight: 600;
+}
+
+.primary-nav .pill.q-link {
+  text-decoration: none;
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+/* ------------------------------------------------------------------ */
+/* Wall                                                                */
+/* ------------------------------------------------------------------ */
+
+.wall-head {
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 14px 20px;
-  border-bottom: 1px solid var(--line);
-  background: var(--bg-2);
+  gap: var(--space-lg);
+  padding: var(--space-xl) var(--space-xl) var(--space-lg);
 }
 
-.brand {
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  font-size: 13px;
-}
-
-.dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  display: inline-block;
-  margin-right: 6px;
-}
-
-.dot.live {
-  background: var(--live);
-  box-shadow: 0 0 0 4px #3d8bfd33;
-}
-
-.dot.up {
-  background: var(--ok);
-}
-
-.dot.down {
-  background: var(--bad);
-}
-
-.pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  border: 1px solid var(--line);
-  padding: 4px 8px;
-  border-radius: 4px;
-  color: var(--muted);
-}
-
-.pill.live {
-  color: var(--live);
-  border-color: #3d8bfd66;
-}
-
-.pill.booked,
-.pill.registered,
-.pill.rescheduled,
-.pill.cancelled {
-  color: var(--ok);
-  border-color: #3dd68c55;
-}
-
-.pill.refused,
-.pill.escalated {
-  color: var(--warn);
-  border-color: #f5a52466;
-}
-
-.pill.ended {
-  color: var(--muted);
+.wall-head .clinic {
+  font: var(--text-display-lg);
+  color: var(--ink);
 }
 
 .grid3 {
   display: grid;
   grid-template-columns: 1.1fr 1.2fr 0.9fr;
-  gap: 1px;
-  background: var(--line);
-  min-height: calc(100vh - 58px);
+  gap: var(--space-xl);
+  padding: 0 var(--space-xl) var(--space-xl);
+  min-height: calc(100vh - 140px);
+}
+
+@media (max-width: 850px) {
+  .grid3 {
+    grid-template-columns: 1fr;
+  }
 }
 
 .col {
-  background: var(--bg);
-  padding: 18px 20px;
+  min-width: 0;
   overflow: auto;
 }
 
-.kicker {
-  font-size: 11px;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--muted);
-  font-weight: 600;
-  margin-bottom: 12px;
-}
-
-.turn {
-  margin: 0 0 12px;
-  max-width: 36ch;
-}
-
-.turn.user {
-  margin-left: auto;
-}
-
-.bubble {
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 10px 12px;
-  font-size: 14px;
-  line-height: 1.45;
-  background: var(--bg-2);
-}
-
-.turn.user .bubble {
-  background: #182033;
-  border-color: #2a3a5a;
-}
-
-.who {
-  font-size: 10px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--muted);
-  margin-bottom: 4px;
+.col .terminal-card {
+  min-height: 100%;
 }
 
 .step {
   display: grid;
   grid-template-columns: 14px 1fr auto;
-  gap: 10px;
+  gap: var(--space-md);
   align-items: start;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--line);
+  padding: var(--space-sm) 0;
+  border-bottom: 1px solid var(--hairline);
 }
 
 .step:last-child {
   border-bottom: 0;
 }
 
+.step .dot {
+  margin-top: 6px;
+}
+
 .step .name {
-  font-weight: 600;
-  font-size: 13px;
+  font: var(--text-code-sm);
+  color: var(--ink);
 }
 
 .step .meta {
-  color: var(--muted);
-  font-size: 12px;
-  margin-top: 2px;
+  font: var(--text-caption-sm);
+  font-family: var(--font-mono);
+  color: var(--mute);
+  margin-top: var(--space-xxs);
+  overflow-wrap: anywhere;
 }
 
-.chart-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--line);
-  font-size: 14px;
+.step .ms {
+  font: var(--text-caption-sm);
+  color: var(--body);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
-.chart-row span {
-  color: var(--muted);
-}
-
+/* The verdict: the wall's single dark surface. */
 .verdict {
-  margin-top: 18px;
-  padding: 14px 16px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  margin-top: var(--space-xl);
+  padding: 24px 32px;
+  background: var(--surface-dark);
+  color: var(--on-dark);
+  border-radius: var(--rounded-lg);
+  font: var(--text-heading-lg);
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
 }
 
-.verdict.live {
-  border-color: #3d8bfd88;
-  color: var(--live);
+.verdict .dot {
+  width: 10px;
+  height: 10px;
 }
 
-.verdict.ok {
-  border-color: #3dd68c88;
-  color: var(--ok);
+.verdict .dot.live {
+  background: var(--on-dark);
 }
 
-.verdict.warn {
-  border-color: #f5a52488;
-  color: var(--warn);
-}
+/* ------------------------------------------------------------------ */
+/* Ops                                                                 */
+/* ------------------------------------------------------------------ */
 
 .ops {
-  padding: 18px 20px 40px;
+  padding: var(--space-xl) var(--space-xl) 40px;
 }
 
 .ops-grid {
   display: grid;
-  grid-template-columns: 280px 1fr;
-  gap: 16px;
+  grid-template-columns: 300px 1fr;
+  gap: var(--space-xl);
 }
 
-.card {
-  background: var(--bg-2);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 14px;
+@media (max-width: 850px) {
+  .ops-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.presence {
+  font: var(--text-caption-sm);
+  color: var(--body);
+  margin-bottom: var(--space-md);
 }
 
 .call-row {
   display: grid;
-  grid-template-columns: 16px 1fr auto;
-  gap: 10px;
+  grid-template-columns: 14px 1fr auto;
+  gap: var(--space-md);
   align-items: center;
-  padding: 10px 8px;
-  border-bottom: 1px solid var(--line);
+  padding: var(--space-md) var(--space-sm);
+  border-bottom: 1px solid var(--hairline);
+  border-radius: var(--rounded-md);
   cursor: pointer;
 }
 
-.call-row:hover {
-  background: #181c24;
+.call-row:last-child {
+  border-bottom: 0;
 }
 
 .call-row.on {
-  background: #182033;
+  background: var(--surface-soft);
 }
 
-.empty {
-  color: var(--muted);
-  padding: 24px 0;
+.call-row > div {
+  min-width: 0;
 }
 
-.q-btn {
-  border-radius: 4px !important;
-  font-weight: 600 !important;
-  letter-spacing: 0.04em;
+.call-row .title,
+.call-row .sub {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.call-row .title {
+  font: var(--text-body-sm-strong);
+  color: var(--ink);
+}
+
+.call-row .sub {
+  font: var(--text-caption-sm);
+  font-family: var(--font-mono);
+  color: var(--body);
+}
+
+.detail-id {
+  font: var(--text-caption-sm);
+  font-family: var(--font-mono);
+  color: var(--body);
+}
+
+.detail-name {
+  font: var(--text-heading-md);
+  color: var(--ink);
+  margin: var(--space-xs) 0 var(--space-lg);
+}
+
+.detail-turn {
+  font: var(--text-body-sm);
+  color: var(--ink);
+  margin: var(--space-sm) 0;
+}
+
+.detail-turn b {
+  font-weight: 500;
+  color: var(--body);
+  margin-right: var(--space-sm);
+}
+
+.detail-tool {
+  font: var(--text-code-sm);
+  color: var(--ink);
+  margin: var(--space-xs) 0;
+}
+
+.login {
+  max-width: 360px;
+  margin: 12vh auto;
+}
+
+.login .error {
+  font: var(--text-caption-sm);
+  color: var(--body);
+  margin-top: var(--space-sm);
+  min-height: 1.4em;
 }
