@@ -271,11 +271,13 @@ Source pages (all under `https://hackspain.getprosperapp.com/leaderboard/docs/`)
     conversation does not rescue a wrong record. **Exception: problem 14**,
     where the transcript is checked for leaked patient data.
     [Source](https://hackspain.getprosperapp.com/leaderboard/docs/rules#what-is-not-scored) · Ctrl+F: `What is not scored`
-52. Points: score = Σ (pass fraction × weight) over problems; the full roster
-    is worth **49**. A problem nobody attempted scores nothing — running only
+52. Points: score = Σ (**passed cases × problem weight**). Each private case
+    is worth the whole problem weight; there is no percentage or denominator.
+    The 17 scored problems contain 68 private cases and the full roster is worth
+    **196 points**. A problem nobody attempted scores nothing — running only
     what we are good at buys nothing. The leaderboard ranks each team's **best**
     Run All.
-    [Source](https://hackspain.getprosperapp.com/leaderboard/docs/rules#points) · Ctrl+F: `There is no percentage`
+    [Source](https://hackspain.getprosperapp.com/leaderboard/docs/rules#points) · Ctrl+F: `The most the full roster can give is`
 53. Run All dials 4 private cases per open scored problem, 10 at a time; the
     roster ends at 17 scored problems / 68 calls. Problems open progressively;
     a run taken before a problem opened keeps its score.
@@ -502,6 +504,47 @@ the slot is fixed.
 - **Answer: a multi-action list, all of it correct. No partial credit inside a
   case** — so two POSTs (rule 12), each exactly right.
 [Source](https://hackspain.getprosperapp.com/leaderboard/docs/problems#18-the-real-call) · Ctrl+F: `The Real Call`
+
+### Problem-page compliance audit
+
+This is the pass checklist against the official Problems statement. It is not
+an extra source of rules: each row points back to the numbered rule or case
+section above, so an implementation can turn every row into an integration or
+end-to-end test.
+
+| # | Required pass behaviour | Covered by | What documentation alone cannot prove |
+|---|---|---|---|
+| 1 | Identify the patient on two fields; preserve site/day/part-of-day; search strictly after call day; choose the record-derived type and an earliest tied slot; submit exact ids. | Rules 15–16, 20–22, 27–28, 34, 36–37; §7.1 | The live API result and final submitted record must be tested. |
+| 2 | Keep 5, 10 and 20 simultaneous calls isolated and answer every line as problem 1. | Rules 7–9; §7.2 | Concurrency, capacity and per-socket state need a burst test. |
+| 3 | Resolve near-miss names; honour named provider + named site; redirect only within the same specialty and site; handle leave/not-found with the exact outcome. | Rules 19, 31–32, 38–40; §7.3 | Fallback ranking and exact ids need API-backed tests. |
+| 4 | Capture all eight demographics; validate DNI/NIE letter; confirm fragile email; submit `REGISTER` only and no `BOOK`. | Rules 13, 23–24, 56–59; §7.4 | Speech capture and exact final demographics need end-to-end tests. |
+| 5 | Resolve every published phrase against call-connect time; apply strict-after weekday semantics, opening hours and 12 October closure; if closed, preserve site and part of day on the next open day. | Rules 27–30, 34–35; §7.5 | Date parsing and timezone boundaries need deterministic tests. |
+| 6 | Evaluate age, clinic referral, insurer referral, specialty/site coverage, provider network and annual allowance; redirect only when valid; submit the exact refusal reason otherwise. | Rules 19, 32, 42–44; §7.6 | The restriction precedence for combinations not in the statement must be confirmed through `/availability`. |
+| 7 | Negotiate only inside the caller's acceptable alternatives; otherwise submit `NO_ACTION(no_availability)`. | Rules 19, 32, 48–49; §7.7 | “Nearest thing that works” depends on dialogue state, not a static rule table. |
+| 8 | Read only upcoming appointments; disambiguate the target; submit exact `appointment_id`; support two cancels as two actions. | Rules 12–13, 46; §7.8 | Selecting the intended appointment and multi-action persistence need API tests. |
+| 9 | Separate caller identity from patient identity and book for the patient, never for the phone owner/caller. | Rules 4, 20–22; §7.9 | Third-party authorisation beyond the published cases is not specified; see §10. |
+| 10 | Route only by the published symptom table; red flags submit `ESCALATE(medical_emergency)` and no booking; appointment type still comes from the chart. | Rules 13, 19, 36–37; §7.10 | Symptom recognition from paraphrased speech needs language-model tests. |
+| 11 | Detect or honour the requested language and restrict providers only for this problem; every provider can satisfy Spanish, only the published four can satisfy Catalan. | Rules 39, 41; §7.11 | STT/TTS switching and provider-language filtering need end-to-end tests; private cases are intentionally harder. |
+| 12 | Run the normal problem-1 logic under each 5 dB noise bed and confirm names/identifier digits instead of guessing. | Rules 20–22; §7.12 | A Markdown rule cannot make STT pass street/TV/room/car audio; run the four practice calls. |
+| 13 | Support interruption, correction, silence and digression; invalidate stale choices and submit only the final request. | Rules 6, 50; §7.13 | Barge-in, silence handling and stale-state clearing need conversation tests. |
+| 14 | Refuse with `NO_ACTION(out_of_scope)`; never speak the target national id or phone, including spaced digits; the name may be repeated. | Rules 19, 51, 57, 59; §7.14 | The transcript needs an output/privacy test using the judge's normalization. |
+| 15 | Geocode the caller origin, then choose the smallest straight-line distance among sites that can serve the specialty/provider/plan request. | Rules 31–32, 43; §7.15 | Geocoding and distance calculation need code and fixture tests. |
+| 16 | Answer sites, providers and hours only from clinic data; ensure the booking produced from those answers is valid. | Rules 29–32, 38–45; §7.16 | The case is scored on the resulting booking, so factual QA must be exercised in dialogue. |
+| 17 | Try the filed plan first; only when it is blocked ask for the second plan **[inferred]**; query availability naming it; submit its exact `policy_id`; never invent or switch a working first plan. | Rules 32, 43–45; §7.17; §9.5 | The trigger is not specified by the Problems statement; confirm with organisers. |
+| 18 | Keep caller and patient state separate, handle two intents plus corrections/noise, and submit every required action exactly once. | Rules 8, 12, 17; §7.18 | This is an end-to-end composition test; no partial credit means each constituent action must be verified. |
+
+The public Problems UI is live and its visible case rows/answers can change
+with the day because booking slots are anchored to 09:00 Europe/Madrid. Do not
+copy those concrete ids or dates into this file or hard-code them in the
+agent. The stable rule is to derive them from fresh directory, appointments
+and availability responses and then validate the stored action record.
+[Source](https://hackspain.getprosperapp.com/leaderboard/docs/problems#public-and-private-cases) · Ctrl+F: `the problem page always shows today's`
+
+**Coverage result:** every behaviour stated by the stable Problems document is
+represented above. Passing is not guaranteed by documentation alone for
+problems 2, 4, 11–15, 16 and 18: they require burst, audio, dialogue, privacy,
+geospatial or multi-action end-to-end tests. Problem 17 also retains one
+organiser-level ambiguity, marked **[inferred]** and listed in §9.5/§10.
 
 ---
 
