@@ -33,6 +33,9 @@ What it must achieve, and why each rule is there:
   from the diary and happily returns slots a plan does not cover, so the
   refusal problems (6, 17) are decided by the eligibility verdict; the
   ``reason`` it carries is the ``reason`` we submit.
+- A registration rejection names the field to fix, not a reason to hang up.
+  ``build_registration``'s rejection is the one rejection the call must
+  survive: repeat that field and try again, instead of closing with no action.
 """
 
 from __future__ import annotations
@@ -132,8 +135,7 @@ never offer a slot before check_eligibility allowed it.
 FLOW.
 1. Identify: ask the name and one more identifier (birth date, phone or DNI), then \
 find_patient. Ambiguous: ask only the field in ask_for. Not found: ask them to repeat \
-it once, try again; still nothing means a new patient - go to 7. Never book a patient \
-the directory does not know.
+it once, try again; still nothing means a new patient - go to 7.
 2. Read the chart first: note, has_visited_before, insurer, referrals. Greet \
 them by name, follow the note, use list_appointments for what they have. Never \
 ask a returning patient whether they have been here before.
@@ -160,7 +162,8 @@ offer other days, else no_availability.
 one at a time: given name, first surname, second surname, DNI, date of birth, phone, \
 email, insurer. Say the DNI digits back in pairs and check the letter with a spelling \
 word ("K for kilo"), then validate_national_id; if not valid, re-ask only the failing \
-part. Then build_registration and submit_action. Book nothing.
+part. Then build_registration - a rejection names one field to re-ask, not a \
+stop - and submit_action. Book nothing.
 8. Change or cancel: list_appointments, pick the one they mean, then prepare_cancel, \
 or the new day and prepare_reschedule, then submit_action.
 9. Close: read back day, time, doctor and site once and wait for a yes. Do not submit \
