@@ -1,6 +1,10 @@
 # Problem 11: languages. The clinic answers in English; the caller who speaks
 # Spanish or Catalan is the exception. Language constrains the booking only
-# when the caller asks for a doctor they can talk to.
+# when the caller asks for a doctor they can talk to, and then the booked
+# provider must speak it. Every provider speaks Spanish; four speak Catalan,
+# one per specialty that has one: Dra. Ortiz (PR01, general practice),
+# Dr. Javier Ocaña (PR08, paediatrics), Dr. Pons (PR10, orthopaedics) and
+# Dr. Vilar (PR12, dermatology). Physiotherapy and gynaecology have nobody.
 # The call connects Friday 18 September 2026, 09:00 Europe/Madrid.
 group: languages
 problem: 11
@@ -8,6 +12,7 @@ now: "2026-09-18T09:00:00+02:00"
 
 scenarios:
   - id: p11.catalan_speaker_wants_a_catalan_doctor
+    # The only Catalan-speaking GP is Dra. Ortiz at Centro, who opens Saturday.
     caller:
       - says: "Bon dia. Sóc la Marta Ruiz, nascuda el dotze de març del vuitanta-cinc. Voldria hora amb un metge de capçalera que parli català, si us plau."
         means: {identify: {name: "Marta Ruiz", date_of_birth: "1985-03-12"}, request: {intent: book, specialty_id: general_practice, language: ca}}
@@ -17,8 +22,9 @@ scenarios:
       actions:
         - kind: book
           patient_id: P00042
-          provider_id: PR02
-          slot: {$earliest_slot: {provider_id: PR02, patient_id: P00042}}
+          provider_id: PR01
+          location_id: centro
+          slot: {$earliest_slot: {provider_id: PR01, patient_id: P00042}}
       privacy_of: [P00042]
 
   - id: p11.spanish_only_caller_books_general_practice
@@ -64,7 +70,8 @@ scenarios:
       privacy_of: [P00043, P00042]
 
   - id: p11.spanish_speaker_wants_a_spanish_speaking_orthopaedist
-    # Public case shape: "alguien con quien pueda hablar en español" constrains the provider.
+    # Public case shape: "alguien con quien pueda hablar en español" constrains
+    # nobody, since every provider speaks Spanish: the earliest orthopaedist wins.
     caller:
       - says: "Buenos días. Soy Marta Ruiz, del doce de marzo del ochenta y cinco. Necesito traumatología, me duele la rodilla desde hace semanas, y que me atienda alguien con quien pueda hablar en español."
         means: {identify: {name: "Marta Ruiz", date_of_birth: "1985-03-12"}, request: {intent: book, specialty_id: orthopaedics, language: es}}
@@ -74,24 +81,83 @@ scenarios:
       actions:
         - kind: book
           patient_id: P00042
-          provider_id: PR05
-          slot: {$earliest_slot: {provider_id: PR05, patient_id: P00042}}
+          provider_id: {$earliest_slot: {specialty_id: orthopaedics, patient_id: P00042, field: provider_id}}
+          slot: {$earliest_slot: {specialty_id: orthopaedics, patient_id: P00042}}
       privacy_of: [P00042]
 
-  - id: p11.catalan_speaker_wants_catalan_physiotherapy
-    # The one physiotherapist speaks Catalan; Sanitas covers him at Sur.
+  - id: p11.catalan_speaker_wants_a_catalan_orthopaedist
+    # languages-aa19667cb074 shape: Catalan throughout, orthopaedics, "algú amb
+    # qui pugui parlar en català". Dr. Iglesia has the earlier slot and speaks
+    # Spanish only; the booking goes to Dr. Pons.
     caller:
-      - says: "Bon dia. Sóc la Marta Ruiz López, nascuda el dotze de març del vuitanta-cinc. Necessito fisioteràpia i que m'atengui algú amb qui pugui parlar en català."
-        means: {identify: {name: "Marta Ruiz López", date_of_birth: "1985-03-12"}, request: {intent: book, specialty_id: physiotherapy, language: ca}}
-      - says: "D'acord, la primera hora que tingui."
+      - says: "Bon dia. Sóc la Marta Ruiz, nascuda el dotze de març del vuitanta-cinc. Necessito traumatologia, em fa mal el genoll des de fa setmanes, i que m'atengui algú amb qui pugui parlar en català."
+        means: {identify: {name: "Marta Ruiz", date_of_birth: "1985-03-12"}, request: {intent: book, specialty_id: orthopaedics, language: ca}}
+      - says: "La primera que tingui, sí."
         means: {accept: true}
     expect:
       actions:
         - kind: book
           patient_id: P00042
-          provider_id: PR06
-          location_id: sur
-          slot: {$earliest_slot: {provider_id: PR06, patient_id: P00042}}
+          provider_id: PR10
+          slot: {$earliest_slot: {provider_id: PR10, patient_id: P00042}}
+      privacy_of: [P00042]
+
+  - id: p11.switches_to_catalan_mid_call_for_a_catalan_paediatrician
+    # Opens in Spanish, switches to Catalan and asks for a paediatrician the
+    # child can talk to. The switch must not restart the call: the identity
+    # given in Spanish still stands, and the booking honours the language.
+    from_number: "+34612345678"
+    caller:
+      - says: "Hola, buenos días. Soy Marta Ruiz López, llamo por mi hijo Lucas, que lleva días con tos."
+        means: {identify: {name: "Marta Ruiz López"}, patient: {name: "Lucas Ruiz López", relation: son}, request: {intent: book, specialty_id: paediatrics}}
+      - says: "Perdoni, millor en català. El Lucas va néixer el vint de juny del dos mil divuit, i voldria un pediatre que parli català, que el nen no entén el castellà."
+        means: {patient: {date_of_birth: "2018-06-20"}, request: {language: ca}}
+      - says: "D'acord, la primera que tingui."
+        means: {accept: true}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00107
+          provider_id: PR08
+          appointment_type_id: review
+          slot: {$earliest_slot: {provider_id: PR08, patient_id: P00107}}
+      must_not_call: [build_registration]
+      privacy_of: [P00042, P00107]
+
+  - id: p11.catalan_speaker_with_dkv_gets_the_catalan_dermatologist
+    # Antonio holds a dermatology referral and DKV. Dra. Iglesias refuses DKV
+    # and speaks no Catalan; Dr. Vilar takes DKV and speaks it. Both rules
+    # point at the same doctor.
+    from_number: "+34655555555"
+    caller:
+      - says: "Bon dia. Sóc l'Antonio Pérez Martín, nascut el trenta de gener del cinquanta-vuit. Tinc un volant per a dermatologia i voldria un dermatòleg que parli català."
+        means: {identify: {name: "Antonio Pérez Martín", date_of_birth: "1958-01-30"}, request: {intent: book, specialty_id: dermatology, language: ca}}
+      - says: "Perfecte, la primera que tingui."
+        means: {accept: true}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00200
+          provider_id: PR12
+          location_id: norte
+          appointment_type_id: dermatology_review
+          policy_id: dkv
+          slot: {$earliest_slot: {provider_id: PR12, patient_id: P00200}}
+      privacy_of: [P00200]
+
+  - id: p11.catalan_speaker_never_gets_a_physiotherapist_who_cannot_talk_to_her
+    # The one physiotherapist speaks Spanish only. Booking him for a caller who
+    # asked for Catalan fails the case; the honest ending is no_availability.
+    caller:
+      - says: "Bon dia. Sóc la Marta Ruiz López, nascuda el dotze de març del vuitanta-cinc. Necessito fisioteràpia i que m'atengui algú amb qui pugui parlar en català."
+        means: {identify: {name: "Marta Ruiz López", date_of_birth: "1985-03-12"}, request: {intent: book, specialty_id: physiotherapy, language: ca}}
+      - says: "Doncs res, gràcies."
+        means: {end: true}
+    expect:
+      actions:
+        - kind: no-action
+          reason: no_availability
+      must_not_call: [prepare_booking]
       privacy_of: [P00042]
 
   - id: p11.english_caller_never_gets_a_language_filter
