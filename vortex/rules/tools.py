@@ -1,26 +1,32 @@
 """rules/ tools - what the clinic does not do.
 
-Owner: the rules lane. Replace each ``stub_*`` call with the real logic.
-Keep the signatures exactly as ``vortex/contract.py`` declares them.
+Owner: the rules lane. Problems 6 (the rules), 10 (triage), 15 (the nearest
+site), 16 (the questions) and 17 (the second policy).
 
-What the docs say this lane must get right (clinic docs + problems 6, 10, 15):
+The one thing every tool here owes the rest of the pipeline is the *right*
+``reason``. The value a tool returns is the value we submit, and it has to name
+the rule that actually stopped the booking, not a plausible one. That is why
+the first eleven values of the closed vocabulary mirror the clinic's own
+restrictions one for one: whatever bit, there is a value for it.
 
-- Refuse with the rule that bit. The first eleven ``DeclineReason`` values
-  mirror the clinic's restrictions one-for-one; /availability's ``blocked``
-  names the rule for a provider.
-- Age boundary: the 14th birthday, in months, no gap, no overlap.
-- Referrals: some specialties need one; the patient's held referrals are on
-  the directory record.
-- Insurance: a plan can refuse a specialty, a site or be refused by a
-  provider. ``privado`` is a plan a patient holds or not, never a fallback.
-- A refused provider with an alternative is a redirect, not a refusal
-  (Dra. Iglesias does not take DKV; Dr. Vilar does).
-- Dr. Requena is on leave for the whole event.
-- Triage: the routing table and the red flags are a published list. A red
-  flag is ESCALATE(medical_emergency), never a booking.
-- Nearest site: smallest straight-line distance among the sites that can
-  actually serve the request.
-- Closed vocabulary: ``contract.ALL_REASONS`` is the only list of reasons.
+Where each answer comes from:
+
+- ``check_eligibility`` reads ``/availability``'s ``blocked`` for anything about
+  a particular doctor, and derives the rest from the catalogue records
+  themselves (see ``rules/eligibility.py``). It never guesses: every refusal is
+  a field on a published record.
+- ``triage`` is a lookup on the published symptom table (``rules/triage.py``).
+  Red flags escalate and book nothing.
+- ``nearest_location`` measures straight-line distance to the published
+  coordinates, among the sites that can serve the request (``rules/geo.py``).
+- ``find_provider`` matches a spoken name against the catalogue, and reports
+  the near-miss pairs as ambiguous rather than picking one.
+
+A refusal carrying one of the five *insurance* reasons is the signal for
+problem 17: the plan on file will not cover this, and the caller may hold a
+second one that does. It is not in the API — the only way to find it is to ask
+on the call, and then to call ``check_eligibility`` again with ``insurer`` set
+to what they said. ``INSURANCE_REASONS`` below is that set.
 """
 
 from __future__ import annotations
@@ -29,23 +35,46 @@ import unicodedata
 from datetime import timedelta
 from difflib import SequenceMatcher
 
-from vortex import contract
 from vortex.contract import (
     MADRID,
+    RULE_REASONS,
+    AvailabilityResponse,
+    BlockedProvider,
+    Catalogue,
     CheckEligibilityInput,
+    DeclineReason,
     EligibilityVerdict,
     FindProviderInput,
     NearestLocationInput,
     NearestLocationResult,
+    PatientRecord,
     ProviderMatch,
     Rejection,
     ToolContext,
     TriageInput,
     TriageResult,
 )
+from vortex.rules import eligibility, geo
+from vortex.rules import triage as triage_table
 
 _TITLES = {"dr", "dra", "d", "doctor", "doctora"}
 _TYPO_MATCH_CUTOFF = 0.8
+
+#: How far ahead ``check_eligibility`` asks /availability about. The API caps a
+#: span at 14 days, and a rule that bites bites on every day of the window.
+_ELIGIBILITY_WINDOW_DAYS = 13
+
+#: The five refusals that are about the plan, not about the clinic. Any of them
+#: is the cue to ask the caller whether they hold other cover (problem 17).
+INSURANCE_REASONS: frozenset[str] = frozenset(
+    {
+        "specialty_not_covered",
+        "location_not_covered",
+        "provider_not_in_network",
+        "insurer_referral_required",
+        "allowance_exhausted",
+    }
+)
 
 
 def _name_tokens(name: str) -> set[str]:
@@ -56,65 +85,226 @@ def _name_tokens(name: str) -> set[str]:
     return tokens - _TITLES
 
 
+#: Where this lane keeps the directory records it has already fetched. Per
+#: call, like everything on ``ToolContext``; never shared between sockets.
+PATIENT_CACHE_KEY = "rules.patients"
+
+
+async def _patient(ctx: ToolContext, patient_id: str) -> PatientRecord | None:
+    """The directory record behind a ``patient_id``. Age and referrals live on it.
+
+    ``/directory`` searches on what the caller said, not on an id, so there is
+    no lookup-by-id to call: the whole directory is asked for and the id picked
+    out of it. Returning ``None`` is safe — the derived patient rules simply
+    stand down and ``/availability`` answers on its own, which is what happens
+    live anyway because the availability query carries ``patient_id``.
+
+    TODO(identity): ``find_patient`` already holds this record. Stashing it in
+    ``ctx.state`` would save this call; see the lane report.
+    """
+    cache = ctx.state.setdefault(PATIENT_CACHE_KEY, {})
+    if patient_id in cache:
+        return cache[patient_id]
+    try:
+        matches = await ctx.clinic.directory()
+    except Exception:  # noqa: BLE001 - a directory hiccup must not lose the call
+        return None
+    record = next((p for p in matches if p.patient_id == patient_id), None)
+    cache[patient_id] = record
+    return record
+
+
+async def _visits_this_year(ctx: ToolContext, patient_id: str) -> int | None:
+    """Visits billed this calendar year, for a plan with a yearly allowance."""
+    try:
+        appointments = await ctx.clinic.appointments(patient_id, when="all")
+    except Exception:  # noqa: BLE001
+        return None
+    year = ctx.now.astimezone(MADRID).year
+    return sum(1 for a in appointments if a.start.astimezone(MADRID).year == year)
+
+
+def _blocked_reason(
+    availability: AvailabilityResponse, provider_id: str | None
+) -> BlockedProvider | None:
+    """What ``/availability`` says stopped this request, if it says anything.
+
+    With a doctor named, only that doctor's entry answers. Without one, a
+    blocked list and no slots at all means every candidate was stopped, and the
+    first rule named is the rule to report.
+    """
+    if not availability.blocked:
+        return None
+    if provider_id:
+        return next((b for b in availability.blocked if b.provider_id == provider_id), None)
+    if availability.slots:
+        return None
+    ruled = [b for b in availability.blocked if b.reason in RULE_REASONS]
+    return (ruled or availability.blocked)[0]
+
+
+def _redirect(
+    catalogue: Catalogue, args: CheckEligibilityInput, blocked: BlockedProvider, plan
+) -> list:
+    """Who else could take the request the blocked provider cannot."""
+    blocked_ids = {args.provider_id} if args.provider_id else set()
+    blocked_ids.add(blocked.provider_id)
+    specialty = args.specialty_id
+    if not specialty:
+        named = next((p for p in catalogue.providers if p.provider_id == blocked.provider_id), None)
+        specialty = named.specialty_id if named else None
+    return eligibility.providers_for(
+        catalogue,
+        specialty,
+        location_id=args.location_id,
+        plan=plan,
+        exclude=blocked_ids,
+    )
+
+
+def _refuse(reason: DeclineReason, detail: str, redirect_to=None) -> EligibilityVerdict:
+    return EligibilityVerdict(
+        allowed=False,
+        rejection=Rejection(reason=reason, detail=detail),
+        redirect_to=redirect_to or [],
+    )
+
+
 async def check_eligibility(ctx: ToolContext, args: CheckEligibilityInput) -> EligibilityVerdict:
     """Can this patient book this specialty/provider/site under this plan?
 
-    Reads the answer straight from ``/availability``'s ``blocked`` for the
-    exact request asked about, rather than re-deriving the insurance/age
-    matrix independently (the docs are explicit: "take the exact reason from
-    ``blocked``. Never guess.").
+    The order is the order the clinic hits the rules in, and it decides which
+    reason gets submitted when more than one is true:
+
+    1. **The patient's own rules** — age, the specialty's referral, and what the
+       plan covers. These are plain fields on the catalogue and directory
+       records, so they can be read rather than guessed, and they are the
+       widest: an under-14 asking for general practice is an age refusal
+       whatever their insurer says.
+    2. **What /availability says** in ``blocked``. The live API is the authority
+       on its own doctors, so its wording wins for anything provider-shaped.
+    3. **The provider's own rules**, derived, for when the API did not answer —
+       offline, or a request too vague for it to refuse.
+    4. Slots, or ``no_availability`` when the calendar is simply full.
+
+    ``insurer`` is the plan to quote against. Left empty it is the one plan the
+    record carries; the second policy of problem 17 reaches this tool only by
+    being named here, because it exists nowhere in the API.
     """
     today = ctx.now.astimezone(MADRID).date()
-    result = await ctx.clinic.availability(
+    catalogue = await ctx.clinic.catalogue()
+    patient = await _patient(ctx, args.patient_id)
+    plan = eligibility.resolve_plan(catalogue, patient, args.insurer)
+
+    visits = None
+    if plan is not None and plan.yearly_allowance is not None:
+        visits = await _visits_this_year(ctx, args.patient_id)
+
+    verdict = eligibility.check_patient_rules(
+        catalogue,
+        patient,
+        specialty_id=args.specialty_id,
+        location_id=args.location_id,
+        plan=plan,
+        today=today,
+        visits_this_year=visits,
+    )
+    if verdict:
+        return _refuse(verdict.reason, verdict.detail, verdict.redirect_to)
+
+    availability = await ctx.clinic.availability(
         date_from=today + timedelta(days=1),
-        date_to=today + timedelta(days=14),
+        date_to=today + timedelta(days=_ELIGIBILITY_WINDOW_DAYS),
         provider_id=args.provider_id,
         specialty_id=args.specialty_id,
         location_id=args.location_id,
         patient_id=args.patient_id,
-        insurer=[args.insurer] if args.insurer else None,
+        insurer=[plan.insurer_id] if plan else None,
     )
-    if result.slots:
+
+    blocked = _blocked_reason(availability, args.provider_id)
+    if blocked is not None:
+        return _refuse(
+            blocked.reason,
+            blocked.detail or "the clinic's availability named this rule",
+            _redirect(catalogue, args, blocked, plan),
+        )
+
+    provider = next((p for p in catalogue.providers if p.provider_id == args.provider_id), None)
+    verdict = eligibility.check_provider_rules(
+        catalogue,
+        provider,
+        specialty_id=args.specialty_id,
+        location_id=args.location_id,
+        plan=plan,
+        today=today,
+    )
+    if verdict:
+        return _refuse(verdict.reason, verdict.detail, verdict.redirect_to)
+
+    if availability.slots:
         return EligibilityVerdict(allowed=True)
-
-    if not result.blocked:
-        return EligibilityVerdict(allowed=False, rejection=Rejection(reason="no_availability"))
-
-    blocked_ids = {b.provider_id for b in result.blocked}
-    match = next(
-        (b for b in result.blocked if b.provider_id == args.provider_id), result.blocked[0]
-    )
-
-    catalogue = await ctx.clinic.catalogue()
-    redirect_to = [
-        p
-        for p in catalogue.providers
-        if p.specialty_id == args.specialty_id
-        and p.provider_id not in blocked_ids
-        and (not args.location_id or args.location_id in p.location_ids)
-    ]
-    return EligibilityVerdict(
-        allowed=False, rejection=Rejection(reason=match.reason), redirect_to=redirect_to
-    )
+    return _refuse("no_availability", "nothing free in the window the clinic offers")
 
 
 async def triage(ctx: ToolContext, args: TriageInput) -> TriageResult:
     """Symptom -> specialty, or emergency.
 
-    TODO(rules): implement the published routing table and the five red flags
-    from problem 10. Keep it a lookup, not a clinical judgement.
+    A lookup on the table problem 10 publishes, never a clinical judgement. The
+    five red flags are checked first and book nothing: they return no specialty
+    at all, so there is no agenda for the call to fall back onto.
     """
-    return await contract.stub_triage(ctx, args)
+    flag = triage_table.red_flag(args.complaint)
+    if flag:
+        ctx.log.event("triage.red_flag", flag=flag, complaint=args.complaint)
+        return TriageResult(
+            specialty_id=None,
+            emergency=True,
+            rejection=Rejection(reason="medical_emergency", detail=f"published red flag: {flag}"),
+        )
+    return TriageResult(specialty_id=triage_table.route(args.complaint), emergency=False)
 
 
 async def nearest_location(ctx: ToolContext, args: NearestLocationInput) -> NearestLocationResult:
     """The closest site that can serve the request.
 
-    TODO(rules): geocode the address (any provider; the €100 card covers it),
-    compute straight-line distance to each site's published coordinates, and
-    skip sites with no provider in the specialty.
+    Straight-line distance to the coordinates the catalogue publishes, among
+    the sites that have somebody in the specialty. The closest site with nobody
+    for the specialty is skipped — physiotherapy sits only at Sur, so a caller
+    next door to Centro still goes to Sur. That is not a refusal.
     """
-    return await contract.stub_nearest_location(ctx, args)
+    catalogue = await ctx.clinic.catalogue()
+    sites = eligibility.sites_serving(catalogue, args.specialty_id, None)
+    if not sites:
+        return NearestLocationResult(
+            rejection=Rejection(
+                reason="type_not_offered",
+                detail=f"no site has anybody in {args.specialty_id}",
+            )
+        )
+
+    point = await geo.locate(args.address)
+    if point is not None:
+        found = geo.nearest(point, sites)
+        if found is not None:
+            site, distance = found
+            return NearestLocationResult(
+                location_id=site.location_id, distance_km=round(distance, 2)
+            )
+
+    # Nothing placed the address. Before giving up, see whether it simply names
+    # the street one of the sites is on.
+    scored = [(geo.address_overlap(args.address, s.address), s) for s in sites if s.address]
+    best = max(scored, default=(0, None), key=lambda pair: pair[0])
+    if best[0] > 0 and best[1] is not None:
+        return NearestLocationResult(location_id=best[1].location_id)
+
+    return NearestLocationResult(
+        rejection=Rejection(
+            reason="out_of_scope",
+            detail=f"could not place {args.address!r}; ask the caller for a district or town",
+        )
+    )
 
 
 async def find_provider(ctx: ToolContext, args: FindProviderInput) -> ProviderMatch:
