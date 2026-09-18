@@ -1,0 +1,51 @@
+name: vortex-board
+
+networks:
+  coolify:
+    external: true
+
+services:
+  board:
+    build:
+      context: ..
+      dockerfile: Dockerfile.board
+    image: vortex-board:local
+    container_name: vortex-board
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      VORTEX_ENV: production
+      VORTEX_BOARD_PORT: "8080"
+      VORTEX_CALLS_LOG: /app/logs/calls.jsonl
+    volumes:
+      - board-logs:/app/logs
+    networks:
+      - coolify
+    expose:
+      - "8080"
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=coolify
+      - traefik.http.middlewares.vortex-gzip.compress=true
+      - traefik.http.middlewares.vortex-https.redirectscheme.scheme=https
+      - traefik.http.middlewares.vortex-headers.headers.stsSeconds=31536000
+      - traefik.http.middlewares.vortex-headers.headers.stsIncludeSubdomains=true
+      - traefik.http.middlewares.vortex-headers.headers.framedeny=true
+      - traefik.http.middlewares.vortex-headers.headers.browserxssfilter=true
+      - traefik.http.middlewares.vortex-headers.headers.contenttypenosniff=true
+      - traefik.http.middlewares.vortex-headers.headers.referrerpolicy=no-referrer
+      - traefik.http.routers.vortex-http.rule=Host(`vortex.jferreiros.com`)
+      - traefik.http.routers.vortex-http.entrypoints=http
+      - traefik.http.routers.vortex-http.middlewares=vortex-https
+      - traefik.http.routers.vortex-http.service=vortex-board
+      - traefik.http.routers.vortex-https.rule=Host(`vortex.jferreiros.com`)
+      - traefik.http.routers.vortex-https.entrypoints=https
+      - traefik.http.routers.vortex-https.tls=true
+      - traefik.http.routers.vortex-https.tls.certresolver=letsencrypt
+      - traefik.http.routers.vortex-https.middlewares=vortex-gzip,vortex-headers
+      - traefik.http.routers.vortex-https.service=vortex-board
+      - traefik.http.services.vortex-board.loadbalancer.server.port=8080
+
+volumes:
+  board-logs:

@@ -113,11 +113,15 @@ run: a Run All holds ten sockets open at once.
 `tool.returned`, `submit.sent`, `submit.result`, `call.ended`, `call.summary`.
 `GET /calls` returns the recent events grouped by call.
 
-`make board` is the live view (NiceGUI, port 8080). `/` is ops: Play dials
-`scripts/fake_caller.py` against `:7860`, Replay writes a scripted book/refuse
-into the JSONL so the wall moves without the voice pipeline. `/wall` is the
-jury screen: transcript, tools, chart. It tails `GET /calls` when line is up,
-otherwise the JSONL file.
+`make board` is the live view (NiceGUI, port 8080). `/wall` is public (jury).
+`/` ops, `/evals` and `/bench` ask for `VORTEX_OPS_PASSWORD` when that env is
+set (always in production). Play dials `scripts/fake_caller.py` against `:7860`.
+Replay writes a scripted book/refuse into the JSONL. The wall tails `GET /calls`
+when line is up, otherwise the JSONL file.
+
+Production: `https://vortex.jferreiros.com/wall` (público) and
+`https://vortex.jferreiros.com/` (equipo). Deploy: `deploy/compose.yml` on the
+VPS, Traefik/Let's Encrypt. Never put the ops password in git.
 
 ## Team
 

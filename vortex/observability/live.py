@@ -8,8 +8,9 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from nicegui import ui
+from nicegui import app, ui
 
+from vortex.observability import auth
 from vortex.observability.calllog import read_recent
 from vortex.observability.demo import write_scripted_call
 from vortex.observability.view import CallCard, build_calls, flatten_grouped
@@ -95,6 +96,49 @@ async def _play_line() -> None:
 
 async def _replay(scenario: str) -> None:
     await write_scripted_call(_log_path(), scenario=scenario, delay_s=0.28)
+
+
+def _client_ip() -> str:
+    client = ui.context.client
+    ip = getattr(client, "ip", None)
+    return str(ip) if ip else "unknown"
+
+
+def _ops_ok() -> bool:
+    if not auth.must_authenticate():
+        return True
+    return bool(app.storage.user.get("ops"))
+
+
+def _login_form() -> None:
+    with ui.element("div").classes("ops"):
+        with ui.element("div").classes("card").style("max-width:360px;margin:12vh auto"):
+            ui.label("Vortex ops").classes("brand")
+            ui.label("Solo el equipo. El wall público está en /wall.").classes("empty")
+            password = ui.input(placeholder="contraseña", password=True).props(
+                "dense dark outlined"
+            )
+            status = ui.label("").style("color:var(--bad);font-size:12px;margin-top:8px")
+
+            def submit() -> None:
+                ip = _client_ip()
+                if not auth.login_allowed(ip):
+                    status.set_text("Demasiados intentos. Esperá 10 minutos.")
+                    return
+                auth.record_login_attempt(ip)
+                if auth.check_password(password.value or ""):
+                    app.storage.user["ops"] = True
+                    ui.navigate.to("/")
+                    return
+                status.set_text("No.")
+
+            ui.button("Entrar", on_click=submit).props("unelevated color=primary")
+            password.on("keydown.enter", submit)
+
+
+def _logout() -> None:
+    app.storage.user.pop("ops", None)
+    ui.navigate.to("/")
 
 
 def _apply_chrome() -> None:
@@ -252,12 +296,17 @@ def wall_page() -> None:
 def ops_page() -> None:
     _apply_chrome()
     ui.page_title("Vortex · ops")
+    if not _ops_ok():
+        _login_form()
+        return
     selected = {"id": None}
     name_box = {"value": "joaquin"}
 
     with ui.element("div").classes("top"):
         ui.link("OPS", "/").classes("brand").style("text-decoration:none;color:inherit")
         ui.link("WALL", "/wall").classes("pill").style("text-decoration:none")
+        ui.link("EVALS", "/evals").classes("pill").style("text-decoration:none")
+        ui.link("BENCH", "/bench").classes("pill").style("text-decoration:none")
         line_pill = ui.element("div").classes("pill")
         ui.element("div").style("flex:1")
         name = ui.input(placeholder="tu nombre", value="joaquin").props("dense dark outlined")
@@ -266,6 +315,7 @@ def ops_page() -> None:
         ui.button("Play", on_click=_play_line).props("unelevated color=primary")
         ui.button("Replay book", on_click=lambda: _replay("book")).props("outline")
         ui.button("Replay refuse", on_click=lambda: _replay("refuse")).props("outline")
+        ui.button("Salir", on_click=_logout).props("flat")
 
     with ui.element("div").classes("ops"):
         people = (
@@ -310,7 +360,42 @@ def ops_page() -> None:
     ui.timer(0.45, redraw)
 
 
+def _private_stub(title: str, body: str) -> None:
+    _apply_chrome()
+    ui.page_title(f"Vortex · {title}")
+    if not _ops_ok():
+        _login_form()
+        return
+    with ui.element("div").classes("top"):
+        ui.link("OPS", "/").classes("brand").style("text-decoration:none;color:inherit")
+        ui.link("WALL", "/wall").classes("pill").style("text-decoration:none")
+        ui.link("EVALS", "/evals").classes("pill").style("text-decoration:none")
+        ui.link("BENCH", "/bench").classes("pill").style("text-decoration:none")
+    with ui.element("div").classes("ops"):
+        with ui.element("div").classes("card"):
+            ui.label(title).classes("brand")
+            ui.label(body).classes("empty")
+
+
+@ui.page("/evals")
+def evals_page() -> None:
+    _private_stub(
+        "Evals",
+        "Aquí van los casos del leaderboard cuando la plataforma abra el run. Privado del equipo.",
+    )
+
+
+@ui.page("/bench")
+def bench_page() -> None:
+    _private_stub(
+        "Bench",
+        "Métricas de STT/LLM/TTS y tasa de submit. Se llena cuando line/ empiece a marcar timings.",
+    )
+
+
 def main() -> None:
+    if auth.is_production() and not auth.ops_password():
+        raise SystemExit("VORTEX_OPS_PASSWORD is required in production")
     ui.run(
         host="0.0.0.0",
         port=BOARD_PORT,
@@ -319,7 +404,7 @@ def main() -> None:
         reload=False,
         show=False,
         favicon="◈",
-        storage_secret="vortex-board",
+        storage_secret=auth.storage_secret(),
     )
 
 
