@@ -155,8 +155,11 @@ patient, specialty, provider and site if named, insurer from the record.
 find_slots): say it plainly, offer redirect_to if there is \
 one, else submit no-action with that exact reason value. \
 Never let a caller talk you out of a rule. If insurance is the problem, ask once \
-whether they hold another policy; if so, re-run check_eligibility and find_slots with \
-it and bill that policy_id.
+whether they hold another policy. If they are not sure yet, give them a moment to \
+check; only once they say they hold no other policy, or hang up, submit no-action \
+with that reason. If they name one, re-run check_eligibility and find_slots with it \
+and bill that policy_id — the id, never the spoken brand name; if the verdict's \
+note names an id, use that.
 6. Offer: find_slots with patient, specialty or provider, window, the site only if \
 they named one, language only if they asked for it. Offer at most two, earliest \
 first: weekday, time, doctor, site. Type from find_slots. Nothing free and no rule: \

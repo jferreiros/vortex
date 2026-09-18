@@ -64,6 +64,7 @@ from vortex.contract import (
     recall_patient,
     remember_patient,
 )
+from vortex.identity import tools as identity
 from vortex.rules import eligibility, facts, geo
 from vortex.rules import triage as triage_table
 
@@ -249,7 +250,21 @@ async def check_eligibility(ctx: ToolContext, args: CheckEligibilityInput) -> El
     # A missing record is not a refusal — it is a verdict with a hole in it, and
     # every answer below says so rather than passing quietly.
     note = "" if patient else NO_RECORD_NOTE
-    plan = eligibility.resolve_plan(catalogue, patient, args.insurer)
+    # The second policy of problem 17 arrives as whatever the caller said aloud
+    # ("Mapfre Salud", "Nueva Mutua Sanitaria"), never as the bare id the
+    # platform submits against. Resolve it the same way registration does, so
+    # a plan named by its full name is not mistaken for an unknown one — and
+    # tell the caller-facing side which id to reuse for find_slots/policy_id,
+    # since nothing downstream re-derives it from what was said here.
+    resolved_insurer = identity.resolve_insurer(args.insurer, catalogue) if args.insurer else None
+    plan = eligibility.resolve_plan(catalogue, patient, resolved_insurer or args.insurer)
+    if (
+        plan is not None
+        and args.insurer
+        and plan.insurer_id.lower() != args.insurer.strip().lower()
+    ):
+        hint = f"'{args.insurer}' is {plan.name}; use insurer/policy_id {plan.insurer_id!r} onward"
+        note = f"{note}; {hint}" if note else hint
 
     verdict = eligibility.check_patient_rules(
         catalogue,
