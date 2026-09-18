@@ -151,10 +151,14 @@ def test_the_arbiter_resolves_like_the_llm(clean_env) -> None:
     assert s.llm_provider == "helmcode"
 
 
-def test_llm_max_tokens_defaults_to_300(clean_env) -> None:
-    """120 cut off a nested-slot tool call mid-argument; 300 gives it room."""
+def test_llm_max_tokens_defaults_to_320(clean_env) -> None:
+    """120 cut off a nested-slot tool call mid-argument; 320 gives it room.
+
+    Measured on qwen3.6: ``submit_action`` with a ``BookAction`` is 107 tokens
+    and ``prepare_booking`` with a full ``Slot`` is 150, beside a spoken turn.
+    """
     s = _settings(clean_env)
-    assert s.llm_max_tokens == 300
+    assert s.llm_max_tokens == 320
 
     s = _settings(clean_env, LLM_MAX_TOKENS="500")
     assert s.llm_max_tokens == 500
