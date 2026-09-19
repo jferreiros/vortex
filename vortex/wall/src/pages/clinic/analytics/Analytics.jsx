@@ -200,16 +200,97 @@ function CallTable({ rows }) {
   );
 }
 
+/* Loading skeleton — traces the shipped layout (header, funnel card, the
+   8 KPIs, the 4 panels, the table) instead of one centered line of text.
+   Every card reuses the real section's classes, so sizes match exactly and
+   nothing jumps when the payload lands. Decorative only: the one thing a
+   screen reader announces is the status line below, everything else is
+   aria-hidden. */
+function SkelLine({ width, size = "md", className = "" }) {
+  return (
+    <span
+      className={`analytics-skel-line analytics-skel-line-${size} ${className}`}
+      style={{ width }}
+    />
+  );
+}
+
+function SkelPanelHead() {
+  return (
+    <div className="analytics-panel-head">
+      <SkelLine width="55%" size="lg" />
+      <SkelLine width="80%" size="sm" className="analytics-skel-gap" />
+    </div>
+  );
+}
+
+function AnalyticsSkeleton() {
+  return (
+    <div className="analytics-page" aria-busy="true">
+      <span className="analytics-sr-only" role="status">
+        Leyendo el registro de llamadas…
+      </span>
+      <div className="analytics-skeleton" aria-hidden="true">
+        <header className="home-hero">
+          <SkelLine width="180px" size="sm" />
+          <div className="home-hero-row">
+            <SkelLine width="220px" size="xl" />
+            <SkelLine width="220px" size="pill" />
+          </div>
+          <SkelLine width="65%" size="md" />
+        </header>
+
+        <Card padding="lg" className="analytics-panel analytics-funnel">
+          <SkelPanelHead />
+          <div className="analytics-skel-block analytics-skel-sankey" />
+        </Card>
+
+        <div className="analytics-kpis">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <Card key={i} padding="md" className="analytics-kpi">
+              <SkelLine width="60%" size="sm" />
+              <SkelLine width="45%" size="xl" className="analytics-skel-gap" />
+              <SkelLine width="85%" size="sm" />
+            </Card>
+          ))}
+        </div>
+
+        <div className="analytics-grid">
+          {Array.from({ length: 2 }).map((_, i) => (
+            <Card key={`row1-${i}`} padding="lg" className="analytics-panel">
+              <SkelPanelHead />
+              <div className="analytics-skel-block analytics-skel-panel-body" />
+            </Card>
+          ))}
+        </div>
+        <div className="analytics-grid">
+          {Array.from({ length: 2 }).map((_, i) => (
+            <Card key={`row2-${i}`} padding="lg" className="analytics-panel">
+              <SkelPanelHead />
+              <div className="analytics-skel-block analytics-skel-panel-body" />
+            </Card>
+          ))}
+        </div>
+
+        <Card padding="lg" className="analytics-panel">
+          <SkelPanelHead />
+          <div className="analytics-skel-rows">
+            {Array.from({ length: 7 }).map((_, i) => (
+              <SkelLine key={i} width="100%" size="row" />
+            ))}
+          </div>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
 export default function Analytics() {
   const [days, setDays] = useState(30);
   const { data, error, loading } = useAnalytics(days);
 
   if (loading && !data) {
-    return (
-      <div className="analytics-page">
-        <p className="analytics-empty">Leyendo el registro de llamadas…</p>
-      </div>
-    );
+    return <AnalyticsSkeleton />;
   }
   if (!data) {
     return (
