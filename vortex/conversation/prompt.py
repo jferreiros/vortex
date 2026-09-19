@@ -53,6 +53,10 @@ What it must achieve, and why each rule is there:
   correction. National id and phone stay silent (problem 14).
 - Read the chart before asking. ``has_visited_before`` and ``note`` say who
   this is; the jury judges on it.
+- An empty window is an offer, not a refusal (problem 7). ``find_slots``
+  fills ``nearest`` with the closest slots that keep the request; the model
+  offers them and books only what the caller takes. Refused, or nothing near:
+  the rejection's reason, ``no_availability``, and nothing else.
 - ``check_eligibility`` before offering, not after. ``find_slots`` answers
   from the diary and happily returns slots a plan does not cover, so the
   refusal problems (6, 17) are decided by the eligibility verdict; the
@@ -118,7 +122,7 @@ TOOL_LINES: dict[str, str] = {
     "validate_national_id": "valid. Re-ask it whole, never read it back.",
     "build_registration": "action. Never read a rejected field back.",
     "resolve_date": 'the window. "the earliest" works.',
-    "find_slots": "slots, appointment_type, blocked.",
+    "find_slots": "slots, nearest, blocked.",
     "list_appointments": "the only appointment_id.",
     "prepare_booking": "action or rejection.",
     "prepare_reschedule": "action.",

@@ -350,19 +350,30 @@ class RulesBrain:
             "language": req.get("language"),
         }
         avail = await trace.call("find_slots", {k: v for k, v in args.items() if v is not None})
-        if avail.get("rejection"):
-            await self._submit(trace, {"kind": "no-action", "reason": avail["rejection"]["reason"]})
-            return
         if not avail["slots"]:
-            if avail.get("blocked"):
+            # The prompt's rule for problem 7: an empty window is an offer while
+            # there is something near to take. Yes books the nearest; no, or
+            # nothing near, submits the reason the tool gave for the window.
+            if avail.get("nearest") and s.accepted and not s.declined:
+                trace.notes.append("asked window empty: booking the nearest alternative")
+                await self._book(trace, patient_id, avail["nearest"][0], insurer)
+                return
+            if avail.get("rejection"):
+                reason = avail["rejection"]["reason"]
+            elif avail.get("blocked"):
                 reason = avail["blocked"][0]["reason"]
             else:
                 reason = "no_availability"
             await self._submit(trace, {"kind": "no-action", "reason": reason})
             return
+        await self._book(trace, patient_id, avail["slots"][0], insurer)
+
+    async def _book(
+        self, trace: Trace, patient_id: str, slot: dict[str, Any], insurer: str | None
+    ) -> None:
         booking = await trace.call(
             "prepare_booking",
-            {"patient_id": patient_id, "slot": avail["slots"][0], "policy_id": insurer or ""},
+            {"patient_id": patient_id, "slot": slot, "policy_id": insurer or ""},
         )
         if booking.get("action"):
             await self._submit(trace, booking["action"])
