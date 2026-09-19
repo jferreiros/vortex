@@ -9,7 +9,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 RUN apt-get update && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/* \
-    && pip install --no-cache-dir nicegui httpx pydantic python-dotenv
+    && pip install --no-cache-dir nicegui httpx pydantic python-dotenv phonenumbers email-validator
 
 COPY vortex ./vortex
 
