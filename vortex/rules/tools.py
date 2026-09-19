@@ -356,6 +356,13 @@ async def triage(ctx: ToolContext, args: TriageInput) -> TriageResult:
     that doctor actually consults in — the only specialty they can be booked
     for. The complaint answers alone when the name resolves to nobody, or to
     people in more than one specialty (Sáez/Sáenz), which the table can split.
+
+    A specialty the caller named outranks the table for the same reason. The
+    table holds symptoms, so it scores nothing for the word "gynaecology" and
+    sends a caller who asked for it to the residue — which is the wrong agenda,
+    the wrong ``appointment_type_id`` and a lost case. A child marker still wins
+    over a named specialty: nothing published sends a child anywhere but
+    paediatrics, and the age rule agrees.
     """
     flag = triage_table.red_flag(args.complaint)
     if flag:
@@ -392,6 +399,16 @@ async def triage(ctx: ToolContext, args: TriageInput) -> TriageResult:
             candidates=len(named),
             specialty_id=routed,
         )
+
+    asked_for = triage_table.named_specialty(args.complaint)
+    if asked_for and asked_for != routed and not triage_table.mentions_child(args.complaint):
+        ctx.log.event(
+            "triage.specialty_named_by_caller",
+            complaint=args.complaint,
+            specialty_id=asked_for,
+            table_said=routed,
+        )
+        return TriageResult(specialty_id=asked_for, emergency=False)
 
     return TriageResult(specialty_id=routed, emergency=False)
 

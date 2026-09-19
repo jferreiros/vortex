@@ -9,6 +9,7 @@ orthopaedic surgeon. A doctor the catalogue knows outranks that residue, in
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 
 from vortex.clinic.client import FakeClinicClient
@@ -139,3 +140,135 @@ async def test_an_unknown_doctor_is_still_not_found(tmp_path):
     assert match.status == "not_found"
     assert match.rejection is not None
     assert match.rejection.reason == "provider_not_found"
+
+
+# ---- the specialty the caller names outright --------------------------------
+#
+# The same residue, reached the other way. The table holds symptoms, so it
+# scores nothing for the word "gynaecology": ten calls in one night asked for a
+# specialty by name and were routed to a GP, and the ones that lost the case are
+# exactly the ones that then booked a general-practice appointment type.
+
+
+async def test_a_named_specialty_is_never_the_general_practice_residue(tmp_path):
+    """The 3-point failure of run 1d45754d, in one line."""
+    ctx = make_ctx(tmp_path)
+
+    routed = await triage(
+        ctx, TriageInput(complaint="the earliest gynaecology appointment, for contraception")
+    )
+
+    assert routed.specialty_id == "gynaecology"
+    assert routed.emergency is False
+    assert routed.rejection is None
+
+
+async def test_every_specialty_answers_to_its_own_name(tmp_path):
+    ctx = make_ctx(tmp_path)
+    for complaint, specialty in (
+        ("I need a gynecology appointment for my yearly checkup", "gynaecology"),
+        ("can I see a dermatologist about this", "dermatology"),
+        ("I was told to book orthopaedics", "orthopaedics"),
+        ("physiotherapy, please", "physiotherapy"),
+        ("necesito cita con el ginecologo", "gynaecology"),
+        ("vull anar al dermatoleg", "dermatology"),
+        ("fisioterapia para la espalda", "physiotherapy"),
+    ):
+        routed = await triage(ctx, TriageInput(complaint=complaint))
+        assert routed.specialty_id == specialty, complaint
+
+
+async def test_a_named_specialty_outranks_a_symptom_that_disagrees(tmp_path):
+    """They asked for the physiotherapist. The knee row does not overrule them."""
+    ctx = make_ctx(tmp_path)
+
+    routed = await triage(
+        ctx, TriageInput(complaint="my knee clicks going up stairs, can I see a physiotherapist?")
+    )
+
+    assert routed.specialty_id == "physiotherapy"
+
+
+async def test_a_child_still_goes_to_paediatrics_whatever_was_named(tmp_path):
+    """The table's own invariant, and the age rule behind it, both survive."""
+    ctx = make_ctx(tmp_path)
+
+    routed = await triage(
+        ctx, TriageInput(complaint="my daughter needs to see a dermatologist about a rash")
+    )
+
+    assert routed.specialty_id == "paediatrics"
+
+
+async def test_a_named_doctor_still_outranks_a_named_specialty(tmp_path):
+    """Dr. Iglesia consults in orthopaedics; that is the only agenda he has."""
+    ctx = make_ctx(tmp_path)
+
+    routed = await triage(
+        ctx,
+        TriageInput(complaint="a dermatology appointment please", provider_name="Dr. Iglesia"),
+    )
+
+    assert routed.specialty_id == "orthopaedics"
+    assert routed.provider_id == ORTHOPAEDIC_PROVIDER_ID
+
+
+async def test_an_emergency_outranks_a_named_specialty(tmp_path):
+    ctx = make_ctx(tmp_path)
+
+    routed = await triage(
+        ctx,
+        TriageInput(
+            complaint=(
+                "I want a dermatology appointment but his face has dropped on one side "
+                "and his arm has gone numb and his speech is slurred"
+            )
+        ),
+    )
+
+    assert routed.emergency is True
+    assert routed.specialty_id is None
+    assert routed.rejection is not None and routed.rejection.reason == "medical_emergency"
+
+
+async def test_two_specialties_at_once_leave_the_table_to_answer(tmp_path):
+    """Not a request that resolves. We do not pick one of the pair."""
+    ctx = make_ctx(tmp_path)
+
+    routed = await triage(
+        ctx, TriageInput(complaint="a gynaecologist or a dermatologist, I am not sure which")
+    )
+
+    assert routed.specialty_id == "general_practice"
+
+
+async def test_a_symptom_that_names_nothing_routes_exactly_as_it_did(tmp_path):
+    """The regression guard: no symptom row moves. These are live complaints
+    from calls that passed while the table answered them."""
+    ctx = make_ctx(tmp_path)
+    for complaint, specialty in (
+        ("a mole on my back that looks different from last year", "general_practice"),
+        ("dry, itchy skin", "general_practice"),
+        ("rash on my arm that keeps coming back", "general_practice"),
+        ("lower back sore for a month, not getting better", "general_practice"),
+        ("shoulder problem, needs orthopedics", "orthopaedics"),
+        ("my son has been pulling at his ear and barely slept", "paediatrics"),
+        ("very heavy, irregular periods for months", "gynaecology"),
+        ("sore throat for three days", "general_practice"),
+    ):
+        routed = await triage(ctx, TriageInput(complaint=complaint))
+        assert routed.specialty_id == specialty, complaint
+
+
+async def test_the_override_is_logged_with_what_the_table_had_said(tmp_path):
+    ctx = make_ctx(tmp_path)
+    await triage(ctx, TriageInput(complaint="a gynaecology appointment"))
+
+    events = [
+        json.loads(line)
+        for line in ctx.log.path.read_text().splitlines()
+        if line.strip() and "triage.specialty_named_by_caller" in line
+    ]
+    assert events
+    assert events[-1]["specialty_id"] == "gynaecology"
+    assert events[-1]["table_said"] == "general_practice"

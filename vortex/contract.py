@@ -680,7 +680,14 @@ class EligibilityVerdict(BaseModel):
 
 
 class TriageInput(BaseModel):
-    complaint: str = Field(description="The symptom, in the caller's words")
+    complaint: str = Field(
+        description=(
+            "Why they are calling, in the caller's own words, verbatim and never "
+            "a summary: the symptom and any specialty they named. Dropping "
+            "'gynaecology' from 'a gynaecology appointment for contraception "
+            "questions' routes them to a GP."
+        )
+    )
     provider_name: str | None = Field(
         default=None,
         description="The doctor the caller named, as said. Their specialty is the one to book.",
