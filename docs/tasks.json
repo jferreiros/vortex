@@ -493,6 +493,13 @@
       "done": "Quien conduce enseña, sin buscar nada: la llamada entrando, las tools disparando, el registro enviado y el tablero de evals. Ensayado dos veces.",
       "why": "El jurado nos llama en directo el domingo a las 11:00. Buscar una pestaña delante de ellos gasta la mitad del tiempo que tenemos."
     },
+    {
+      "id": "T54", "wave": "w5", "lane": "linea", "kind": "infra",
+      "title": "Voz · Meter Soniox en el bench y medir error por entidad a 5 dB",
+      "problems": [12, 18], "weight": 5, "size": "2 h", "blocked_by": [],
+      "files": ["evals/voice/providers/", "evals/voice/pricing.yaml", "evals/voice/runner.py"],
+      "done": "`make evals-voice REAL=1` tiene una fila Soniox stt-rt-v5 con las mezclas a 5 dB que ya construye, y reporta CER de nombre, DNI, teléfono y email además del WER.",
+      "why": "El bench compara Deepgram, OpenAI y Cartesia, y el STT de producción no está. Sin esta cifra nadie puede decidir un filtro de ruido ni un cambio de proveedor. Ver docs/research/01-noise-suppression.md y 02-stt-landscape.md."
 
     {
       "id": "T55", "wave": "w6", "lane": "conv", "kind": "voz",
@@ -500,7 +507,6 @@
       "problems": [4, 12, 13], "weight": 4, "size": "1 h", "blocked_by": [],
       "files": ["vortex/conversation/prompt.py", "evals/conversation/scenarios/"],
       "done": "El prompt pide un campo por turno, agrupa dígitos de tres en tres, lee el id una sola vez, y aplica 'el último valor gana' en correcciones. Un escenario por regla en evals/conversation.",
-      "why": "Los alfanuméricos son el fallo número uno del sector (ServiceNow EVA, mar 2026). Con ruido a 5 dB un nombre o un dígito hay que confirmarlo, y el caller difícil cambia de id a media frase. Ver docs/research/02-stt-landscape.md y 03-turn-detection.md."
-    }
+      "why": "Los alfanuméricos son el fallo número uno del sector (ServiceNow EVA, mar 2026). Con ruido a 5 dB un nombre o un dígito hay que confirmarlo, y el caller difícil cambia de id a media frase. Ver docs/research/02-stt-landscape.md y 03-turn-detection.md."    }
   ]
 }
