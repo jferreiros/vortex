@@ -38,6 +38,110 @@ const SOURCE_LABEL = {
 
 const LANGUAGE_NAMES = { es: "Español", en: "Inglés", ca: "Catalán", gl: "Gallego", eu: "Euskera" };
 
+/* Same stroke language as Sidebar.jsx's ICONS: viewBox 24, no fill, 1.7 stroke.
+   One glyph per KPI key and per panel, so a reader can scan the row before
+   reading a single number. Never a colour — tone comes from the CSS class. */
+const ICONS = {
+  calls: (
+    <path d="M6.6 3.5c.7 1.6 1.8 3 3.2 4.1l-2 2.4a13 13 0 0 0 5.9 5.9l2.4-2a13 13 0 0 1 4.1 3.2c.5.5.5 1.4-.1 1.9l-1.3 1.1a2.6 2.6 0 0 1-2.2.6C10.9 19.6 4.4 13.1 3.3 6.4a2.6 2.6 0 0 1 .6-2.2L5 3c.5-.6 1.4-.6 1.9-.1z" />
+  ),
+  handled: (
+    <>
+      <circle cx="12" cy="12" r="8.2" />
+      <path d="M8.4 12.4l2.4 2.4 4.8-5.6" />
+    </>
+  ),
+  reply: (
+    <>
+      <circle cx="12" cy="13" r="7.5" />
+      <path d="M12 13l2.8-2.8M9.5 3.5h5M12 5.5V3.5" />
+    </>
+  ),
+  llm: (
+    <>
+      <rect x="6.5" y="6.5" width="11" height="11" rx="2.2" />
+      <path d="M12 3.5v3M12 17.5v3M3 12h3.5M17.5 12H21" />
+    </>
+  ),
+  turns: (
+    <>
+      <path d="M4 8h13.5M17.5 8l-3-3M17.5 8l-3 3" />
+      <path d="M20 16H6.5M6.5 16l3-3M6.5 16l3 3" />
+    </>
+  ),
+  share: (
+    <>
+      <path d="M4 6a2.5 2.5 0 0 1 2.5-2.5h11A2.5 2.5 0 0 1 20 6v6a2.5 2.5 0 0 1-2.5 2.5H9l-4 3v-3H6.5A2.5 2.5 0 0 1 4 12z" />
+      <path d="M12 5.5v8.5" strokeDasharray="1.6 1.8" />
+    </>
+  ),
+  duration: (
+    <>
+      <path d="M7 4h10M7 20h10" />
+      <path d="M7 4l5 8-5 8M17 4l-5 8 5 8" />
+    </>
+  ),
+  cost: (
+    <>
+      <circle cx="12" cy="12" r="8.2" />
+      <path d="M14.6 8.6a4.3 4.3 0 1 0 0 6.8M8.4 10.7h5M8.4 13.3h4" />
+    </>
+  ),
+  funnel: (
+    <>
+      <circle cx="4.5" cy="12" r="1.8" />
+      <circle cx="19.5" cy="6" r="1.8" />
+      <circle cx="19.5" cy="12" r="1.8" />
+      <circle cx="19.5" cy="18" r="1.8" />
+      <path d="M6.2 12c3-.2 5-1.5 6-3.7M6.2 12h6M6.2 12c3 .2 5 1.5 6 3.7" />
+    </>
+  ),
+  clock: (
+    <>
+      <circle cx="12" cy="12" r="8.2" />
+      <path d="M12 7.5V12l3 2" />
+    </>
+  ),
+  talkers: (
+    <>
+      <circle cx="8.5" cy="8" r="2.6" />
+      <circle cx="16.3" cy="9.4" r="2.1" />
+      <path d="M3.8 19c.5-3 2.6-4.7 4.7-4.7s4.2 1.4 4.9 3.8" />
+      <path d="M13.6 19c.4-2.2 1.9-3.6 3.6-3.6 1.5 0 2.9.9 3.5 2.6" />
+    </>
+  ),
+  wrench: (
+    <path d="M14.7 6.3a4 4 0 0 0-5.4 4.9L4 16.5V20h3.5l5.3-5.3a4 4 0 0 0 4.9-5.4l-2.6 2.6-2-2z" />
+  ),
+  table: (
+    <>
+      <rect x="3.5" y="4.5" width="17" height="15" rx="2" />
+      <path d="M3.5 9.5h17M9 9.5V19.5" />
+    </>
+  ),
+};
+
+function Icon({ name, size = 16 }) {
+  const glyph = ICONS[name];
+  if (!glyph) return null;
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="analytics-icon"
+      aria-hidden="true"
+    >
+      {glyph}
+    </svg>
+  );
+}
+
 /* The page polls its own endpoint. No mock seed: an empty window must read
    as empty, not as a plausible-looking invention — this page's whole claim
    is that every number on it came off a real call. */
@@ -75,10 +179,13 @@ function useAnalytics(days) {
   return state;
 }
 
-function Kpi({ label, value, caption }) {
+function Kpi({ icon, label, value, caption }) {
   return (
     <Card padding="md" className="analytics-kpi">
-      <span className="analytics-kpi-label">{label}</span>
+      <span className="analytics-kpi-label">
+        <Icon name={icon} />
+        {label}
+      </span>
       <div className="analytics-kpi-value">{value}</div>
       <p className="analytics-kpi-caption">{caption}</p>
     </Card>
@@ -332,6 +439,7 @@ export default function Analytics() {
 
       <Card padding="lg" className="analytics-panel analytics-funnel">
         <div className="analytics-panel-head">
+          <Icon name="funnel" size={18} />
           <div>
             <h2>Recorrido de la llamada</h2>
             <p>
@@ -345,13 +453,14 @@ export default function Analytics() {
 
       <div className="analytics-kpis">
         {data.kpis.map((kpi) => (
-          <Kpi key={kpi.key} label={kpi.label} value={kpi.value} caption={kpi.caption} />
+          <Kpi key={kpi.key} icon={kpi.key} label={kpi.label} value={kpi.value} caption={kpi.caption} />
         ))}
       </div>
 
       <div className="analytics-grid">
         <Card padding="lg" className="analytics-panel">
           <div className="analytics-panel-head">
+            <Icon name="clock" size={18} />
             <div>
               <h2>Tiempo de respuesta</h2>
               <p>Del final del turno del paciente a la respuesta del agente.</p>
@@ -392,6 +501,7 @@ export default function Analytics() {
 
         <Card padding="lg" className="analytics-panel">
           <div className="analytics-panel-head">
+            <Icon name="talkers" size={18} />
             <div>
               <h2>Quién lleva la conversación</h2>
               <p>Reparto de palabras entre el agente y el paciente.</p>
@@ -426,6 +536,7 @@ export default function Analytics() {
       <div className="analytics-grid">
         <Card padding="lg" className="analytics-panel">
           <div className="analytics-panel-head">
+            <Icon name="wrench" size={18} />
             <div>
               <h2>Herramientas</h2>
               <p>
@@ -468,6 +579,7 @@ export default function Analytics() {
 
         <Card padding="lg" className="analytics-panel">
           <div className="analytics-panel-head">
+            <Icon name="llm" size={18} />
             <div>
               <h2>Modelos y coste</h2>
               <p>Sólo las {num(models.metered_calls)} llamadas que llevan contador.</p>
@@ -531,6 +643,7 @@ export default function Analytics() {
 
       <Card padding="lg" className="analytics-panel">
         <div className="analytics-panel-head">
+          <Icon name="table" size={18} />
           <div>
             <h2>Llamadas</h2>
             <p>Las {num(data.calls.length)} más recientes del periodo, una fila por llamada.</p>
