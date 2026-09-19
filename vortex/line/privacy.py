@@ -17,6 +17,10 @@ from vortex.contract import PATIENT_RECORDS_KEY, ToolContext
 _WS = re.compile(r"\s+")
 _NON_DIGIT = re.compile(r"\D")
 
+#: Sentence-ending punctuation, with the quotes and brackets that may trail it.
+#: A digit right after the mark (``1.500``) is not an ending.
+_UNIT_END = re.compile(r"[.!?…]['\"”’»)\]]*(?=\s|$)|[。！？]")
+
 #: Same digit-word table the corpus judge uses for the stricter local check.
 DIGIT_WORDS: dict[str, str] = {
     "cero": "0",
@@ -157,3 +161,24 @@ def session_leaks(ctx: ToolContext, text: str) -> list[str]:
 def scrub_session_text(ctx: ToolContext, text: str) -> tuple[str, list[str]]:
     """Scrub one outgoing phrase against this call's session values."""
     return scrub_outgoing(text, protected_from_session(ctx))
+
+
+def split_speakable(text: str) -> tuple[list[str], str]:
+    """Split buffered LLM text into complete sentences and what is still open.
+
+    The LLM streams its answer in chunks and the TTS service joins them back
+    into sentences before it speaks, so a chunk is never the unit to scan: a
+    phone split as "612 ", "345 ", "678" leaks only once the three are
+    together. Everything up to a sentence ending is a unit the guard can
+    scan and release; the trailing remainder stays buffered until a later
+    chunk closes it. Joining the units and the remainder gives ``text`` back
+    unchanged.
+    """
+    units: list[str] = []
+    start = 0
+    for match in _UNIT_END.finditer(text):
+        unit = text[start : match.end()]
+        if unit.strip():
+            units.append(unit)
+            start = match.end()
+    return units, text[start:]
