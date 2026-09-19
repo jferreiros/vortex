@@ -21,9 +21,10 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import Body, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, PlainTextResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
+from pydantic import ValidationError
 
-from vortex.line import twilio, voice_config
+from vortex.line import personalities, twilio, voice_config
 from vortex.line.session import CallSession
 from vortex.observability.calllog import group_by_call, read_calls, read_recent
 from vortex.observability.discord_calls import enabled as discord_calls_on
@@ -37,6 +38,19 @@ DESIGN_CSS = Path(__file__).resolve().parent.parent / "observability" / "design.
 
 class HandshakeError(RuntimeError):
     pass
+
+
+def _no_such_personality(slug: str) -> JSONResponse:
+    """Same body shape as a validation failure, so the page reads one field."""
+    return JSONResponse({"error": f"no personality named {slug}"}, status_code=404)
+
+
+def _first_error(exc: ValidationError) -> str:
+    """The first complaint, as a sentence: the form shows one line, and the
+    validators already say which field and why."""
+    first = exc.errors()[0]
+    field = ".".join(str(part) for part in first["loc"]) or "payload"
+    return f"{field}: {first['msg'].removeprefix('Value error, ')}"
 
 
 async def read_handshake(ws: WebSocket, *, max_messages: int = 5) -> twilio.StartPayload:
@@ -134,6 +148,47 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except Exception as exc:
             raise HTTPException(503, f"voice preview unavailable: {exc}") from exc
         return Response(content=audio, media_type="audio/mpeg")
+
+    # ---- the Clinic View's "Personalidades" picker --------------------------
+    # Same shape as the voice card above: the board proxies these four and the
+    # personalities.db file lives on this process's log volume. Foundation
+    # only — activating a persona stores the choice; reading it on the call
+    # (prompt tone, greeting, TTS voice) is a separate change.
+
+    @app.get("/personalities")
+    async def get_personalities() -> dict[str, object]:
+        people = personalities.list_all(settings)
+        return {
+            "items": [person.to_dict() for person in people],
+            "active": next((p.slug for p in people if p.active), None),
+        }
+
+    @app.get("/personalities/{slug}")
+    async def get_personality(slug: str) -> Response:
+        person = personalities.get(settings, slug)
+        if person is None:
+            return _no_such_personality(slug)
+        return JSONResponse(person.to_dict())
+
+    @app.put("/personalities/{slug}")
+    async def put_personality(
+        slug: str,
+        payload: Annotated[dict | None, Body()] = None,
+    ) -> Response:
+        try:
+            return JSONResponse(personalities.update(settings, slug, payload).to_dict())
+        except KeyError:
+            return _no_such_personality(slug)
+        except ValidationError as exc:
+            # One sentence the form can show, not pydantic's whole report.
+            return JSONResponse({"error": _first_error(exc)}, status_code=422)
+
+    @app.post("/personalities/{slug}/activate")
+    async def activate_personality(slug: str) -> Response:
+        try:
+            return JSONResponse(personalities.activate(settings, slug).to_dict())
+        except KeyError:
+            return _no_such_personality(slug)
 
     @app.websocket(settings.ws_path)
     async def call_socket(ws: WebSocket) -> None:
