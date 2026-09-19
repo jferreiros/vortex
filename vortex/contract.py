@@ -202,9 +202,23 @@ def action_route(action: Action) -> str:
     return ACTION_ROUTES[action.kind]
 
 
+# The published judge scores three refusal codes: ``referral_required``,
+# ``specialty_not_covered``, ``provider_not_found``. The clinic has a finer
+# word, ``insurer_referral_required`` (the plan's own referral, not the
+# specialty's). Call ``e50c1c96`` of the 19 Sep 11:30 run sent that finer
+# word; the case wanted ``referral_required`` and scored zero. The wire
+# collapses the alias so the judge sees the code it actually accepts.
+SCORE_REASON_ALIASES: dict[str, str] = {
+    "insurer_referral_required": "referral_required",
+}
+
+
 def action_payload(action: Action, call_id: str) -> dict[str, Any]:
     """The JSON body for the submit route: snake_case, ``call_id`` first."""
     body = action.model_dump(mode="json", exclude={"kind"})
+    reason = body.get("reason")
+    if isinstance(reason, str) and reason in SCORE_REASON_ALIASES:
+        body["reason"] = SCORE_REASON_ALIASES[reason]
     return {"call_id": call_id, **body}
 
 
@@ -433,6 +447,11 @@ class Appointment(_Record):
     appointment_type_id: str
     start: datetime  # platform: start_time
     duration_minutes: int = 15
+    #: Ours, not the platform's: the wire carries only provider_id, and the
+    #: model speaks names. ``list_appointments`` fills this from the catalogue
+    #: so the doctor on the record is a name the caller's words can be checked
+    #: against - call 096af75d died to a provider name the model invented.
+    provider_name: str = ""
     #: Ours, not the platform's: ``AppointmentOut`` carries no status, so on
     #: live data this is always "scheduled". What can be cancelled or moved is
     #: what ``when=upcoming`` returns, not what this field says.
@@ -611,6 +630,11 @@ class AvailabilityResult(BaseModel):
     slots: list[Slot] = Field(default_factory=list)
     blocked: list[BlockedProvider] = Field(default_factory=list)
     appointment_type: AppointmentTypeRecord | None = None
+    #: Filled only when ``slots`` is empty and no rule blocked anyone: the
+    #: closest free slots outside the asked window that keep every other
+    #: constraint (problem 7). Offer them; book one only if the caller agrees.
+    #: Empty together with ``slots`` and ``blocked`` means the calendar is full.
+    nearest: list[Slot] = Field(default_factory=list)
     rejection: Rejection | None = None
     widened: bool = Field(
         default=False, description="True when widen_days triggered a further search."

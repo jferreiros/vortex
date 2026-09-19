@@ -1,3 +1,15 @@
 .landing-root {
   min-height: 100vh;
 }
+
+/* Crossfade veil for the hero → explainer scroll transition, see
+   useCrossfadeScroll.js. Sits above both sections while it fades in/out. */
+.landing-scroll-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: var(--color-bg);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 420ms ease;
+}

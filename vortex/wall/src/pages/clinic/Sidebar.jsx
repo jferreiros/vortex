@@ -4,10 +4,24 @@ const ICONS = {
   home: (
     <path d="M4 11.5L12 4l8 7.5M6 9.5V20h5v-5.5h2V20h5V9.5" />
   ),
+  doctor: (
+    <>
+      <circle cx="12" cy="8" r="3.2" />
+      <path d="M5 19.5c.8-3.2 3.4-5 7-5s6.2 1.8 7 5" />
+    </>
+  ),
   settings: (
     <>
       <circle cx="12" cy="12" r="3.2" />
-      <path d="M19.4 13.6a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34a1.7 1.7 0 0 0-1 1.55V19.7a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.1-1.55a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87a1.7 1.7 0 0 0-1.55-1H4.3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 6 9.4a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H10.5a1.7 1.7 0 0 0 1-1.55V3.3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9.4a1.7 1.7 0 0 0 1.55 1h.09a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1z" />
+      <path d="M19.4 13.6a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34a1.7 1.7 0 0 0-1 1.55V19.7a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.1-1.55a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87a1.7 1.7 0 0 0-1.55-1H4.3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 6 9.4a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H10.5a1.7 1.7 0 0 0 1-1.55V3.3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06-.06a1.7 1.7 0 0 0-.34 1.87V9.4a1.7 1.7 0 0 0 1.55 1h.09a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1z" />
+    </>
+  ),
+  ai: (
+    <>
+      <circle cx="12" cy="12" r="8.2" />
+      <circle cx="9.3" cy="10.3" r="0.9" fill="currentColor" stroke="none" />
+      <circle cx="14.7" cy="10.3" r="0.9" fill="currentColor" stroke="none" />
+      <path d="M8.6 14.4a4.3 4.3 0 0 0 6.8 0" />
     </>
   ),
   insights: (
@@ -21,11 +35,13 @@ const ICONS = {
   ),
 };
 
-const NAV_ITEMS = [
+const CLINIC_ITEMS = [
   { to: "/clinic/home", label: "Home", icon: "home" },
-  { to: "/clinic/settings", label: "Settings", icon: "settings" },
+  { to: "/clinic/settings", label: "Ajustes", icon: "settings" },
+  { to: "/clinic/ai", label: "IA", icon: "ai" },
   { to: "/clinic/insights", label: "Statistics", icon: "insights" },
   { to: "/clinic/live-calls", label: "Live Calls", icon: "liveCalls" },
+  { to: "/clinic/doctor", label: "Horarios", icon: "doctor" },
 ];
 
 function NavIcon({ name }) {
@@ -33,6 +49,15 @@ function NavIcon({ name }) {
     <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       {ICONS[name]}
     </svg>
+  );
+}
+
+function Item({ to, icon, label }) {
+  return (
+    <NavLink to={to} className={({ isActive }) => `clinic-sidebar-item ${isActive ? "on" : ""}`}>
+      <NavIcon name={icon} />
+      <span>{label}</span>
+    </NavLink>
   );
 }
 
@@ -48,15 +73,8 @@ export default function Sidebar() {
       </div>
 
       <div className="clinic-sidebar-nav">
-        {NAV_ITEMS.map((item) => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            className={({ isActive }) => `clinic-sidebar-item ${isActive ? "on" : ""}`}
-          >
-            <NavIcon name={item.icon} />
-            <span>{item.label}</span>
-          </NavLink>
+        {CLINIC_ITEMS.map((item) => (
+          <Item key={item.to} {...item} />
         ))}
       </div>
 

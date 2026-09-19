@@ -11,19 +11,39 @@ prompt that names a tool the model was never given is an invitation to
 hallucinate a call, and a tool the model was given but the prompt never
 mentions is one it will not reach for.
 
+The version tests pin the loader: the env var names the version, unset means
+the latest on disk, a version is a file that is never edited in place, and
+the sha256 is of the exact bytes the run recorded.
+
 ``tests/test_conversation_lane.py`` owns the *content* of the prompt (the
 rules the score depends on). This file owns its shape.
 """
 
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, datetime
+from pathlib import Path
+
+import pytest
 
 from vortex.contract import MADRID
+from vortex.conversation import prompt as prompt_module
 from vortex.conversation.prompt import (
+    CLINIC_NAME,
+    PROMPTS_DIR,
+    SITES_BRIEF,
+    SPECIALTIES_BRIEF,
+    TOOL_GUIDE,
     TOOL_LINES,
+    active_prompt_version,
     build_system_prompt,
+    caller_note_for,
     initial_messages,
+    latest_prompt_version,
+    list_prompt_versions,
+    load_prompt_template,
+    prompt_sha256,
     tool_guide,
 )
 from vortex.conversation.turns import DEFAULT_EXPOSED_TOOLS
@@ -32,9 +52,12 @@ NOW = datetime(2026, 9, 18, 9, 0, tzinfo=MADRID)  # Friday, the public-case anch
 
 # Characters per token, and the ceiling. Kept here rather than in the module
 # so the budget is a test the lane has to argue with, not a constant it can
-# quietly raise while editing the prompt.
+# quietly raise while editing the prompt. 1400 until issue 298: listing the
+# six specialty ids next to SITES_BRIEF cost ~25 tokens on a prompt that was
+# already at the wall. The next claim on this budget buys its tokens out of
+# the existing text.
 CHARS_PER_TOKEN = 4
-TOKEN_BUDGET = 1400
+TOKEN_BUDGET = 1430
 
 
 def test_the_prompt_builds() -> None:
@@ -96,3 +119,77 @@ def test_initial_messages_carries_the_whole_prompt() -> None:
     content = messages[0]["content"]
     assert content == build_system_prompt(NOW)
     assert "submit_action" in content
+
+
+def test_the_prompt_teaches_change_and_cancel() -> None:
+    """Problem 8, call 096af75d: a doctor's name is staff, not another patient,
+    and moving a visit is a reschedule, never a new booking."""
+    text = build_system_prompt(NOW)
+    for needle in (
+        "doctor's name is staff, not a patient",
+        "The record's doctor wins a mismatch",
+        "never a booking",
+        "first slot after theirs",
+        '"later than/after a day" still goes to resolve_date',
+    ):
+        assert needle in text, needle
+
+
+# ---- versions ----------------------------------------------------------------
+
+
+def test_env_unset_loads_the_latest_version(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("VORTEX_PROMPT_VERSION", raising=False)
+    assert active_prompt_version() == latest_prompt_version() == "v6-idle-submit"
+    assert build_system_prompt(NOW) == load_prompt_template("v6-idle-submit").format(
+        clinic_name=CLINIC_NAME,
+        now_human="09:00 on Friday 18 September 2026",
+        tomorrow="Saturday 19 September 2026",
+        language="English",
+        sites_brief=SITES_BRIEF,
+        specialties_brief=SPECIALTIES_BRIEF,
+        caller_note=caller_note_for(None),
+        tool_guide=TOOL_GUIDE,
+    )
+
+
+def test_the_env_var_names_the_version(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    (tmp_path / "v4-test.md").write_text("Pinned: {language}.", encoding="utf-8")
+    monkeypatch.setenv("VORTEX_PROMPT_VERSION", "v4-test")
+    assert active_prompt_version(tmp_path) == "v4-test"
+    assert load_prompt_template(directory=tmp_path) == "Pinned: {language}."
+    # build_system_prompt resolves the env at call time, not at import.
+    monkeypatch.setattr(prompt_module, "PROMPTS_DIR", tmp_path)
+    assert build_system_prompt(NOW) == "Pinned: English."
+
+
+def test_an_unknown_or_malformed_version_is_an_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with pytest.raises(ValueError, match="unknown prompt version 'v9-nope'"):
+        load_prompt_template("v9-nope")
+    with pytest.raises(ValueError, match="not a v<N>-<slug> name"):
+        load_prompt_template("../escape")
+    monkeypatch.setenv("VORTEX_PROMPT_VERSION", "v9-nope")
+    with pytest.raises(ValueError, match="v3-specialty-ids"):
+        build_system_prompt(NOW)
+
+
+def test_a_second_version_can_be_added_without_editing_the_first(
+    tmp_path: Path,
+) -> None:
+    first = load_prompt_template("v3-specialty-ids")
+    (tmp_path / "v3-specialty-ids.md").write_text(first, encoding="utf-8")
+    (tmp_path / "v4-terse.md").write_text("Terse. {tool_guide}", encoding="utf-8")
+    assert list_prompt_versions(tmp_path) == ["v3-specialty-ids", "v4-terse"]
+    assert latest_prompt_version(tmp_path) == "v4-terse"
+    # The first version still loads, byte for byte, from the same directory.
+    assert load_prompt_template("v3-specialty-ids", tmp_path) == first
+    assert prompt_sha256("v3-specialty-ids", tmp_path) == prompt_sha256("v3-specialty-ids")
+
+
+def test_prompt_sha256_is_the_file_s_bytes() -> None:
+    assert (
+        prompt_sha256("v3-specialty-ids")
+        == hashlib.sha256((PROMPTS_DIR / "v3-specialty-ids.md").read_bytes()).hexdigest()
+    )

@@ -19,6 +19,11 @@ networks:
 
 volumes:
   line-logs:
+    # Fixed name so the board (deploy/compose.yml) can mount this exact volume
+    # read-only as its JSONL fallback. This is the volume the line already
+    # writes /app/logs/calls.jsonl to — pinning the name keeps the data that
+    # is already there.
+    name: vortex-line_line-logs
 
 services:
   line:

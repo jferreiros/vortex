@@ -1,11 +1,14 @@
 import { BrowserRouter, HashRouter, Routes, Route, Navigate } from "react-router-dom";
+import ScrollToTop from "./ScrollToTop";
 import Landing from "../pages/landing/Landing";
 import ClinicShell from "../pages/clinic/ClinicShell";
 import Home from "../pages/clinic/home/Home";
 import Settings from "../pages/clinic/settings/Settings";
+import AiConfig from "../pages/clinic/ai/AiConfig";
 import Insights from "../pages/clinic/insights/Insights";
 import LiveCalls from "../pages/clinic/live-calls/LiveCalls";
 import LiveCallDetail from "../pages/clinic/live-calls/LiveCallDetail";
+import Agenda from "../pages/clinic/agenda/Agenda";
 
 // Hash-based on purpose: this SPA is served by FastAPI from a single
 // registered path (/call/{call_id}/zoom — see vortex/observability/live.py)
@@ -21,13 +24,18 @@ export default function AppRouter() {
   const Router = import.meta.env.DEV ? BrowserRouter : HashRouter;
   return (
     <Router>
+      <ScrollToTop />
       <Routes>
         <Route path="/" element={<Landing />} />
 
         <Route path="/clinic" element={<ClinicShell />}>
           <Route index element={<Navigate to="home" replace />} />
           <Route path="home" element={<Home />} />
+          <Route path="doctor" element={<Agenda />} />
+          <Route path="agenda" element={<Navigate to="/clinic/doctor" replace />} />
           <Route path="settings" element={<Settings />} />
+          <Route path="ai" element={<AiConfig />} />
+          <Route path="personalities" element={<Navigate to="/clinic/ai" replace />} />
           <Route path="insights" element={<Insights />} />
           <Route path="live-calls" element={<LiveCalls />} />
           <Route path="live-calls/:callId" element={<LiveCallDetail />} />

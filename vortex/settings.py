@@ -90,6 +90,30 @@ DEFAULT_LLM_PROVIDER = "helmcode"
 DEFAULT_ARBITER_PROVIDER = "helmcode"
 DEFAULT_ARBITER_MODEL = "deepseek-v4-flash"
 
+# A ``submit_action`` with a nested ``BookAction`` measured 107 completion
+# tokens on qwen3.6; ``prepare_booking`` with a full ``Slot`` measured 150.
+# 120 was chosen for the spoken turn and silently capped the tool call too,
+# so a leftover ``LLM_MAX_TOKENS=120`` in .env made every booking impossible.
+# Anything below this floor is raised to the default. Do not lower it.
+MIN_TOKENS_FOR_A_BOOKING = 256
+DEFAULT_LLM_MAX_TOKENS = 320
+# Off unless set. qwen3.6 is ~2 s with tools on the same Helmcode perk, but
+# it loops prepare_booking/submit_action on problem 1, so a hang must not
+# spend the retry there. Set LLM_ALT_MODEL=qwen3.6 only if Helmcode is mute
+# and problem 1 is not on the line.
+DEFAULT_LLM_ALT_MODEL = ""
+
+
+def _llm_max_tokens() -> int:
+    raw = _env("LLM_MAX_TOKENS", str(DEFAULT_LLM_MAX_TOKENS))
+    try:
+        value = int(raw)
+    except ValueError:
+        return DEFAULT_LLM_MAX_TOKENS
+    if value < MIN_TOKENS_FOR_A_BOOKING:
+        return DEFAULT_LLM_MAX_TOKENS
+    return value
+
 
 def _llm_provider(var: str, default: str) -> str:
     """Fold an ``LLM_PROVIDER``-shaped variable to a known preset."""
@@ -174,12 +198,14 @@ class Settings:
     # 120 was chosen for the spoken turn (one or two sentences) and silently
     # capped the *tool call* as well, which is the same completion: a
     # prepare_booking/submit_action with a nested slot was cut off mid-argument,
-    # the tool call never closed and the call submitted nothing. A
-    # ``submit_action`` carrying a ``BookAction`` measures 107 tokens on
-    # qwen3.6 and ``prepare_booking`` with a full ``Slot`` measures 150, so at
-    # 120 the model could never emit a booking at all. Measured with
-    # scripts/rehearse_text.py.
-    llm_max_tokens: int = field(default_factory=lambda: int(_env("LLM_MAX_TOKENS", "320")))
+    # the tool call never closed and the call submitted nothing. A leftover
+    # ``LLM_MAX_TOKENS=120`` in .env survived the default bump to 320 and
+    # shipped that way; ``_llm_max_tokens`` raises anything below
+    # ``MIN_TOKENS_FOR_A_BOOKING``. Measured with scripts/rehearse_text.py.
+    llm_max_tokens: int = field(default_factory=_llm_max_tokens)
+    # Same host as ``llm_model``. On a first-token timeout the retry uses this
+    # instead of the hung model. Empty disables the swap.
+    llm_alt_model: str = field(default_factory=lambda: _env("LLM_ALT_MODEL", DEFAULT_LLM_ALT_MODEL))
     # Qwen3 hybrid builds think by default; a phone call cannot wait for that.
     llm_disable_thinking: bool = field(
         default_factory=lambda: (
@@ -215,6 +241,7 @@ class Settings:
     arbiter_base_url_env: str = field(default_factory=lambda: _env("ARBITER_BASE_URL"))
     arbiter_api_key_env: str = field(default_factory=lambda: _env("ARBITER_API_KEY"))
     arbiter_model_env: str = field(default_factory=lambda: _env("ARBITER_MODEL"))
+    jev_arbiter: bool = field(default_factory=lambda: _env_flag("VORTEX_JEV_ARBITER", "0"))
 
     # --- TTS: a primary and an alternate --------------------------------------
     # VORTEX_TTS_PROVIDER     speaks Spanish (google | elevenlabs)
@@ -326,6 +353,15 @@ class Settings:
     calls_log_path: Path = field(
         default_factory=lambda: Path(_env("VORTEX_CALLS_LOG", str(REPO_ROOT / "logs/calls.jsonl")))
     )
+    # The product's own database (database/): appointments and the calls
+    # that touched them, separate from the calls.jsonl event log above. On
+    # the same volume as calls_log_path by default so it survives a redeploy
+    # the same way voiceconfig.db already does (vortex/line/voice_config.py).
+    product_db_path: Path = field(
+        default_factory=lambda: Path(
+            _env("VORTEX_PRODUCT_DB", str(REPO_ROOT / "logs" / "vortex_product.db"))
+        )
+    )
     langfuse_public_key: str = field(default_factory=lambda: _env("LANGFUSE_PUBLIC_KEY"))
     langfuse_secret_key: str = field(default_factory=lambda: _env("LANGFUSE_SECRET_KEY"))
     langfuse_base_url: str = field(
@@ -334,6 +370,10 @@ class Settings:
     langfuse_environment: str = field(
         default_factory=lambda: _env("LANGFUSE_TRACING_ENVIRONMENT") or _env("VORTEX_ENV")
     )
+    # HuggingFace Inference token: the Clinic View summarises a visit note when
+    # it is set (vortex/observability/calendar.py ``summarize_note``). Empty =
+    # the note is shown raw.
+    hf_token: str = field(default_factory=lambda: _env("HF_TOKEN"))
 
     # Live geocoder for problem 15 (vortex/rules/geo.py). Empty = gazetteer only.
     # VORTEX_GEOCODER: cartociudad | nominatim | "" (off).
@@ -358,6 +398,62 @@ class Settings:
     # would replace is already decided, and a booking that misses the window is
     # worth less than a refusal that makes it.
     cold_booking_timeout_secs: float = 6.0
+
+    # --- SMS confirmations (Twilio) -------------------------------------------
+    # After an accepted book/cancel we text the calling number. Opt-in: live
+    # messaging needs the flag on, and is dry-run when the Twilio keys below are
+    # missing. Off by default so no deployment texts a patient unasked.
+    sms_confirmations: bool = field(default_factory=lambda: _env_flag("VORTEX_SMS_CONFIRMATIONS"))
+    twilio_account_sid: str = field(default_factory=lambda: _env("TWILIO_ACCOUNT_SID"))
+    twilio_auth_token: str = field(default_factory=lambda: _env("TWILIO_AUTH_TOKEN"))
+    # Prefer a Messaging Service; otherwise a bare From number works.
+    twilio_messaging_service_sid: str = field(
+        default_factory=lambda: _env("TWILIO_MESSAGING_SERVICE_SID")
+    )
+    twilio_from_number: str = field(default_factory=lambda: _env("TWILIO_FROM_NUMBER"))
+    # When set, every confirmation goes here instead of the caller's from_number.
+    # Hackathon/demo only: leave empty in production so each caller gets their own text.
+    sms_force_to: str = field(default_factory=lambda: _env("VORTEX_SMS_FORCE_TO"))
+    # Also text the day before the slot (same opt-in as confirmations). Default on.
+    sms_day_before_reminders: bool = field(
+        default_factory=lambda: _env_flag("VORTEX_SMS_DAY_BEFORE", "true")
+    )
+    # How far ahead of the slot the reminder fires. 24 = one day before.
+    # Lower it in demos (e.g. 0.01) to exercise the worker without waiting.
+    sms_reminder_lead_hours: float = field(
+        default_factory=lambda: float(_env("VORTEX_SMS_REMINDER_LEAD_HOURS", "24") or "24")
+    )
+    # JSON file for pending day-before reminders. Empty = next to the calls log.
+    sms_reminders_path: str = field(default_factory=lambda: _env("VORTEX_SMS_REMINDERS_PATH"))
+    sms_reminder_poll_secs: float = field(
+        default_factory=lambda: float(_env("VORTEX_SMS_REMINDER_POLL_SECS", "30") or "30")
+    )
+
+    # --- Day-before confirmation calls (Twilio Voice) -------------------------
+    # The day before an accepted booking we call the patient, say the
+    # appointment in their language and ask whether they will come; the answer
+    # is stored per appointment (logs/confirmation_calls.json). Opt-in like
+    # SMS, dry-run without Twilio keys or a public URL. The TwiML comes from
+    # this server's /confirmation/* routes, so Twilio needs to reach them:
+    # public_base_url is the https tunnel base (e.g. the `make tunnel` host).
+    confirmation_calls: bool = field(default_factory=lambda: _env_flag("VORTEX_CONFIRMATION_CALLS"))
+    public_base_url: str = field(default_factory=lambda: _env("VORTEX_PUBLIC_BASE_URL"))
+    # How far ahead of the slot the call fires. 24 = one day before.
+    # Lower it in demos (e.g. 0.01) to exercise the worker without waiting.
+    confirmation_lead_hours: float = field(
+        default_factory=lambda: float(_env("VORTEX_CONFIRMATION_LEAD_HOURS", "24") or "24")
+    )
+    # JSON file for pending confirmation calls. Empty = next to the calls log.
+    confirmation_calls_path: str = field(
+        default_factory=lambda: _env("VORTEX_CONFIRMATION_CALLS_PATH")
+    )
+    confirmation_poll_secs: float = field(
+        default_factory=lambda: float(_env("VORTEX_CONFIRMATION_POLL_SECS", "30") or "30")
+    )
+    # When set, every confirmation call goes here instead of the patient's
+    # number. Hackathon/demo only (a Twilio trial can only call verified
+    # numbers anyway). Falls back to sms_force_to, the demo's one demo number.
+    confirmation_force_to: str = field(default_factory=lambda: _env("VORTEX_CONFIRMATION_FORCE_TO"))
 
     @property
     def clinic_is_live(self) -> bool:
@@ -532,6 +628,8 @@ class Settings:
             "stt_model": self.soniox_stt_model,
             "llm_provider": self.llm_provider,
             "llm_model": self.llm_model,
+            "llm_alt_model": self.llm_alt_model,
+            "llm_max_tokens": self.llm_max_tokens,
             "llm_base_url": self.llm_base_url,
             "gemini_live_model": self.gemini_live_model,
             "gemini_live_voice": self.gemini_live_voice,
@@ -541,6 +639,8 @@ class Settings:
             "arbiter_model": self.arbiter_model,
             "arbiter_base_url": self.arbiter_base_url,
             "has_arbiter_key": bool(self.arbiter_api_key),
+            "jev_arbiter": self.jev_arbiter,
+            "has_typesafe_key": bool(_env("TYPESAFE_API_KEY")),
             "tts_provider": self.tts_provider,
             "tts_provider_alt": self.tts_provider_alt,
             "tts_routed": self.tts_is_routed,
@@ -560,10 +660,27 @@ class Settings:
             "user_idle_secs": self.user_idle_secs,
             "ws_path": self.ws_path,
             "calls_log_path": str(self.calls_log_path),
+            "product_db_path": str(self.product_db_path),
             "has_langfuse_keys": bool(self.langfuse_public_key and self.langfuse_secret_key),
+            "has_hf_token": bool(self.hf_token),
             "langfuse_base_url": self.langfuse_base_url,
             "langfuse_environment": self.langfuse_environment,
             "geocoder": self.geocoder or ("nominatim" if self.geocoder_url else ""),
+            "sms_confirmations": self.sms_confirmations,
+            "sms_force_to_set": bool(self.sms_force_to),
+            "sms_day_before_reminders": self.sms_day_before_reminders,
+            "confirmation_calls": self.confirmation_calls,
+            "confirmation_calls_public_url_set": bool(self.public_base_url),
+            "confirmation_force_to_set": bool(self.confirmation_force_to or self.sms_force_to),
+            "has_twilio_voice": bool(
+                self.twilio_account_sid and self.twilio_auth_token and self.twilio_from_number
+            ),
+            "sms_reminder_lead_hours": self.sms_reminder_lead_hours,
+            "has_twilio_sms": bool(
+                self.twilio_account_sid
+                and self.twilio_auth_token
+                and (self.twilio_messaging_service_sid or self.twilio_from_number)
+            ),
         }
 
 

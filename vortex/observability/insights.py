@@ -7,11 +7,13 @@ log is empty the page shows an honest empty state, never a sample chart.
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from statistics import median
 from zoneinfo import ZoneInfo
 
+from vortex.observability.pricing import CallCost, price_call
 from vortex.observability.view import CallCard
 
 MADRID = ZoneInfo("Europe/Madrid")
@@ -88,13 +90,97 @@ def calls_by_hour(cards: list[CallCard]) -> list[Bar]:
     ]
 
 
+def handle_seconds(cards: list[CallCard]) -> list[float]:
+    """Seconds on the line, ended calls with a duration only, ascending."""
+    return sorted(c.duration_ms / 1000 for c in cards if not c.live and c.duration_ms)
+
+
+def percentiles(values: Sequence[float], *qs: float) -> list[float | None]:
+    """The q-quantiles of ``values`` by nearest rank, one per q.
+
+    Nearest rank, not interpolation: every number the console shows is a call
+    that really happened, never an average of two of them. Empty input gives
+    None per q, so a caller can unpack the result without guarding first.
+    """
+    ordered = sorted(values)
+    if not ordered:
+        return [None] * len(qs)
+    last = len(ordered) - 1
+    return [ordered[min(last, max(0, int(round(q * last))))] for q in qs]
+
+
 def handle_times(cards: list[CallCard]) -> tuple[float | None, float | None, float | None]:
     """(median, p90, max) seconds for ended calls with a duration."""
-    values = sorted(c.duration_ms / 1000 for c in cards if not c.live and c.duration_ms)
+    values = handle_seconds(cards)
     if not values:
         return None, None, None
-    p90 = values[min(len(values) - 1, int(round(0.9 * (len(values) - 1))))]
+    p90 = percentiles(values, 0.9)[0]
     return median(values), p90, values[-1]
+
+
+def on_day(
+    cards: list[CallCard], day: date | None = None, *, now: datetime | None = None
+) -> list[CallCard]:
+    """The cards that started on ``day`` in Madrid. Today by default."""
+    day = day or (now or datetime.now(MADRID)).astimezone(MADRID).date()
+    out: list[CallCard] = []
+    for card in cards:
+        if not card.started_at:
+            continue
+        try:
+            stamp = datetime.fromisoformat(card.started_at)
+        except ValueError:
+            continue
+        if stamp.tzinfo is None:
+            continue
+        if stamp.astimezone(MADRID).date() == day:
+            out.append(card)
+    return out
+
+
+@dataclass
+class CostSummary:
+    """€ per call over a set of cards, at list price and at what we pay.
+
+    ``metered`` counts the calls that carried a ``call.usage`` event;
+    ``priced`` the subset where every leg had a verified price. The averages
+    and the totals run over ``priced`` only: a call whose TTS model has no
+    published rate would otherwise pull the average down by the size of the
+    hole. When the two differ the console says "n of m calls priced".
+    """
+
+    metered: int = 0
+    priced: int = 0
+    avg_list_eur: float | None = None
+    avg_paid_eur: float | None = None
+    total_list_eur: float = 0.0
+    total_paid_eur: float = 0.0
+    #: The legs nobody could price, distinct and sorted, for the caption.
+    unpriced: list[str] = field(default_factory=list)
+    #: True when at least one priced call's LLM leg was a perk.
+    perk: bool = False
+
+
+def cost_per_call(cards: list[CallCard]) -> CostSummary:
+    """What a call cost, averaged over the calls we could price in full."""
+    costs: list[CallCost] = [price_call(card.usage) for card in cards]
+    metered = [c for c in costs if c.metered]
+    priced = [c for c in metered if c.priced]
+    unpriced = sorted({label for c in metered for label in c.unpriced})
+    if not priced:
+        return CostSummary(metered=len(metered), unpriced=unpriced)
+    total_list = sum(c.total_list_eur for c in priced)
+    total_paid = sum(c.total_eur for c in priced)
+    return CostSummary(
+        metered=len(metered),
+        priced=len(priced),
+        avg_list_eur=total_list / len(priced),
+        avg_paid_eur=total_paid / len(priced),
+        total_list_eur=total_list,
+        total_paid_eur=total_paid,
+        unpriced=unpriced,
+        perk=any(c.perk for c in priced),
+    )
 
 
 @dataclass

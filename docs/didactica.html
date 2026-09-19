@@ -1,0 +1,3140 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Vortex explicado en lenguaje simple: visión, arquitectura, decisiones, seguridad, resiliencia, evals y estado de los retos. Equipo Vortex, track Prosper AI, HackSpain 2026.">
+<title>Vortex, explicado</title>
+<style id="design-tokens">
+/*
+ * Vortex design system — the one stylesheet every front end loads first.
+ *
+ * Source of truth: DESIGN.md at the repo root. Tokens here mirror its YAML
+ * front matter one to one. Change a value there, then here, then run
+ * `make design-sync` so docs/design.css matches (tests/test_design.py checks).
+ *
+ * Who loads it:
+ *   - vortex/observability/live.py   (ops board `/` and jury wall `/wall`)
+ *   - vortex/line/server.py          (served at GET /design.css for /mic)
+ *   - evals/common/report.py         (inlined into evals/results/report.html)
+ *   - docs/*.html                    (as docs/design.css, the synced copy)
+ *
+ * Rules in one breath: paper-white canvas, black pills for every action,
+ * hairline cards, one dark surface per page, no shadows, no gradients,
+ * no brand colour. Status uses the traffic-light trio and nothing else.
+ */
+
+@import url("https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap");
+
+/* ------------------------------------------------------------------ */
+/* Tokens                                                              */
+/* ------------------------------------------------------------------ */
+
+:root {
+  /* colors */
+  --primary: #000000;
+  --on-primary: #ffffff;
+  --ink: #000000;
+  --ink-deep: #090909;
+  --charcoal: #525252;
+  --body: #737373;
+  --mute: #a3a3a3;
+  --canvas: #ffffff;
+  --surface-soft: #fafafa;
+  --surface-card: #ffffff;
+  --hairline: #e5e5e5;
+  --hairline-strong: #d4d4d4;
+  --on-dark: #ffffff;
+  --on-dark-mute: rgba(255, 255, 255, 0.7);
+  --surface-dark: #171717;
+  --focus-ring: rgba(59, 130, 246, 0.5);
+  --link: #000000;
+  --link-mute: #737373;
+  --terminal-red: #ff5f56;
+  --terminal-yellow: #ffbd2e;
+  --terminal-green: #27c93f;
+
+  /* font families */
+  --font-display: "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-body: "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* typography: `font` shorthand values, ready for `font: var(--text-…)` */
+  --text-display-xl: 600 36px/1.11 var(--font-display);
+  --text-display-lg: 600 30px/1.2 var(--font-display);
+  --text-heading-lg: 600 24px/1.33 var(--font-display);
+  --text-heading-md: 500 20px/1.4 var(--font-body);
+  --text-heading-sm: 500 18px/1.56 var(--font-body);
+  --text-body-md: 400 16px/1.5 var(--font-body);
+  --text-body-strong: 500 16px/1.5 var(--font-body);
+  --text-body-sm: 400 14px/1.43 var(--font-body);
+  --text-body-sm-strong: 500 14px/1.43 var(--font-body);
+  --text-caption-sm: 400 12px/1.33 var(--font-body);
+  --text-code-md: 400 16px/1.5 var(--font-mono);
+  --text-code-sm: 400 14px/1.43 var(--font-mono);
+  --text-button-md: 500 14px/1 var(--font-body);
+
+  /* rounded */
+  --rounded-none: 0px;
+  --rounded-sm: 6px;
+  --rounded-md: 8px;
+  --rounded-lg: 12px;
+  --rounded-full: 9999px;
+
+  /* spacing */
+  --space-xxs: 2px;
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 12px;
+  --space-lg: 16px;
+  --space-xl: 24px;
+  --space-xxl: 32px;
+  --space-section: 88px;
+
+  /* layout */
+  --column: 720px;
+  --column-wide: 960px;
+  --nav-height: 56px;
+
+  color-scheme: light;
+}
+
+@media (max-width: 850px) {
+  :root {
+    --space-section: 64px;
+  }
+}
+
+@media (max-width: 640px) {
+  :root {
+    --space-section: 48px;
+    --text-display-xl: 500 28px/1.15 var(--font-display);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Base                                                                */
+/* ------------------------------------------------------------------ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--canvas);
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--canvas);
+  color: var(--ink);
+  font: var(--text-body-md);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3,
+h4,
+p,
+ul,
+ol,
+figure {
+  margin: 0;
+}
+
+h1 {
+  font: var(--text-display-xl);
+  letter-spacing: -0.02em;
+}
+
+h2 {
+  font: var(--text-display-lg);
+  letter-spacing: -0.015em;
+}
+
+h3 {
+  font: var(--text-heading-lg);
+}
+
+h4 {
+  font: var(--text-heading-md);
+}
+
+p {
+  color: var(--body);
+}
+
+a {
+  color: var(--link);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+code,
+kbd,
+samp {
+  font: var(--text-code-sm);
+}
+
+img,
+svg {
+  max-width: 100%;
+  display: block;
+}
+
+.icon {
+  width: 16px;
+  height: 16px;
+  max-width: 16px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex: 0 0 auto;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: var(--ink);
+  color: var(--on-primary);
+}
+
+/* ------------------------------------------------------------------ */
+/* Layout                                                              */
+/* ------------------------------------------------------------------ */
+
+.container {
+  max-width: var(--column);
+  margin: 0 auto;
+  padding: 0 var(--space-lg);
+}
+
+.container-wide {
+  max-width: var(--column-wide);
+  margin: 0 auto;
+  padding: 0 var(--space-lg);
+}
+
+.container-full {
+  padding: 0 var(--space-xl);
+}
+
+.section {
+  margin-top: var(--space-section);
+}
+
+.section-head {
+  max-width: 66ch;
+  margin-bottom: var(--space-xl);
+}
+
+.section-head p {
+  margin-top: var(--space-sm);
+}
+
+.hairline {
+  border: 0;
+  border-top: 1px solid var(--hairline);
+  margin: var(--space-xl) 0;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+
+.grow {
+  flex: 1 1 auto;
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+.center {
+  text-align: center;
+}
+
+/* ------------------------------------------------------------------ */
+/* Text roles                                                          */
+/* ------------------------------------------------------------------ */
+
+.display-xl { font: var(--text-display-xl); color: var(--ink); letter-spacing: -0.02em; }
+.display-lg { font: var(--text-display-lg); color: var(--ink); letter-spacing: -0.015em; }
+.heading-lg { font: var(--text-heading-lg); color: var(--ink); }
+.heading-md { font: var(--text-heading-md); color: var(--ink); }
+.heading-sm { font: var(--text-heading-sm); color: var(--ink); }
+.body-md { font: var(--text-body-md); color: var(--body); }
+.body-strong { font: var(--text-body-strong); color: var(--ink); }
+.body-sm { font: var(--text-body-sm); color: var(--body); }
+.body-sm-strong { font: var(--text-body-sm-strong); color: var(--ink); }
+.caption-sm { font: var(--text-caption-sm); color: var(--body); }
+.code-md { font: var(--text-code-md); color: var(--ink); }
+.code-sm { font: var(--text-code-sm); color: var(--ink); }
+
+/* A section label above a list. body-sm-strong in body grey; no caps, no tracking. */
+.kicker {
+  font: var(--text-body-sm-strong);
+  color: var(--body);
+  margin-bottom: var(--space-md);
+}
+
+.lede {
+  font: var(--text-heading-sm);
+  font-weight: 400;
+  color: var(--body);
+  max-width: 58ch;
+}
+
+.empty {
+  font: var(--text-body-sm);
+  color: var(--mute);
+  padding: var(--space-xl) 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Buttons                                                             */
+/* ------------------------------------------------------------------ */
+
+.button-primary,
+.button-secondary,
+.button-pill-on-dark,
+.button-disabled {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  height: 36px;
+  padding: 8px 20px;
+  border-radius: var(--rounded-full);
+  border: 1px solid transparent;
+  font: var(--text-button-md);
+  text-decoration: none;
+  cursor: pointer;
+  white-space: nowrap;
+  appearance: none;
+}
+
+.button-primary {
+  background: var(--primary);
+  color: var(--on-primary);
+  border-color: var(--primary);
+}
+
+.button-primary:active {
+  background: var(--ink-deep);
+}
+
+.button-secondary {
+  background: var(--canvas);
+  color: var(--ink);
+  border-color: var(--hairline-strong);
+}
+
+.button-secondary:active {
+  border-color: var(--ink);
+}
+
+.button-pill-on-dark {
+  background: var(--canvas);
+  color: var(--ink);
+  border-color: var(--canvas);
+}
+
+.button-disabled,
+.button-primary:disabled,
+.button-secondary:disabled {
+  background: var(--surface-soft);
+  color: var(--mute);
+  border-color: var(--surface-soft);
+  cursor: not-allowed;
+}
+
+/* ------------------------------------------------------------------ */
+/* Inputs                                                              */
+/* ------------------------------------------------------------------ */
+
+.search-pill,
+.text-input {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  border-radius: var(--rounded-full);
+  color: var(--ink);
+  appearance: none;
+  outline: none;
+}
+
+.search-pill {
+  height: 36px;
+  padding: 8px 16px;
+  background: var(--surface-soft);
+  border: 1px solid transparent;
+  font: var(--text-body-sm);
+}
+
+.search-pill:focus,
+.search-pill:focus-within {
+  background: var(--canvas);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.text-input {
+  height: 40px;
+  padding: 8px 16px;
+  background: var(--canvas);
+  border: 1px solid var(--hairline);
+  font: var(--text-body-md);
+}
+
+.text-input:focus,
+.text-input:focus-within {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.text-input::placeholder,
+.search-pill::placeholder {
+  color: var(--mute);
+}
+
+/* ------------------------------------------------------------------ */
+/* Code surfaces                                                       */
+/* ------------------------------------------------------------------ */
+
+.install-snippet {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  min-height: 48px;
+  padding: 12px 20px;
+  background: var(--surface-soft);
+  color: var(--ink);
+  border-radius: var(--rounded-full);
+  font: var(--text-code-md);
+  overflow-wrap: anywhere;
+}
+
+.command-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  background: var(--surface-soft);
+  color: var(--ink);
+  border-radius: var(--rounded-full);
+  font: var(--text-code-sm);
+  white-space: nowrap;
+}
+
+.terminal-card {
+  background: var(--canvas);
+  color: var(--ink);
+  border: 1px solid var(--hairline);
+  border-radius: var(--rounded-lg);
+  padding: var(--space-lg);
+  font: var(--text-code-sm);
+}
+
+.terminal-card .comment {
+  color: var(--mute);
+}
+
+.terminal-traffic-lights {
+  display: flex;
+  gap: var(--space-xs);
+  margin-bottom: var(--space-md);
+}
+
+.terminal-traffic-lights i {
+  width: 12px;
+  height: 12px;
+  border-radius: var(--rounded-full);
+  display: block;
+}
+
+.terminal-traffic-lights i:nth-child(1) { background: var(--terminal-red); }
+.terminal-traffic-lights i:nth-child(2) { background: var(--terminal-yellow); }
+.terminal-traffic-lights i:nth-child(3) { background: var(--terminal-green); }
+
+.terminal-card pre {
+  margin: 0;
+  white-space: pre-wrap;
+  font: inherit;
+}
+
+/* ------------------------------------------------------------------ */
+/* Cards                                                               */
+/* ------------------------------------------------------------------ */
+
+.card {
+  background: var(--surface-card);
+  color: var(--ink);
+  border: 1px solid var(--hairline);
+  border-radius: var(--rounded-lg);
+  padding: var(--space-xxl);
+}
+
+.card-compact {
+  padding: var(--space-lg);
+}
+
+/* The single inverted surface. One per page. */
+.card-dark {
+  background: var(--surface-dark);
+  color: var(--on-dark);
+  border: 1px solid var(--surface-dark);
+  border-radius: var(--rounded-lg);
+  padding: var(--space-xxl);
+}
+
+.card-dark p,
+.card-dark .body,
+.card-dark .caption-sm,
+.card-dark .body-sm {
+  color: var(--on-dark-mute);
+}
+
+.cta-strip-dark {
+  background: var(--surface-dark);
+  color: var(--on-dark);
+  border-radius: var(--rounded-lg);
+  padding: 24px 32px;
+  font: var(--text-heading-lg);
+}
+
+.feature-bullet {
+  display: flex;
+  gap: var(--space-sm);
+  font: var(--text-body-sm);
+  color: var(--charcoal);
+}
+
+.feature-bullet::before {
+  content: "✓";
+  color: var(--ink);
+  flex: 0 0 auto;
+}
+
+.faq-row {
+  padding: var(--space-lg) 0;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.faq-row .q {
+  font: var(--text-heading-sm);
+  color: var(--ink);
+}
+
+.faq-row .a {
+  font: var(--text-body-md);
+  color: var(--body);
+  margin-top: var(--space-xs);
+}
+
+/* Stat tile: a number and its label inside a hairline grid. */
+.stat-grid {
+  display: grid;
+  gap: 1px;
+  background: var(--hairline);
+  border: 1px solid var(--hairline);
+  border-radius: var(--rounded-lg);
+  overflow: hidden;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+}
+
+.stat {
+  background: var(--canvas);
+  padding: var(--space-lg);
+  min-width: 0;
+}
+
+.stat .n {
+  font: var(--text-display-lg);
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.stat .l {
+  font: var(--text-caption-sm);
+  color: var(--body);
+  margin-top: var(--space-xs);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Key/value row inside a card or column. */
+.kv {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding: var(--space-sm) 0;
+  border-bottom: 1px solid var(--hairline);
+  font: var(--text-body-sm);
+}
+
+.kv > :first-child {
+  color: var(--body);
+}
+
+.kv > :last-child {
+  color: var(--ink);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+/* ------------------------------------------------------------------ */
+/* Pills and status                                                    */
+/* ------------------------------------------------------------------ */
+
+/* A neutral tag: hairline border, ink text. Not a button. */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--rounded-full);
+  background: var(--canvas);
+  color: var(--ink);
+  font: var(--text-body-sm-strong);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.pill.soft {
+  background: var(--surface-soft);
+  border-color: transparent;
+}
+
+.pill.dark {
+  background: var(--surface-dark);
+  border-color: var(--surface-dark);
+  color: var(--on-dark);
+}
+
+.pill.mute {
+  color: var(--body);
+}
+
+/*
+ * Status dots: the only colour in the system besides black and grey.
+ * They borrow the terminal traffic lights, so they never introduce a hue.
+ *   ok   = green   (submitted, line up, test pass)
+ *   warn = yellow  (refused, escalated, unverified)
+ *   bad  = red     (failed, line down)
+ *   live = black, pulsing (a call in progress)
+ *   off  = grey    (idle, skipped)
+ */
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--rounded-full);
+  background: var(--mute);
+  display: inline-block;
+  flex: 0 0 auto;
+}
+
+.dot.ok { background: var(--terminal-green); }
+.dot.warn { background: var(--terminal-yellow); }
+.dot.bad { background: var(--terminal-red); }
+.dot.off { background: var(--hairline-strong); }
+
+.dot.live {
+  background: var(--ink);
+  animation: ds-pulse 1.2s ease-in-out infinite;
+}
+
+.pill.dark .dot.live {
+  background: var(--on-dark);
+}
+
+@keyframes ds-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dot.live {
+    animation: none;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Navigation and footer                                               */
+/* ------------------------------------------------------------------ */
+
+.primary-nav {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-sm) var(--space-lg);
+  min-height: var(--nav-height);
+  padding: var(--space-sm) var(--space-xl);
+  background: var(--canvas);
+  color: var(--ink);
+  border-bottom: 1px solid var(--hairline);
+  font: var(--text-body-sm-strong);
+}
+
+.primary-nav .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font: var(--text-heading-sm);
+  font-weight: 600;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.primary-nav .brand img,
+.brand-mark {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--rounded-full);
+}
+
+.primary-nav a {
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.primary-nav .nav-mute {
+  color: var(--body);
+}
+
+.footer-section {
+  margin-top: var(--space-section);
+  padding: 32px 24px;
+  border-top: 1px solid var(--hairline);
+  font: var(--text-caption-sm);
+  color: var(--body);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm) var(--space-lg);
+  justify-content: center;
+}
+
+.footer-section a {
+  color: var(--body);
+}
+
+@media (max-width: 640px) {
+  .primary-nav {
+    padding: var(--space-sm) var(--space-lg);
+  }
+
+  .primary-nav .nav-mute {
+    display: none;
+  }
+}
+
+/* Inline nav chips, e.g. a sticky section index. Pills, never tabs. */
+.chip-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--rounded-full);
+  background: var(--canvas);
+  color: var(--ink);
+  font: var(--text-body-sm-strong);
+  text-decoration: none;
+  cursor: pointer;
+  white-space: nowrap;
+  appearance: none;
+}
+
+.chip[aria-pressed="true"],
+.chip.on {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--on-primary);
+}
+
+/* ------------------------------------------------------------------ */
+/* Tables                                                              */
+/* ------------------------------------------------------------------ */
+
+table.ds {
+  width: 100%;
+  border-collapse: collapse;
+  font: var(--text-body-sm);
+}
+
+table.ds th,
+table.ds td {
+  padding: var(--space-sm) var(--space-md);
+  border-bottom: 1px solid var(--hairline);
+  text-align: left;
+  vertical-align: top;
+}
+
+table.ds th {
+  font: var(--text-body-sm-strong);
+  color: var(--body);
+}
+
+table.ds td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------------ */
+/* Conversation transcript (wall, ops)                                 */
+/* ------------------------------------------------------------------ */
+
+.turn {
+  max-width: 40ch;
+  margin-bottom: var(--space-md);
+}
+
+.turn.user {
+  margin-left: auto;
+}
+
+.turn .who {
+  font: var(--text-caption-sm);
+  color: var(--body);
+  margin-bottom: var(--space-xs);
+}
+
+.turn .bubble {
+  font: var(--text-body-md);
+  color: var(--ink);
+  background: var(--surface-soft);
+  border-radius: var(--rounded-lg);
+  padding: 10px 14px;
+}
+
+.turn.user .bubble {
+  background: var(--canvas);
+  border: 1px solid var(--hairline);
+}
+
+.transcript {
+  max-height: 64dvh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
+  padding-right: var(--space-sm);
+}
+
+/* ------------------------------------------------------------------ */
+/* Console components (wall, ops, call detail)                         */
+/* ------------------------------------------------------------------ */
+
+/* Nav tabs: pills in a row; the active one is black. */
+.tabs {
+  display: flex;
+  gap: var(--space-xs);
+  align-items: center;
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 14px;
+  border-radius: var(--rounded-full);
+  font: var(--text-body-sm-strong);
+  color: var(--body);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.tab.on {
+  background: var(--primary);
+  color: var(--on-primary);
+}
+
+/* Page header: title, one-line explanation, controls at the right. */
+.page-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-lg);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-xl);
+}
+
+.page-head .title {
+  font: var(--text-heading-lg);
+  color: var(--ink);
+  letter-spacing: -0.015em;
+}
+
+.page-head .sub {
+  font: var(--text-body-sm);
+  color: var(--body);
+  margin-top: var(--space-xs);
+  max-width: 56ch;
+}
+
+/* The four stages of a call. `.done` is behind us, `.now` is in progress. */
+.stages {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--hairline);
+  border: 1px solid var(--hairline);
+  border-radius: var(--rounded-lg);
+  overflow: hidden;
+}
+
+@media (max-width: 640px) {
+  .stages {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.stage {
+  background: var(--canvas);
+  padding: var(--space-md) var(--space-lg);
+  min-width: 0;
+}
+
+.stage .n {
+  font: var(--text-caption-sm);
+  color: var(--mute);
+  font-variant-numeric: tabular-nums;
+}
+
+.stage .t {
+  font: var(--text-body-sm-strong);
+  color: var(--mute);
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-top: var(--space-xxs);
+}
+
+.stage .d {
+  font: var(--text-caption-sm);
+  color: var(--mute);
+  margin-top: var(--space-xxs);
+}
+
+.stage.done .t,
+.stage.now .t {
+  color: var(--ink);
+}
+
+.stage.done .d,
+.stage.now .d {
+  color: var(--body);
+}
+
+.stage.now {
+  background: var(--surface-soft);
+}
+
+/* Decision timeline: one row per tool call. */
+.timeline {
+  display: flex;
+  flex-direction: column;
+}
+
+.tl-row {
+  display: grid;
+  grid-template-columns: 16px 1fr auto;
+  gap: var(--space-md);
+  align-items: start;
+  padding: var(--space-md) 0;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.tl-row:last-child {
+  border-bottom: 0;
+}
+
+.tl-row .dot {
+  margin-top: 6px;
+}
+
+.tl-row .what {
+  font: var(--text-body-sm-strong);
+  color: var(--ink);
+}
+
+.tl-row .tool {
+  font: var(--text-code-sm);
+  font-size: 12px;
+  color: var(--body);
+  margin-left: var(--space-sm);
+}
+
+.tl-row .said {
+  font: var(--text-body-sm);
+  color: var(--charcoal);
+  margin-top: var(--space-xxs);
+}
+
+.tl-row .said.bad {
+  color: var(--ink);
+}
+
+.tl-row .ms {
+  font: var(--text-caption-sm);
+  color: var(--body);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  padding-top: 3px;
+}
+
+/* Outcome card: the page's dark surface. */
+.outcome {
+  background: var(--surface-dark);
+  color: var(--on-dark);
+  border-radius: var(--rounded-lg);
+  padding: var(--space-xl) var(--space-xxl);
+}
+
+.outcome .label {
+  font: var(--text-caption-sm);
+  color: var(--on-dark-mute);
+}
+
+.outcome .title {
+  font: var(--text-display-lg);
+  color: var(--on-dark);
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  margin-top: var(--space-xs);
+}
+
+.outcome .title .dot {
+  width: 12px;
+  height: 12px;
+}
+
+.outcome .title .dot.live {
+  background: var(--on-dark);
+}
+
+.outcome .text {
+  font: var(--text-body-md);
+  color: var(--on-dark-mute);
+  margin-top: var(--space-sm);
+  max-width: 48ch;
+}
+
+.outcome .reason {
+  display: inline-flex;
+  align-items: center;
+  margin-top: var(--space-lg);
+  padding: 6px 12px;
+  border-radius: var(--rounded-full);
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--on-dark);
+  font: var(--text-code-sm);
+}
+
+.outcome .kv {
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.outcome .kv > :first-child {
+  color: var(--on-dark-mute);
+}
+
+.outcome .kv > :last-child {
+  color: var(--on-dark);
+}
+
+/* Data table. Wrap it so a narrow screen scrolls the table, not the page. */
+.table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font: var(--text-body-sm);
+}
+
+.table th {
+  font: var(--text-caption-sm);
+  color: var(--body);
+  text-align: left;
+  padding: var(--space-sm) var(--space-md);
+  border-bottom: 1px solid var(--hairline);
+  white-space: nowrap;
+}
+
+.table td {
+  padding: var(--space-md);
+  border-bottom: 1px solid var(--hairline);
+  color: var(--ink);
+  vertical-align: middle;
+}
+
+.table tr.pick {
+  cursor: pointer;
+}
+
+.table tr.pick.on td {
+  background: var(--surface-soft);
+}
+
+.table td .row {
+  flex-wrap: nowrap;
+}
+
+.table td.mute {
+  color: var(--body);
+}
+
+.table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.table td.id {
+  font: var(--text-code-sm);
+  font-size: 12px;
+  color: var(--body);
+}
+
+/* Live indicator in a header. */
+.live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  height: 28px;
+  padding: 0 12px;
+  border-radius: var(--rounded-full);
+  background: var(--surface-dark);
+  color: var(--on-dark);
+  font: var(--text-body-sm-strong);
+}
+
+.live-badge .dot {
+  background: var(--on-dark);
+  animation: ds-pulse 1.2s ease-in-out infinite;
+}
+
+/* Typing indicator for a live transcript. */
+.typing {
+  display: inline-flex;
+  gap: 4px;
+  padding: 10px 14px;
+  background: var(--surface-soft);
+  border-radius: var(--rounded-lg);
+}
+
+.typing i {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--rounded-full);
+  background: var(--mute);
+  animation: ds-pulse 1s ease-in-out infinite;
+}
+
+.typing i:nth-child(2) { animation-delay: 0.2s; }
+.typing i:nth-child(3) { animation-delay: 0.4s; }
+
+/* Empty state: centred, quiet. */
+.empty-state {
+  padding: var(--space-section) var(--space-lg);
+  text-align: center;
+}
+
+.empty-state .t {
+  font: var(--text-heading-md);
+  color: var(--ink);
+}
+
+.empty-state .d {
+  font: var(--text-body-sm);
+  color: var(--body);
+  margin-top: var(--space-xs);
+}
+
+/* Section title with an optional right-hand meta. */
+.section-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-md);
+  margin-bottom: var(--space-md);
+}
+
+.section-title .t {
+  font: var(--text-heading-md);
+  color: var(--ink);
+}
+
+.section-title .m {
+  font: var(--text-caption-sm);
+  color: var(--body);
+}
+
+/* Trust strip: three quiet facts under the header. */
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm) var(--space-xl);
+  font: var(--text-body-sm);
+  color: var(--body);
+}
+
+.facts b {
+  font-weight: 500;
+  color: var(--ink);
+}
+
+/* ------------------------------------------------------------------ */
+/* App shell (sidebar console)                                         */
+/* ------------------------------------------------------------------ */
+
+.app {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  height: 100dvh;
+  min-height: 100dvh;
+  overflow: hidden;
+}
+
+@media (max-width: 850px) {
+  .app {
+    grid-template-columns: 1fr;
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+  }
+}
+
+.sidebar {
+  border-right: 1px solid var(--hairline);
+  background: var(--canvas);
+  padding: var(--space-lg) var(--space-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  height: 100dvh;
+  overflow: hidden;
+}
+
+@media (max-width: 850px) {
+  .sidebar {
+    position: static;
+    height: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--hairline);
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-xs);
+    padding: var(--space-sm) var(--space-md);
+  }
+
+  .sidebar .brand {
+    padding: 0 var(--space-sm) 0 0;
+  }
+
+  .app .sidebar .clinic-switcher,
+  .app .sidebar .nav-sub,
+  .app .sidebar .foot {
+    display: none;
+  }
+}
+
+.sidebar .brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-xs) var(--space-md) var(--space-md);
+  font: var(--text-heading-sm);
+  font-weight: 600;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.clinic-switcher {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  margin: 0 var(--space-xs) var(--space-md);
+  padding: 10px 12px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--rounded-lg);
+  background: var(--surface-soft);
+}
+
+.clinic-switcher .name {
+  font: var(--text-body-sm-strong);
+  color: var(--ink);
+}
+
+.clinic-switcher .meta {
+  font: var(--text-caption-sm);
+  color: var(--body);
+}
+
+.clinic-switcher .caret {
+  font: var(--text-caption-sm);
+  color: var(--mute);
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  height: 34px;
+  padding: 0 12px;
+  border-radius: var(--rounded-full);
+  font: var(--text-body-sm-strong);
+  color: var(--charcoal);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.nav-item.on {
+  background: var(--primary);
+  color: var(--on-primary);
+}
+
+.nav-item .count {
+  margin-left: auto;
+  font: var(--text-caption-sm);
+  color: var(--body);
+}
+
+.nav-item.on .count {
+  color: var(--on-dark-mute);
+}
+
+.nav-sub {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xxs);
+  padding-left: var(--space-lg);
+}
+
+.nav-sub .nav-item {
+  height: 28px;
+  font: var(--text-body-sm);
+  color: var(--body);
+}
+
+.nav-sub .nav-item.on {
+  background: var(--surface-soft);
+  color: var(--ink);
+}
+
+.nav-label {
+  font: var(--text-caption-sm);
+  color: var(--mute);
+  padding: var(--space-md) 12px var(--space-xs);
+}
+
+.sidebar .foot {
+  margin-top: auto;
+  padding: var(--space-md) var(--space-xs) 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  border-top: 1px solid var(--hairline);
+}
+
+.content {
+  min-width: 0;
+  height: 100dvh;
+  overflow: auto;
+}
+
+@media (max-width: 850px) {
+  .content {
+    height: auto;
+    overflow: visible;
+  }
+}
+
+/* Preview chip: sample or roadmap surface. Always next to the thing it labels. */
+.chip-preview {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: var(--rounded-full);
+  background: var(--surface-soft);
+  color: var(--body);
+  font: var(--text-caption-sm);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.chip-preview::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: var(--rounded-full);
+  border: 1px solid var(--mute);
+}
+
+.preview-note {
+  font: var(--text-body-sm);
+  color: var(--body);
+  padding: var(--space-md) var(--space-lg);
+  border: 1px dashed var(--hairline-strong);
+  border-radius: var(--rounded-lg);
+  margin-bottom: var(--space-lg);
+}
+
+/* Agent cards. */
+.agent-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--space-lg);
+}
+
+.agent-card {
+  display: block;
+  text-decoration: none;
+  color: var(--ink);
+  border: 1px solid var(--hairline);
+  border-radius: var(--rounded-lg);
+  padding: var(--space-lg) var(--space-xl);
+  min-width: 0;
+}
+
+.agent-card.live {
+  border-color: var(--ink);
+}
+
+.agent-card .role {
+  font: var(--text-caption-sm);
+  color: var(--body);
+}
+
+.agent-card .name {
+  font: var(--text-heading-md);
+  color: var(--ink);
+  margin-top: var(--space-xxs);
+}
+
+.agent-card .summary {
+  font: var(--text-body-sm);
+  color: var(--body);
+  margin-top: var(--space-sm);
+}
+
+.agent-card .kpis {
+  display: flex;
+  gap: var(--space-lg);
+  margin-top: var(--space-lg);
+}
+
+.agent-card .kpis .n {
+  font: var(--text-heading-md);
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.agent-card .kpis .l {
+  font: var(--text-caption-sm);
+  color: var(--body);
+}
+
+/* Horizontal bars for Insights: hairline track, ink fill, count at the right. */
+.bars {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.bar-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 220px) 1fr 48px;
+  gap: var(--space-md);
+  align-items: center;
+  font: var(--text-body-sm);
+}
+
+.bar-row .label {
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bar-row .track {
+  height: 10px;
+  background: var(--surface-soft);
+  border-radius: var(--rounded-full);
+  overflow: hidden;
+}
+
+.bar-row .fill {
+  height: 100%;
+  background: var(--ink);
+  border-radius: var(--rounded-full);
+}
+
+.bar-row .n {
+  text-align: right;
+  color: var(--body);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Tiny hour histogram: 24 columns. */
+.hours {
+  display: grid;
+  grid-template-columns: repeat(24, 1fr);
+  gap: 3px;
+  align-items: end;
+  height: 72px;
+}
+
+.hours .col {
+  background: var(--hairline);
+  border-radius: 2px 2px 0 0;
+  min-height: 2px;
+}
+
+.hours .col.on {
+  background: var(--ink);
+}
+
+.hours-axis {
+  display: grid;
+  grid-template-columns: repeat(24, 1fr);
+  gap: 3px;
+  font: var(--text-caption-sm);
+  color: var(--mute);
+  margin-top: var(--space-xs);
+}
+
+/* Two- and three-column sections. */
+.cols-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-xl);
+}
+
+.cols-3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-xl);
+}
+
+@media (max-width: 1024px) {
+  .cols-2,
+  .cols-3 {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Needs-attention rows. */
+.attn {
+  display: grid;
+  grid-template-columns: 16px 1fr auto;
+  gap: var(--space-md);
+  align-items: center;
+  padding: var(--space-sm) 0;
+  border-bottom: 1px solid var(--hairline);
+  text-decoration: none;
+  color: var(--ink);
+}
+
+.attn:last-child {
+  border-bottom: 0;
+}
+
+.attn .t {
+  font: var(--text-body-sm-strong);
+}
+
+.attn .d {
+  font: var(--text-caption-sm);
+  color: var(--body);
+}
+
+.attn .m {
+  font: var(--text-caption-sm);
+  color: var(--body);
+  white-space: nowrap;
+}
+
+/* Definition list for settings. */
+.def {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  gap: var(--space-xs) var(--space-lg);
+  font: var(--text-body-sm);
+}
+
+.def dt {
+  color: var(--body);
+}
+
+.def dd {
+  margin: 0;
+  color: var(--ink);
+}
+
+.matrix td.yes::before {
+  content: "✓";
+  color: var(--ink);
+}
+
+.matrix td.no::before {
+  content: "—";
+  color: var(--mute);
+}
+
+/* Live workflow: one card per turn and tool. The speaking card pulses. */
+.wf-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-lg);
+  margin-bottom: var(--space-xl);
+}
+
+.wf-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: var(--space-xl);
+  align-items: start;
+}
+
+.wf-side {
+  position: sticky;
+  top: 0;
+}
+
+@media (max-width: 1024px) {
+  .wf-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .wf-side {
+    position: static;
+  }
+}
+
+.workflow {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  min-height: 0;
+  padding-bottom: var(--space-xl);
+}
+
+.wf-card {
+  background: var(--canvas);
+  border: 1px solid var(--hairline);
+  border-radius: var(--rounded-lg);
+  padding: var(--space-lg);
+}
+
+.wf-card.agent {
+  background: var(--surface-soft);
+  border-color: transparent;
+}
+
+.wf-card.speaking {
+  animation: wf-speak 1.2s ease-out infinite;
+}
+
+@keyframes wf-speak {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.012); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wf-card.speaking {
+    animation: none;
+  }
+}
+
+.wf-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-sm);
+}
+
+.wf-who {
+  font: var(--text-caption-sm);
+  color: var(--body);
+}
+
+.wf-text {
+  font: var(--text-body-md);
+  color: var(--ink);
+}
+
+@media (max-width: 640px) {
+  .table .narrow-hide {
+    display: none;
+  }
+
+  .table-wrap {
+    overflow-x: visible;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Doctor calendar (/calendar)                                         */
+/* ------------------------------------------------------------------ */
+
+.cal-rail {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--space-md);
+}
+
+.cal-doc {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  text-align: left;
+  border: 1px solid var(--hairline);
+  border-radius: var(--rounded-lg);
+  background: var(--canvas);
+  padding: var(--space-md) var(--space-lg);
+  cursor: pointer;
+  min-width: 0;
+}
+
+.cal-doc.on {
+  border-color: var(--ink);
+}
+
+.cal-doc .row {
+  gap: var(--space-sm);
+}
+
+.cal-doc-name {
+  font: var(--text-body-sm-strong);
+  color: var(--ink);
+}
+
+.cal-doc-spec,
+.cal-doc-count {
+  font: var(--text-caption-sm);
+  color: var(--body);
+}
+
+.cal-bar {
+  height: 6px;
+  border-radius: var(--rounded-full);
+  background: var(--surface-soft);
+  border: 1px solid var(--hairline);
+  overflow: hidden;
+}
+
+.cal-bar-fill {
+  height: 100%;
+  background: var(--ink);
+}
+
+.cal-grid-wrap {
+  overflow-x: auto;
+  padding-bottom: var(--space-sm);
+}
+
+.cal-grid {
+  display: grid;
+  gap: 2px;
+  min-width: max-content;
+  align-items: stretch;
+}
+
+.cal-corner,
+.cal-colhead,
+.cal-timelabel {
+  position: sticky;
+  background: var(--canvas);
+  z-index: 1;
+}
+
+.cal-corner {
+  top: 0;
+  left: 0;
+  z-index: 2;
+}
+
+.cal-colhead {
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--space-xs) var(--space-sm);
+}
+
+.cal-dow {
+  font: var(--text-caption-sm);
+  color: var(--body);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.cal-date {
+  font: var(--text-body-sm-strong);
+  color: var(--ink);
+}
+
+.cal-timelabel {
+  left: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: var(--space-sm);
+  font: var(--text-caption-sm);
+  color: var(--body);
+  font-variant-numeric: tabular-nums;
+}
+
+.cal-cell {
+  height: 18px;
+  border-radius: var(--rounded-sm);
+}
+
+button.cal-cell,
+.cal-cell.q-btn {
+  height: 18px !important;
+  min-height: 18px !important;
+  min-width: 0 !important;
+  padding: 0 !important;
+  border-radius: var(--rounded-sm) !important;
+  font-size: 0 !important;
+  color: transparent !important;
+}
+
+button.cal-cell .q-btn__content,
+.cal-cell.q-btn .q-btn__content {
+  width: 100%;
+  height: 100%;
+}
+
+.cal-cell.free {
+  background: var(--surface-soft);
+  border: 1px solid var(--hairline);
+}
+
+.cal-cell.booked {
+  background: var(--ink);
+  cursor: pointer;
+}
+
+.cal-cell.off {
+  background: transparent;
+}
+
+button.cal-cell,
+.cal-cell.q-btn {
+  height: 18px !important;
+  min-height: 18px !important;
+  min-width: 0 !important;
+  padding: 0 !important;
+  border-radius: var(--rounded-sm) !important;
+  font-size: 0 !important;
+  color: transparent !important;
+}
+
+button.cal-cell .q-btn__content,
+.cal-cell.q-btn .q-btn__content {
+  width: 100%;
+  height: 100%;
+}
+
+.cal-cell.booked.on {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.page-head .button-quiet {
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.cal-grid-week {
+  min-width: 0;
+  width: 100%;
+}
+
+.cal-grid-week .cal-cell,
+.cal-grid-week button.cal-cell,
+.cal-grid-week .cal-cell.q-btn {
+  height: 28px;
+  min-height: 28px !important;
+}
+
+.cal-week {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-md);
+}
+
+.cal-week-label {
+  font: var(--text-body-sm-strong);
+  color: var(--ink);
+  text-align: center;
+  flex: 1 1 auto;
+}
+
+.cal-today-list {
+  display: grid;
+  gap: var(--space-lg);
+}
+
+.cal-brief {
+  margin: 0;
+  max-width: 40rem;
+}
+
+.cal-brief .section-title {
+  margin-bottom: var(--space-md);
+}
+
+.cal-brief-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-md);
+}
+
+.cal-note {
+  max-width: 56ch;
+  margin-top: var(--space-xs);
+}
+
+.cal-brief .kicker {
+  margin-top: var(--space-md);
+}
+</style>
+<style>
+  html{scroll-behavior:smooth}
+
+  .wrap{max-width:var(--column-wide); margin:0 auto; padding-inline:var(--space-lg); padding-bottom:var(--space-section)}
+  @media (min-width:700px){ .wrap{padding-inline:var(--space-xl)} }
+
+  h1,h2,h3{text-wrap:balance}
+  .mono{font-family:var(--font-mono); font-size:.92em}
+  .eyebrow{font:var(--text-body-sm-strong); color:var(--body)}
+  .lede{font:var(--text-heading-sm); font-weight:400; color:var(--body); max-width:62ch; margin-top:var(--space-lg)}
+  .lede b{color:var(--ink); font-weight:500}
+
+  .mast{padding-block:var(--space-xxl) var(--space-xl)}
+  .mast .eyebrow{display:block; margin-bottom:var(--space-lg)}
+  .mast h1{max-width:22ch}
+  .mast .facts{margin-top:var(--space-xl)}
+
+  .nav{
+    position:sticky; top:0; z-index:5; background:var(--canvas);
+    border-block:1px solid var(--hairline);
+    margin-inline:calc(-1 * var(--space-lg)); padding-inline:var(--space-lg);
+  }
+  @media (min-width:700px){ .nav{margin-inline:calc(-1 * var(--space-xl)); padding-inline:var(--space-xl)} }
+  .nav .chip-row{padding-block:var(--space-md)}
+
+  section{padding-top:var(--space-section); scroll-margin-top:72px}
+  section > .head{max-width:66ch; margin-bottom:var(--space-xl)}
+  section > .head .eyebrow{display:block; margin-bottom:var(--space-sm)}
+  section > .head p{margin-top:var(--space-md)}
+
+  .stack-lg{display:grid; gap:var(--space-lg)}
+  .stack-md{display:grid; gap:var(--space-md)}
+  .stack-sm{display:grid; gap:var(--space-sm)}
+  .mt-lg{margin-top:var(--space-lg)}
+  .mt-xl{margin-top:var(--space-xl)}
+
+  .legend{display:flex; flex-wrap:wrap; gap:var(--space-sm) var(--space-md); align-items:center; margin-top:var(--space-xl)}
+  .legend .note{font:var(--text-body-sm); color:var(--body)}
+
+  ul.plain{margin:0; padding:0; list-style:none; display:grid; gap:var(--space-sm); font:var(--text-body-sm); color:var(--charcoal)}
+  ul.plain > li{padding-left:16px; position:relative}
+  ul.plain > li::before{content:""; position:absolute; left:0; top:.55em; width:6px; height:6px; background:var(--ink); border-radius:var(--rounded-full)}
+  ul.plain b{color:var(--ink); font-weight:500}
+
+  .steps{display:grid; gap:1px; background:var(--hairline); border:1px solid var(--hairline); border-radius:var(--rounded-lg); overflow:hidden}
+  .steps > li{background:var(--canvas); padding:var(--space-lg) var(--space-xl); display:grid; grid-template-columns:28px minmax(0,1fr); gap:var(--space-lg); align-items:start}
+  .steps .no{font:var(--text-code-sm); color:var(--mute); padding-top:3px}
+  .steps .t{font:var(--text-body-strong); color:var(--ink)}
+  .steps .d{font:var(--text-body-sm); color:var(--body); margin-top:var(--space-xxs)}
+  .steps .d .mono{color:var(--ink)}
+
+  table.ds caption{text-align:left; padding-bottom:var(--space-sm); font:var(--text-body-sm-strong); color:var(--body)}
+  .table-scroll{overflow-x:auto; -webkit-overflow-scrolling:touch}
+  .table-scroll table.ds{min-width:640px}
+  table.ds td b{font-weight:500}
+  table.ds .mono{white-space:nowrap}
+
+  .faq .faq-row:first-child{border-top:1px solid var(--hairline)}
+  .faq .a b{color:var(--ink); font-weight:500}
+
+  .pending{margin:0; padding:0; list-style:none; display:grid; gap:var(--space-md)}
+  .pending > li{display:grid; grid-template-columns:8px minmax(0,1fr); gap:var(--space-md); align-items:start}
+  .pending .dot{margin-top:7px}
+  .pending .t{font:var(--text-body-sm-strong); color:var(--ink)}
+  .pending .d{font:var(--text-body-sm); color:var(--body); margin-top:var(--space-xxs)}
+
+  .card-dark .stat-grid{background:rgba(255,255,255,.18); border-color:rgba(255,255,255,.18); margin-top:var(--space-xl)}
+  .card-dark .stat{background:var(--surface-dark)}
+  .card-dark .stat .n{color:var(--on-dark)}
+  .card-dark .stat .l{color:var(--on-dark-mute)}
+  .card-dark .kv{border-color:rgba(255,255,255,.18)}
+  .card-dark .kv > :first-child{color:var(--on-dark-mute)}
+  .card-dark .kv > :last-child{color:var(--on-dark)}
+  .card-dark h2{color:var(--on-dark)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="mast">
+    <span class="eyebrow">Equipo Vortex · HackSpain 2026 · track Prosper AI («El Turno»)</span>
+    <h1>Un agente de voz que coge el teléfono de una clínica</h1>
+    <p class="lede">Los organizadores llaman a nuestro socket, interpretan a un paciente, y nosotros
+      enviamos la acción que habríamos hecho: <b>reservar, registrar, cambiar, cancelar, no hacer
+      nada o escalar</b>. Acierta o falla: no hay nota parcial. Esta página explica cómo está hecho,
+      qué decidimos y qué no sabemos todavía.</p>
+
+    <div class="facts">
+      <span><b>36 / 40</b> puntos en el mejor Run All</span>
+      <span><b>1.º</b> en el marcador</span>
+      <span><b>18 de 20</b> casos privados superados</span>
+      <span><b>737</b> tests</span>
+    </div>
+
+    <div class="legend">
+      <span class="pill"><i class="dot ok"></i>Hecho</span>
+      <span class="pill"><i class="dot warn"></i>Inferencia</span>
+      <span class="pill"><i class="dot off"></i>Pendiente</span>
+      <span class="note">Cada afirmación lleva una de las tres marcas. «Hecho» significa que está
+        verificado en el repositorio o en el panel de la plataforma. «Inferencia» es un juicio
+        nuestro. «Pendiente» es algo que todavía no hemos probado.</span>
+    </div>
+  </header>
+
+  <nav class="nav" aria-label="Secciones">
+    <div class="chip-row">
+      <a class="chip" href="#vision">Visión</a>
+      <a class="chip" href="#arquitectura">Arquitectura</a>
+      <a class="chip" href="#llamada">Una llamada</a>
+      <a class="chip" href="#piezas">Piezas</a>
+      <a class="chip" href="#decisiones">Decisiones</a>
+      <a class="chip" href="#seguridad">Seguridad</a>
+      <a class="chip" href="#resiliencia">Resiliencia</a>
+      <a class="chip" href="#evals">Evals</a>
+      <a class="chip" href="#reto1">Reto 1</a>
+      <a class="chip" href="#reto2">Reto 2</a>
+      <a class="chip" href="#jurado">Jurado</a>
+      <a class="chip" href="#preguntas">Preguntas difíciles</a>
+      <a class="chip" href="#pendiente">Lo que falta</a>
+    </div>
+  </nav>
+
+  <section id="vision">
+    <div class="head">
+      <span class="eyebrow">Visión</span>
+      <h2>La recepcionista que nunca deja el teléfono sonando</h2>
+      <p>Una clínica pierde citas porque nadie coge el teléfono a la vez que atiende el mostrador.
+        Vortex atiende esas llamadas: identifica a quien llama, lee su historia en el sistema de la
+        clínica, decide qué cita cabe según las reglas, y deja constancia de lo que ha hecho.</p>
+      <p>No es un chatbot con voz. Es un <b>sistema de decisión</b> al que le hemos puesto voz: la
+        parte difícil no es hablar bonito, es no equivocarse de paciente, de médico, de centro o de
+        minuto, y saber decir «no» cuando la regla de la clínica lo exige.</p>
+    </div>
+
+    <div class="cols-2">
+      <div class="card stack-md">
+        <h3>Qué resuelve</h3>
+        <ul class="plain">
+          <li>Coge la llamada <b>a la primera</b>, en cualquier momento, y varias a la vez.</li>
+          <li>Reconoce al paciente por su nombre y un segundo dato, sin pedirle que repita lo que la
+            clínica ya sabe.</li>
+          <li>Da la primera hora real que existe, no una aproximada: consulta la disponibilidad de
+            verdad antes de ofrecer nada.</li>
+          <li>Se niega con un motivo concreto cuando la regla lo dice: edad, derivación, seguro,
+            médico de baja, centro cerrado.</li>
+          <li>Escala a una persona cuando hay un síntoma de urgencia.</li>
+          <li>Deja una ficha de cada llamada que un humano puede auditar en diez segundos.</li>
+        </ul>
+      </div>
+
+      <div class="card stack-md">
+        <h3>La regla que ordena todo el diseño</h3>
+        <p><b>Nunca enviar nada es el peor resultado posible.</b> Una llamada sin registro enviado es
+          un caso intentado y fallado, y desde fuera un agente que ha petado y una negativa correcta
+          se ven igual.</p>
+        <p>Por eso cada llamada acaba, sí o sí, con una acción enviada. Si no se puede reservar, se
+          envía <span class="mono">NO_ACTION</span> con el motivo tipado que nombra la regla que ha
+          mordido. Esa decisión aparece luego en casi todas las demás: en la escalera de reintentos,
+          en el <em>fallback</em> al cerrar el socket, en las herramientas que devuelven tipos y no
+          frases.</p>
+        <p class="feature-bullet"><span>Está escrita como regla dura del equipo en
+          <span class="mono">CLAUDE.md</span>, no es una intención.</span></p>
+      </div>
+    </div>
+  </section>
+
+  <section id="arquitectura">
+    <div class="head">
+      <span class="eyebrow">Arquitectura de punta a punta</span>
+      <h2>Un socket entra, una acción sale</h2>
+      <p>No hay número de teléfono en nuestro lado. La plataforma abre un WebSocket y nos manda audio
+        de teléfono en el formato de Twilio Media Streams. Cada conexión monta su propio agente
+        completo y no comparte nada con las demás.</p>
+    </div>
+
+    <div class="stack-lg">
+      <div class="terminal-card">
+        <div class="terminal-traffic-lights" aria-hidden="true"><i></i><i></i><i></i></div>
+<pre>plataforma ──ws──&gt; line/server.py ── CallSession (una por socket)
+                        │                 ├─ ToolContext: call_id, ahora (Madrid), clínica, log, submitter
+                        │                 └─ pipeline de voz: Soniox → LLM → TTS
+                        ▼
+              conversation/ prompt + turnos
+                        ▼
+              tools.py ── call_tool(nombre, ctx, args) ──&gt; identity/ diary/ rules/
+                                                            │
+                                                     clinic/ (API de solo lectura)
+                        ▼
+              line/submit.py ── POST /api/v1/submit/&lt;acción&gt; ── dentro de los 30 s tras cerrar
+                        ▼
+              observability/ logs/calls.jsonl (un JSON por evento, con su call_id)</pre>
+      </div>
+
+      <div class="table-scroll">
+        <table class="ds">
+          <caption>Las siete etapas y dónde vive cada una</caption>
+          <thead>
+            <tr><th>Etapa</th><th>Qué hace</th><th>Dónde</th><th>Estado</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><b>Entrada</b></td>
+              <td>Acepta el socket y espera el mensaje <span class="mono">start</span> de Twilio.</td>
+              <td><span class="mono">line/server.py</span>, <span class="mono">line/twilio.py</span></td>
+              <td><span class="pill"><i class="dot ok"></i>Hecho</span></td>
+            </tr>
+            <tr>
+              <td><b>Sesión</b></td>
+              <td>Crea una <span class="mono">CallSession</span> con su contexto: reloj de Madrid,
+                cliente de la clínica, log y cliente de envío.</td>
+              <td><span class="mono">line/session.py</span></td>
+              <td><span class="pill"><i class="dot ok"></i>Hecho</span></td>
+            </tr>
+            <tr>
+              <td><b>Oído</b></td>
+              <td>Transcribe en tiempo real con identificación de idioma y vocabulario de clínica
+                reforzado.</td>
+              <td>Soniox <span class="mono">stt-rt-v5</span></td>
+              <td><span class="pill"><i class="dot ok"></i>Hecho</span></td>
+            </tr>
+            <tr>
+              <td><b>Cabeza</b></td>
+              <td>Un modelo de lenguaje con el prompt de la clínica y un juego cerrado de
+                herramientas. No improvisa datos: los pide.</td>
+              <td><span class="mono">conversation/prompt.py</span>, <span class="mono">models.py</span></td>
+              <td><span class="pill"><i class="dot ok"></i>Hecho</span></td>
+            </tr>
+            <tr>
+              <td><b>Manos</b></td>
+              <td>Las herramientas leen la API de la clínica y devuelven datos tipados o un rechazo
+                tipado. Nunca prosa.</td>
+              <td><span class="mono">tools.py</span> → <span class="mono">identity/ diary/ rules/</span></td>
+              <td><span class="pill"><i class="dot ok"></i>Hecho</span></td>
+            </tr>
+            <tr>
+              <td><b>Voz</b></td>
+              <td>Habla en español con Chirp 3 HD y en catalán, gallego y euskera por el proveedor
+                alternativo. Un filtro revisa lo que va a decir antes de decirlo.</td>
+              <td><span class="mono">line/pipecat_voice.py</span>, <span class="mono">line/privacy.py</span></td>
+              <td><span class="pill"><i class="dot ok"></i>Hecho</span></td>
+            </tr>
+            <tr>
+              <td><b>Constancia</b></td>
+              <td>POST de la acción a la plataforma dentro de la ventana de 30 s tras cerrar el
+                socket, y una línea JSON por evento.</td>
+              <td><span class="mono">line/submit.py</span>, <span class="mono">observability/</span></td>
+              <td><span class="pill"><i class="dot ok"></i>Hecho</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="card stack-md">
+        <h3>Cinco carriles, un solo contrato</h3>
+        <p>Somos cinco personas trabajando un fin de semana. Para no pisarnos, el código está
+          dividido en carriles con una sola superficie compartida: <span class="mono">vortex/contract.py</span>,
+          que congela la firma de cada herramienta, las seis acciones y los motivos de rechazo.</p>
+        <dl class="def">
+          <dt><span class="mono">line/</span></dt><dd>El socket, el audio, el ciclo de la llamada y el envío.</dd>
+          <dt><span class="mono">conversation/</span></dt><dd>El prompt, los turnos, las interrupciones, el idioma.</dd>
+          <dt><span class="mono">identity/</span></dt><dd>Quién llama: directorio, segundo dato, letra del DNI/NIE, alta de nuevo paciente.</dd>
+          <dt><span class="mono">diary/</span></dt><dd>La agenda: disponibilidad, fechas relativas al minuto exacto, horarios, cambios y cancelaciones.</dd>
+          <dt><span class="mono">rules/</span></dt><dd>Lo que la clínica rechaza: edad, derivación, seguro, médico, triaje, centro más cercano.</dd>
+          <dt><span class="mono">clinic/</span></dt><dd>Cliente HTTP de solo lectura y datos de prueba para trabajar sin red.</dd>
+          <dt><span class="mono">observability/</span></dt><dd>El log de llamadas y la consola que ve el jurado.</dd>
+        </dl>
+        <p class="feature-bullet"><span>Una herramienta se puede reescribir sin tocar el resto,
+          porque su firma no cambia. Eso es lo que nos ha permitido arreglar fallos de puntuación en
+          paralelo durante la noche.</span></p>
+      </div>
+    </div>
+  </section>
+
+  <section id="llamada">
+    <div class="head">
+      <span class="eyebrow">Flujo de una llamada</span>
+      <h2>Lo que pasa en los tres minutos que dura</h2>
+      <p>Cada llamada está limitada a tres minutos. Este es el camino completo, desde que suena hasta
+        que queda constancia. Los nombres en <span class="mono">monoespaciado</span> son los eventos
+        reales que se escriben en el log, así que esta lista se puede seguir mirando la consola.</p>
+    </div>
+
+    <ol class="steps">
+      <li>
+        <span class="no">01</span>
+        <div>
+          <div class="t">Se abre el socket y nace la llamada</div>
+          <div class="d">Llega <span class="mono">start</span> con el identificador de la llamada y el
+            número de origen. Se crea la sesión, se fija el reloj en Europe/Madrid <em>en ese
+            instante</em> —nunca la hora de la máquina— y se escribe <span class="mono">call.started</span>.</div>
+        </div>
+      </li>
+      <li>
+        <span class="no">02</span>
+        <div>
+          <div class="t">Antes de saludar, ya buscamos quién llama</div>
+          <div class="d">Con el número de origen se intenta resolver el paciente en el directorio, con
+            un tope de 2 segundos. Si responde, el agente ya sabe con quién habla y no le hace
+            repetir lo que la clínica tiene apuntado. Si tarda, se sigue sin ello y se anota
+            <span class="mono">identity.caller_line_timed_out</span>.</div>
+        </div>
+      </li>
+      <li>
+        <span class="no">03</span>
+        <div>
+          <div class="t">Saluda</div>
+          <div class="d">El saludo sale por el sintetizador en cuanto el transporte está conectado, sin
+            esperar al modelo. Es la diferencia entre «ha cogido el teléfono» y «esto está roto».</div>
+        </div>
+      </li>
+      <li>
+        <span class="no">04</span>
+        <div>
+          <div class="t">Escucha y decide cuándo le toca hablar</div>
+          <div class="d">La transcripción llega en vivo. El final de turno se detecta por el propio
+            motor de voz o por detección de actividad más un modelo de turnos, según configuración.
+            Hay empujones suaves si el paciente se queda callado, y una puerta de palabras para que un
+            «ajá» no corte al agente en mitad de una frase.</div>
+        </div>
+      </li>
+      <li>
+        <span class="no">05</span>
+        <div>
+          <div class="t">Identifica: nombre y un segundo dato</div>
+          <div class="d">El modelo llama a <span class="mono">find_patient</span>. Si hay dos personas
+            con el mismo nombre, la herramienta no elige: devuelve que hace falta un segundo dato. La
+            letra del DNI o del NIE se valida con su algoritmo, no se cree. Si no existe, la vía es
+            registrar, no inventar.</div>
+        </div>
+      </li>
+      <li>
+        <span class="no">06</span>
+        <div>
+          <div class="t">Comprueba las reglas antes de ofrecer nada</div>
+          <div class="d">Edad, derivación, seguro y póliza, médico correcto, centro correcto, síntoma
+            de urgencia. Si una regla muerde, la herramienta devuelve un rechazo tipado con el motivo
+            exacto. Ese motivo es el que se enviará: el modelo no lo redacta.</div>
+        </div>
+      </li>
+      <li>
+        <span class="no">07</span>
+        <div>
+          <div class="t">Busca hueco de verdad</div>
+          <div class="d"><span class="mono">find_slots</span> pregunta a la disponibilidad real.
+            «Lo antes posible» empieza <em>el día siguiente</em> a la llamada: nada se reserva el
+            mismo día. La hora se resuelve al minuto con su zona horaria explícita, porque se compara
+            exacta contra la de la plataforma.</div>
+        </div>
+      </li>
+      <li>
+        <span class="no">08</span>
+        <div>
+          <div class="t">Prepara, confirma con el paciente, y solo entonces envía</div>
+          <div class="d">El agente lee en voz alta día, hora, médico y centro. Un «sí» confirma una
+            sola cosa: la propuesta que está sobre la mesa en ese momento. Se envía con
+            <span class="mono">submit_action</span> y se anota
+            <span class="mono">submit.sent</span> / <span class="mono">submit.result</span>.</div>
+        </div>
+      </li>
+      <li>
+        <span class="no">09</span>
+        <div>
+          <div class="t">Se despide y cuelga</div>
+          <div class="d">Cuando el envío se acepta, se arma el colgado: el agente termina la frase de
+            despedida y cierra. No se queda la línea abierta gastando el reloj.</div>
+        </div>
+      </li>
+      <li>
+        <span class="no">10</span>
+        <div>
+          <div class="t">Y si nada de esto salió bien, se envía de todas formas</div>
+          <div class="d">Al cerrar, si no hay ningún envío aceptado, entra una escalera de ocho ramas
+            ordenadas por probabilidad de acertar el caso: lo preparado y confirmado, el último
+            rechazo tipado, una reserva en frío a partir del historial del que llama, y como último
+            recurso <span class="mono">NO_ACTION(out_of_scope)</span>. Queda como
+            <span class="mono">submit.fallback</span>. Todo dentro de la ventana de 30 segundos, con
+            5 de margen.</div>
+        </div>
+      </li>
+    </ol>
+  </section>
+
+  <section id="piezas">
+    <div class="head">
+      <span class="eyebrow">Componentes y proveedores</span>
+      <h2>Cada pieza es una variable de entorno</h2>
+      <p>Ningún proveedor está escrito en el código. Cambiar de modelo, de voz o de transcriptor es
+        editar el <span class="mono">.env</span> y reiniciar. Eso nos ha permitido cambiar de modelo
+        tres veces en una noche sin abrir un <em>pull request</em>.</p>
+    </div>
+
+    <div class="stack-lg">
+      <div class="table-scroll">
+        <table class="ds">
+          <caption>Lo que corre hoy en la línea que marca la plataforma</caption>
+          <thead>
+            <tr><th>Pieza</th><th>Qué usamos</th><th>Variable</th><th>Estado</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><b>Transporte</b></td>
+              <td>WebSocket propio en formato Twilio Media Streams, µ-law 8 kHz, tramas de 20 ms</td>
+              <td><span class="mono">VORTEX_WS_PATH</span></td>
+              <td><span class="pill"><i class="dot ok"></i>En producción</span></td>
+            </tr>
+            <tr>
+              <td><b>Transcripción</b></td>
+              <td>Soniox <span class="mono">stt-rt-v5</span>, con identificación de idioma y términos
+                de clínica reforzados</td>
+              <td><span class="mono">SONIOX_API_KEY</span></td>
+              <td><span class="pill"><i class="dot ok"></i>En producción</span></td>
+            </tr>
+            <tr>
+              <td><b>Modelo</b></td>
+              <td>Cualquier modelo compatible con la API de OpenAI. Hoy, por preajuste
+                <span class="mono">helmcode</span></td>
+              <td><span class="mono">LLM_PROVIDER</span>, <span class="mono">LLM_MODEL</span></td>
+              <td><span class="pill"><i class="dot ok"></i>En producción</span></td>
+            </tr>
+            <tr>
+              <td><b>Modelo de reserva</b></td>
+              <td>Un segundo modelo al que se reintenta si el primero se cuelga</td>
+              <td><span class="mono">LLM_ALT_MODEL</span></td>
+              <td><span class="pill"><i class="dot ok"></i>Hecho</span></td>
+            </tr>
+            <tr>
+              <td><b>Voz, español</b></td>
+              <td>Google Chirp 3 HD</td>
+              <td><span class="mono">VORTEX_TTS_PROVIDER</span></td>
+              <td><span class="pill"><i class="dot ok"></i>En producción</span></td>
+            </tr>
+            <tr>
+              <td><b>Voz, ca / gl / eu</b></td>
+              <td>Proveedor alternativo, enrutado por idioma detectado</td>
+              <td><span class="mono">VORTEX_TTS_PROVIDER_ALT</span></td>
+              <td><span class="pill"><i class="dot ok"></i>Hecho</span></td>
+            </tr>
+            <tr>
+              <td><b>Voz a voz</b></td>
+              <td>Gemini Live, un único modelo que oye y habla</td>
+              <td><span class="mono">VORTEX_VOICE_MODE=gemini-live</span></td>
+              <td><span class="pill"><i class="dot warn"></i>Solo demo</span></td>
+            </tr>
+            <tr>
+              <td><b>Clínica</b></td>
+              <td>API de solo lectura de la plataforma; sin clave, datos de prueba locales</td>
+              <td><span class="mono">PLATFORM_API_KEY</span></td>
+              <td><span class="pill"><i class="dot ok"></i>En producción</span></td>
+            </tr>
+            <tr>
+              <td><b>Despliegue</b></td>
+              <td>Contenedor en el servidor del equipo, publicado por Traefik con HTTPS; se levanta
+                solo tras un reinicio</td>
+              <td><span class="mono">deploy/compose.yaml</span></td>
+              <td><span class="pill"><i class="dot ok"></i>En producción</span></td>
+            </tr>
+            <tr>
+              <td><b>Trazas</b></td>
+              <td>Langfuse, con lista blanca de campos</td>
+              <td><span class="mono">LANGFUSE_*</span></td>
+              <td><span class="pill"><i class="dot ok"></i>Hecho</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="card stack-md">
+        <h3>El sistema arranca aunque falten todas las claves</h3>
+        <p>Si falta la clave de la plataforma, se usa la clínica de prueba y un cliente de envío que
+          escribe en el log en vez de hacer el POST. Si faltan las claves de voz, corre un pipeline de
+          relleno que cuenta tramas y envía una negativa tipada al final.
+          <span class="mono">GET /health</span> dice en qué modo está.</p>
+        <p>Suena a detalle, pero es lo que permite que cinco personas ejecuten toda la suite y una
+          llamada completa en su portátil, sin red y sin gastar un céntimo, mientras la clave de
+          verdad está en un solo sitio.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="decisiones">
+    <div class="head">
+      <span class="eyebrow">Decisiones y lo que cuestan</span>
+      <h2>Nueve decisiones, cada una con su precio</h2>
+      <p>Toda decisión de arquitectura renuncia a algo. Estas son las nuestras y lo que hemos
+        sacrificado en cada una. Ninguna es gratis y ninguna es irreversible.</p>
+    </div>
+
+    <div class="table-scroll">
+      <table class="ds">
+        <thead>
+          <tr><th>Decisión</th><th>Por qué</th><th>Qué sacrificamos</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><b>Cascada (oír → pensar → hablar) en vez de voz a voz</b></td>
+            <td>Los modelos de voz a voz están por debajo del 52 % en tareas agénticas con
+              herramientas. En una reserva el error no es un matiz de tono: es el paciente
+              equivocado. LiveKit, Coval y Deepgram recomiendan la cascada para este caso.</td>
+            <td>Latencia y naturalidad. La cascada suma el retardo de tres servicios. Gemini Live
+              queda como demostración para el jurado y <em>nunca</em> puntúa.</td>
+          </tr>
+          <tr>
+            <td><b>Soniox como transcriptor</b></td>
+            <td>Es la única opción barata con español y catalán nativos, identificación de idioma,
+              detección semántica de fin de turno y entrada µ-law de 8 kHz directa.</td>
+            <td>Alternativas con mejor detección de turno, pero sin catalán. Cambiar tiraría a la
+              basura todo el ajuste de vocabulario de clínica.</td>
+          </tr>
+          <tr>
+            <td><b>Las herramientas devuelven tipos o un rechazo tipado. Nunca prosa</b></td>
+            <td>El motivo que devuelve la herramienta es literalmente el motivo que enviamos. Si la
+              herramienta devolviera una frase, el modelo tendría que interpretarla para encontrar el
+              motivo, y ahí se pierde el punto.</td>
+            <td>Flexibilidad. Un caso nuevo exige un motivo nuevo en el contrato, no una frase
+              distinta.</td>
+          </tr>
+          <tr>
+            <td><b>Los identificadores salen siempre de la API</b></td>
+            <td>Se comparan carácter a carácter. Un identificador adivinado falla el caso incluso
+              cuando la hora es la correcta.</td>
+            <td>Una llamada de red más en cada paso, y un agente que no puede «recordar» lo que no ha
+              consultado.</td>
+          </tr>
+          <tr>
+            <td><b>Una sesión completa por socket, sin nada compartido</b></td>
+            <td>Un Run All abre diez sockets a la vez y el reto 2 abre veinte. Compartir una
+              conversación, un contador o una llamada en vuelo es exactamente el fallo que el reto
+              busca.</td>
+            <td>Memoria: cada llamada paga su propio pipeline. El contenedor está limitado a 4 GB y
+              eso hay que vigilarlo.</td>
+          </tr>
+          <tr>
+            <td><b>Escalera de <em>fallback</em> al cerrar</b></td>
+            <td>Nunca enviar nada es el peor resultado. Antes de rendirse, la escalera prueba lo
+              preparado, el último rechazo tipado y una reserva en frío a partir del historial.</td>
+            <td>Riesgo de enviar algo peor que el silencio. Lo aceptamos: el silencio nunca es más
+              barato que una respuesta equivocada, porque puntúan igual.</td>
+          </tr>
+          <tr>
+            <td><b>Proveedores por variable de entorno</b></td>
+            <td>Cambiar de modelo o de voz es editar el <span class="mono">.env</span> y reiniciar, no
+              un cambio de código con revisión.</td>
+            <td>Más superficie de configuración de la que nadie ha verificado entera. Dos preajustes
+              de modelo siguen marcados como no verificados en el README.</td>
+          </tr>
+          <tr>
+            <td><b>Sin juez basado en modelo en el camino de cada PR</b></td>
+            <td>Las comprobaciones deterministas primero. Un juez de modelo mete varianza justo donde
+              queremos una señal estable.</td>
+            <td>No medimos el tono ni la calidad conversacional automáticamente. Eso queda en juicio
+              humano.</td>
+          </tr>
+          <tr>
+            <td><b>pass^k en lugar de pass@1</b></td>
+            <td>Un escenario que pasa el 70 % de las veces es un escenario que falla en una tanda de
+              68 llamadas. Solo cuenta como aprobado si pasa las k veces.</td>
+            <td>Cuesta k veces más tiempo y dinero por medida.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="seguridad">
+    <div class="head">
+      <span class="eyebrow">Seguridad y privacidad</span>
+      <h2>Datos de pacientes, y una clave que es de todo el equipo</h2>
+      <p>Manejamos nombres, documentos de identidad, teléfonos e historial clínico. Y una sola clave
+        de API que si se filtra hay que rotar en el mostrador para los cinco.</p>
+    </div>
+
+    <div class="cols-2">
+      <div class="card stack-md">
+        <h3>La clave y los secretos</h3>
+        <ul class="plain">
+          <li>La clave vive solo en el entorno. <span class="mono">.env</span>, las credenciales de
+            Google y cualquier fichero de cuenta de servicio están <b>ignorados por git</b>.</li>
+          <li><span class="mono">GET /health</span> y el evento de arranque de cada llamada publican
+            <b>booleanos</b> (<span class="mono">has_platform_key</span>), nunca el valor de una
+            clave.</li>
+          <li>Sin clave de plataforma, el cliente de envío pasa a modo seco: escribe en el log en vez
+            de hacer el POST. No hay forma de mandar algo real sin querer.</li>
+          <li>La contraseña de la consola de equipo se compara con una función de tiempo constante,
+            no con un igual.</li>
+          <li>La exploración de la API de la clínica guarda las respuestas con los campos de paciente
+            sustituidos por <span class="mono">[redacted]</span>, para que un cambio de nombre de
+            campo se vea sin dejar datos en el disco.</li>
+        </ul>
+      </div>
+
+      <div class="card stack-md">
+        <h3>Lo que el agente no puede decir ni exportar</h3>
+        <ul class="plain">
+          <li>Un <b>filtro antes del sintetizador</b> revisa cada frase que va a salir por el
+            altavoz. Si intenta leer un documento de identidad o un teléfono, se bloquea y queda como
+            <span class="mono">voice.privacy_block</span>. Uno de los retos puntuados revisa
+            precisamente el transcrito en busca de datos filtrados.</li>
+          <li>La entrada y la salida de cada herramienta pasan por una función de redacción antes de
+            entrar en el log.</li>
+          <li>Las trazas externas se exportan con <b>lista blanca</b>: lo que no está en la lista sale
+            como <span class="mono">[redacted]</span>. No se envían ni los prompts ni las respuestas
+            en bruto.</li>
+          <li>En las páginas públicas —el muro del jurado y la ficha de una llamada— los teléfonos van
+            enmascarados.</li>
+          <li><span class="pill"><i class="dot warn"></i>Honestidad</span> El log operativo
+            <span class="mono">logs/calls.jsonl</span> sí guarda el texto de los turnos. Es la
+            herramienta de depuración del equipo, está ignorada por git y no sale de la máquina.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section id="resiliencia">
+    <div class="head">
+      <span class="eyebrow">Resiliencia</span>
+      <h2>Qué pasa cuando algo se rompe a las tres de la mañana</h2>
+      <p>Dependemos de tres servicios externos y de una red. Todos fallan alguna vez. La pregunta de
+        diseño no es «cómo evitamos el fallo» sino «qué envía la llamada cuando falla».</p>
+    </div>
+
+    <div class="table-scroll">
+      <table class="ds">
+        <thead>
+          <tr><th>Si falla…</th><th>Qué hace el sistema</th><th>Estado</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>El modelo tarda o se cuelga sin soltar el primer token</td>
+            <td>Hay un plazo para el primer token. Al vencer, reintenta; si se configura un modelo
+              alternativo, reintenta con él; si todo falla, el agente dice una frase de espera en el
+              idioma del paciente en vez de quedarse mudo. Queda como
+              <span class="mono">llm.timeout</span> y <span class="mono">llm.retry</span>.</td>
+            <td><span class="pill"><i class="dot ok"></i>Hecho</span></td>
+          </tr>
+          <tr>
+            <td>Una herramienta tarda</td>
+            <td>El agente dice «un momento» en cuanto arranca la llamada a herramienta, para que el
+              silencio no se lea como línea muerta.</td>
+            <td><span class="pill"><i class="dot ok"></i>Hecho</span></td>
+          </tr>
+          <tr>
+            <td>La búsqueda por número de origen no responde</td>
+            <td>Tope de 2 segundos y se sigue sin ella. No bloquea el saludo.</td>
+            <td><span class="pill"><i class="dot ok"></i>Hecho</span></td>
+          </tr>
+          <tr>
+            <td>El POST de la acción falla</td>
+            <td>Tiempo límite de 8 segundos y cada código tratado por separado: aceptado, duplicado,
+              ventana cerrada, llamada desconocida, campos inválidos. Un duplicado se trata como
+              éxito, no como error.</td>
+            <td><span class="pill"><i class="dot ok"></i>Hecho</span></td>
+          </tr>
+          <tr>
+            <td>La llamada termina sin haber enviado nada</td>
+            <td>La escalera de ocho ramas, con una reserva en frío antes de rendirse. Dentro de los
+              30 segundos, con 5 de margen.</td>
+            <td><span class="pill"><i class="dot ok"></i>Hecho</span></td>
+          </tr>
+          <tr>
+            <td>El pipeline lanza una excepción</td>
+            <td>Se anota <span class="mono">call.crashed</span> y el cierre <em>sigue ejecutándose</em>:
+              un agente que ha petado también envía su acción.</td>
+            <td><span class="pill"><i class="dot ok"></i>Hecho</span></td>
+          </tr>
+          <tr>
+            <td>El servidor se cae o se reinicia la máquina</td>
+            <td>Corre como contenedor con reinicio automático, detrás de Traefik con certificado
+              propio. Ya no depende del portátil de nadie ni de un túnel.</td>
+            <td><span class="pill"><i class="dot ok"></i>En producción</span></td>
+          </tr>
+          <tr>
+            <td>Se pierde la conexión a mitad de llamada</td>
+            <td>El cierre intenta enviar igualmente. Aun así, <b>es nuestro fallo abierto más
+              caro</b>: los dos casos que perdimos en el mejor run traen la señal
+              <span class="mono">connection_lost</span>.</td>
+            <td><span class="pill"><i class="dot off"></i>Sin resolver</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="evals">
+    <div class="head">
+      <span class="eyebrow">Observabilidad y evals</span>
+      <h2>Cómo sabemos si funciona sin esperar a la plataforma</h2>
+      <p>La plataforma puntúa un Run All cada media hora aproximadamente y <b>nunca dice qué campo
+        hemos fallado</b>. Medir allí es lento y ciego. Así que medimos aquí.</p>
+    </div>
+
+    <div class="stack-lg">
+      <div class="cols-2">
+        <div class="card stack-md">
+          <h3>Una línea por evento</h3>
+          <p>Cada llamada escribe un JSON por evento, todos etiquetados con su identificador de
+            llamada: inicio, cada turno del paciente y del agente, cada herramienta llamada y lo que
+            devolvió, el envío y su resultado, el consumo y el fin.</p>
+          <p>Sobre ese fichero se construye todo lo demás: la consola, el muro del jurado, la ficha de
+            una llamada y las métricas. No hay una segunda fuente de verdad.</p>
+        </div>
+        <div class="card stack-md">
+          <h3>La consola, hecha para que un humano audite</h3>
+          <ul class="plain">
+            <li><b>Muro público</b>: transcrito, traza de herramientas y el veredicto, en tres
+              columnas, legible a tres metros.</li>
+            <li><b>Ficha de una llamada</b>, compartible por enlace.</li>
+            <li><b>«Por qué no se reservó»</b> es una columna de primera clase, no una nota al pie: el
+              motivo tipado y su explicación en una frase.</li>
+            <li><b>Coste por llamada</b> calculado del consumo real de transcripción, modelo y voz.
+              Se muestran dos números: precio de tarifa y lo que realmente pagamos.</li>
+            <li>Todo estado es un punto de color <em>y</em> una palabra. El color solo nunca lleva
+              significado.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="table-scroll">
+        <table class="ds">
+          <caption>Cinco capas de evaluación, cada una respondiendo a una pregunta distinta</caption>
+          <thead>
+            <tr><th>Capa</th><th>Qué prueba</th><th>Clínica</th><th>Qué vale</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><b>1 · Lógica</b></td>
+              <td>Una herramienta, o un flujo de herramientas, aislada. 132 casos.</td>
+              <td>De prueba</td>
+              <td>Forma, no verdad. En cada PR.</td>
+            </tr>
+            <tr>
+              <td><b>2 · Conversación</b></td>
+              <td>Un paciente guionizado, turno a turno, en texto. 57 escenarios con correcciones,
+                interrupciones, silencios y terceras personas.</td>
+              <td>De prueba</td>
+              <td>Prueba que el prompt conduce las herramientas. Ciego al audio.</td>
+            </tr>
+            <tr>
+              <td><b>3 · Voz</b></td>
+              <td>Proveedores reales sobre las mismas frases, limpias y con ruido, tras un ciclo
+                telefónico de 8 kHz. Latencia percibida, tasa de error por idioma, coste.</td>
+              <td>—</td>
+              <td>Cuesta dinero de verdad. Fuera del camino de PR, a propósito.</td>
+            </tr>
+            <tr>
+              <td><b>4 · Corpus</b></td>
+              <td>Un juez que replica el de la plataforma, sobre una copia real de la clínica.</td>
+              <td><b>Real</b></td>
+              <td>La única capa con verdad de campo. Las 73 respuestas oficiales pasan por él y las
+                130 reservas publicadas se reproducen contra la clínica real.</td>
+            </tr>
+            <tr>
+              <td><b>5 · Banco de modelos</b></td>
+              <td>Los modelos candidatos jugando los mismos escenarios, con el prompt y las
+                herramientas reales, y el enrutado que corre hoy al lado.</td>
+              <td>De prueba</td>
+              <td>Convierte «qué modelo usamos» en un número en vez de una costumbre.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="card stack-md">
+        <h3>La respuesta honesta a «¿vuestros evals predicen la nota?»</h3>
+        <p><b>Hoy, no.</b> Nuestras capas comprueban condiciones necesarias; ninguna comprueba la
+          suficiente. Las capas 1, 2 y 5 corren contra una clínica de prueba con pacientes
+          inventados, así que un escenario en verde dice que el prompt sabe conducir las
+          herramientas, no que el agente reservaría el paciente correcto en el hueco que el caso
+          acepta.</p>
+        <p>Lo que sí está sólido es el <b>juez</b> de la capa 4: si dice que un registro pasa, la
+          plataforma dice que pasa. Y la copia de la clínica es real. Lo que falta es el puente:
+          pasar los 73 casos oficiales <em>por el agente</em> y juzgar el resultado. Está diseñado y
+          documentado; no está construido.</p>
+        <p class="feature-bullet"><span>Esto está escrito así, con estas palabras, en
+          <span class="mono">docs/NEXT-STEPS.md</span> desde antes de que nadie nos lo preguntara. Lo
+          contamos porque es la diferencia entre un equipo que mide y un equipo que cree.</span></p>
+      </div>
+
+      <div class="facts">
+        <span><b>737</b> tests</span>
+        <span><b>18</b> modelos en el banco</span>
+        <span>CI bloqueante: <b>tests, lint, formato</b></span>
+        <span>Evals en CI: <b>informativo</b>, comenta en el PR</span>
+        <span>Arranque sin red y sin claves: <b>sí</b></span>
+      </div>
+    </div>
+  </section>
+
+  <section id="reto1">
+    <div class="head">
+      <span class="eyebrow">Estado del reto 1</span>
+      <h2>36 de 40, primeros, y tres veces seguidas</h2>
+      <p>El marcador guarda el <b>mejor</b> Run All de cada equipo, no el último ni la suma. Estos son
+        los números tal como los devuelve el panel de la plataforma, leídos a las 11:58 del sábado.</p>
+    </div>
+
+    <div class="card-dark stack-lg">
+      <h2>36 / 40 puntos · 1.º</h2>
+      <p>18 de los 20 casos privados superados en el mejor run. Y no fue una casualidad: <b>tres runs
+        distintos</b> llegaron a la misma marca, a las 06:25, a las 08:06 y a las 11:30 de la mañana.
+        Repetir un resultado tres veces con semillas privadas diferentes es la mejor prueba que
+        tenemos de que el sistema, cuando funciona, funciona por diseño.</p>
+
+      <div class="stat-grid">
+        <div class="stat"><div class="n">36</div><div class="l">de 40 puntos</div></div>
+        <div class="stat"><div class="n">1.º</div><div class="l">en el marcador</div></div>
+        <div class="stat"><div class="n">18/20</div><div class="l">casos del mejor run</div></div>
+        <div class="stat"><div class="n">29</div><div class="l">runs lanzados</div></div>
+        <div class="stat"><div class="n">347</div><div class="l">casos juzgados</div></div>
+      </div>
+
+      <div>
+        <div class="kv"><span>Mejor run</span><span class="mono">9562ef24</span></div>
+        <div class="kv"><span>Runs que alcanzaron 36/40</span><span>3 de 18 privados</span></div>
+        <div class="kv"><span>Tasa global de acierto</span><span>171 de 347 casos · 49,3 %</span></div>
+        <div class="kv"><span>Fallos atribuidos al arnés</span><span>4</span></div>
+        <div class="kv"><span>Los 2 casos perdidos</span><span class="mono">connection_lost + record_mismatch</span></div>
+        <div class="kv"><span>Endpoint activo</span><span class="mono">wss://line.167.233.80.47.sslip.io/ws</span></div>
+        <div class="kv"><span>Muro de puntuación</span><span>domingo 06:00 Europe/Madrid</span></div>
+      </div>
+    </div>
+
+    <div class="cols-2 mt-xl">
+      <div class="card stack-md">
+        <h3>Qué nos costó los 4 puntos que faltan</h3>
+        <p>Los dos casos perdidos en el mejor run valían 2 puntos cada uno y traen las mismas dos
+          señales: <span class="mono">connection_lost</span> y <span class="mono">record_mismatch</span>.
+          La plataforma los atribuye como <em>no concluyentes</em>, lo que significa que no puede
+          decidir si el fallo fue nuestro o suyo.</p>
+        <p><span class="pill"><i class="dot warn"></i>Inferencia</span> Nuestra lectura es que la
+          conexión se cortó antes de que el registro correcto llegara a salir, y el
+          <em>fallback</em> envió una acción que no coincidía. Es la misma familia de fallo en los
+          tres runs de 36 puntos, así que es <b>un solo defecto</b>, no cuatro problemas distintos.</p>
+      </div>
+
+      <div class="card stack-md">
+        <h3>El número honesto: 49,3 %</h3>
+        <p>Sobre los 347 casos juzgados en todos los runs, hemos pasado 171. El mejor run vale 36; la
+          media está muy por debajo. Esa distancia <b>es varianza</b>, y es nuestro problema abierto
+          número uno.</p>
+        <p>De dónde viene: un bucle de mejora automática corrió durante la noche optimizando contra
+          cuatro casos privados por problema, <b>sin ninguna barrera local que detuviera una
+          regresión</b>. Nos subió a lo más alto y luego nos bajó. La lección está escrita: el Run All
+          es el último paso de la comprobación, nunca el primero.</p>
+      </div>
+    </div>
+
+    <div class="card stack-md mt-lg">
+      <h3>Sobre «no habrá más runs»</h3>
+      <p><span class="pill"><i class="dot warn"></i>Decisión, no dato</span> Que no lancemos más Run
+        All es una <b>decisión del equipo</b> en el momento de escribir esto, no un límite de la
+        plataforma. Los datos que sí son hechos: el marcador conserva el mejor run, abrir retos nuevos
+        nunca baja una puntuación anterior, y solo cuentan los runs <em>terminados</em> antes del muro
+        del domingo a las 06:00.</p>
+      <p>Dicho de otra forma: 36/40 está guardado y no se puede perder. Lanzar otro run solo puede
+        subirlo o no cambiarlo. Si la decisión es no lanzar más, es por dónde queremos gastar las
+        horas que quedan, no porque el marcador esté cerrado.</p>
+    </div>
+  </section>
+
+  <section id="reto2">
+    <div class="head">
+      <span class="eyebrow">Preparación del reto 2</span>
+      <h2>La centralita: no puntúa, y es el cero de todo lo demás</h2>
+      <p>El reto 2 es el reto 1 repetido cinco, diez o veinte veces <em>al mismo tiempo</em>. No da
+        puntos y el Run All no lo marca nunca: hay que dispararlo a mano. Pero un socket que mezcla
+        estado entre llamadas no falla un caso, falla <b>el run entero</b>.</p>
+    </div>
+
+    <div class="cols-2">
+      <div class="card stack-md">
+        <h3>Lo que ya está probado</h3>
+        <ul class="plain">
+          <li><b>Diez llamadas simultáneas sobre sockets reales</b>, en un test automatizado: cada
+            llamada con su identificador propio, su flujo de audio propio, al menos diez tramas
+            recibidas y cada envío atribuido a su llamada y no a otra.</li>
+          <li>Todo el estado es <b>por socket por construcción</b>: la sesión, el contexto de
+            herramientas, el contador de consumo y la política de confirmación. No hay una sola
+            variable a nivel de módulo en el camino de la llamada, y hay un test que lo comprueba con
+            dos instancias a la vez.</li>
+          <li>El marcador de llamadas falsas dispara <b>N llamadas en paralelo</b> con una sola orden,
+            así que reproducir una tanda es inmediato.</li>
+          <li>El contenedor está <b>limitado a 4 GB</b> en una máquina de 22 GB, para que una tanda no
+            se lleve el servidor por delante.</li>
+        </ul>
+      </div>
+
+      <div class="card stack-md">
+        <h3>Lo que falta antes de decir que está listo</h3>
+        <ul class="plain">
+          <li><span class="pill"><i class="dot off"></i>Pendiente</span> La prueba automatizada se
+            queda en <b>diez</b>. Las tandas de 5 y de 20 están documentadas como expectativa, no
+            registradas como resultado.</li>
+          <li><span class="pill"><i class="dot off"></i>Pendiente</span> No hay una medición guardada
+            de memoria y latencia con veinte líneas abiertas.</li>
+          <li><span class="pill"><i class="dot warn"></i>Inferencia</span> El servidor corre en un
+            solo proceso y la concurrencia es asíncrona, no por procesos. Veinte llamadas deberían
+            caber de sobra porque el trabajo es esperar a la red, no calcular. <b>Deberían</b> no es
+            <b>lo hicieron</b>.</li>
+          <li>La acción concreta: disparar 5, luego 10, luego 20, y guardar el resultado junto con el
+            consumo de memoria del contenedor. Media hora de trabajo.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section id="jurado">
+    <div class="head">
+      <span class="eyebrow">El jurado</span>
+      <h2>Qué juzgan y qué les enseñamos</h2>
+      <p>El domingo hay una segunda puntuación que no es automática: el mismo panel llama a todos los
+        equipos. La columna de la izquierda son <b>los criterios tal como están publicados</b>, sin
+        añadir ni interpretar. La de la derecha es lo nuestro: qué le ponemos delante para cada uno.</p>
+      <p>Hay una frase en las bases que ordena toda la preparación: <b>un criterio que el jurado no
+        puede observar no puntúa</b>. Así que nada de contar lo que hay; hay que poder mostrarlo.</p>
+    </div>
+
+    <div class="table-scroll">
+      <table class="ds">
+        <thead>
+          <tr><th>Criterio publicado</th><th>Qué le ponemos delante</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><b>Experiencia del paciente</b></td>
+            <td>Que llamen ellos. Saludo inmediato sin esperar al modelo, «un momento» mientras
+              consulta, y colgado limpio al confirmar. Si se quedan callados, el agente les empuja
+              suave en vez de dejar la línea muerta.</td>
+          </tr>
+          <tr>
+            <td><b>Lo personal que resulta</b> (usar la ficha y el historial antes de preguntar)</td>
+            <td>La búsqueda por número de origen ocurre <em>antes</em> del saludo. Si el número está en
+              el directorio, el agente ya sabe quién llama y no le hace repetir su nombre ni su
+              documento. Es el detalle que más se nota por teléfono.</td>
+          </tr>
+          <tr>
+            <td><b>La plataforma alrededor del agente</b> (consola en vivo, «¿por qué dijo eso?»)</td>
+            <td>El muro en el proyector mientras hablan: transcrito, traza de herramientas y veredicto.
+              Y la respuesta a «por qué dijo eso» es una columna, no una explicación: el motivo tipado
+              con su frase. La ficha de la llamada se comparte por enlace.</td>
+          </tr>
+          <tr>
+            <td><b>Seguridad y límites</b></td>
+            <td>Que intenten sacarle un dato de otro paciente. El filtro anterior al sintetizador
+              bloquea documentos y teléfonos en la voz, y queda registrado el bloqueo. Que le pidan
+              algo fuera de alcance: responde <span class="mono">NO_ACTION(out_of_scope)</span>, no
+              improvisa.</td>
+          </tr>
+          <tr>
+            <td><b>Manejo de idiomas</b></td>
+            <td>Que llamen en catalán, gallego o euskera. La identificación de idioma va en la
+              transcripción y la voz se enruta al proveedor que sabe hablarlo. Es la razón por la que
+              elegimos el transcriptor que elegimos, y se puede contar en una frase.</td>
+          </tr>
+          <tr>
+            <td><b>Rigor de ingeniería</b> (arnés de evaluación, varianza, fallos con nombre, coste por
+              llamada)</td>
+            <td>Cinco capas de evals con un juez verificado contra el de la plataforma; 18 modelos
+              comparados con número y página publicada; el coste por llamada calculado del consumo
+              real; y la varianza contada como lo que es: 36/40 en el mejor run, 49,3 % de media, y el
+              motivo identificado.</td>
+          </tr>
+          <tr>
+            <td><b>Discreción</b></td>
+            <td>Teléfonos enmascarados en todo lo público, exportación de trazas con lista blanca,
+              claves que no salen ni en el <span class="mono">/health</span>, y un log operativo que
+              no sale de la máquina.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card stack-md mt-xl">
+      <h3>El argumentario en tres frases</h3>
+      <ul class="plain">
+        <li><b>Está en producción, no en un portátil.</b> El endpoint es un contenedor en un servidor,
+          con HTTPS y reinicio automático. Se puede llamar ahora mismo.</li>
+        <li><b>Medimos antes de creer.</b> Hay un juez verificado contra el de la plataforma, 737
+          tests y 18 modelos comparados con números. Y sabemos decir dónde nuestros evals todavía no
+          predicen la nota.</li>
+        <li><b>Nunca se queda en silencio.</b> Aunque el modelo se cuelgue, el socket se caiga o el
+          proceso lance una excepción, la llamada acaba con una acción enviada y un motivo con
+          nombre.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="preguntas">
+    <div class="head">
+      <span class="eyebrow">Preguntas difíciles</span>
+      <h2>Las que preferiríamos que no nos hicieran</h2>
+      <p>Con la respuesta que daríamos. Sin adornos: si algo no lo sabemos, la respuesta dice que no lo
+        sabemos.</p>
+    </div>
+
+    <div class="faq">
+      <div class="faq-row">
+        <div class="q">¿36 de 40 fue suerte?</div>
+        <div class="a">No, y tenemos la prueba: <b>tres runs distintos</b> llegaron a 36/40, con
+          semillas privadas diferentes y a horas distintas. Lo que sí es cierto es que la media está
+          en el 49,3 % de casos acertados. Los dos números juntos dicen la verdad completa: <b>el techo
+          es real y la varianza también</b>.</div>
+      </div>
+
+      <div class="faq-row">
+        <div class="q">¿Por qué no usáis un modelo de voz a voz, que suena mucho mejor?</div>
+        <div class="a">Porque aquí no se puntúa cómo suena, se puntúa si el registro coincide. Los
+          modelos de voz a voz están por debajo del 52 % en tareas agénticas con herramientas, y menos
+          del 15 % de los agentes en producción los usaban en la primera mitad de 2026. Tenemos Gemini
+          Live montado y lo enseñamos encantados, pero está marcado en el código como <b>solo demo</b>
+          y el modo automático no lo elige nunca.</div>
+      </div>
+
+      <div class="faq-row">
+        <div class="q">Si el modelo se cuelga en mitad de la llamada, ¿qué oye el paciente?</div>
+        <div class="a">Una frase de espera en su idioma. Hay un plazo para el primer token del modelo;
+          al vencer se reintenta, si hay modelo alternativo configurado se reintenta con él, y si todo
+          falla el agente habla en vez de callarse. Un silencio largo se juzga como fallo nuestro, así
+          que el silencio es el enemigo, no el retraso.</div>
+      </div>
+
+      <div class="faq-row">
+        <div class="q">¿Y si se cae la conexión justo antes de enviar?</div>
+        <div class="a">El cierre de la sesión intenta enviar igualmente, dentro de la ventana de 30
+          segundos. Pero aquí no vamos a vender humo: <b>es exactamente el fallo que nos cuesta los 4
+          puntos que faltan</b>. Los dos casos perdidos del mejor run traen la señal de conexión
+          perdida. La escalera de <em>fallback</em> envía algo, y ese algo no coincidió.</div>
+      </div>
+
+      <div class="faq-row">
+        <div class="q">¿Cómo sé que no mezcláis dos llamadas simultáneas?</div>
+        <div class="a">Hay un test que abre <b>diez sockets reales a la vez</b> y comprueba que cada
+          llamada tiene su identificador, su flujo de audio y sus envíos atribuidos a ella. Todo el
+          estado del camino de llamada es por socket por construcción, sin variables de módulo. Y sé
+          decir el límite: <b>la prueba automatizada se queda en diez, no en veinte</b>.</div>
+      </div>
+
+      <div class="faq-row">
+        <div class="q">¿Vuestros evals predicen la puntuación de la plataforma?</div>
+        <div class="a">Todavía no, y lo tenemos escrito antes de que nos lo preguntaran. El juez está
+          verificado contra el de la plataforma y la copia de la clínica es real, pero las capas que
+          corren en cada PR usan una clínica de prueba con pacientes inventados. Falta el puente:
+          pasar los 73 casos oficiales por el agente y juzgar el resultado. Está diseñado; no está
+          construido.</div>
+      </div>
+
+      <div class="faq-row">
+        <div class="q">Si teníais un bucle que se mejoraba solo, ¿por qué no lo dejasteis corriendo?</div>
+        <div class="a">Porque funcionó y luego nos hundió. Optimizaba contra cuatro casos privados por
+          problema <b>sin ninguna barrera local</b>, así que una regresión no tenía dónde ser
+          detectada antes de desplegarse. Nos puso primeros y después nos bajó. La conclusión es de
+          método, no de herramienta: el Run All es la última comprobación, nunca la señal que guía.</div>
+      </div>
+
+      <div class="faq-row">
+        <div class="q">¿Por qué el agente atiende en inglés por defecto?</div>
+        <div class="a">Porque de los 73 casos públicos, 69 están en inglés. La clínica del ejercicio
+          opera en inglés y quien llama en otra lengua es la excepción. El agente sigue al paciente al
+          idioma en que le hablen —español, catalán, gallego, euskera— y ese salto es justamente lo
+          que aísla el reto de idiomas.</div>
+      </div>
+
+      <div class="faq-row">
+        <div class="q">¿Qué impide que el modelo se invente un identificador de paciente o de cita?</div>
+        <div class="a">Que no los ve nunca de otra fuente. El identificador de paciente sale del
+          directorio, el de la cita sale de las citas del paciente, y el de tipo de cita sale de la
+          disponibilidad. Se comparan carácter a carácter: uno adivinado falla el caso aunque la hora
+          sea correcta. Está como regla dura del equipo y como forma del contrato de herramientas.</div>
+      </div>
+
+      <div class="faq-row">
+        <div class="q">¿Puede el agente decir en voz alta el DNI de un paciente?</div>
+        <div class="a">No debería, y hay un filtro entre el modelo y el sintetizador que lo bloquea y
+          lo registra. Uno de los retos puntuados revisa el transcrito buscando exactamente eso. El
+          filtro se puede probar en vivo: pídeselo y mira el bloqueo aparecer en la consola.</div>
+      </div>
+
+      <div class="faq-row">
+        <div class="q">¿Cuánto cuesta una llamada?</div>
+        <div class="a">Se calcula del consumo real de cada llamada: segundos de audio transcritos,
+          tokens de entrada y salida del modelo, caracteres sintetizados. Se muestran <b>dos
+          números</b>: el precio de tarifa, que es el que sirve para comparar proveedores, y lo que
+          realmente pagamos, que en el modelo actual es cero porque entra en la bolsa del hackathon.
+          No mezclamos los dos.</div>
+      </div>
+
+      <div class="faq-row">
+        <div class="q">¿Qué pasa si el paciente no existe en el directorio?</div>
+        <div class="a">Se registra, no se reserva. Es un reto propio y tiene una trampa: en esos casos
+          una reserva <em>al lado</em> del registro hace fallar el caso. La letra del documento se
+          valida con su algoritmo antes de dar el alta, así que un dígito mal dictado se detecta en la
+          llamada y no después.</div>
+      </div>
+
+      <div class="faq-row">
+        <div class="q">¿Qué es lo siguiente que arreglaríais si tuvierais dos horas más?</div>
+        <div class="a">El puente de evaluación: pasar los 73 casos oficiales por el agente contra la
+          copia real de la clínica y juzgarlos con el juez verificado. Da un número offline en un
+          minuto y dice <b>qué campo</b> se ha perdido, que es justo lo que el Run All no dice. Sin
+          eso, cada mejora es una apuesta.</div>
+      </div>
+    </div>
+  </section>
+
+  <section id="pendiente">
+    <div class="head">
+      <span class="eyebrow">Lo que falta</span>
+      <h2>La lista honesta</h2>
+      <p>Todo lo que sabemos que no está hecho o no está verificado, en un solo sitio. Si el jurado
+        encuentra algo que no está en esta lista, hemos fallado en esta sección.</p>
+    </div>
+
+    <ul class="pending">
+      <li>
+        <i class="dot off"></i>
+        <div>
+          <div class="t">El puente de evaluación: los 73 casos oficiales por el agente</div>
+          <div class="d">Todas las piezas existen —los casos con su guion, el paciente guionizado, el
+            agente en modo texto, el juez, los puntos por problema—. Falta un cliente de clínica que
+            responda desde la copia real en vez de la de prueba. Es la única pieza nueva.</div>
+        </div>
+      </li>
+      <li>
+        <i class="dot off"></i>
+        <div>
+          <div class="t">Tandas de 5 y de 20 líneas, medidas y guardadas</div>
+          <div class="d">La prueba automatizada llega a diez. Falta disparar las otras dos y anotar
+            memoria y latencia del contenedor.</div>
+        </div>
+      </li>
+      <li>
+        <i class="dot off"></i>
+        <div>
+          <div class="t">La conexión perdida a mitad de llamada</div>
+          <div class="d">El defecto que nos cuesta los 4 puntos que faltan. Reproducido en tres runs,
+            atribuido como no concluyente por la plataforma, sin causa raíz confirmada.</div>
+        </div>
+      </li>
+      <li>
+        <i class="dot off"></i>
+        <div>
+          <div class="t">Versionado del prompt</div>
+          <div class="d">El prompt es un fichero sin versión. Un run guarda qué modelo usó, pero no qué
+            prompt, así que dos runs no se pueden comparar con confianza. El plan está escrito: un
+            fichero por versión y la versión anotada en cada resultado.</div>
+        </div>
+      </li>
+      <li>
+        <i class="dot warn"></i>
+        <div>
+          <div class="t">Dos preajustes de modelo sin verificar</div>
+          <div class="d">Dos de los proveedores de modelo están marcados como no verificados en el
+            README: nadie ha llamado a esa URL ni a ese identificador de modelo. Están disponibles,
+            no probados.</div>
+        </div>
+      </li>
+      <li>
+        <i class="dot warn"></i>
+        <div>
+          <div class="t">La capa de voz nunca ha corrido contra los servicios reales</div>
+          <div class="d">Los adaptadores están escritos desde la documentación de los proveedores. Sin
+            claves corre un proveedor simulado, con latencias inventadas y precios reales, y el informe
+            lo dice en la cabecera.</div>
+        </div>
+      </li>
+      <li>
+        <i class="dot warn"></i>
+        <div>
+          <div class="t">Métricas de toma de turno</div>
+          <div class="d">Medir interrupciones falsas y finales de turno perdidos exige audio pasando por
+            el detector de actividad. La capa de voz mide a los proveedores, no nuestros ajustes.</div>
+        </div>
+      </li>
+      <li>
+        <i class="dot warn"></i>
+        <div>
+          <div class="t">El arnés no conduce el pipeline de voz real</div>
+          <div class="d">Las evaluaciones automáticas llegan hasta el texto. La voz real se prueba
+            llamando, y eso todavía lo hace una persona.</div>
+        </div>
+      </li>
+    </ul>
+  </section>
+
+  <footer class="footer-section">
+    <span>Equipo Vortex · HackSpain 2026 · track Prosper AI</span>
+    <span>Diseño: <span class="mono">DESIGN.md</span></span>
+    <span>Panel leído el 19/09/2026 a las 11:58 Europe/Madrid</span>
+    <span>Esta página se abre sin servidor: los estilos van dentro del fichero</span>
+  </footer>
+
+</div>
+</body>
+</html>

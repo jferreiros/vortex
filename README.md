@@ -20,9 +20,40 @@ make call N=10              # ... with 10 concurrent fake calls
 make tunnel                 # ngrok http 7860 -> wss://<host>/ws for the dashboard
 make test                   # the whole test suite
 make tail                   # follow logs/calls.jsonl
+make logs-discord           # redacted digest of the call log to Discord
+make langfuse-check         # project URL + whether the live line has keys
 ```
 
 `make smoke` and `make test` need no key and no network.
+
+## Day-before confirmation calls
+
+With `VORTEX_CONFIRMATION_CALLS=true` plus the Twilio keys and
+`VORTEX_PUBLIC_BASE_URL` (the tunnel host), an accepted booking also queues a
+voice call for the day before the slot. The worker dials the patient, this
+server's `/confirmation/*` routes serve the TwiML, and `Gather input="speech"`
+captures the answer: confirmed / not_coming / reschedule_requested. The question
+itself offers the move out loud ("Si prefiere cambiarla, dígamelo y la movemos
+ahora mismo"), so the caller learns the option exists without guessing (es, ca, gl,
+eu and en scripts; the call inherits the language the caller used, Spanish by
+default). No answer lands as `no_answer` or `unclear`. A reschedule answer does
+not end the call: when the live voice pipeline runs behind the same server the
+call hands the line to its colleague - "le paso con mi compañero, que es quien
+le agenda las citas" - and `<Connect><Stream>` carries it back to `/ws` with the
+appointment, the already-identified patient and the language on the start
+message, so the booking agent's rebooking flow continues without re-asking any
+data and the patient moves the appointment in the same call. Without the live
+voice pipeline the stored callback promise stands. The Twilio-only segments
+sound in the wall's own voice: when Google TTS credentials are set each line
+(the question, the reprompt, the "le paso con mi compañero" bridge, the
+fallback acknowledgements) is synthesised with the configured Chirp 3 HD
+persona and rate from `voiceconfig.db`, cached under
+`logs/confirmation_audio/`, served by `GET /confirmation/audio/{name}` and
+played with `<Play>`; without credentials, or if synthesis fails, the TwiML
+keeps Twilio's standard `<Say>` voice for that line. Every row lives in
+`logs/confirmation_calls.json` — the hooks a waitlist filler or a retry/SMS
+fallback would subscribe to. Try it: `uv run python scripts/try_confirmation_call.py`
+(`--live --to <E.164> --base-url <tunnel>` to dial for real).
 
 ## Modes
 
@@ -94,8 +125,9 @@ production) sit behind a sidebar:
 | `/insights` | refusal reasons, handle times, tool latency, calls by hour |
 | `/settings`, `/settings/rules`, `/settings/integrations`, `/settings/engineering` | sites, doctors, rules and the insurance matrix from the clinic API; providers; evals |
 
-Public pages for the jury: `/wall` (the projector view) and `/call/<id>` (one
-call, shareable). Phone numbers are masked there. The board reads calls from
+Public pages for the jury: `/wall` (the Live flow: the call in progress as
+conversation, workflow and outcome, on a dark canvas made for a projector) and
+`/call/<id>` (one call, shareable). Phone numbers are masked there. The board reads calls from
 the line at `VORTEX_LINE_URL`. Every screen follows `DESIGN.md`.
 
 ## Design
@@ -114,6 +146,28 @@ make test                   # tests/test_design.py fails when the copy is stale
 ```
 
 Before you add a colour, a font or a shadow, read `DESIGN.md`. The answer is no.
+
+## The explainer — one page for a jury or a new joiner
+
+`docs/didactica.html` explains the whole system in plain Spanish: the vision, the
+architecture end to end, one call step by step, the providers, the decisions and
+what each one cost, security, resilience, the evals, where challenge 1 stands,
+what is ready for challenge 2, the jury's published criteria, and the questions
+we would rather not be asked, with answers. Every claim carries one of three
+marks: fact, inference or pending.
+
+It is **one file that opens with a double click** — no server, no build, no
+network. The design tokens are inlined instead of linked:
+
+```bash
+make didactica              # re-inline design.css after you change the tokens
+open docs/didactica.html    # or just double-click it
+```
+
+`make design-sync` calls it too, and `tests/test_didactica.py` fails when the
+inlined copy is stale, when a nav link points at a missing section or when the
+page grows a second dark surface. Published at
+**https://docs.167.233.80.47.sslip.io/** (`deploy/compose.docs.yaml`).
 
 ## Which model for which job — the bench
 

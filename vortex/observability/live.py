@@ -11,29 +11,36 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
+import subprocess
 import sys
 import time
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
 import httpx
+from fastapi import Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from nicegui import app, ui
 
-from vortex.observability import auth, explain, insights
+from vortex.clinic.client import FakeClinicClient
+from vortex.line import personalities, voice_config
+from vortex.observability import auth, callfeed, explain, insights, pricing
+from vortex.observability import calendar as cal
 from vortex.observability.business_insights import business_insights
-from vortex.observability.calllog import read_recent
-from vortex.observability.demo import write_scripted_call
+from vortex.observability.demo import replay_cancellation_demo, write_scripted_call
 from vortex.observability.home_overview import home_overview
+from vortex.observability.home_pack import load_synthetic_cards, occupancy
 from vortex.observability.icons import icon
-from vortex.observability.view import CallCard, build_calls, flatten_grouped
+from vortex.observability.view import CallCard, build_calls
 from vortex.observability.wall_timeline import build_timeline, call_summary, latest_intent
 from vortex.settings import REPO_ROOT, get_settings
 
-LINE_URL = os.environ.get("VORTEX_LINE_URL", "http://127.0.0.1:7860").rstrip("/")
+log = logging.getLogger("vortex.observability")
+
 BOARD_PORT = int(os.environ.get("VORTEX_BOARD_PORT", "8080"))
 CLINIC_NAME = os.environ.get("VORTEX_CLINIC_NAME", "Clínica Arenal")
 PRESENCE: dict[str, float] = {}
@@ -50,6 +57,9 @@ WALL_APP_DIST = REPO_ROOT / "vortex" / "wall" / "dist"
 #: Source art for the app — not part of the Vite build, served straight off
 #: disk. vortex/wall/media/avatar2d.png -> GET /wall/avatar2d.
 WALL_MEDIA_DIR = REPO_ROOT / "vortex" / "wall" / "media"
+#: The persona portraits, one SVG per personality (the filename is the
+#: persona's ``avatar`` field). Served by GET /wall/personalities/{file}.
+PERSONALITY_MEDIA_DIR = WALL_MEDIA_DIR / "personalities"
 
 MADRID = ZoneInfo("Europe/Madrid")
 
@@ -67,20 +77,20 @@ def _log_path() -> Path:
     return get_settings().calls_log_path
 
 
-def _load_events() -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
-    health: dict[str, Any] | None = None
-    try:
-        health = httpx.get(f"{LINE_URL}/health", timeout=0.35).json()
-        grouped = (
-            httpx.get(f"{LINE_URL}/calls", params={"limit": 800}, timeout=0.5)
-            .json()
-            .get("calls", {})
-        )
-        if isinstance(grouped, dict):
-            return flatten_grouped(grouped), health
-    except Exception:
-        pass
-    return read_recent(_log_path(), limit=800), health
+#: Where the events a screen draws come from lives in ``callfeed`` (a leaf
+#: module, so it is importable in tests without pulling in these pages): the
+#: line's /calls first, then the last good fetch, then this process's own
+#: calls.jsonl — which in production is the line's log volume mounted into
+#: the board, not an empty private one.
+
+
+def _load_events(
+    scope: str = "recent",
+    *,
+    since: datetime | None = None,
+    cache_ttl: float = 0.0,
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None, dict]:
+    return callfeed.load_events(scope, _log_path(), since=since, cache_ttl=cache_ttl)
 
 
 def _parse_ts(value: str | None) -> datetime | None:
@@ -103,7 +113,7 @@ def _is_live(card: CallCard) -> bool:
 
 
 def _build_cards() -> tuple[list[CallCard], dict[str, Any] | None]:
-    events, health = _load_events()
+    events, health, _source_info = _load_events("recent")
     cards = build_calls(events)
     for card in cards:
         if card.live and not _is_live(card):
@@ -198,7 +208,27 @@ async def _play_line() -> None:
 
 
 async def _replay(scenario: str) -> None:
-    await write_scripted_call(_log_path(), scenario=scenario, delay_s=0.28)
+    try:
+        await write_scripted_call(_log_path(), scenario=scenario, delay_s=0.28)
+    except OSError:
+        # In production the board mounts the line's log read-only — scripted
+        # calls are a local demo tool, not something to mix into live metrics.
+        ui.notify("The call log is read-only here — replay demos locally.", type="warning")
+
+
+async def _replay_cancellations() -> None:
+    try:
+        await replay_cancellation_demo(_log_path())
+    except FileNotFoundError:
+        ui.notify(
+            "synthetic-data/logs/cancellation_demo.jsonl is missing — "
+            "regenerate it with scripts/make_cancellation_pack.py",
+            type="warning",
+        )
+    except OSError:
+        # In production the board mounts the line's log read-only — scripted
+        # calls are a local demo tool, not something to mix into live metrics.
+        ui.notify("The call log is read-only here — replay demos locally.", type="warning")
 
 
 def _client_ip() -> str:
@@ -371,18 +401,28 @@ def _footer() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _stat(n: str, label: str, dot: str | None = None) -> None:
+def _stat(n: str, label: str, dot: str | None = None, note: str | None = None) -> None:
     with ui.element("div").classes("stat"):
         with ui.element("div").classes("n row"):
             if dot:
                 _dot(dot)
             ui.label(n)
         ui.label(label).classes("l")
+        if note:
+            ui.label(note).classes("l")
+
+
+def _priced_note(cost: insights.CostSummary) -> str | None:
+    """'2 of 3 calls priced', only when some call had a leg with no price."""
+    if not cost.metered or cost.priced == cost.metered:
+        return None
+    return f"{cost.priced} of {cost.metered} calls priced"
 
 
 def _kpis(cards: list[CallCard]) -> None:
     s = explain.stats_for(cards)
     rate = "—" if s.submit_rate is None else f"{s.submit_rate * 100:.0f}%"
+    cost = insights.cost_per_call(cards)
     with ui.element("div").classes("stat-grid"):
         _stat(str(s.calls), explain.KPI_LABEL["calls"])
         _stat(str(s.live), explain.KPI_LABEL["live"], "live" if s.live else None)
@@ -395,6 +435,9 @@ def _kpis(cards: list[CallCard]) -> None:
             explain.KPI_LABEL["handle"],
         )
         _stat(_ms(s.median_tool_ms), explain.KPI_LABEL["tool"])
+        # Ninth tile: the grid is auto-fit minmax(140px, 1fr), so it wraps to
+        # a second row on a narrow screen instead of squeezing the other eight.
+        _stat(pricing.eur(cost.avg_list_eur, 3), explain.KPI_LABEL["cost"], note=_priced_note(cost))
 
 
 def _stages(card: CallCard | None) -> None:
@@ -538,6 +581,30 @@ def _outcome(card: CallCard | None) -> None:
                     ui.label(str(value)).classes("mono")
 
 
+def _cost_rows(card: CallCard | None) -> list[tuple[str, str | None]]:
+    """What this call cost, leg by leg. Empty when the call was never metered.
+
+    Cost is not patient data, so the public page shows these rows too: the
+    jury's question is what one answered call costs, and the answer belongs
+    next to the call it came from.
+    """
+    cost = pricing.price_call(card.usage if card else None)
+    if not cost.metered:
+        return []
+    partial = " · partial" if cost.partial else ""
+    llm = f"{pricing.count(cost.llm_tokens_in)} in / {pricing.count(cost.llm_tokens_out)} out"
+    llm += f" · {pricing.eur(cost.llm_list_eur)} list"
+    if cost.perk:
+        llm += " · perk"
+    return [
+        ("Cost (list)", f"{pricing.eur(cost.total_list_eur)}{partial}"),
+        ("Cost (we pay)", f"{pricing.eur(cost.total_eur)}{partial}"),
+        ("STT", f"{cost.stt_seconds:.1f} s · {pricing.eur(cost.stt_eur)}"),
+        ("LLM", llm),
+        ("TTS", f"{pricing.count(cost.tts_characters)} chars · {pricing.eur(cost.tts_eur)}"),
+    ]
+
+
 def _record(card: CallCard | None, *, public: bool = False) -> None:
     with ui.element("div").classes("section-title"):
         ui.label("Record").classes("t")
@@ -545,7 +612,7 @@ def _record(card: CallCard | None, *, public: bool = False) -> None:
     phone = card.from_number if card else None
     if public and phone:
         phone = insights.mask_phone(phone)
-    rows = [
+    rows: list[tuple[str, str | None]] = [
         ("Patient", card.patient_name if card else None),
         ("Phone", phone),
         ("Doctor", card.provider_name if card else None),
@@ -556,6 +623,7 @@ def _record(card: CallCard | None, *, public: bool = False) -> None:
         ("Duration", _duration(card) if card else None),
         ("Started", _clock(card.started_at) if card else None),
         ("Call id", card.call_id if card else None),
+        *_cost_rows(card),
     ]
     for label, value in rows:
         with ui.element("div").classes("kv"):
@@ -704,6 +772,7 @@ def _calls_table(
                 ("Why not booked", ""),
                 ("Tools", "narrow-hide"),
                 ("Duration", "narrow-hide"),
+                ("€", "narrow-hide"),
                 ("Call id", "narrow-hide"),
             ):
                 with ui.element("th").classes(extra):
@@ -734,6 +803,11 @@ def _calls_table(
                         ui.label(str(len(card.tools)))
                     with ui.element("td").classes("num narrow-hide"):
                         ui.label(_duration(card))
+                    with ui.element("td").classes("num narrow-hide"):
+                        # List price, three decimals. An em dash means the call
+                        # was never metered, not that it was free.
+                        cost = pricing.price_call(card.usage)
+                        ui.label(pricing.eur(cost.total_list_eur, 3) if cost.metered else "—")
                     with ui.element("td").classes("id narrow-hide"):
                         ui.label(card.call_id)
 
@@ -869,7 +943,7 @@ async def call_page(call_id: str) -> None:
 @app.get("/api/wall/timeline/{call_id}")
 def wall_timeline_api(call_id: str) -> JSONResponse:
     """The chat+tool timeline the react-spring zoom page polls."""
-    events, health = _load_events()
+    events, health, _source_info = _load_events("recent")
     items = build_timeline(events, call_id)
     intent = latest_intent(events, call_id)
     call = call_summary(events, call_id)
@@ -898,29 +972,540 @@ def _card_started(card: CallCard) -> datetime | None:
 @app.get("/api/wall/business-insights")
 def wall_business_insights_api(days: int = 30) -> JSONResponse:
     """Unavailability reasons, doctor ranking, the demand/supply heatmap and
-    cancellation recovery for the Statistics page's 7 / 30 / 90 day pills.
+    cancellation recovery for the Insights page's "7 / 30 / 90 días" pills.
     ``days`` is one of those three; anything else is clamped to the nearest.
     """
     days = min((7, 30, 90), key=lambda d: abs(d - days))
     now = datetime.now(UTC)
-    events, _health = _load_events()
-    cards = build_calls(events)
     cutoff = now - timedelta(days=days)
+    # Ask the line for every call started inside the window — a fetch bounded
+    # by date, so a busy day's worth of events can never push an in-range call
+    # out of the read the way the old 800-event tail did.
+    events, _health, source = _load_events(
+        f"insights:{days}", since=cutoff, cache_ttl=callfeed.INSIGHTS_CACHE_TTL_S
+    )
+    cards = build_calls(events)
     in_range = [c for c in cards if (started := _card_started(c)) and started >= cutoff]
     payload = business_insights(in_range, now=now)
     payload["range_days"] = days
+    payload["source"] = source
     return JSONResponse(payload)
+
+
+def _sync_clinic(coro: Any) -> Any:
+    try:
+        coro.send(None)
+    except StopIteration as stop:
+        return stop.value
+    raise RuntimeError("clinic client did not complete synchronously")
+
+
+def _sync_catalogue() -> Any:
+    return _sync_clinic(FakeClinicClient().catalogue())
+
+
+def _ensure_agenda() -> None:
+    """Load catalogue, directory and appointments through the clinic client."""
+    global _AGENDA_CATALOGUE, _AGENDA_PATIENTS, _AGENDA_BOOKINGS
+    if _AGENDA_CATALOGUE is not None and _AGENDA_PATIENTS is not None:
+        return
+    pack = cal.SYNTHETIC_DATA_DIR
+    data_dir = pack if (pack / "patients.json").exists() else None
+    pack_client = FakeClinicClient(data_dir=data_dir) if data_dir is not None else None
+    api_client = FakeClinicClient()
+    _AGENDA_CATALOGUE = _sync_clinic(api_client.catalogue())
+    records = _sync_clinic((pack_client or api_client).directory())
+    seen = {row.patient_id for row in records}
+    for row in _sync_clinic(api_client.directory()):
+        if row.patient_id not in seen:
+            records.append(row)
+            seen.add(row.patient_id)
+    _AGENDA_PATIENTS = cal.patient_index_from_records(records)
+    _AGENDA_BOOKINGS = cal.load_agenda_bookings(_AGENDA_CATALOGUE)
+
+
+_AGENDA_CATALOGUE = None
+_AGENDA_PATIENTS: dict[str, Any] | None = None
+_AGENDA_BOOKINGS: dict[Any, Any] | None = None
+
+
+@app.get("/api/wall/agenda-options")
+def wall_agenda_options_api() -> JSONResponse:
+    """Doctors, sites, specialties and appointment types for the diary dropdowns."""
+    global _AGENDA_CATALOGUE
+    if _AGENDA_CATALOGUE is None:
+        _ensure_agenda()
+    return JSONResponse(cal.agenda_options(_AGENDA_CATALOGUE))
+
+
+@app.get("/api/wall/doctor-suggest")
+def wall_doctor_suggest_api(q: str = "") -> JSONResponse:
+    """Name typeahead. Empty query returns an empty list, never the full roster."""
+    global _AGENDA_CATALOGUE
+    if _AGENDA_CATALOGUE is None:
+        _ensure_agenda()
+    calendars = cal.build_calendars(_AGENDA_CATALOGUE, {})
+    return JSONResponse(cal.suggest_doctors(calendars, q))
+
+
+@app.get("/api/wall/doctor-agenda")
+def wall_doctor_agenda_api(
+    name: str = "",
+    specialty: str = "",
+    week: str | None = None,
+    month: str | None = None,
+    today: str | None = None,
+) -> JSONResponse:
+    """Month grid of booked visits. Doctor is optional; specialty is enough."""
+    global _AGENDA_CATALOGUE, _AGENDA_PATIENTS, _AGENDA_BOOKINGS
+    _ensure_agenda()
+    catalogue = _AGENDA_CATALOGUE
+    if today:
+        try:
+            today_date = date.fromisoformat(today)
+        except ValueError:
+            today_date = datetime.now(ZoneInfo("Europe/Madrid")).date()
+    else:
+        today_date = datetime.now(ZoneInfo("Europe/Madrid")).date()
+    week_date = None
+    if week:
+        try:
+            week_date = date.fromisoformat(week)
+        except ValueError:
+            week_date = None
+    month_date = None
+    if month:
+        raw = month.strip()
+        if len(raw) == 7:
+            raw = f"{raw}-01"
+        try:
+            month_date = date.fromisoformat(raw)
+        except ValueError:
+            month_date = None
+    calendars = cal.build_calendars(catalogue, _agenda_bookings_live())
+    payload = cal.clinic_agenda(
+        calendars,
+        _AGENDA_PATIENTS,
+        name=name,
+        specialty_id=specialty,
+        today=today_date,
+        week=week_date,
+        month=month_date,
+        location_names={loc.location_id: loc.name for loc in catalogue.locations},
+        type_names={item.appointment_type_id: item.name for item in catalogue.appointment_types},
+        type_durations={
+            item.appointment_type_id: item.duration_minutes for item in catalogue.appointment_types
+        },
+        plan_names={plan.insurer_id: plan.name for plan in catalogue.insurance_plans},
+    )
+    return JSONResponse(payload)
+
+
+# ---- Wall cancellations ----------------------------------------------------
+# The Horarios page's "Cancelar" buttons land here. The data layer is
+# ``database/`` (the control centre's own store): one ``wall_cancellations``
+# row per freed slot, plus a status flip on ``appointments`` when the
+# appointment exists there — the same ``cancelled`` a phone cancellation
+# writes through ``database/hooks.py``. Reads then drop those slots via
+# ``cal.drop_cancelled``, so a cancelled visit simply shows as a free slot,
+# the same thing a CANCEL replayed from the call log does. Every cancelled
+# visit with a patient on it also lands in the rebooking queue
+# (``rebooking.sqlite3`` next to the product DB) as a pending ``reschedule``
+# — the outbound dialer calls the patient back for a new slot once the line
+# can dial out. Nothing is submitted anywhere: the clinic's own diary is the
+# system of record here.
+
+
+def _wall_db_path() -> Path:
+    return get_settings().product_db_path
+
+
+def _wall_cancelled_keys() -> set[cal.BookingKey]:
+    """The slots the control centre cancelled by hand, as diary keys."""
+    from database import db  # late import, same as vortex/line/submit.py's
+
+    keys: set[cal.BookingKey] = set()
+    try:
+        conn = db.connect(_wall_db_path())
+        try:
+            rows = db.list_wall_cancellations(conn)
+        finally:
+            conn.close()
+    except Exception:
+        # A missing/unwritable store must never blank the diary.
+        log.exception("wall_cancellations read failed; agenda shows every slot")
+        return keys
+    for row in rows:
+        key = cal.cancel_key(row.provider_id, row.site_id, row.slot_start)
+        if key is not None:
+            keys.add(key)
+    return keys
+
+
+def _agenda_bookings_live() -> dict[cal.BookingKey, cal.Booking]:
+    """The loaded bookings minus the slots the wall already cancelled."""
+    _ensure_agenda()
+    return cal.drop_cancelled(_AGENDA_BOOKINGS or {}, _wall_cancelled_keys())
+
+
+def _rebooking_store_path() -> Path:
+    """The reschedule-callback queue file: ``rebooking.sqlite3`` next to the
+    product DB (``logs/`` locally, the board's writable volume in deploy —
+    same place a real outbound dialer would read it from)."""
+    return _wall_db_path().with_name("rebooking.sqlite3")
+
+
+def _enqueue_rebookings(bookings: list[cal.Booking]) -> int:
+    """One pending ``rebooking_requests`` row per cancelled visit — the queue
+    ``vortex/diary/rebooking.py``'s watcher re-checks and the line's outbound
+    dialer will drain once it can place calls. A failed queue must not roll
+    back a cancel that already committed, so this logs and degrades to 0
+    instead of propagating."""
+    from vortex.diary import rebooking  # late import, same as database/ below
+
+    today = datetime.now(MADRID).date()
+    try:
+        store = rebooking.RebookingStore(_rebooking_store_path())
+    except Exception:
+        log.exception("rebooking queue unavailable; cancelled slots stay cancelled")
+        return 0
+    queued = 0
+    for booking in bookings:
+        request = rebooking.wall_cancel_request(
+            provider_id=booking.provider_id,
+            location_id=booking.location_id,
+            slot_start=booking.start,
+            patient_id=booking.patient_id,
+            appointment_id=booking.appointment_id or None,
+            today=today,
+        )
+        if request is None:
+            continue  # no patient on the visit — nobody to call back
+        try:
+            store.add(request)
+            queued += 1
+        except Exception:
+            log.exception("rebooking enqueue failed for slot %s", booking.start.isoformat())
+    return queued
+
+
+def _parse_day(raw: Any) -> date | None:
+    try:
+        return date.fromisoformat(str(raw or "").strip())
+    except ValueError:
+        return None
+
+
+def _cancel_range_args(
+    payload: Any,
+) -> tuple[str, date | None, date | None, str | None]:
+    """Shared validation for the two range routes. ``from`` > ``to`` is a
+    slips-of-the-mouse case, not an error — the range swaps ends."""
+    if not isinstance(payload, dict):
+        return "", None, None, "bad_request"
+    provider_id = str(payload.get("provider_id") or "").strip()
+    day_from = _parse_day(payload.get("from"))
+    day_to = _parse_day(payload.get("to"))
+    if not provider_id:
+        return provider_id, day_from, day_to, "missing_doctor"
+    if day_from is None or day_to is None:
+        return provider_id, day_from, day_to, "missing_dates"
+    if day_from > day_to:
+        day_from, day_to = day_to, day_from
+    return provider_id, day_from, day_to, None
+
+
+def _cancel_targets(
+    provider_id: str, day_from: date, day_to: date
+) -> tuple[str, list[cal.Booking]]:
+    """One doctor's still-booked slots inside the range — the exact set a
+    range cancel frees, so preview and confirm can never disagree on what
+    "all appointments in the range" means."""
+    _ensure_agenda()
+    catalogue = _AGENDA_CATALOGUE
+    provider = next((p for p in catalogue.providers if p.provider_id == provider_id), None)
+    if provider is None:
+        return "", []
+    hits = [
+        booking
+        for booking in _agenda_bookings_live().values()
+        if booking.provider_id == provider_id
+        and day_from <= booking.start.astimezone(MADRID).date() <= day_to
+    ]
+    return provider.name, sorted(hits, key=lambda booking: booking.start)
+
+
+def _cancel_sample(bookings: list[cal.Booking], limit: int = 8) -> list[dict[str, str]]:
+    """The first few affected visits, for the modal's "this is what goes" list."""
+    patients = _AGENDA_PATIENTS or {}
+    sample = []
+    for booking in bookings[:limit]:
+        person = patients.get(booking.patient_id)
+        start = booking.start.astimezone(MADRID)
+        sample.append(
+            {
+                "date": start.date().isoformat(),
+                "time": start.strftime("%H:%M"),
+                "full_name": (person.full_name if person else "") or "Cita",
+            }
+        )
+    return sample
+
+
+@app.post("/api/wall/agenda/cancel-preview")
+async def wall_cancel_preview_api(request: Request) -> JSONResponse:
+    """The count (and a sample) a range cancel would free — the number the
+    modal shows before its explicit confirm. Writes nothing."""
+    provider_id, day_from, day_to, err = _cancel_range_args(await request.json())
+    if err:
+        return JSONResponse({"ok": False, "error": err}, status_code=400)
+    doctor, hits = _cancel_targets(provider_id, day_from, day_to)
+    if not doctor:
+        return JSONResponse({"ok": False, "error": "unknown_doctor"}, status_code=404)
+    return JSONResponse(
+        {
+            "ok": True,
+            "doctor": doctor,
+            "count": len(hits),
+            "sample": _cancel_sample(hits),
+        }
+    )
+
+
+@app.post("/api/wall/agenda/cancel")
+async def wall_cancel_range_api(request: Request) -> JSONResponse:
+    """Batch cancel: every booked slot of one doctor inside [from, to]."""
+    provider_id, day_from, day_to, err = _cancel_range_args(await request.json())
+    if err:
+        return JSONResponse({"ok": False, "error": err}, status_code=400)
+    doctor, hits = _cancel_targets(provider_id, day_from, day_to)
+    if not doctor:
+        return JSONResponse({"ok": False, "error": "unknown_doctor"}, status_code=404)
+    from database import db
+
+    patients = _AGENDA_PATIENTS or {}
+    with db.connection(_wall_db_path()) as conn:
+        for booking in hits:
+            person = patients.get(booking.patient_id)
+            db.insert_wall_cancellation(
+                conn,
+                provider_id=booking.provider_id,
+                site_id=booking.location_id,
+                slot_start=booking.start.astimezone(MADRID).isoformat(),
+                appointment_id=booking.appointment_id or None,
+                patient_name=person.full_name if person else None,
+                provider_name=doctor,
+            )
+        touched = db.cancel_appointment_rows(
+            conn, provider_id=provider_id, day_from=day_from, day_to=day_to
+        )
+    queued = _enqueue_rebookings(hits)
+    return JSONResponse(
+        {
+            "ok": True,
+            "doctor": doctor,
+            "cancelled": len(hits),
+            "appointments_updated": len(touched),
+            "rebookings_queued": queued,
+        }
+    )
+
+
+@app.post("/api/wall/appointments/cancel")
+async def wall_cancel_visit_api(request: Request) -> JSONResponse:
+    """Single cancel from a visit's detail view. The body names the slot the
+    way the diary keys it — provider + site + minute — and the server takes
+    every other fact (patient, appointment id) from the booking itself."""
+    payload = await request.json()
+    if not isinstance(payload, dict):
+        return JSONResponse({"ok": False, "error": "bad_request"}, status_code=400)
+    provider_id = str(payload.get("provider_id") or "").strip()
+    location_id = str(payload.get("location_id") or "").strip()
+    key = cal.cancel_key(provider_id, location_id, payload.get("slot_start"))
+    if key is None:
+        return JSONResponse({"ok": False, "error": "bad_slot"}, status_code=400)
+    booking = _agenda_bookings_live().get(key)
+    if booking is None:
+        # Free already (or never booked, or cancelled earlier) — a wall cancel
+        # must never mint a row for a slot nothing was on.
+        return JSONResponse({"ok": False, "error": "not_booked"}, status_code=409)
+    catalogue = _AGENDA_CATALOGUE
+    provider = next((p for p in catalogue.providers if p.provider_id == provider_id), None)
+    person = (_AGENDA_PATIENTS or {}).get(booking.patient_id)
+    from database import db
+
+    with db.connection(_wall_db_path()) as conn:
+        db.insert_wall_cancellation(
+            conn,
+            provider_id=provider_id,
+            site_id=location_id,
+            slot_start=booking.start.astimezone(MADRID).isoformat(),
+            appointment_id=booking.appointment_id or None,
+            patient_name=person.full_name if person else None,
+            provider_name=provider.name if provider else None,
+        )
+        touched = db.cancel_appointment_row(
+            conn,
+            appointment_id=booking.appointment_id or None,
+            provider_id=provider_id,
+            slot_start=booking.start.astimezone(MADRID).isoformat(),
+        )
+    queued = _enqueue_rebookings([booking])
+    return JSONResponse(
+        {"ok": True, "appointment_updated": touched, "rebookings_queued": queued}
+    )
+
+
+#: The Home page's own numbers never come from the live line: the pack is a
+#: fixed corpus of eval calls, cached for the life of the process the same
+#: way the React app's build is.
+_HOME_CARDS_CACHE: list[CallCard] | None = None
+
+
+def _home_cards() -> list[CallCard]:
+    global _HOME_CARDS_CACHE
+    if _HOME_CARDS_CACHE is None:
+        _HOME_CARDS_CACHE = load_synthetic_cards()
+    return _HOME_CARDS_CACHE
 
 
 @app.get("/api/wall/home-overview")
 def wall_home_overview_api() -> JSONResponse:
-    """Today's diary mix, desk containment, human queue, plus seven-day
-    unmet demand and cancellation recovery for the Clinic Home page.
+    """Stats, hourly and daily volume for the Home page — read straight off
+    ``synthetic-data/`` (see ``home_overview.py``), never a per-render mock."""
+    return JSONResponse(home_overview(_home_cards(), now=datetime.now(UTC)))
+
+
+@app.get("/api/wall/occupancy")
+def wall_occupancy_api(site: str = "", specialty: str = "") -> JSONResponse:
+    """Occupancy calendar for the Home page's site/specialty filters — read
+    straight off ``wall-cache/occupancy.json``, precomputed at start-up."""
+    return JSONResponse(occupancy(site=site, specialty=specialty))
+
+
+# ---- "Voz del agente" settings ---------------------------------------------
+# The card's store lives on the line (a voiceconfig.db next to its calls log);
+# the board only has that volume read-only, so these proxy to the line's API.
+# When the line is down the GET falls back to defaults so the page still loads.
+
+
+@app.get("/api/wall/voice-config")
+async def wall_voice_config() -> JSONResponse:
+    try:
+        r = httpx.get(f"{callfeed.LINE_URL}/voice-config", timeout=callfeed.LINE_HEALTH_TIMEOUT_S)
+        if r.status_code == 200:
+            return JSONResponse(r.json())
+    except Exception as exc:
+        log.warning("voice-config fetch failed: %s", exc)
+    return JSONResponse(voice_config.DEFAULTS)
+
+
+@app.put("/api/wall/voice-config")
+async def wall_voice_config_put(request: Request) -> JSONResponse:
+    payload = await request.json()
+    try:
+        r = httpx.put(f"{callfeed.LINE_URL}/voice-config", json=payload, timeout=5)
+        return JSONResponse(r.json(), status_code=r.status_code)
+    except Exception as exc:
+        return JSONResponse({"error": f"line unreachable: {exc}"}, status_code=502)
+
+
+@app.post("/api/wall/voice-preview")
+async def wall_voice_preview(request: Request) -> Response:
+    """The Try button: streams back the line's MP3 of the greeting."""
+    payload = await request.json()
+    try:
+        r = httpx.post(f"{callfeed.LINE_URL}/voice-preview", json=payload, timeout=20)
+    except Exception as exc:
+        return JSONResponse({"error": f"line unreachable: {exc}"}, status_code=502)
+    if r.status_code == 200:
+        return Response(content=r.content, media_type="audio/mpeg")
+    try:
+        return JSONResponse(r.json(), status_code=r.status_code)
+    except Exception:
+        return JSONResponse({"error": r.text}, status_code=r.status_code)
+
+
+# ---- "Personalidades" picker -------------------------------------------------
+# Same arrangement as the voice card: the personas live on the line (a
+# personalities.db next to its calls log) and the board only has that volume
+# read-only, so these proxy to the line's API. When the line is down the GET
+# falls back to the seed personas, flagged ``offline`` so the page can say so
+# and grey out the buttons instead of pretending a write will land.
+
+
+@app.get("/api/wall/personalities")
+async def wall_personalities() -> JSONResponse:
+    try:
+        r = httpx.get(f"{callfeed.LINE_URL}/personalities", timeout=callfeed.LINE_HEALTH_TIMEOUT_S)
+        if r.status_code == 200:
+            return JSONResponse(r.json())
+    except Exception as exc:
+        log.warning("personalities fetch failed: %s", exc)
+    return JSONResponse(
+        {
+            "items": personalities.DEFAULTS,
+            "active": personalities.DEFAULTS[0]["slug"],
+            "offline": True,
+            **personalities.catalog(),
+        }
+    )
+
+
+@app.post("/api/wall/personalities")
+async def wall_personality_create(request: Request) -> JSONResponse:
+    payload = await request.json()
+    try:
+        r = httpx.post(f"{callfeed.LINE_URL}/personalities", json=payload, timeout=5)
+        return JSONResponse(r.json(), status_code=r.status_code)
+    except Exception as exc:
+        return JSONResponse({"error": f"line unreachable: {exc}"}, status_code=502)
+
+
+@app.get("/api/wall/personalities/{slug}")
+async def wall_personality(slug: str) -> JSONResponse:
+    try:
+        r = httpx.get(
+            f"{callfeed.LINE_URL}/personalities/{slug}", timeout=callfeed.LINE_HEALTH_TIMEOUT_S
+        )
+        return JSONResponse(r.json(), status_code=r.status_code)
+    except Exception as exc:
+        return JSONResponse({"error": f"line unreachable: {exc}"}, status_code=502)
+
+
+@app.put("/api/wall/personalities/{slug}")
+async def wall_personality_put(slug: str, request: Request) -> JSONResponse:
+    payload = await request.json()
+    try:
+        r = httpx.put(f"{callfeed.LINE_URL}/personalities/{slug}", json=payload, timeout=5)
+        return JSONResponse(r.json(), status_code=r.status_code)
+    except Exception as exc:
+        return JSONResponse({"error": f"line unreachable: {exc}"}, status_code=502)
+
+
+@app.post("/api/wall/personalities/{slug}/activate")
+async def wall_personality_activate(slug: str) -> JSONResponse:
+    try:
+        r = httpx.post(f"{callfeed.LINE_URL}/personalities/{slug}/activate", timeout=5)
+        return JSONResponse(r.json(), status_code=r.status_code)
+    except Exception as exc:
+        return JSONResponse({"error": f"line unreachable: {exc}"}, status_code=502)
+
+
+@app.get("/wall/personalities/{filename}")
+def wall_personality_art(filename: str) -> Response:
+    """One persona portrait, straight off disk like the avatar routes above.
+
+    The stored filename is validated on the way in (no separators), but this
+    resolves it inside the folder anyway and refuses anything that lands
+    outside it or is not an SVG: a hand-edited db row must not read /etc.
     """
-    now = datetime.now(UTC)
-    events, _health = _load_events()
-    cards = build_calls(events)
-    return JSONResponse(home_overview(cards, now=now))
+    path = (PERSONALITY_MEDIA_DIR / filename).resolve()
+    if path.suffix.lower() != ".svg" or not path.is_relative_to(PERSONALITY_MEDIA_DIR.resolve()):
+        return JSONResponse({"error": "no such portrait"}, status_code=404)
+    if not path.is_file():
+        return JSONResponse({"error": "no such portrait"}, status_code=404)
+    return FileResponse(path, media_type="image/svg+xml")
 
 
 @app.get("/wall/avatar2d")
@@ -938,6 +1523,30 @@ def wall_avatar2d_animated() -> FileResponse:
     as the landing page's hero avatar.
     """
     return FileResponse(WALL_MEDIA_DIR / "avatar2d_animated.svg", media_type="image/svg+xml")
+
+
+@app.get("/wall/vorty-face")
+def wall_vorty_face() -> FileResponse:
+    """A static, cropped-to-the-head SVG (no animation) used as Vorty's
+    chat avatar — e.g. the Live Call transcript.
+    """
+    return FileResponse(WALL_MEDIA_DIR / "vorty-face.svg", media_type="image/svg+xml")
+
+
+@app.get("/wall/vorty-face-no-headphones")
+def wall_vorty_face_bare() -> FileResponse:
+    """The same head without the headset, so an accessory overlay can sit on top."""
+    return FileResponse(WALL_MEDIA_DIR / "vorty-face-no-headphones.svg", media_type="image/svg+xml")
+
+
+@app.get("/wall/accessories/{filename}")
+def wall_vorty_accessory(filename: str) -> Response:
+    """One Vorty accessory SVG, stacked over the bare face on a persona card."""
+    folder = (WALL_MEDIA_DIR / "accessories" / "animated").resolve()
+    path = (folder / filename).resolve()
+    if path.suffix.lower() != ".svg" or not path.is_relative_to(folder) or not path.is_file():
+        return JSONResponse({"error": "no such accessory"}, status_code=404)
+    return FileResponse(path, media_type="image/svg+xml")
 
 
 @app.get("/wall", response_model=None)
@@ -1056,6 +1665,9 @@ async def ops_page() -> None:
             "outline no-caps"
         ).classes("button-secondary")
         ui.button("Replay refusal", on_click=lambda: _replay("refuse")).props(
+            "outline no-caps"
+        ).classes("button-secondary")
+        ui.button("Replay cancellations", on_click=_replay_cancellations).props(
             "outline no-caps"
         ).classes("button-secondary")
 
@@ -1259,9 +1871,28 @@ def bench_page() -> None:
     )
 
 
+def _precompute_wall_cache() -> None:
+    """Refresh ``wall-cache/occupancy.json`` off the clinic API's own GETs
+    before serving the first request — see ``scripts/precompute_wall_cache.py``.
+    Run as a subprocess, the same way ``_play_line`` shells out to
+    ``scripts/fake_caller.py``: it's a standalone script, not a package
+    import, and a slow or failing fetch should delay start-up, never crash
+    the board — the Home page just shows an empty occupancy card until the
+    next successful run."""
+    script = REPO_ROOT / "scripts" / "precompute_wall_cache.py"
+    result = subprocess.run(
+        [sys.executable, str(script)], cwd=str(REPO_ROOT), capture_output=True, text=True
+    )
+    if result.returncode == 0:
+        print(result.stdout.strip())
+    else:
+        print(f"wall-cache precompute failed, keeping any existing file: {result.stderr.strip()}")
+
+
 def main() -> None:
     if auth.is_production() and not auth.ops_password():
         raise SystemExit("VORTEX_OPS_PASSWORD is required in production")
+    _precompute_wall_cache()
     ui.run(
         host="0.0.0.0",
         port=BOARD_PORT,
@@ -1277,8 +1908,9 @@ def main() -> None:
 # The clinic console (Overview, Agents, Patients, Insights, Settings) registers
 # its pages on import. It imports this module, so it must come last.
 # The doctor calendar (/calendar) registers its page on import; it reuses this
-# module's chrome, so it comes after everything above is defined.
-from vortex.observability import calendar_view, console  # noqa: E402, F401
+# module's chrome, so it comes after everything above is defined. liveflow is
+# the workflow projector page (/wall/flow public, /calls/live for the team).
+from vortex.observability import calendar_view, console, liveflow  # noqa: E402, F401
 
 if __name__ in {"__main__", "__mp_main__"}:
     main()

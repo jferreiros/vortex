@@ -16,6 +16,7 @@ not a pass.
 
 from __future__ import annotations
 
+from contextvars import ContextVar
 from typing import Protocol
 
 import httpx
@@ -29,6 +30,21 @@ from vortex.contract import (
     ToolContext,
     action_payload,
     action_route,
+)
+from vortex.settings import get_settings
+
+# Where ``submit_action`` leaves the action the POST actually carried. The JEV
+# arbiter can replace a booking with an escalation between the tool call and
+# the send, so whatever acts on acceptance - the confirmation SMS - has to read
+# what the platform holds, not what it was asked for. A context variable and
+# not the call's ``state``: one call can have two sends in flight - a confirmed
+# plan goes out as its own task while the model's ``submit_action`` runs - and
+# each task gets its own copy of the context, so the second send cannot
+# overwrite what the first one reads back. Nothing is shared between sockets
+# either, for the same reason, and the ``call_id`` travels with the action so an
+# inherited context can never answer for another call.
+_EFFECTIVE_ACTION: ContextVar[tuple[str, Action] | None] = ContextVar(
+    "vortex_line_effective_action", default=None
 )
 
 
@@ -120,11 +136,35 @@ def with_verdict_reason(ctx: ToolContext, action: Action) -> Action:
     return forced
 
 
+def remember_submitted_action(ctx: ToolContext, action: Action) -> None:
+    """Pair the action a POST carries with the task that sends it."""
+    _EFFECTIVE_ACTION.set((ctx.call_id, action))
+
+
+def submitted_action(ctx: ToolContext, requested: Action) -> Action:
+    """The action this task's own POST carried, or ``requested`` if it sent none."""
+    sent = _EFFECTIVE_ACTION.get()
+    if sent is None or sent[0] != ctx.call_id:
+        return requested
+    return sent[1]
+
+
 async def submit_action(ctx: ToolContext, args: SubmitInput) -> SubmitResult:
     """The ``submit_action`` tool. Sends through the call's own submit client."""
     if ctx.submitter is None:
         return SubmitResult(status="error", detail="no submitter on this call context")
     action = with_verdict_reason(ctx, args.action)
+    if get_settings().jev_arbiter:
+        from vortex.jev.arbiter import review
+
+        reviewed = await review(ctx, action)
+        if reviewed is not action:
+            ctx.log.event(
+                "submit.jev_override",
+                route=action_route(action),
+                decided=action_route(reviewed),
+            )
+            action = reviewed
     if action is not args.action:
         ctx.log.event(
             "submit.reason_override",
@@ -132,9 +172,30 @@ async def submit_action(ctx: ToolContext, args: SubmitInput) -> SubmitResult:
             model_reason=args.action.reason,  # type: ignore[union-attr]
             reason=action.reason,  # type: ignore[union-attr]
         )
+    remember_submitted_action(ctx, action)
     route = action_route(action)
     payload = action_payload(action, ctx.call_id)
     ctx.log.event("submit.sent", route=route, payload=payload)
     result = await ctx.submitter.submit(ctx.call_id, action)
     ctx.log.action_submitted(route, payload, result)
+    if action.kind in {"book", "cancel", "reschedule"}:
+        if result.status in {"accepted", "duplicate"}:
+            invalidate = getattr(ctx.clinic, "invalidate_availability", None)
+            if invalidate is not None:
+                invalidate()
+        # dry_run counts too: with no PLATFORM_API_KEY (the default local
+        # setup — see database/README.md's "Entorno (local)") nothing is
+        # ever "accepted", but the action is exactly as real locally as it
+        # would be against the platform, and make call/make run must
+        # populate database/ the same way a keyed deploy does. Only a
+        # rejected, late or unknown-call submit means the action never
+        # happened at all.
+        if result.status in {"accepted", "duplicate", "dry_run"}:
+            # Late import: database/ has no reason to load at process start
+            # for every call, and this keeps the product database an
+            # optional layer the line depends on for one call, not a
+            # startup-time dependency.
+            from database.hooks import persist_submission
+
+            await persist_submission(ctx, action, db_path=get_settings().product_db_path)
     return result
