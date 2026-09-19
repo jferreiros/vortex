@@ -61,12 +61,13 @@ from vortex.line.submit import (
     SubmitApi,
     SubmitClient,
     submit_action,
+    submitted_action,
     with_verdict_reason,
 )
 from vortex.line.twilio import StartPayload
 from vortex.line.usage import UsageTotals
 from vortex.observability.calllog import CallLog
-from vortex.observability.tracing import observe_span
+from vortex.observability.tracing import mask_phone, observe_span
 from vortex.rules.triage import DEFAULT_SPECIALTY
 from vortex.settings import Settings, get_settings
 
@@ -495,7 +496,7 @@ class CallSession:
             if result.status in ACCEPTED_STATUSES:
                 self.arm_hangup("submit_accepted")
                 if sent is not None:
-                    self._queue_sms(sent)
+                    self._queue_sms(submitted_action(self.ctx, sent))
         else:
             self.memory.observe(name, result)
             if self.memory.superseded_slot:
@@ -648,7 +649,7 @@ class CallSession:
         self.submitted.append(result)
         self.sent_actions.append(with_verdict_reason(self.ctx, action))
         if result.status in ACCEPTED_STATUSES:
-            self._queue_sms(action)
+            self._queue_sms(submitted_action(self.ctx, action))
         return result
 
     @property
@@ -730,12 +731,11 @@ class CallSession:
         details = await resolve_details(self.ctx, action)
         body = render_confirmation_text(action, details)
         payload = notification_payload(action, details)
-        self.ctx.log.event("sms.sending", to=to, body=body, **payload)
+        self.ctx.log.event("sms.sending", to=mask_phone(to), **payload)
         result = await self.sms.send(to=to, body=body)
         self.ctx.log.event(
             f"sms.{result.status}",
-            to=result.to or to,
-            body=result.body or body,
+            to=mask_phone(result.to or to),
             detail=result.detail,
             sid=result.sid,
             **payload,

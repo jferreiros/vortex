@@ -793,6 +793,14 @@ def _slot_rejection(
     return None
 
 
+async def _fresh_availability(ctx: ToolContext, **query: object) -> AvailabilityResponse:
+    """Use a client's live hook when its normal availability path is cached."""
+    fresh = getattr(ctx.clinic, "fresh_availability", None)
+    if fresh is not None:
+        return await fresh(**query)
+    return await ctx.clinic.availability(**query)  # type: ignore[arg-type]
+
+
 async def prepare_booking(ctx: ToolContext, args: PrepareBookingInput) -> BookingResult:
     """Build the ``BookAction`` for a chosen slot, or reject it.
 
@@ -820,7 +828,8 @@ async def prepare_booking(ctx: ToolContext, args: PrepareBookingInput) -> Bookin
 
     day = args.slot.start.astimezone(MADRID).date()
     try:
-        availability = await ctx.clinic.availability(
+        availability = await _fresh_availability(
+            ctx,
             date_from=day,
             date_to=day,
             provider_id=args.slot.provider_id,

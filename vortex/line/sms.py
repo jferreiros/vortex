@@ -81,7 +81,9 @@ class DryRunSmsClient:
 
     async def send(self, *, to: str, body: str) -> SmsResult:
         self.sent.append((to, body))
-        return SmsResult(status="dry_run", detail="no Twilio credentials: not sent", to=to, body=body)
+        return SmsResult(
+            status="dry_run", detail="no Twilio credentials: not sent", to=to, body=body
+        )
 
     async def aclose(self) -> None:
         return None
@@ -160,7 +162,13 @@ def make_sms_client(settings: Settings) -> SmsClient:
 
 
 def format_slot_es(when: datetime) -> str:
-    """``jueves 24 de septiembre a las 16:30`` in Europe/Madrid."""
+    """``jueves 24 de septiembre a las 16:30`` in Europe/Madrid.
+
+    A naive ``when`` is refused: ``astimezone`` would read it in the machine's
+    timezone and text the caller an hour the clinic never offered.
+    """
+    if when.utcoffset() is None:
+        raise ValueError(f"appointment datetime must carry an offset: {when.isoformat()}")
     local = when.astimezone(MADRID)
     weekday = WEEKDAYS_ES[local.weekday()]
     month = MONTHS_ES[local.month - 1]
@@ -192,10 +200,7 @@ def cancellation_confirmation_text(
     location_name: str = "",
 ) -> str:
     if when is None:
-        return (
-            "Cita cancelada: hemos cancelado tu cita. "
-            "Para reservar otra, llama a la clínica."
-        )
+        return "Cita cancelada: hemos cancelado tu cita. Para reservar otra, llama a la clínica."
     stamp = format_slot_es(when)
     if provider_name and location_name:
         head = f"Cita cancelada con {provider_name} en {location_name}: {stamp}."
@@ -260,7 +265,10 @@ async def resolve_details(ctx: ToolContext, action: Action) -> AppointmentDetail
         if known is None:
             details.missing.append("appointment_details")
             return details
-        details.when = known.start
+        if known.start.utcoffset() is not None:
+            details.when = known.start
+        else:
+            details.missing.append("naive_appointment_start")
         details.provider_id = known.provider_id
         details.location_id = known.location_id
     else:
@@ -303,14 +311,18 @@ def render_confirmation_text(action: Action, details: AppointmentDetails) -> str
 
 
 def notification_payload(action: Action, details: AppointmentDetails) -> dict[str, Any]:
-    """Compact log fields for sms.* events."""
+    """Compact log fields for sms.* events.
+
+    Clinic ids and enums only. ``CallLog.event`` writes every field here to
+    ``calls.jsonl`` verbatim, and the doctor's and the site's names are free
+    text about where a named patient is treated - the message the caller reads
+    carries them, the log does not.
+    """
     payload: dict[str, Any] = {
         "action_kind": action.kind,
         "when": details.when.isoformat() if details.when else "",
         "provider_id": details.provider_id,
         "location_id": details.location_id,
-        "provider_name": details.provider_name,
-        "location_name": details.location_name,
         "missing": list(details.missing),
     }
     if isinstance(action, CancelAction):
