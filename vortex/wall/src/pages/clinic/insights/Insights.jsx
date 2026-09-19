@@ -12,6 +12,16 @@ const RANGES = [
 
 const POLL_MS = 6000;
 
+// One mock row per catalogue specialty — the six Arenal services.
+const MOCK_SERVICES = [
+  { id: "general_practice", name: "Medicina general", requested: 21, offered: 18, booked: 15, declined_full: 3, providers: 3, occupancy_pct: 116.7, extra_providers_needed: 1 },
+  { id: "paediatrics", name: "Pediatría", requested: 9, offered: 12, booked: 8, declined_full: 0, providers: 2, occupancy_pct: 75.0, extra_providers_needed: 0 },
+  { id: "dermatology", name: "Dermatología", requested: 6, offered: 8, booked: 5, declined_full: 0, providers: 1, occupancy_pct: 75.0, extra_providers_needed: 0 },
+  { id: "orthopaedics", name: "Traumatología", requested: 5, offered: 10, booked: 4, declined_full: 0, providers: 2, occupancy_pct: 50.0, extra_providers_needed: 0 },
+  { id: "gynaecology", name: "Ginecología", requested: 3, offered: 6, booked: 3, declined_full: 0, providers: 1, occupancy_pct: 50.0, extra_providers_needed: 0 },
+  { id: "physiotherapy", name: "Fisioterapia", requested: 2, offered: 9, booked: 2, declined_full: 0, providers: 1, occupancy_pct: 22.2, extra_providers_needed: 0 },
+];
+
 const MOCK_STATS = {
   calls_considered: 214,
   unavailability: MOCK_OVERVIEW.unavailability,
@@ -25,12 +35,14 @@ const MOCK_STATS = {
       { date: "2026-09-19", freed: 2, relocated: 1, lost: 1 },
     ],
   },
-  providers: {
-    providers: [
-      { id: "p1", name: "Dra. Ortiz", requests: 18, success_rate: 44, median_wait_days: 12, flagged: true },
-      { id: "p2", name: "Dr. Sáez", requests: 14, success_rate: 79, median_wait_days: 4, flagged: false },
-      { id: "p3", name: "Dra. Vidal", requests: 11, success_rate: 82, median_wait_days: 3, flagged: false },
-      { id: "p4", name: "Dr. Costa", requests: 7, success_rate: 71, median_wait_days: 6, flagged: false },
+  // Same shape business_insights.service_occupancy serves: one row per
+  // specialty, network-wide ("all") and once per site.
+  occupancy: {
+    all: MOCK_SERVICES,
+    sites: [
+      { id: "centro", name: "Arenal Centro", services: MOCK_SERVICES },
+      { id: "norte", name: "Arenal Norte", services: MOCK_SERVICES },
+      { id: "sur", name: "Arenal Sur", services: MOCK_SERVICES },
     ],
   },
   heatmap: {
@@ -146,6 +158,135 @@ function StatTable({ columns, rows, empty }) {
   );
 }
 
+// One box per specialty: name, occupancy % (can read over 100% — the
+// platform only offers a slot that exists, so unmatched demand is a real
+// rejection for being full), a capped mini-bar and the volume behind it.
+function ServiceTile({ service, active, onClick }) {
+  const pct = service.occupancy_pct;
+  const known = pct != null;
+  const over = known && pct > 100;
+  return (
+    <button
+      type="button"
+      className={`service-tile ${over ? "over" : ""} ${active ? "active" : ""}`}
+      aria-expanded={active}
+      onClick={onClick}
+    >
+      <div className="service-tile-top">
+        <span className="service-tile-name">{service.name}</span>
+        <span className={`service-tile-pct ${over ? "over" : ""}`}>{known ? `${pct}%` : "—"}</span>
+      </div>
+      <span className="service-tile-track">
+        <span
+          className={`service-tile-fill ${over ? "over" : ""}`}
+          style={{ width: `${known ? Math.min(pct, 100) : 0}%` }}
+        />
+      </span>
+      <span className="service-tile-meta">
+        {service.requested} pet · {service.providers} médico{service.providers === 1 ? "" : "s"}
+      </span>
+    </button>
+  );
+}
+
+// What tapping a tile answers: how many more providers of that specialty
+// would have absorbed every request this period, at today's slots-per-doctor
+// rate — the number business_insights.service_occupancy already computed.
+function ServiceDetail({ service }) {
+  const pct = service.occupancy_pct;
+  const extra = service.extra_providers_needed ?? 0;
+  if (pct == null) {
+    return (
+      <p className="service-detail-empty">
+        {service.name}: se pidió cita pero no quedó registrado ningún hueco ofrecido — no se
+        puede calcular la ocupación en este período.
+      </p>
+    );
+  }
+  if (extra <= 0) {
+    return (
+      <p className="service-detail-empty">
+        {service.name} tiene margen: {service.providers} médico{service.providers === 1 ? "" : "s"}{" "}
+        cubren la demanda pedida ({pct}%).
+      </p>
+    );
+  }
+  return (
+    <div className="service-detail">
+      <p className="service-detail-head">
+        {service.name}: {service.requested} peticiones contra {service.offered} huecos ofrecidos
+        ({pct}% de ocupación)
+        {service.declined_full > 0 ? `, ${service.declined_full} rechazadas por no quedar hueco` : ""}
+        .
+      </p>
+      <p className="service-detail-calc">
+        Con <strong>{extra} médico{extra === 1 ? "" : "s"} más</strong> de esta especialidad
+        (sobre los {service.providers} actuales) se habría podido atender a todos los que la
+        pidieron.
+      </p>
+    </div>
+  );
+}
+
+// Ocupación por servicio: pick a centre (or all of them), see every
+// specialty's demand-vs-capacity in one glance, tap a box for the hiring
+// math behind it. Data comes precomputed in the same business-insights
+// payload as the rest of the page — no calculation duplicated here.
+function ServiceOccupancy({ occupancy }) {
+  const [site, setSite] = useState("all");
+  const [openId, setOpenId] = useState(null);
+  const sites = occupancy?.sites ?? [];
+  const services = site === "all" ? occupancy?.all ?? [] : sites.find((s) => s.id === site)?.services ?? [];
+  const active = services.find((s) => s.id === openId) ?? null;
+
+  return (
+    <div className="service-occupancy">
+      <div className="home-toolbar" role="tablist" aria-label="Centro">
+        <button
+          type="button"
+          className={`home-chip ${site === "all" ? "on" : ""}`}
+          onClick={() => {
+            setSite("all");
+            setOpenId(null);
+          }}
+        >
+          Todos los centros
+        </button>
+        {sites.map((s) => (
+          <button
+            key={s.id}
+            type="button"
+            className={`home-chip ${site === s.id ? "on" : ""}`}
+            onClick={() => {
+              setSite(s.id);
+              setOpenId(null);
+            }}
+          >
+            {s.name}
+          </button>
+        ))}
+      </div>
+      {services.length ? (
+        <>
+          <div className="service-grid">
+            {services.map((s) => (
+              <ServiceTile
+                key={s.id}
+                service={s}
+                active={openId === s.id}
+                onClick={() => setOpenId(openId === s.id ? null : s.id)}
+              />
+            ))}
+          </div>
+          {active && <ServiceDetail service={active} />}
+        </>
+      ) : (
+        <p className="insights-empty">Sin peticiones de especialidad en este período.</p>
+      )}
+    </div>
+  );
+}
+
 function Heatmap({ heatmap }) {
   const rows = heatmap?.rows ?? [];
   const bands = heatmap?.bands ?? [];
@@ -196,7 +337,6 @@ export default function Insights() {
   const data = useBusinessInsights(days) ?? MOCK_STATS;
   const unmet = data.unavailability ?? {};
   const cancel = data.cancellations ?? {};
-  const providers = data.providers?.providers ?? [];
   const calls = data.calls_considered ?? 0;
   const unmetPct = calls ? Math.round((100 * (unmet.unmet_total ?? 0)) / calls) : 0;
   const topReason = unmet.buckets?.[0];
@@ -265,23 +405,11 @@ export default function Insights() {
         </Card>
 
         <Card padding="lg" className="insights-panel">
-          <h2>Doctors asked for by name</h2>
-          <StatTable
-            empty="Nobody asked for a doctor by name."
-            columns={[
-              { key: "name", label: "Doctor" },
-              { key: "requests", label: "Asks", num: true },
-              { key: "rate", label: "Booked", num: true },
-              { key: "wait", label: "Wait", num: true },
-            ]}
-            rows={providers.slice(0, 6).map((p) => ({
-              id: p.id,
-              name: p.flagged ? `${p.name} · tight` : p.name,
-              requests: p.requests,
-              rate: `${p.success_rate}%`,
-              wait: p.median_wait_days != null ? `${p.median_wait_days} d` : "—",
-            }))}
-          />
+          <h2>Ocupación por servicio</h2>
+          <p className="insights-panel-sub">
+            Toca un servicio para ver cuantos médicos más harían falta para atender toda la demanda.
+          </p>
+          <ServiceOccupancy occupancy={data.occupancy} />
         </Card>
       </div>
 
