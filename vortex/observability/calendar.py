@@ -244,6 +244,26 @@ def _cells_for_day(
     return cells
 
 
+def grid_signature(calendars: list[DoctorCalendar]) -> tuple:
+    """A fingerprint of everything the grids show: each cell's minute and state.
+
+    The view redraws only when this changes. Totals are not enough: a reschedule
+    moves a booking inside one doctor's window while the booked count, the
+    capacity and the day count all stay the same, and the old slot would stay on
+    screen.
+    """
+    return tuple(
+        (
+            calendar.provider_id,
+            tuple(
+                (day.day, tuple((cell.start, cell.status) for cell in day.cells))
+                for day in calendar.days
+            ),
+        )
+        for calendar in calendars
+    )
+
+
 def build_calendars(
     catalogue: Catalogue,
     bookings: dict[BookingKey, Booking],

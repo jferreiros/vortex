@@ -7,6 +7,7 @@ against a seeded call log.
 from __future__ import annotations
 
 import asyncio
+import json
 import threading
 from collections.abc import Iterator
 from pathlib import Path
@@ -132,6 +133,34 @@ async def test_calendar_page_renders_doctor_grids(seeded: Path, user: User) -> N
     # Doctor names come from the catalogue, so the rail renders with or without
     # the synthetic-data pack present.
     await user.should_see("Dra. Ortiz")
+
+
+async def test_calendar_hides_patient_data_on_a_booked_slot(
+    seeded: Path, user: User, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The grid is public: a taken slot says it is taken and nothing else."""
+    calendar_log = tmp_path / "calendar.jsonl"
+    booking = {
+        "kind": "submit.result",
+        "call_id": "cal-privacy",
+        "ts": "2026-09-07T10:00:00+02:00",
+        "payload": {
+            "action": "BOOK",
+            "patient_id": "P-LEAKED-ID",
+            "provider_id": "PR01",
+            "location_id": "centro",
+            "appointment_type_id": "T-LEAKED-TYPE",
+            "slot": "2026-09-08T10:00:00+02:00",
+        },
+    }
+    calendar_log.write_text(json.dumps(booking) + "\n", encoding="utf-8")
+    monkeypatch.setenv("VORTEX_CALENDAR_LOG", str(calendar_log))
+
+    await user.open("/calendar")
+    # The pill proves the booking reached the grid, so the checks below are real.
+    await user.should_see("1 booked")
+    await user.should_not_see("P-LEAKED-ID")
+    await user.should_not_see("T-LEAKED-TYPE")
 
 
 async def test_public_pages_mask_the_phone(seeded: Path, user: User) -> None:
