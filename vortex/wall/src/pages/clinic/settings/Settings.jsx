@@ -20,11 +20,47 @@ function deepEqual(a, b) {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
+function fromApi(json) {
+  if (!json || typeof json !== "object") return DEFAULTS;
+  return {
+    minimumBookingLeadHours: json.minimumBookingLeadHours ?? DEFAULTS.minimumBookingLeadHours,
+    patientIdentificationFieldsRequired:
+      json.patientIdentificationFieldsRequired ?? DEFAULTS.patientIdentificationFieldsRequired,
+    callTimeCapMinutes: json.callTimeCapMinutes ?? DEFAULTS.callTimeCapMinutes,
+  };
+}
+
 export default function Settings() {
   const [settings, setSettings] = useState(DEFAULTS);
   const [savedSettings, setSavedSettings] = useState(DEFAULTS);
   const [saveStatus, setSaveStatus] = useState(null);
   const [showDefaultConfirm, setShowDefaultConfirm] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/wall/clinic-settings")
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((json) => {
+        if (cancelled) return;
+        const next = fromApi(json);
+        setSettings(next);
+        setSavedSettings(next);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const persist = async (next) => {
+    const response = await fetch("/api/wall/clinic-settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(next),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return fromApi(await response.json());
+  };
 
   const hasChanges = !deepEqual(settings, savedSettings);
 
@@ -50,15 +86,28 @@ export default function Settings() {
     updateSetting("patientIdentificationFieldsRequired", Math.max(1, Math.min(4, value)));
   };
 
-  const handleSave = () => {
-    setSavedSettings(JSON.parse(JSON.stringify(settings)));
-    setSaveStatus("saved");
+  const handleSave = async () => {
+    try {
+      const saved = await persist(settings);
+      setSettings(saved);
+      setSavedSettings(saved);
+      setSaveStatus("saved");
+    } catch {
+      setSaveStatus(null);
+    }
     setTimeout(() => setSaveStatus(null), 3000);
   };
 
-  const handleSetDefault = () => {
-    setSettings(DEFAULTS);
-    setSaveStatus("defaulted");
+  const handleSetDefault = async () => {
+    try {
+      const saved = await persist(DEFAULTS);
+      setSettings(saved);
+      setSavedSettings(saved);
+      setSaveStatus("defaulted");
+    } catch {
+      setSettings(DEFAULTS);
+      setSaveStatus("defaulted");
+    }
     setTimeout(() => setSaveStatus(null), 3000);
   };
 

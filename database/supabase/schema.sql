@@ -123,6 +123,29 @@ create table if not exists public.rebooking_requests (
     draft_action_json  text
 );
 
+-- ---- clinic console (settings, pathways, patterns) ------------------------
+
+create table if not exists public.clinic_settings (
+    id                                      integer primary key check (id = 1),
+    minimum_booking_lead_hours              integer not null,
+    patient_identification_fields_required  integer not null,
+    call_time_cap_minutes                   integer not null,
+    updated_at                              text not null
+);
+
+create table if not exists public.wall_documents (
+    kind        text primary key,
+    body        jsonb not null,
+    updated_at  text not null
+);
+
+create table if not exists public.suggestion_rejections (
+    patient_id   text not null,
+    pattern_id   text not null,
+    rejected_at  text not null,
+    primary key (patient_id, pattern_id)
+);
+
 -- ---- agent voice + personas -----------------------------------------------
 
 create table if not exists public.voiceconfig (
@@ -189,6 +212,9 @@ alter table public.wall_cancellations enable row level security;
 alter table public.rebooking_requests enable row level security;
 alter table public.voiceconfig enable row level security;
 alter table public.personalities enable row level security;
+alter table public.clinic_settings enable row level security;
+alter table public.wall_documents enable row level security;
+alter table public.suggestion_rejections enable row level security;
 
 revoke all on function public.call_events_for_window(integer, timestamptz)
     from public, anon, authenticated;
@@ -202,4 +228,7 @@ grant all on table public.wall_cancellations to service_role;
 grant all on table public.rebooking_requests to service_role;
 grant all on table public.voiceconfig to service_role;
 grant all on table public.personalities to service_role;
+grant all on table public.clinic_settings to service_role;
+grant all on table public.wall_documents to service_role;
+grant all on table public.suggestion_rejections to service_role;
 grant usage, select on all sequences in schema public to service_role;

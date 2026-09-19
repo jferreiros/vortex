@@ -2,8 +2,9 @@ import { useNavigate } from "react-router-dom";
 import { useLayoutEffect, useRef, useState } from "react";
 import Card from "../../../components/ui/Card";
 import { MOCK_OVERVIEW, useHomeOverview } from "./useHomeOverview";
-import { PLACEHOLDER_CALLS } from "../live-calls/placeholderCalls";
-import { REASON_LABEL } from "../../../lib/labels";
+import { useOccupancy, withDate } from "./useHomeData";
+import useLiveCalls from "../live-calls/useLiveCalls";
+import { PHASE_LABEL, REASON_LABEL } from "../../../lib/labels";
 import patientTimelines from "../../../data/patientTimelines.json";
 import "../live-calls/live-calls.css";
 import "./home.css";
@@ -15,24 +16,11 @@ const MANAGER_NAME = "Ricardo";
 const PATIENT_ID_BY_NAME = Object.fromEntries(
   patientTimelines.patients.map((p) => [p.name, p.patientId])
 );
-function patientIdFor(name) {
+function patientIdFor(call) {
+  if (typeof call === "object" && call?.patient_id) return call.patient_id;
+  const name = typeof call === "string" ? call : call?.patient;
   return PATIENT_ID_BY_NAME[name] || patientTimelines.patients[0].patientId;
 }
-
-// "Rechazada" = the agent submitted NO_ACTION. `reason` is one of the closed
-// 18-value vocabulary (see .claude/skills/submit-action) — the exact rule
-// that bit — plus the moment it happened and a way to ring the caller back.
-const REJECTED_CALLS = [
-  { id: "rej-1", patient: "Sin identificar", phone: "+34 611 224 578", time: "11:42:07", reason: "no_availability" },
-  { id: "rej-2", patient: "Marcos Iglesias Peña", phone: "+34 699 015 332", time: "11:26:51", reason: "location_hours" },
-  { id: "rej-3", patient: "Sin identificar", phone: "+34 622 887 140", time: "10:58:19", reason: "out_of_scope" },
-];
-
-// "Escalada" = handed off to a human. The reason is the thing worth showing.
-const ESCALATED_CALLS = [
-  { id: "call-4", patient: "Ana Salas Ferrer", time: "11:39:22", reason: "Síntomas que requieren triaje clínico" },
-  { id: "esc-2", patient: "Jorge Nieto Campos", time: "11:15:40", reason: "Solicita cambio fuera de la ventana permitida" },
-];
 
 function HistoryIcon() {
   return (
@@ -91,9 +79,9 @@ function RejectedRow({ call, onOpenHistory }) {
           </button>
           <a
             className="feed-row-call"
-            href={`tel:${call.phone.replace(/\s+/g, "")}`}
-            title={`Devolver llamada a ${call.phone}`}
-            aria-label={`Devolver llamada a ${call.phone}`}
+            href={call.phone ? `tel:${String(call.phone).replace(/\s+/g, "")}` : undefined}
+            title={call.phone ? `Devolver llamada a ${call.phone}` : "Sin teléfono"}
+            aria-label={call.phone ? `Devolver llamada a ${call.phone}` : "Sin teléfono"}
           >
             <PhoneIcon />
           </a>
@@ -251,11 +239,14 @@ export default function Home() {
   const navigate = useNavigate();
   const [liveFilter, setLiveFilter] = useState("all");
   const data = useHomeOverview() ?? MOCK_OVERVIEW;
+  const occupancy = useOccupancy();
+  const { calls: liveFeed, rejected, escalated } = useLiveCalls();
   const today = data.today ?? MOCK_OVERVIEW.today;
   const moved = today.rescheduled + today.cancelled;
   const liveCalls =
-    liveFilter === "all" ? PLACEHOLDER_CALLS : PLACEHOLDER_CALLS.filter((c) => c.direction === liveFilter);
-  const openHistory = (patientName) => navigate(`/clinic/patient-timeline/${patientIdFor(patientName)}`);
+    liveFilter === "all" ? liveFeed : liveFeed.filter((c) => c.direction === liveFilter);
+  const occupancyWeek = withDate(occupancy?.week);
+  const openHistory = (call) => navigate(`/clinic/patient-timeline/${patientIdFor(call)}`);
 
   const kpis = [
     {
@@ -329,7 +320,10 @@ export default function Home() {
         </div>
         <Card padding="sm" className="home-live-card">
           <ul className="home-call-list">
-            {liveCalls.map((call) => (
+        {liveCalls.length === 0 ? (
+            <li className="home-call-empty">Ninguna llamada en curso.</li>
+          ) : (
+            liveCalls.map((call) => (
               <li key={call.id}>
                 <div
                   className="home-call-row"
@@ -343,7 +337,7 @@ export default function Home() {
                     <span className="home-call-name">{call.patient}</span>
                     <span className="home-call-meta">
                       <DirectionGlyph direction={call.direction} />
-                      {call.phase}
+                      {PHASE_LABEL[call.phase] || call.phase}
                       <span className="dot">·</span>
                       {call.phone}
                     </span>
@@ -354,7 +348,7 @@ export default function Home() {
                     className="home-call-history-btn"
                     onClick={(e) => {
                       e.stopPropagation();
-                      openHistory(call.patient);
+                      openHistory(call);
                     }}
                     title="Ver historial del paciente"
                     aria-label="Ver historial del paciente"
@@ -363,10 +357,31 @@ export default function Home() {
                   </button>
                 </div>
               </li>
-            ))}
+            ))
+          )}
           </ul>
         </Card>
       </section>
+
+      {occupancyWeek.length > 0 ? (
+        <section className="home-occupancy">
+          <div className="home-live-head">
+            <h2>Ocupación</h2>
+            <p className="home-occupancy-meta">
+              Semana {occupancy?.weekAvgPct ?? "—"}% · mes {occupancy?.monthPct ?? "—"}%
+            </p>
+          </div>
+          <div className="home-occupancy-week">
+            {occupancyWeek.map((day) => (
+              <div key={day.date.toISOString()} className="home-occupancy-day">
+                <span className="home-occupancy-label">{day.label}</span>
+                <span className="home-occupancy-bar" style={{ height: `${Math.max(8, day.pct)}%` }} />
+                <span className="home-occupancy-pct">{day.pct}%</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <section className="home-review">
         <div className="home-live-head">
@@ -379,11 +394,11 @@ export default function Home() {
                 <AlertIcon />
                 <span className="feed-panel-title">Llamadas rechazadas</span>
               </span>
-              <span className="feed-panel-count">{REJECTED_CALLS.length}</span>
+              <span className="feed-panel-count">{rejected.length}</span>
             </div>
             <ul className="feed-list">
-              {REJECTED_CALLS.map((call) => (
-                <RejectedRow key={call.id} call={call} onOpenHistory={() => openHistory(call.patient)} />
+              {rejected.map((call) => (
+                <RejectedRow key={call.id} call={call} onOpenHistory={() => openHistory(call)} />
               ))}
             </ul>
           </Card>
@@ -394,11 +409,11 @@ export default function Home() {
                 <EscalateIcon />
                 <span className="feed-panel-title">Llamadas escaladas</span>
               </span>
-              <span className="feed-panel-count">{ESCALATED_CALLS.length}</span>
+              <span className="feed-panel-count">{escalated.length}</span>
             </div>
             <ul className="feed-list">
-              {ESCALATED_CALLS.map((call) => (
-                <EscalatedRow key={call.id} call={call} onOpenHistory={() => openHistory(call.patient)} />
+              {escalated.map((call) => (
+                <EscalatedRow key={call.id} call={call} onOpenHistory={() => openHistory(call)} />
               ))}
             </ul>
           </Card>
