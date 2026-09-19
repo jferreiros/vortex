@@ -79,6 +79,42 @@ def test_check_national_id_folds_spoken_separators() -> None:
     assert dictated.valid is spelled.valid
 
 
+def test_unique_one_edit_repair_accepts_the_matching_id() -> None:
+    """seis/tres at one position: letter Z uniquely recovers Marta's DNI."""
+    result = check_national_id("12645678Z")  # heard 6, true 3 at position 2
+    assert result.valid is True
+    assert result.kind == "dni"
+    assert result.normalized == "12345678Z"
+    assert result.repaired_from == "12645678Z"
+    assert result.ask_digit_positions == []
+
+
+def test_unique_one_edit_repair_works_for_nie() -> None:
+    result = check_national_id("X1264567L")
+    assert result.valid is True
+    assert result.kind == "nie"
+    assert result.normalized == "X1234567L"
+    assert result.repaired_from == "X1264567L"
+
+
+def test_ambiguous_one_edit_asks_for_the_differing_digits() -> None:
+    result = check_national_id("12345778Z")
+    assert result.valid is False
+    assert result.normalized == "12345778Z"
+    assert result.repaired_from is None
+    assert result.ask_digit_positions == [0, 5, 7]
+
+
+def test_wrong_letter_with_no_repair_stays_invalid() -> None:
+    """Right digits, wrong letter, and no 1-edit yields that letter → still invalid."""
+    result = check_national_id("12345678A")
+    assert result.valid is False
+    assert result.normalized == "12345678A"
+    assert result.expected_letter == "Z"
+    assert result.ask_digit_positions == []
+    assert result.repaired_from is None
+
+
 # ---- find_patient: ambiguity and near misses ------------------------------
 
 
@@ -95,6 +131,16 @@ async def test_a_wrong_digit_in_the_id_is_a_near_miss_not_a_match(ctx: ToolConte
     )
     assert result.status == "not_found"
     assert any(p.patient_id == "P00042" for p in result.candidates)
+
+
+async def test_a_repairable_misheard_id_finds_the_patient(ctx: ToolContext) -> None:
+    """One confusion edit that uniquely fits the letter is applied before /directory."""
+    result = await find_patient(
+        ctx, FindPatientInput(name="Marta Ruiz López", national_id="12645678Z")
+    )
+    assert result.status == "found"
+    assert result.patient is not None
+    assert result.patient.patient_id == "P00042"
 
 
 async def test_a_line_shared_by_two_patients_is_still_ambiguous(ctx: ToolContext) -> None:
