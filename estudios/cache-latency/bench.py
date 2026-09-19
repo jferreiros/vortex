@@ -332,7 +332,12 @@ async def run_scenario(
     elif share_client:
         shared = ClinicClient(base_url, api_key)
 
-    slot = await warmup_slot(FakeClinicClient())
+    warm_client = shared if shared is not None else ClinicClient(base_url, api_key)
+    try:
+        slot = await warmup_slot(warm_client)
+    finally:
+        if warm_client is not shared:
+            await warm_client.aclose()
     recipes = tool_recipes()
     recipes["prepare_booking"]["slot"] = slot
     recipes["prepare_reschedule"]["slot"] = slot
