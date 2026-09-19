@@ -14,6 +14,9 @@ export function useCallTimeline(callId) {
 
   useEffect(() => {
     cancelledRef.current = false;
+    setItems([]);
+    setIntent(null);
+    setCall(null);
 
     if (!callId) {
       const stop = mockStream((next) => {

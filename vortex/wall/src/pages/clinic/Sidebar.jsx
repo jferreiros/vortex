@@ -39,7 +39,7 @@ const CLINIC_ITEMS = [
   { to: "/clinic/home", label: "Home", icon: "home" },
   { to: "/clinic/settings", label: "Ajustes", icon: "settings" },
   { to: "/clinic/ai", label: "IA", icon: "ai" },
-  { to: "/clinic/insights", label: "Insights", icon: "insights" },
+  { to: "/clinic/insights", label: "Statistics", icon: "insights" },
   { to: "/clinic/live-calls", label: "Live Calls", icon: "liveCalls" },
   { to: "/clinic/doctor", label: "Horarios", icon: "doctor" },
 ];
