@@ -48,6 +48,9 @@ def offline_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> setting
         "VORTEX_CONFIRMATION_CALLS_PATH",
         "VORTEX_CONFIRMATION_POLL_SECS",
         "VORTEX_CONFIRMATION_FORCE_TO",
+        "SUPABASE_URL",
+        "SUPABASE_SERVICE_ROLE_KEY",
+        "SUPABASE_SECRET_KEY",
     ):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("VORTEX_VOICE_MODE", "stub")
@@ -97,6 +100,9 @@ def _unset_dotenv_keys() -> None:
         "VORTEX_CONFIRMATION_CALLS_PATH",
         "VORTEX_CONFIRMATION_POLL_SECS",
         "VORTEX_CONFIRMATION_FORCE_TO",
+        "SUPABASE_URL",
+        "SUPABASE_SERVICE_ROLE_KEY",
+        "SUPABASE_SECRET_KEY",
     ):
         os.environ.pop(key, None)
 

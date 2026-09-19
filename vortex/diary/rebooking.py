@@ -263,6 +263,24 @@ class RebookingStore:
             )
         stored = self.get(request.request_id)
         assert stored is not None
+        try:
+            from database.remote import mirrors_file, safe_upsert
+
+            if mirrors_file(self.path):
+                dumped = stored.model_dump(mode="json")
+                safe_upsert(
+                    "rebooking_requests",
+                    [
+                        {
+                            **{k: dumped[k] for k in dumped if k not in {"matched_slot", "draft_action"}},
+                            "matched_slot_json": _json_or_none(dumped.get("matched_slot")),
+                            "draft_action_json": _json_or_none(dumped.get("draft_action")),
+                        }
+                    ],
+                    "request_id",
+                )
+        except Exception:
+            pass
         return stored
 
     def get(self, request_id: str) -> RebookingRequest | None:
@@ -313,6 +331,28 @@ class RebookingStore:
             )
         stored = self.get(request_id)
         assert stored is not None
+        try:
+            from database.remote import mirrors_file, safe_upsert
+
+            if mirrors_file(self.path):
+                dumped = stored.model_dump(mode="json")
+                safe_upsert(
+                    "rebooking_requests",
+                    [
+                        {
+                            **{
+                                k: dumped[k]
+                                for k in dumped
+                                if k not in {"matched_slot", "draft_action"}
+                            },
+                            "matched_slot_json": _json_or_none(dumped.get("matched_slot")),
+                            "draft_action_json": _json_or_none(dumped.get("draft_action")),
+                        }
+                    ],
+                    "request_id",
+                )
+        except Exception:
+            pass
         return stored
 
 

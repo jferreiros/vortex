@@ -109,9 +109,9 @@ def insert_call(
         ON CONFLICT(call_id) DO UPDATE SET
             purpose = excluded.purpose,
             language = excluded.language,
-            duration_ms = excluded.duration_ms,
+            duration_ms = COALESCE(excluded.duration_ms, calls.duration_ms),
             outcome = excluded.outcome,
-            appointment_id = excluded.appointment_id
+            appointment_id = COALESCE(excluded.appointment_id, calls.appointment_id)
         RETURNING *
         """,
         (
@@ -126,6 +126,9 @@ def insert_call(
             appointment_id,
         ),
     ).fetchone()
+    from database.remote import after_write
+
+    after_write(conn, "calls", row, "call_id")
     return CallRecord.from_row(row)
 
 
@@ -143,6 +146,11 @@ def get_call_by_call_id(conn: sqlite3.Connection, call_id: str) -> CallRecord | 
 
 def link_call_to_appointment(conn: sqlite3.Connection, call_pk: int, appointment_id: str) -> None:
     conn.execute("UPDATE calls SET appointment_id = ? WHERE id = ?", (appointment_id, call_pk))
+    row = conn.execute("SELECT * FROM calls WHERE id = ?", (call_pk,)).fetchone()
+    if row is not None:
+        from database.remote import after_write
+
+        after_write(conn, "calls", row, "call_id")
 
 
 # ---------------------------------------------------------------------------
@@ -213,6 +221,9 @@ def insert_appointment(
             ts,
         ),
     ).fetchone()
+    from database.remote import after_write
+
+    after_write(conn, "appointments", row, "id")
     return AppointmentRecord.from_row(row)
 
 
@@ -235,6 +246,9 @@ def update_appointment(
     ).fetchone()
     if row is None:
         raise KeyError(f"no appointment {appointment_id!r} to update")
+    from database.remote import after_write
+
+    after_write(conn, "appointments", row, "id")
     return AppointmentRecord.from_row(row)
 
 
@@ -243,6 +257,11 @@ def set_confirmation_call(conn: sqlite3.Connection, appointment_id: str, call_pk
         "UPDATE appointments SET confirmation_call_id = ?, updated_at = ? WHERE id = ?",
         (call_pk, now_iso(), appointment_id),
     )
+    row = conn.execute("SELECT * FROM appointments WHERE id = ?", (appointment_id,)).fetchone()
+    if row is not None:
+        from database.remote import after_write
+
+        after_write(conn, "appointments", row, "id")
 
 
 def appointments_due_for_confirmation(
@@ -263,6 +282,84 @@ def appointments_due_for_confirmation(
         (day,),
     ).fetchall()
     return [AppointmentRecord.from_row(row) for row in rows]
+
+
+#: Statuses that still occupy a slot in the diary. ``cancelled`` frees it, and
+#: ``no_show``/``completed`` are about a visit that already happened, so the
+#: board's forward-looking agenda asks for these two.
+OPEN_STATUSES: tuple[str, ...] = ("scheduled", "confirmed")
+
+
+def list_appointments(
+    conn: sqlite3.Connection,
+    *,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    statuses: tuple[str, ...] = OPEN_STATUSES,
+) -> list[AppointmentRecord]:
+    """Appointments in a date window, oldest slot first.
+
+    The window is compared on ``substr(slot_start, 1, 10)`` rather than by
+    parsing: ``slot_start`` is stored as tz-aware ISO-8601 with an explicit
+    offset, and every row carries Europe/Madrid's, so the leading date is
+    already the local calendar day the board draws.
+    """
+    clauses: list[str] = []
+    params: list[Any] = []
+    if statuses:
+        clauses.append(f"status IN ({', '.join('?' for _ in statuses)})")
+        params.extend(statuses)
+    if date_from is not None:
+        clauses.append("substr(slot_start, 1, 10) >= ?")
+        params.append(date_from.isoformat())
+    if date_to is not None:
+        clauses.append("substr(slot_start, 1, 10) <= ?")
+        params.append(date_to.isoformat())
+    from database.remote import mirrors_product, select
+
+    if mirrors_product(conn):
+        remote_rows = select("appointments", {"order": "slot_start"})
+        if remote_rows:
+            records = [AppointmentRecord.from_row(row) for row in remote_rows]  # type: ignore[arg-type]
+            if statuses:
+                records = [r for r in records if r.status in statuses]
+            if date_from is not None:
+                records = [r for r in records if r.slot_start[:10] >= date_from.isoformat()]
+            if date_to is not None:
+                records = [r for r in records if r.slot_start[:10] <= date_to.isoformat()]
+            return records
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    rows = conn.execute(
+        f"SELECT * FROM appointments {where} ORDER BY slot_start",  # noqa: S608 - clauses are this function's own literals
+        params,
+    ).fetchall()
+    return [AppointmentRecord.from_row(row) for row in rows]
+
+
+def call_id_by_appointment(conn: sqlite3.Connection) -> dict[str, str]:
+    """``appointments.id`` -> the event log's own ``call_id`` for the call that
+    booked it — what a screen needs to link a visit back to its transcript,
+    since ``booking_call_id`` is this database's integer key, not the log's."""
+    rows = conn.execute(
+        """
+        SELECT a.id AS appointment_id, c.call_id AS call_id
+        FROM appointments a
+        JOIN calls c ON c.id = a.booking_call_id
+        """
+    ).fetchall()
+    from database.remote import mirrors_product, select
+
+    if mirrors_product(conn):
+        appts = select("appointments", {"select": "id,booking_call_id"})
+        calls = select("calls", {"select": "id,call_id"})
+        if appts is not None and calls is not None:
+            by_pk = {int(c["id"]): str(c["call_id"]) for c in calls}
+            return {
+                str(a["id"]): by_pk[int(a["booking_call_id"])]
+                for a in appts
+                if a.get("booking_call_id") is not None and int(a["booking_call_id"]) in by_pk
+            }
+    return {row["appointment_id"]: row["call_id"] for row in rows}
 
 
 # ---------------------------------------------------------------------------
@@ -308,11 +405,20 @@ def insert_wall_cancellation(
             now_iso(),
         ),
     ).fetchone()
+    from database.remote import after_write
+
+    after_write(conn, "wall_cancellations", row, "id")
     return WallCancellationRecord.from_row(row)
 
 
 def list_wall_cancellations(conn: sqlite3.Connection) -> list[WallCancellationRecord]:
     """Every hand-cancelled slot — the set the agenda filters out per request."""
+    from database.remote import mirrors_product, select
+
+    if mirrors_product(conn):
+        remote_rows = select("wall_cancellations", {"order": "slot_start"})
+        if remote_rows:
+            return [WallCancellationRecord.from_row(row) for row in remote_rows]  # type: ignore[arg-type]
     rows = conn.execute("SELECT * FROM wall_cancellations ORDER BY slot_start").fetchall()
     return [WallCancellationRecord.from_row(row) for row in rows]
 
@@ -334,7 +440,14 @@ def cancel_appointment_rows(
         """,
         (now_iso(), provider_id, day_from.isoformat(), day_to.isoformat()),
     ).fetchall()
-    return [str(row["id"]) for row in rows]
+    ids = [str(row["id"]) for row in rows]
+    from database.remote import after_write
+
+    for appointment_id in ids:
+        synced = conn.execute("SELECT * FROM appointments WHERE id = ?", (appointment_id,)).fetchone()
+        if synced is not None:
+            after_write(conn, "appointments", synced, "id")
+    return ids
 
 
 def cancel_appointment_row(
@@ -357,7 +470,15 @@ def cancel_appointment_row(
             (now_iso(), appointment_id),
         ).fetchall()
         if rows:
-            return str(rows[0]["id"])
+            appointment_id = str(rows[0]["id"])
+            synced = conn.execute(
+                "SELECT * FROM appointments WHERE id = ?", (appointment_id,)
+            ).fetchone()
+            if synced is not None:
+                from database.remote import after_write
+
+                after_write(conn, "appointments", synced, "id")
+            return appointment_id
     if provider_id and slot_start:
         rows = conn.execute(
             """
@@ -369,7 +490,15 @@ def cancel_appointment_row(
             (now_iso(), provider_id, slot_start[:16]),
         ).fetchall()
         if rows:
-            return str(rows[0]["id"])
+            appointment_id = str(rows[0]["id"])
+            synced = conn.execute(
+                "SELECT * FROM appointments WHERE id = ?", (appointment_id,)
+            ).fetchone()
+            if synced is not None:
+                from database.remote import after_write
+
+                after_write(conn, "appointments", synced, "id")
+            return appointment_id
     return None
 
 
