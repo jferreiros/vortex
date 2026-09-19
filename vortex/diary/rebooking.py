@@ -16,9 +16,10 @@ from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any, Literal
 
+import httpx
 from pydantic import BaseModel, Field
 
-from vortex.clinic.client import ClinicApi
+from vortex.clinic.client import ClinicApi, ClinicApiError
 from vortex.contract import MADRID, BookAction, RescheduleAction, Slot
 
 RebookingIntent = Literal["book", "reschedule"]
@@ -275,7 +276,8 @@ class RebookingWatcher:
         clock to trust: the caller passes the same Europe/Madrid instant a call
         would carry. Nothing is booked same-day, so a window that ends today or
         earlier is dropped instead of queried again, and the query starts
-        tomorrow.
+        tomorrow. A rejected or unreachable query costs its own row a turn and
+        leaves the rest of the batch alone.
         """
 
         assert now.tzinfo is not None, "check_once needs a timezone-aware now"
@@ -284,15 +286,18 @@ class RebookingWatcher:
         for request in self.store.pending():
             if request.date_to < earliest:
                 continue
-            answer = await self.clinic.availability(
-                date_from=max(request.date_from, earliest),
-                date_to=request.date_to,
-                provider_id=request.provider_id,
-                specialty_id=request.specialty_id,
-                location_id=request.location_id,
-                patient_id=request.patient_id,
-                insurer=[request.policy_id] if request.policy_id else None,
-            )
+            try:
+                answer = await self.clinic.availability(
+                    date_from=max(request.date_from, earliest),
+                    date_to=request.date_to,
+                    provider_id=request.provider_id,
+                    specialty_id=request.specialty_id,
+                    location_id=request.location_id,
+                    patient_id=request.patient_id,
+                    insurer=[request.policy_id] if request.policy_id else None,
+                )
+            except (ClinicApiError, httpx.HTTPError):
+                continue
             slots = _filter_time(answer.slots, request, earliest)
             if not slots:
                 continue
