@@ -353,6 +353,15 @@ class Settings:
     calls_log_path: Path = field(
         default_factory=lambda: Path(_env("VORTEX_CALLS_LOG", str(REPO_ROOT / "logs/calls.jsonl")))
     )
+    # The product's own database (database/): appointments and the calls
+    # that touched them, separate from the calls.jsonl event log above. On
+    # the same volume as calls_log_path by default so it survives a redeploy
+    # the same way voiceconfig.db already does (vortex/line/voice_config.py).
+    product_db_path: Path = field(
+        default_factory=lambda: Path(
+            _env("VORTEX_PRODUCT_DB", str(REPO_ROOT / "logs" / "vortex_product.db"))
+        )
+    )
     langfuse_public_key: str = field(default_factory=lambda: _env("LANGFUSE_PUBLIC_KEY"))
     langfuse_secret_key: str = field(default_factory=lambda: _env("LANGFUSE_SECRET_KEY"))
     langfuse_base_url: str = field(
@@ -621,6 +630,7 @@ class Settings:
             "user_idle_secs": self.user_idle_secs,
             "ws_path": self.ws_path,
             "calls_log_path": str(self.calls_log_path),
+            "product_db_path": str(self.product_db_path),
             "has_langfuse_keys": bool(self.langfuse_public_key and self.langfuse_secret_key),
             "langfuse_base_url": self.langfuse_base_url,
             "langfuse_environment": self.langfuse_environment,
