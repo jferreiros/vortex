@@ -26,6 +26,19 @@ make langfuse-check         # project URL + whether the live line has keys
 
 `make smoke` and `make test` need no key and no network.
 
+## Day-before confirmation calls
+
+With `VORTEX_CONFIRMATION_CALLS=true` plus the Twilio keys and
+`VORTEX_PUBLIC_BASE_URL` (the tunnel host), an accepted booking also queues a
+voice call for the day before the slot. The worker dials the patient, this
+server's `/confirmation/*` routes serve the TwiML, and `Gather input="speech"`
+captures the answer: confirmed / not_coming / reschedule_requested (es, ca, gl,
+eu and en scripts; the call inherits the language the caller used, Spanish by
+default). No answer lands as `no_answer` or `unclear`. Every row lives in
+`logs/confirmation_calls.json` — the hooks a waitlist filler or a retry/SMS
+fallback would subscribe to. Try it: `uv run python scripts/try_confirmation_call.py`
+(`--live --to <E.164> --base-url <tunnel>` to dial for real).
+
 ## Modes
 
 The server always starts. Missing keys switch components to fake mode:
