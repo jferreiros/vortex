@@ -60,31 +60,6 @@
   font-weight: var(--weight-medium);
 }
 
-/* Suggested action ---------------------------------------------------------*/
-
-.insights-suggestion {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-3);
-  margin-top: var(--space-5);
-  padding: var(--space-4);
-  background: var(--color-primary-soft);
-  border-radius: var(--radius-md);
-}
-
-.insights-suggestion-icon {
-  flex: 0 0 auto;
-  color: var(--color-primary-deep);
-  font-weight: var(--weight-bold);
-}
-
-.insights-suggestion p {
-  margin: 0;
-  font-size: var(--text-sm);
-  color: var(--color-ink);
-  line-height: var(--leading-normal);
-}
-
 /* 1. Unavailability reasons — horizontal bars ------------------------------*/
 
 .reason-bars {
@@ -130,17 +105,55 @@
 
 /* 2. Provider ranking -------------------------------------------------------*/
 
-.provider-ranking {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
+.provider-chevron {
+  color: var(--color-faint);
+  font-size: var(--text-sm);
+  transition: transform var(--duration-fast) var(--ease-standard);
 }
 
-.provider-row-top {
+.provider-row.open .provider-chevron {
+  transform: rotate(90deg);
+}
+
+.provider-detail,
+.provider-detail-empty {
+  margin: 0 var(--space-3) var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+
+.provider-detail {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
   gap: var(--space-2);
+  padding-bottom: var(--space-2);
+}
+
+.provider-detail-head {
+  margin: 0;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--color-ink);
+}
+
+.provider-detail-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--color-mute);
+}
+
+.provider-detail-count {
+  font-family: var(--font-mono);
+  flex: 0 0 auto;
+}
+
+.provider-detail-empty {
+  padding-bottom: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-faint);
 }
 
 .provider-name {
@@ -157,14 +170,6 @@
   padding: 2px 8px;
   border-radius: var(--radius-full);
   flex: 0 0 auto;
-}
-
-.provider-row-meta {
-  display: flex;
-  gap: var(--space-2);
-  font-size: var(--text-xs);
-  color: var(--color-mute);
-  margin: var(--space-1) 0;
 }
 
 .provider-row-track {
@@ -185,13 +190,130 @@
   background: var(--color-warn);
 }
 
-/* 3. Cancellations: reused vs. lost ----------------------------------------*/
-
-.cancel-trio {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: var(--space-4);
+.provider-flag {
+  white-space: nowrap;
 }
+
+.provider-flag.bench {
+  color: var(--color-primary-deep);
+  background: var(--color-primary-soft);
+}
+
+/* 2b. Two compact rankings side by side: most requested vs. best closers.
+
+   The wrap is a container so the columns stack by *card* width, not
+   viewport — a narrow column inside a wide page reads the same as a
+   phone. */
+
+.provider-rankings-wrap {
+  container-type: inline-size;
+}
+
+.provider-rankings {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-5);
+}
+
+@container (max-width: 620px) {
+  .provider-rankings {
+    grid-template-columns: 1fr;
+  }
+}
+
+.provider-rank-title {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-ink);
+}
+
+.provider-rank-sub {
+  margin: var(--space-1) 0 var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--color-faint);
+}
+
+.provider-rank-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.provider-rank-empty {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-xs);
+  color: var(--color-faint);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.provider-compact-head {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.provider-compact-head:hover,
+.provider-row.open .provider-compact-head {
+  background: var(--color-bg);
+}
+
+.provider-compact-head:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.provider-compact-head .provider-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.provider-compact-bar {
+  flex: 1 1 24px;
+  min-width: 24px;
+  display: flex;
+  align-items: center;
+}
+
+.provider-compact-bar .provider-row-track {
+  flex: 1 1 auto;
+}
+
+.provider-row-fill {
+  display: block;
+}
+
+.provider-compact-meta {
+  flex: 0 0 auto;
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  color: var(--color-mute);
+  white-space: nowrap;
+}
+
+.provider-avg {
+  margin: var(--space-4) 0 0;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+  font-size: var(--text-xs);
+  color: var(--color-faint);
+}
+
+/* 3. Cancellations: reused vs. lost ----------------------------------------*/
 
 .cancel-tile {
   display: flex;
@@ -215,69 +337,171 @@
   color: var(--color-ink);
 }
 
-.cancel-value.good {
-  color: var(--color-primary-deep);
-}
-
-.cancel-value.bad {
-  color: var(--color-warn);
-}
-
 .cancel-label {
   font-size: var(--text-xs);
   font-weight: var(--weight-medium);
   color: var(--color-mute);
 }
 
-.cancel-pending {
-  margin: var(--space-3) 0 0;
-  font-size: var(--text-xs);
+.cancel-sub {
+  font-size: 10px;
   color: var(--color-faint);
 }
 
-.cancel-daily {
-  display: flex;
-  align-items: flex-end;
-  gap: var(--space-2);
-  height: 96px;
+/* The two headline rates as a pair, atop the lead-time chart. */
+.cancel-rates {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-4);
+}
+
+.cancel-section {
   margin-top: var(--space-5);
   padding-top: var(--space-3);
   border-top: 1px solid var(--color-border);
-}
-
-.cancel-daily-col {
-  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
+  gap: var(--space-2);
+}
+
+.cancel-section-title {
+  margin: 0;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--color-ink);
+}
+
+.cancel-hint {
+  margin: 0;
+  font-size: 10px;
+  color: var(--color-faint);
+}
+
+.cancel-buckets {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.cancel-bucket {
+  display: flex;
   align-items: center;
-  gap: var(--space-1);
+  gap: var(--space-3);
+}
+
+.cancel-bucket-label {
+  flex: 0 0 64px;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--color-mute);
+  font-family: var(--font-mono);
+}
+
+.cancel-bucket-track {
+  flex: 1 1 auto;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background: var(--color-border);
+  overflow: hidden;
+}
+
+.cancel-bucket-fill {
+  height: 100%;
+  border-radius: var(--radius-full);
+  background: var(--color-primary);
+  transition: width var(--duration-slow) var(--ease-standard);
+}
+
+/* Stacked variant: the same bar, split by where the freed slot ended up.
+   flex-grow keeps each segment proportional to its count. */
+.cancel-bucket-stack {
+  display: flex;
+  height: 100%;
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  transition: width var(--duration-slow) var(--ease-standard);
+}
+
+.cancel-bucket-seg {
+  min-width: 4px;
   height: 100%;
 }
 
-.cancel-daily-bar {
-  flex: 1 1 auto;
-  width: 100%;
-  max-width: 28px;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-  background: var(--color-border);
-}
-
-.cancel-daily-seg.relocated {
+.cancel-bucket-seg.relocated {
   background: var(--color-primary);
 }
 
-.cancel-daily-seg.lost {
+.cancel-bucket-seg.lost {
   background: var(--color-warn);
 }
 
-.cancel-daily-date {
-  font-size: 10px;
-  color: var(--color-faint);
+.cancel-bucket-seg.pending {
+  background: var(--color-faint);
+}
+
+.cancel-legend {
+  display: flex;
+  gap: var(--space-4);
+  font-size: var(--text-xs);
+  color: var(--color-mute);
+}
+
+.cancel-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.cancel-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.cancel-swatch.relocated {
+  background: var(--color-primary);
+}
+
+.cancel-swatch.lost {
+  background: var(--color-warn);
+}
+
+.cancel-swatch.pending {
+  background: var(--color-faint);
+}
+
+.cancel-bucket-count {
+  flex: 0 0 auto;
+  font-size: var(--text-xs);
   font-family: var(--font-mono);
+  color: var(--color-mute);
+}
+
+.cancel-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-5);
+}
+
+.cancel-list-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--color-mute);
+}
+
+.cancel-list-count {
+  font-family: var(--font-mono);
+  flex: 0 0 auto;
+}
+
+/* Residual buckets ("Otro motivo", "Sin motivo dicho") always sort last;
+   this keeps them visually secondary even when their count is the tallest. */
+.cancel-list-row-residual {
+  color: var(--color-faint);
 }
 
 /* 4. Demand vs. supply heatmap -----------------------------------------------*/
@@ -292,8 +516,8 @@
   grid-column: 1;
 }
 
-.heatmap-band-label,
-.heatmap-weekday {
+.heatmap-col-label,
+.heatmap-row-label {
   display: flex;
   align-items: center;
   font-size: var(--text-xs);
@@ -301,12 +525,12 @@
   color: var(--color-mute);
 }
 
-.heatmap-band-label {
+.heatmap-col-label {
   justify-content: center;
   padding-bottom: var(--space-2);
 }
 
-.heatmap-weekday {
+.heatmap-row-label {
   padding-right: var(--space-2);
 }
 
@@ -333,6 +557,33 @@
 
 .heatmap-cell.gap {
   box-shadow: inset 0 0 0 2px var(--color-warn);
+}
+
+/* A (weekday, band) the selected clinic does not open — the red "Cerrado" box
+   the site picker exists to show. Urgent, not warn: a shut door is harder
+   than demand without supply. */
+.heatmap-cell.closed {
+  background: var(--color-urgent-soft);
+  box-shadow: inset 0 0 0 2px var(--color-urgent);
+}
+
+.heatmap-cell.closed::before {
+  display: none;
+}
+
+.heatmap-closed-label {
+  position: relative;
+  z-index: 1;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--color-urgent);
+}
+
+.heatmap-hours {
+  margin: 0 0 var(--space-4);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-mute);
 }
 
 .heatmap-demand,
@@ -380,8 +631,13 @@
   box-shadow: inset 0 0 0 2px var(--color-warn);
 }
 
+.heatmap-swatch.closed {
+  background: var(--color-urgent-soft);
+  box-shadow: inset 0 0 0 2px var(--color-urgent);
+}
+
 @media (max-width: 700px) {
-  .cancel-trio {
-    grid-template-columns: repeat(2, 1fr);
+  .cancel-columns {
+    grid-template-columns: 1fr;
   }
 }
