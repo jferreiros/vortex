@@ -751,15 +751,17 @@ async def test_the_idle_handler_speaks_the_prompt_in_the_call_language(voice_set
 def test_vad_mode_wires_our_turn_strategies() -> None:
     """The aggregator always gets the conversation lane's strategies.
 
-    Without them it falls back to its defaults (smart-turn v3) or, in Soniox
-    mode, to ExternalUserTurnStrategies that ignore interrupt_min_words.
+    VAD+Smart Turn installs LocalSmartTurnAnalyzerV3 with VAD stop_secs=0.2.
+    Soniox mode overrides ExternalUserTurnStrategies so interrupt_min_words runs.
     """
     pytest.importorskip("pipecat")
+    from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
+    from pipecat.audio.vad.vad_analyzer import VADParams
     from pipecat.processors.aggregators.llm_response_universal import LLMUserAggregatorParams
     from pipecat.turns.user_start import MinWordsUserTurnStartStrategy, VADUserTurnStartStrategy
     from pipecat.turns.user_stop import (
         ExternalUserTurnStopStrategy,
-        SpeechTimeoutUserTurnStopStrategy,
+        TurnAnalyzerUserTurnStopStrategy,
     )
     from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
@@ -773,9 +775,10 @@ def test_vad_mode_wires_our_turn_strategies() -> None:
         VADUserTurnStartStrategy,
         MinWordsUserTurnStartStrategy,
     ]
-    assert [type(s) for s in params.user_turn_strategies.stop] == [
-        SpeechTimeoutUserTurnStopStrategy
-    ]
+    assert [type(s) for s in params.user_turn_strategies.stop] == [TurnAnalyzerUserTurnStopStrategy]
+    assert isinstance(params.user_turn_strategies.stop[0]._turn_analyzer, LocalSmartTurnAnalyzerV3)
+    assert isinstance(params.vad_analyzer.params, VADParams)
+    assert params.vad_analyzer.params.stop_secs == 0.2
 
     soniox_params = _user_aggregator_params(TurnSettings())
     assert isinstance(soniox_params.user_turn_strategies, UserTurnStrategies)
@@ -787,3 +790,4 @@ def test_vad_mode_wires_our_turn_strategies() -> None:
     ]
     assert soniox_params.user_turn_strategies.start[0]._min_words == 2
     assert soniox_params.user_turn_strategies.stop[0].resolves_proposed_turn_stop_frames is True
+    assert soniox_params.vad_analyzer.params.stop_secs == 0.4
