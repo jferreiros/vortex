@@ -225,6 +225,16 @@ class Settings:
     # ElevenLabs. Empty means the service's own default.
     elevenlabs_base_url: str = field(default_factory=lambda: _env("ELEVENLABS_BASE_URL"))
 
+    # --- Turn-taking (the conversation lane reads this through TurnSettings) ---
+    # Seconds of caller silence before the agent asks whether they are still
+    # there. 0 disables the nudge. The 2026-09-18 run measured the harness
+    # caller answering in a median of 4.5 s, p90 10 s and max 22 s, so 6 s
+    # fired 147 times over 20 calls, mostly while the caller was still
+    # thinking. 10 s clears the p90.
+    user_idle_secs: float = field(
+        default_factory=lambda: float(_env("VORTEX_USER_IDLE_SECS", "10"))
+    )
+
     # Server
     host: str = field(default_factory=lambda: _env("VORTEX_HOST", "0.0.0.0"))
     port: int = field(default_factory=lambda: int(_env("VORTEX_PORT", "7860")))
@@ -423,6 +433,7 @@ class Settings:
             # A provider with a key but no voice id builds and then fails on
             # every utterance, so say so before the first call.
             "tts_voices_missing": self.tts_voices_missing,
+            "user_idle_secs": self.user_idle_secs,
             "ws_path": self.ws_path,
             "calls_log_path": str(self.calls_log_path),
             "has_langfuse_keys": bool(self.langfuse_public_key and self.langfuse_secret_key),

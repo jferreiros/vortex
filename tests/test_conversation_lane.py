@@ -221,7 +221,12 @@ def test_turn_settings_are_english_first_and_interruptible() -> None:
     assert turns.enable_interruptions is True
     assert turns.stt_language_hints[0] == "en"
     assert set(turns.stt_language_hints) >= {"en", "es", "ca"}
-    assert 0 < turns.user_idle_secs < 8, "nudge before the caller's 8-second silence ends the call"
+    # The harness caller answered in 4.5 s median / 10 s p90 on 2026-09-18, so
+    # anything under 10 fires inside its thinking pause. The upper bound keeps
+    # the nudge ahead of the platform's own cut-off for a quiet line.
+    assert 10 <= turns.user_idle_secs < 20, "nudge after the caller's p90, before the line is cut"
+    assert turns.idle_mute_secs >= turns.user_idle_secs
+    assert turns.idle_bot_grace_secs > 0
     assert turns.exposed_tools == DEFAULT_EXPOSED_TOOLS
     assert "submit_action" in turns.exposed_tools
     # Frozen: one instance is shared by every call, so nobody may mutate it.
@@ -229,10 +234,31 @@ def test_turn_settings_are_english_first_and_interruptible() -> None:
         turns.enable_interruptions = False  # type: ignore[misc]
 
 
-def test_soniox_mode_leaves_turn_strategies_to_the_stt_service() -> None:
-    # Passing strategies in Soniox mode would override the external ones the
-    # STT installs and break turn endings; the factory says None on purpose.
-    assert user_turn_strategies(TurnSettings(soniox_turn_detection=True)) is None
+def test_soniox_mode_passes_the_strategies_the_stt_would_have_recommended() -> None:
+    """Same object Soniox recommends, but built before the aggregator's default.
+
+    Returning ``None`` let ``LLMUserContextAggregator.__init__`` build
+    ``UserTurnStrategies()``, whose default stop strategy constructs
+    ``LocalSmartTurnAnalyzerV3()`` and loads an ONNX model per socket. The
+    Soniox recommendation only arrived later, so the model was pure waste.
+    """
+    pytest.importorskip("pipecat")
+    from pipecat.turns.user_start import ExternalUserTurnStartStrategy
+    from pipecat.turns.user_stop import ExternalUserTurnStopStrategy
+    from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
+
+    strategies = user_turn_strategies(TurnSettings(soniox_turn_detection=True))
+    assert isinstance(strategies, ExternalUserTurnStrategies)
+    assert strategies.enable_interruptions is True
+    assert [type(s) for s in strategies.start] == [ExternalUserTurnStartStrategy]
+    assert [type(s) for s in strategies.stop] == [ExternalUserTurnStopStrategy]
+
+    # ``should_interrupt`` on the STT service is the same flag, so the
+    # recommendation we replace is byte-for-byte the one we pass.
+    quiet = user_turn_strategies(
+        TurnSettings(soniox_turn_detection=True, enable_interruptions=False)
+    )
+    assert quiet.enable_interruptions is False
 
 
 def test_vad_mode_builds_strategies_that_honour_the_settings() -> None:
