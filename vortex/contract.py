@@ -510,10 +510,15 @@ class ValidateNationalIdInput(BaseModel):
 
 
 class NationalIdCheck(BaseModel):
-    normalized: str  # uppercase, no spaces or dashes
+    normalized: str  # uppercase, no spaces or dashes; repaired id when uniquely corrected
     kind: Literal["dni", "nie", "invalid"]
-    valid: bool  # the check letter matches the digits
+    valid: bool  # the check letter matches the digits (of normalized)
     expected_letter: str | None = None
+    # Heard form before a unique 1-edit digit repair. None when not repaired.
+    repaired_from: str | None = None
+    # 0-based indexes into the digit body to re-ask when several 1-edit
+    # candidates fit the heard check letter. Empty otherwise.
+    ask_digit_positions: list[int] = Field(default_factory=list)
 
 
 class BuildRegistrationInput(BaseModel):
