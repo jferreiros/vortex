@@ -126,7 +126,7 @@ if [[ "${HEALTH}" != healthy ]]; then
   exit 1
 fi
 
-CODE="$(curl -sS -m 15 -o /dev/null -w '%{http_code}' "${PUBLIC_WALL}" || echo 000)"
+CODE="$(curl -sS -L -m 15 -o /dev/null -w '%{http_code}' "${PUBLIC_WALL}" || echo 000)"
 if [[ "${CODE}" != 200 ]]; then
   notify "La línea ya está, pero el muro contestó ${CODE} (${what}). Hay que mirarlo."
   exit 1

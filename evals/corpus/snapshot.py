@@ -73,6 +73,34 @@ def _named_patients() -> list[str]:
     )
 
 
+def _patient_specialty_pairs(
+    provider_specialty: dict[str, str],
+) -> set[tuple[str, str, str]]:
+    """The (patient, specialty) pairs the published answers depend on.
+
+    ``/availability`` names the one right ``appointment_type`` **for the patient
+    and specialty it was asked about**, and every slot carries that type's id.
+    Asked without a ``patient_id`` it answers ``first_visit`` for everyone, so a
+    snapshot taken that way cannot reproduce a single review booking. Pull the
+    pairs the roster needs, and no more.
+    """
+    pairs: set[tuple[str, str, str]] = set()
+    for case in load().cases:
+        for alternative in case.acceptable:
+            for action in alternative:
+                patient = action.get("patient_id")
+                specialty = provider_specialty.get(action.get("provider_id", ""))
+                if not (patient and specialty):
+                    continue
+                # Unqualified: what the plan on the record buys.
+                pairs.add((patient, specialty, ""))
+                # And named: problem 17's second plan is nowhere in the data, so
+                # the only way to see its slots is to ask for it by name.
+                if action.get("policy_id"):
+                    pairs.add((patient, specialty, action["policy_id"]))
+    return pairs
+
+
 def _persona_lookups() -> list[dict[str, str]]:
     """The directory queries the personas themselves make possible.
 
@@ -190,8 +218,46 @@ async def take(out_dir: Path = WORLD_DIR) -> int:
                 start = end + timedelta(days=1)
             _dump(out_dir / "availability" / f"{specialty}.json", windows)
 
+        provider_specialty = {
+            p.provider_id: p.specialty_id
+            for p in getattr(catalogue, "providers", [])
+            if getattr(p, "provider_id", None) and getattr(p, "specialty_id", None)
+        }
+        pairs = sorted(_patient_specialty_pairs(provider_specialty))
+        print(
+            f"availability per patient ({len(pairs)} patient/specialty/plan keys the answers need)"
+        )
+        per_patient: dict[str, Any] = {}
+        for patient_id, specialty, policy in pairs:
+            start = CALENDAR_FROM
+            windows = []
+            while start <= CALENDAR_TO:
+                end = min(start + MAX_SPAN - timedelta(days=1), CALENDAR_TO)
+                try:
+                    response = await client.availability(
+                        date_from=start,
+                        date_to=end,
+                        specialty_id=specialty,
+                        patient_id=patient_id,
+                        insurer=[policy] if policy else None,
+                    )
+                except ClinicApiError as error:
+                    windows.append({"from": str(start), "to": str(end), "error": str(error)})
+                else:
+                    windows.append(
+                        {
+                            "from": str(start),
+                            "to": str(end),
+                            "response": response.model_dump(mode="json"),
+                        }
+                    )
+                start = end + timedelta(days=1)
+            per_patient[f"{patient_id}:{specialty}:{policy}"] = windows
+        _dump(out_dir / "availability-per-patient.json", per_patient)
+
         manifest["specialties"] = specialties
         manifest["patients"] = patients
+        manifest["patient_specialty_pairs"] = [f"{p}:{s}:{c}" for p, s, c in pairs]
         _dump(out_dir / "manifest.json", manifest)
     finally:
         await client.aclose()

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -18,7 +19,7 @@ from vortex.observability.demo import write_scripted_call
 
 
 @pytest.fixture
-def seeded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def seeded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     log = tmp_path / "calls.jsonl"
     asyncio.run(write_scripted_call(log, scenario="refuse", delay_s=0))
     asyncio.run(write_scripted_call(log, scenario="book", delay_s=0))
@@ -31,7 +32,8 @@ def seeded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         raise OSError("offline")
 
     monkeypatch.setattr("httpx.get", _offline_get)
-    return log
+    yield log
+    settings.reset_settings()
 
 
 async def test_wall_shows_the_last_call_and_why(seeded: Path, user: User) -> None:
@@ -41,6 +43,20 @@ async def test_wall_shows_the_last_call_and_why(seeded: Path, user: User) -> Non
     await user.should_see("Marta Ruiz López")
     await user.should_see("Recent calls")
     await user.should_see("insurance does not cover")
+
+
+def test_the_seeded_log_does_not_outlive_the_fixture(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    """The regression: the wall above cached its temp log path past teardown.
+
+    Reads the settings the previous test left behind, so it has to stay right
+    after a page test that resolves the call log.
+    """
+    from vortex import settings
+
+    cached_log = settings.get_settings().calls_log_path
+    assert tmp_path_factory.getbasetemp() not in cached_log.parents
 
 
 async def test_call_page_explains_a_refusal(

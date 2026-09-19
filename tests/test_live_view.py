@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
+
+import pytest
 
 from vortex.observability.calllog import CallLog
 from vortex.observability.view import build_call, build_calls
@@ -93,6 +96,23 @@ def test_refuse_reason_from_eligibility() -> None:
     card = build_call("CA-3", events)
     assert card.status == "refused"
     assert card.decline_reason == "not_eligible_age"
+
+
+def test_turn_time_renders_the_madrid_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The regression: a workflow card showed the host machine's clock."""
+    from vortex.observability.live import _turn_time
+
+    monkeypatch.setenv("TZ", "America/New_York")
+    time.tzset()
+    try:
+        card = build_call(
+            "CA-4",
+            [{"kind": "call.started", "call_id": "CA-4", "ts": "2026-09-19T08:00:00+00:00"}],
+        )
+        assert _turn_time(card, "2026-09-19T08:00:30+00:00") == "10:00:30 +30.0s"
+    finally:
+        monkeypatch.undo()
+        time.tzset()
 
 
 def test_build_calls_newest_first() -> None:
