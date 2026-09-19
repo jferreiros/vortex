@@ -4,7 +4,9 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
-from vortex.clinic.client import FakeClinicClient
+import httpx
+
+from vortex.clinic.client import ClinicApiError, FakeClinicClient
 from vortex.contract import MADRID, AvailabilityResponse, BookAction, RescheduleAction
 from vortex.diary.rebooking import (
     RebookingStore,
@@ -43,6 +45,21 @@ class RecordingClinic(FakeClinicClient):
 
     async def availability(self, **kwargs: Any) -> AvailabilityResponse:
         self.windows.append((kwargs["date_from"], kwargs["date_to"]))
+        return await super().availability(**kwargs)
+
+
+class FlakyClinic(FakeClinicClient):
+    """A fake diary that rejects the first query of a run and answers the rest."""
+
+    def __init__(self, error: Exception) -> None:
+        super().__init__()
+        self.error = error
+        self.calls = 0
+
+    async def availability(self, **kwargs: Any) -> AvailabilityResponse:
+        self.calls += 1
+        if self.calls == 1:
+            raise self.error
         return await super().availability(**kwargs)
 
 
@@ -281,3 +298,29 @@ async def test_the_queried_window_starts_the_day_after_the_check(tmp_path: Path)
     assert clinic.windows == [(date(2026, 9, 19), date(2026, 9, 20))]
     assert matched.matched_slot is not None
     assert matched.matched_slot.start.astimezone(MADRID).date() > NOW.date()
+
+
+async def test_a_rejected_query_does_not_abort_the_rest_of_the_batch(tmp_path: Path) -> None:
+    store = RebookingStore(tmp_path / "rebooking.sqlite3")
+    for events in (_book_events(), _reschedule_events()):
+        request = analyze_call(events)
+        assert request is not None
+        store.add(request)
+    clinic = FlakyClinic(ClinicApiError(422, "date range is outside the published calendar"))
+
+    matched = await RebookingWatcher(clinic, store).check_once(now=NOW)
+
+    assert clinic.calls == 2
+    assert len(matched) == 1
+    assert len(store.pending()) == 1
+
+
+async def test_a_transport_failure_leaves_the_row_pending(tmp_path: Path) -> None:
+    store = RebookingStore(tmp_path / "rebooking.sqlite3")
+    request = analyze_call(_book_events())
+    assert request is not None
+    store.add(request)
+    clinic = FlakyClinic(httpx.ConnectError("clinic unreachable"))
+
+    assert await RebookingWatcher(clinic, store).check_once(now=NOW) == []
+    assert [row.request_id for row in store.pending()] == [request.request_id]
