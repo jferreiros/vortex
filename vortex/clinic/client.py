@@ -699,6 +699,9 @@ class FakeClinicClient:
         self._appointments = [
             Appointment.model_validate(_adapt_appointment(a)) for a in appointment_rows
         ]
+        self._appointments_by_patient: dict[str, list[Appointment]] = {}
+        for item in self._appointments:
+            self._appointments_by_patient.setdefault(item.patient_id, []).append(item)
 
     async def health(self) -> bool:
         return True
@@ -939,7 +942,7 @@ class FakeClinicClient:
     ) -> list[Appointment]:
         check_when(when)
         now = datetime.now(tz=self._appointments[0].start.tzinfo) if self._appointments else None
-        items = [a for a in self._appointments if a.patient_id == patient_id]
+        items = list(self._appointments_by_patient.get(patient_id, []))
         if when == "upcoming":
             items = [a for a in items if now is None or a.start >= now]
         elif when == "past":
