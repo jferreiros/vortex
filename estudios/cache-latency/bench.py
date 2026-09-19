@@ -52,16 +52,15 @@ sys.path.insert(0, str(REPO_ROOT))
 
 import httpx  # noqa: E402
 
+from evals.common.context import make_context  # noqa: E402
 from vortex.clinic import fixtures  # noqa: E402
 from vortex.clinic.client import (  # noqa: E402
     ClinicClient,
     FakeClinicClient,
-    _adapt_appointment_type,
     _adapt_catalogue,
 )
 from vortex.contract import MADRID, Catalogue  # noqa: E402
 from vortex.tools import TOOLS  # noqa: E402
-from evals.common.context import make_context  # noqa: E402
 
 PROD_BASE_URL = "https://hackspain.getprosperapp.com"
 
@@ -192,7 +191,9 @@ def make_handler(state: PlatformState):
                 self._reply(state.availability(params))
             elif url.path.startswith("/api/v1/patients/"):
                 patient_id = url.path.split("/")[4]
-                self._reply({"appointments": state.appointments(patient_id, params.get("when", "upcoming"))})
+                self._reply(
+                    {"appointments": state.appointments(patient_id, params.get("when", "upcoming"))}
+                )
             else:
                 self._reply({"detail": "not found"}, 404)
 
@@ -265,8 +266,14 @@ def tool_recipes() -> dict[str, dict]:
         },
         "list_appointments": {"patient_id": fixtures.APPOINTMENTS[0]["patient_id"], "when": "all"},
         # prepare_booking / prepare_reschedule get their slot injected by the warmup.
-        "prepare_booking": {"patient_id": fixtures.PATIENTS[0]["patient_id"], "policy_id": "mapfre"},
-        "prepare_reschedule": {"appointment_id": fixtures.APPOINTMENTS[0]["appointment_id"], "policy_id": "mapfre"},
+        "prepare_booking": {
+            "patient_id": fixtures.PATIENTS[0]["patient_id"],
+            "policy_id": "mapfre",
+        },
+        "prepare_reschedule": {
+            "appointment_id": fixtures.APPOINTMENTS[0]["appointment_id"],
+            "policy_id": "mapfre",
+        },
         "prepare_cancel": {
             "appointment_id": fixtures.APPOINTMENTS[0]["appointment_id"],
             "patient_id": fixtures.APPOINTMENTS[0]["patient_id"],
@@ -276,7 +283,10 @@ def tool_recipes() -> dict[str, dict]:
             "specialty_id": "general_practice",
         },
         "triage": {"complaint": "knee pain since yesterday"},
-        "nearest_location": {"address": "Calle de Alcala 1, Madrid", "specialty_id": "general_practice"},
+        "nearest_location": {
+            "address": "Calle de Alcala 1, Madrid",
+            "specialty_id": "general_practice",
+        },
         "find_provider": {"spoken_name": provider_name()},
         "clinic_facts": {"location_id": "centro"},
     }
@@ -287,9 +297,7 @@ async def warmup_slot(client) -> dict:
     spec = TOOLS["find_slots"]
     with tempfile.TemporaryDirectory() as tmp:
         ctx = make_context(call_id="bench-warmup", log_dir=Path(tmp), clinic=client)
-        result = await spec.fn(
-            ctx, spec.input_model.model_validate(tool_recipes()["find_slots"])
-        )
+        result = await spec.fn(ctx, spec.input_model.model_validate(tool_recipes()["find_slots"]))
     slots = getattr(result, "slots", None) or getattr(result, "results", None) or []
     if not slots:
         raise RuntimeError("warmup find_slots returned no slots; fixtures changed?")
@@ -356,7 +364,9 @@ async def run_scenario(
                     await spec.fn(ctx, spec.input_model.model_validate(args))
                 except Exception as exc:  # a broken recipe must not kill the study
                     samples = []
-                    out["scenarios"][label]["tools"][name] = {"error": f"{type(exc).__name__}: {exc}"}
+                    out["scenarios"][label]["tools"][name] = {
+                        "error": f"{type(exc).__name__}: {exc}"
+                    }
                     break
                 samples.append((time.perf_counter() - started) * 1000)
                 if not share_client and not in_memory:
@@ -364,7 +374,9 @@ async def run_scenario(
             else:
                 reqs_after = sum(state.requests.values()) if state else 0
                 row = pct(samples)
-                row["api_requests_per_call"] = round((reqs_after - reqs_before) / runs, 2) if state else None
+                row["api_requests_per_call"] = (
+                    round((reqs_after - reqs_before) / runs, 2) if state else None
+                )
                 if state:
                     delta = state.requests - routes_before
                     row["routes_per_call"] = {
@@ -495,12 +507,21 @@ def storage_bakeoff(full_pull_slots: list[dict], runs: int) -> dict:
 
     patients = _synthetic_directory(SYNTHETIC_PATIENTS)
     appointments = [
-        dict(fixtures.APPOINTMENTS[i % len(fixtures.APPOINTMENTS)],
-             appointment_id=f"A{i:05d}", patient_id=f"P{(i % SYNTHETIC_PATIENTS) + 1:05d}")
+        dict(
+            fixtures.APPOINTMENTS[i % len(fixtures.APPOINTMENTS)],
+            appointment_id=f"A{i:05d}",
+            patient_id=f"P{(i % SYNTHETIC_PATIENTS) + 1:05d}",
+        )
         for i in range(SYNTHETIC_PATIENTS * 2)
     ]
     slots = full_pull_slots
-    report: dict = {"synthetic_scale": {"patients": len(patients), "appointments": len(appointments), "slots": len(slots)}}
+    report: dict = {
+        "synthetic_scale": {
+            "patients": len(patients),
+            "appointments": len(appointments),
+            "slots": len(slots),
+        }
+    }
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
@@ -508,9 +529,9 @@ def storage_bakeoff(full_pull_slots: list[dict], runs: int) -> dict:
         # --- JSON snapshot -------------------------------------------------
         started = time.perf_counter()
         json_path = tmp_path / "snapshot.json"
-        json_path.write_text(json.dumps(
-            {"patients": patients, "appointments": appointments, "slots": slots}
-        ))
+        json_path.write_text(
+            json.dumps({"patients": patients, "appointments": appointments, "slots": slots})
+        )
         json_build = time.perf_counter() - started
         started = time.perf_counter()
         loaded = json.loads(json_path.read_text())
@@ -533,25 +554,38 @@ def storage_bakeoff(full_pull_slots: list[dict], runs: int) -> dict:
         db = sqlite3.connect(db_path)
         db.execute("CREATE TABLE patients (patient_id TEXT PRIMARY KEY, phone TEXT, payload TEXT)")
         db.execute("CREATE INDEX idx_patients_phone ON patients(phone)")
-        db.execute("CREATE TABLE appointments (appointment_id TEXT PRIMARY KEY, patient_id TEXT, payload TEXT)")
+        db.execute(
+            "CREATE TABLE appointments (appointment_id TEXT PRIMARY KEY, patient_id TEXT, payload TEXT)"
+        )
         db.execute("CREATE INDEX idx_appt_patient ON appointments(patient_id)")
         db.execute("CREATE TABLE slots (provider_id TEXT, day TEXT, payload TEXT)")
         db.execute("CREATE INDEX idx_slots_day ON slots(day)")
-        db.executemany("INSERT INTO patients VALUES (?,?,?)",
-                       [(p["patient_id"], p["phone"], json.dumps(p)) for p in patients])
-        db.executemany("INSERT INTO appointments VALUES (?,?,?)",
-                       [(a["appointment_id"], a["patient_id"], json.dumps(a)) for a in appointments])
-        db.executemany("INSERT INTO slots VALUES (?,?,?)",
-                       [(s["provider_id"], s["start_time"][:10], json.dumps(s)) for s in slots])
+        db.executemany(
+            "INSERT INTO patients VALUES (?,?,?)",
+            [(p["patient_id"], p["phone"], json.dumps(p)) for p in patients],
+        )
+        db.executemany(
+            "INSERT INTO appointments VALUES (?,?,?)",
+            [(a["appointment_id"], a["patient_id"], json.dumps(a)) for a in appointments],
+        )
+        db.executemany(
+            "INSERT INTO slots VALUES (?,?,?)",
+            [(s["provider_id"], s["start_time"][:10], json.dumps(s)) for s in slots],
+        )
         db.commit()
         sqlite_build = time.perf_counter() - started
         started = time.perf_counter()
         for _ in range(runs):
-            db.execute("SELECT payload FROM patients WHERE phone = ?", (patients[1234]["phone"],)).fetchall()
+            db.execute(
+                "SELECT payload FROM patients WHERE phone = ?", (patients[1234]["phone"],)
+            ).fetchall()
         sqlite_query = (time.perf_counter() - started) / runs * 1e6
         started = time.perf_counter()
         for _ in range(runs):
-            db.execute("SELECT payload FROM slots WHERE day = ?", (slots[len(slots)//2]["start_time"][:10],)).fetchall()
+            db.execute(
+                "SELECT payload FROM slots WHERE day = ?",
+                (slots[len(slots) // 2]["start_time"][:10],),
+            ).fetchall()
         sqlite_day = (time.perf_counter() - started) / runs * 1e6
         db.close()
         report["sqlite"] = {
@@ -575,7 +609,9 @@ def storage_bakeoff(full_pull_slots: list[dict], runs: int) -> dict:
         for _ in range(runs):
             by_phone[patients[1234]["phone"]]
         mem_query = (time.perf_counter() - started) / runs * 1e6
-        payload_bytes = len(json.dumps({"patients": patients, "appointments": appointments, "slots": slots}))
+        payload_bytes = len(
+            json.dumps({"patients": patients, "appointments": appointments, "slots": slots})
+        )
         report["memory"] = {
             "build_s": round(mem_build, 4),
             "payload_mb_serialized": round(payload_bytes / 1e6, 3),
@@ -592,9 +628,17 @@ def storage_bakeoff(full_pull_slots: list[dict], runs: int) -> dict:
 
 async def amain() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--runs", type=int, default=25, help="timed repetitions per tool per scenario")
-    parser.add_argument("--live", action="store_true", help="also run no_cache/current against the production API (needs PLATFORM_API_KEY)")
-    parser.add_argument("--no-network", action="store_true", help="skip the WAN network-floor measurement")
+    parser.add_argument(
+        "--runs", type=int, default=25, help="timed repetitions per tool per scenario"
+    )
+    parser.add_argument(
+        "--live",
+        action="store_true",
+        help="also run no_cache/current against the production API (needs PLATFORM_API_KEY)",
+    )
+    parser.add_argument(
+        "--no-network", action="store_true", help="skip the WAN network-floor measurement"
+    )
     parser.add_argument("--out", type=Path, default=Path(__file__).with_name("results.json"))
     args = parser.parse_args()
 
@@ -614,26 +658,81 @@ async def amain() -> None:
             out["network_floor"] = network_floor(args.runs)
 
         # -- tool scenarios over the local platform server -------------------
-        out["scenarios"]["no_cache"] = {"tools": {}, "meaning": "fresh HTTP client per call, nothing reused"}
-        await run_scenario("no_cache", base_url, "bench", share_client=False,
-                           in_memory=False, runs=args.runs, state=state, out=out)
-        out["scenarios"]["current"] = {"tools": {}, "meaning": "shared client; only the catalogue is cached (production today)"}
-        await run_scenario("current", base_url, "bench", share_client=True,
-                           in_memory=False, runs=args.runs, state=state, out=out)
-        out["scenarios"]["full_memory"] = {"tools": {}, "meaning": "everything in local memory (warm snapshot cache)"}
-        await run_scenario("full_memory", base_url, "bench", share_client=True,
-                           in_memory=True, runs=args.runs, state=state, out=out)
+        out["scenarios"]["no_cache"] = {
+            "tools": {},
+            "meaning": "fresh HTTP client per call, nothing reused",
+        }
+        await run_scenario(
+            "no_cache",
+            base_url,
+            "bench",
+            share_client=False,
+            in_memory=False,
+            runs=args.runs,
+            state=state,
+            out=out,
+        )
+        out["scenarios"]["current"] = {
+            "tools": {},
+            "meaning": "shared client; only the catalogue is cached (production today)",
+        }
+        await run_scenario(
+            "current",
+            base_url,
+            "bench",
+            share_client=True,
+            in_memory=False,
+            runs=args.runs,
+            state=state,
+            out=out,
+        )
+        out["scenarios"]["full_memory"] = {
+            "tools": {},
+            "meaning": "everything in local memory (warm snapshot cache)",
+        }
+        await run_scenario(
+            "full_memory",
+            base_url,
+            "bench",
+            share_client=True,
+            in_memory=True,
+            runs=args.runs,
+            state=state,
+            out=out,
+        )
 
         # -- live scenarios (optional) ---------------------------------------
         api_key = os.environ.get("PLATFORM_API_KEY", "")
         live_url = os.environ.get("PLATFORM_API_BASE_URL", PROD_BASE_URL)
         if args.live and api_key:
-            out["scenarios"]["live_no_cache"] = {"tools": {}, "meaning": "production API, nothing cached"}
-            await run_scenario("live_no_cache", live_url, api_key, share_client=False,
-                               in_memory=False, runs=args.runs, state=None, out=out)
-            out["scenarios"]["live_current"] = {"tools": {}, "meaning": "production API, catalogue cached"}
-            await run_scenario("live_current", live_url, api_key, share_client=True,
-                               in_memory=False, runs=args.runs, state=None, out=out)
+            out["scenarios"]["live_no_cache"] = {
+                "tools": {},
+                "meaning": "production API, nothing cached",
+            }
+            await run_scenario(
+                "live_no_cache",
+                live_url,
+                api_key,
+                share_client=False,
+                in_memory=False,
+                runs=args.runs,
+                state=None,
+                out=out,
+            )
+            out["scenarios"]["live_current"] = {
+                "tools": {},
+                "meaning": "production API, catalogue cached",
+            }
+            await run_scenario(
+                "live_current",
+                live_url,
+                api_key,
+                share_client=True,
+                in_memory=False,
+                runs=args.runs,
+                state=None,
+                out=out,
+            )
             out["cache_build_live"] = await cache_build(live_url, api_key, None)
         elif args.live:
             print("!! --live needs PLATFORM_API_KEY; skipping live scenarios", file=sys.stderr)
@@ -672,7 +771,9 @@ async def amain() -> None:
             if "error" in row:
                 print(f"| {name} | ERROR {row['error'][:60]} | | |")
             else:
-                print(f"| {name} | {row['p50_ms']} | {row['p95_ms']} | {row.get('api_requests_per_call')} |")
+                print(
+                    f"| {name} | {row['p50_ms']} | {row['p95_ms']} | {row.get('api_requests_per_call')} |"
+                )
     print("\ncache_build_local:", json.dumps(out["cache_build_local"]))
     print("storage:", json.dumps(out["storage"], indent=2)[:1500])
     if "network_floor" in out:
