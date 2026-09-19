@@ -244,8 +244,7 @@ async def run_all(
                     group=scenario.group,
                     tags=list(scenario.tags),
                     details=[
-                        "rules brain submits one intent per call; "
-                        "problem 18 needs --brain model"
+                        "rules brain submits one intent per call; problem 18 needs --brain model"
                     ],
                 )
             )
