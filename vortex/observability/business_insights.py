@@ -1483,8 +1483,42 @@ DATA_GAPS: list[str] = [
 ]
 
 
+def is_real_call(card: CallCard) -> bool:
+    """A call that actually dialled the line — a real caller or one of
+    ``scripts/fake_caller.py``'s practice runs — never an offline artefact
+    sharing the same log:
+
+    - eval smoke tests carry ``call_id`` prefixed ``probe:``
+      (``evals/corpus/hydrate.py``);
+    - both eval families (probes and the named corpus cases such as
+      ``adversarial-...`` or ``the_rules-...``) mark their own
+      ``call.started`` with ``clinic="synthetic-data"``, a value
+      ``Settings.describe()`` never produces (real calls get "live" or
+      "fake" there, meaning only whether the *clinic* API is live — not
+      whether the *call* is real);
+    - the console's "replay demo" button (``observability/demo.py``) marks
+      its scripted calls ``voice="demo"``, a value ``voice_label`` never
+      returns (real calls get "gemini-live", "pipecat" or "stub").
+
+    Any one of these three checks alone would catch most of the log; kept
+    together because either offline family evolving its ``call_id`` shape
+    must not let its calls sneak back into what the board counts.
+    """
+    if card.call_id.startswith("probe:"):
+        return False
+    if card.clinic == "synthetic-data":
+        return False
+    return card.voice != "demo"
+
+
 def business_insights(cards: list[CallCard], *, now: datetime | None = None) -> dict[str, Any]:
-    """The full payload the Insights page's business-insights endpoint returns."""
+    """The full payload the Insights page's business-insights endpoint
+    returns. ``cards`` is filtered to ``is_real_call`` first: eval probes,
+    synthetic corpus cases and scripted "replay demo" calls share this same
+    log for visibility elsewhere in the console, but they are not a call a
+    clinic manager should see counted as business volume.
+    """
+    cards = [c for c in cards if is_real_call(c)]
     catalogue = site_catalogue()
     return {
         "calls_considered": len(cards),
