@@ -133,7 +133,7 @@ def main() -> None:
     ap.add_argument("--dry-run", action="store_true", help="print, create nothing")
     args = ap.parse_args()
 
-    findings = parse(args.review.read_text(errors="replace"))
+    findings = parse(args.review.read_text(encoding="utf-8", errors="replace"))
     if not findings:
         print("No major findings. Nothing to file.")
         return
