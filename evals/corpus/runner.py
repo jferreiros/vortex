@@ -19,7 +19,11 @@ stub is reported hollow, never as a pass.
 **Judging real calls.** With ``--judge-log`` the runner reads a call log,
 joins each call to the public case it dialled and scores the record the way the
 leaderboard would, naming the field that lost. Practice calls are free and
-uncapped; this turns them into the feedback ``Run All`` refuses to give.
+uncapped; this turns them into the feedback ``Run All`` refuses to give. One
+honesty rule: a slot in a published answer was computed for the day the roster
+was exported, so a call dialled on any other day is skipped for such cases —
+printed as ``STALE ANCHOR`` — instead of failing the agent for the calendar
+having moved.
 """
 
 from __future__ import annotations
@@ -254,7 +258,9 @@ def _read_call_log(path: Path) -> dict[str, dict[str, Any]]:
     logged twice: ``submit.sent`` carries the payload before the POST,
     ``submit.result`` carries it with the platform's answer. Read the result and
     fall back to what was sent, so a call whose POST never came back is judged
-    on what it tried to submit rather than counted as silence.
+    on what it tried to submit rather than counted as silence. The first
+    timestamp seen for a call is kept too: the stale-anchor gate needs the day
+    the call was dialled, not the day it is being judged.
     """
     calls: dict[str, dict[str, Any]] = {}
     for line in path.read_text().splitlines():
@@ -270,8 +276,10 @@ def _read_call_log(path: Path) -> dict[str, dict[str, Any]]:
             continue
         call = calls.setdefault(
             call_id,
-            {"actions": [], "attempted": [], "our_turns": [], "from_number": None},
+            {"actions": [], "attempted": [], "our_turns": [], "from_number": None, "ts": None},
         )
+        if call["ts"] is None and event.get("ts"):
+            call["ts"] = event["ts"]
         kind = event.get("kind") or event.get("event")
         payload = event.get("payload") or {}
         if kind == "submit.result" and payload:
@@ -315,8 +323,40 @@ def _phone_index(roster: Roster) -> dict[str, list[Case]]:
     return index
 
 
+def _carries_slot(case: Case) -> bool:
+    """Does any acceptable answer carry a slot?
+
+    A published slot was computed by the organisers' generator from the case's
+    ``reference_time``: "the earliest appointment" starts the day after the
+    call, so the same request dialled on a later day can have a different right
+    answer. Ids, reasons and answers without a slot do not move with the day.
+    Deliberately conservative: a slot pinned to a far date is skipped too,
+    because the runner cannot recompute the generator to know it held.
+    """
+    return any(action.get("slot") for alt in case.acceptable for action in alt)
+
+
+def _call_day(call: dict[str, Any]) -> datetime.date | None:
+    """The Europe/Madrid day the call was dialled, from the log's timestamps."""
+    raw = call.get("ts")
+    if not raw:
+        return None
+    try:
+        moment = datetime.datetime.fromisoformat(str(raw))
+    except ValueError:
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=datetime.UTC)  # the call log stamps UTC
+    return moment.astimezone(probes.MADRID).date()
+
+
 def _judge_cases(
-    roster: Roster, log_path: Path, case_id: str | None = None
+    roster: Roster,
+    log_path: Path,
+    case_id: str | None = None,
+    *,
+    anchor: datetime.date | None = None,
+    today: datetime.date | None = None,
 ) -> tuple[list[CaseResult], list[str]]:
     notes: list[str] = []
     if not log_path.exists():
@@ -324,15 +364,15 @@ def _judge_cases(
     calls = _read_call_log(log_path)
     if not calls:
         return [], [f"{log_path} holds no call events"]
-    anchor = roster.cases[0].now.date() if roster.cases else None
-    today = datetime.datetime.now(probes.MADRID).date()
+    anchor = anchor or (roster.cases[0].now.date() if roster.cases else None)
+    today = today or datetime.datetime.now(probes.MADRID).date()
     if anchor and anchor != today:
         notes.append(
-            f"the roster is the export anchored to {anchor}, and today is {today}. "
-            "'The earliest appointment' means the earliest from the day after the "
-            "call, so every BOOK answer that asked for the earliest has moved. "
-            "A slot mismatch on such a case is the anchor, not the agent — "
-            "the problem page shows today's answer, the exported file does not."
+            f"STALE ANCHOR: the roster is the export anchored to {anchor}, and today is "
+            f'{today}. "The earliest appointment" means the earliest from the day after '
+            "the call, so a slot in a published answer is the right answer only for a call "
+            "dialled on the anchor day. Judged calls dialled since are skipped for such "
+            "cases, never failed on a slot that was not theirs to hit."
         )
     forced = roster.get(case_id) if case_id else None
     if case_id and forced is None:
@@ -341,6 +381,7 @@ def _judge_cases(
     out: list[CaseResult] = []
     unmatched: list[str] = []
     ambiguous: list[str] = []
+    skipped_for_anchor: list[str] = []
     for call_id, call in calls.items():
         case = forced
         if case is None:
@@ -356,6 +397,30 @@ def _judge_cases(
                 continue
         if case is None:
             unmatched.append(f"{call_id[:12]} (from_number {call.get('from_number') or 'absent'})")
+            continue
+        call_day = _call_day(call)
+        day_known = call_day is not None
+        dialled = call_day or today
+        if dialled != case.now.date() and _carries_slot(case):
+            skipped_for_anchor.append(case.id)
+            out.append(
+                CaseResult(
+                    id=f"judged.{case.id}",
+                    name=f"{case.summary or case.shape()} · call {call_id[:8]}",
+                    status="skipped",
+                    problem=case.number,
+                    group="judged",
+                    details=[
+                        f"not scored: the call was dialled on {dialled}"
+                        + ("" if day_known else " (the log carries no timestamp; assumed)"),
+                        f"the case's answers were computed for {case.now.date()}, and the "
+                        "slot it accepts moves with the call day — STALE ANCHOR",
+                        "scoring resumes once the roster is re-exported for the call's day: "
+                        "make evals-fetch",
+                    ],
+                    tags=["judged", case.problem_id, "stale-anchor"],
+                )
+            )
             continue
         verdict = judge.score(case, call["actions"], our_turns=call["our_turns"] or None)
         out.append(
@@ -388,6 +453,13 @@ def _judge_cases(
             "the organisers reuse a persona across problems, so a number identifies "
             "only 26 of the 73 cases on its own. A practice call is dialled one case "
             "at a time, so --case is the reliable way to say which"
+        )
+    if skipped_for_anchor:
+        unique = sorted(set(skipped_for_anchor))
+        more = f" and {len(unique) - 4} more" if len(unique) > 4 else ""
+        notes.append(
+            f"{len(skipped_for_anchor)} judged call(s) sat on slot answers and were "
+            f"skipped, not scored: {', '.join(unique[:4])}{more}"
         )
     return out, notes
 
@@ -444,6 +516,8 @@ async def run(
     started = time.perf_counter()
     roster = load()
     log_dir = results_dir / "calls" / LAYER
+    anchor = roster.cases[0].now.date() if roster.cases else None
+    today = datetime.datetime.now(probes.MADRID).date()
     run_result = RunResult(
         layer=LAYER,
         started_at=__import__("datetime").datetime.now(__import__("datetime").UTC).isoformat(),
@@ -451,6 +525,8 @@ async def run(
         mode={
             "roster": str(roster.path.name),
             "roster_sha256": roster.sha256[:12],
+            "roster_anchor": anchor.isoformat() if anchor else None,
+            "anchor_stale": bool(anchor and anchor != today),
             "cases": len(roster.cases),
             "judge_log": str(judge_log) if judge_log else None,
         },
@@ -467,7 +543,7 @@ async def run(
         cases += _roster_reproduction_cases(roster, run_result)
 
     if judge_log is not None:
-        judged, notes = _judge_cases(roster, judge_log, case_id)
+        judged, notes = _judge_cases(roster, judge_log, case_id, anchor=anchor, today=today)
         cases += judged
         run_result.notes += notes
 
