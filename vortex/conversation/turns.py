@@ -519,6 +519,58 @@ def is_affirmation(text: str) -> bool:
     return _is_only_affirmative(words)
 
 
+# Call 6d537b3a: the rule had already bitten, the caller said "Ah, I see",
+# and the model asked again about another policy. A bare "yes" after that
+# question means they hold another policy — do not treat it as acceptance.
+# These phrases mean they accepted the refusal. Nothing else.
+REFUSAL_ACCEPTANCE_PHRASES: tuple[str, ...] = (
+    "i see",
+    "ah i see",
+    "oh i see",
+    "i understand",
+    "okay i understand",
+    "ok i understand",
+    "thanks anyway",
+    "thank you anyway",
+    "ya veo",
+    "ah ya veo",
+    "ya lo veo",
+    "lo entiendo",
+    "entendido",
+)
+
+REFUSAL_CONTINUE_STEMS: tuple[str, ...] = (
+    "referr",
+    "polic",
+    "poliz",
+    "póliz",
+    "another",
+    "otra",
+    "why",
+    "por que",
+    "por qué",
+)
+
+REFUSAL_ACCEPTANCE_MAX_WORDS = 8
+
+
+def is_refusal_acceptance(text: str) -> bool:
+    """Did the caller accept a rule that already bit, and nothing else?
+
+    ``yes`` / ``sí`` / ``vale`` after "do you hold another policy?" is a
+    new fact, not an ending. ``Ah, I see`` and ``I understand`` are.
+    """
+    words = _words(text)
+    if not words or len(words) > REFUSAL_ACCEPTANCE_MAX_WORDS:
+        return False
+    if any(word in NEGATIONS for word in words):
+        return False
+    joined = " ".join(words)
+    if any(stem in joined for stem in REFUSAL_CONTINUE_STEMS):
+        return False
+    return any(phrase in joined for phrase in REFUSAL_ACCEPTANCE_PHRASES)
+
+
 def looks_like_confirmation_question(text: str, *, prepared: bool = False) -> bool:
     """Was the agent's last turn a read-back waiting for a yes?
 
