@@ -67,17 +67,19 @@ def test_ask_text_spanish_full_stamp() -> None:
     assert "Arenal Centro" in text
     assert "jueves 24 de septiembre a las 16:30" in text
     assert "¿Va a venir?" in text
+    assert "la movemos ahora mismo" in text  # the in-call reschedule offer
 
 
 def test_ask_text_other_languages_ask_the_same_question() -> None:
-    for lang, marker in (
-        ("ca", "Hi vindrà?"),
-        ("gl", "Vai vir?"),
-        ("eu", "Etorriko al zara?"),
-        ("en", "Will you come?"),
+    for lang, marker, offer in (
+        ("ca", "Hi vindrà?", "la movem ara"),
+        ("gl", "Vai vir?", "movémola agora"),
+        ("eu", "Etorriko al zara?", "mugituko dugu"),
+        ("en", "Will you come?", "we'll change it right now"),
     ):
         text = ask_text(language=lang, when=WHEN)
         assert marker in text
+        assert offer in text  # the in-call reschedule offer, in her language
         assert "24/09" in text  # digit stamp any voice can read
 
 
