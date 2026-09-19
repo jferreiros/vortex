@@ -46,6 +46,7 @@ def offline_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> setting
     monkeypatch.setenv("VORTEX_VOICE_MODE", "stub")
     monkeypatch.setenv("VORTEX_CLINIC_MODE", "fake")
     monkeypatch.setenv("VORTEX_CALLS_LOG", str(tmp_path / "calls.jsonl"))
+    monkeypatch.setenv("VORTEX_PRODUCT_DB", str(tmp_path / "vortex_product.db"))
     settings_module.reset_settings()
     yield settings_module.get_settings()
     settings_module.reset_settings()
