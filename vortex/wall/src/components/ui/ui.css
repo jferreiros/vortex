@@ -54,6 +54,23 @@
   background: var(--color-primary-soft);
 }
 
+.ui-button-danger {
+  background: var(--color-urgent);
+  color: var(--color-on-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.ui-button-danger:hover {
+  background: var(--color-warn);
+  box-shadow: var(--shadow-md);
+}
+
+.ui-button-danger:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
 /* Card --------------------------------------------------------------------*/
 
 .ui-card {
@@ -231,6 +248,14 @@
   font-size: var(--text-sm);
   text-align: center;
   padding: var(--space-6) 0;
+}
+
+.ui-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-top: 1px solid var(--color-border);
 }
 
 /* Switch -----------------------------------------------------------------------*/

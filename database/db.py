@@ -23,7 +23,12 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
-from database.models import AppointmentRecord, AppointmentWithCalls, CallRecord
+from database.models import (
+    AppointmentRecord,
+    AppointmentWithCalls,
+    CallRecord,
+    WallCancellationRecord,
+)
 from database.schema import migrate
 
 DEFAULT_DB_PATH = Path(__file__).resolve().parent / "vortex.db"
@@ -266,6 +271,114 @@ def appointments_due_for_confirmation(
         (day,),
     ).fetchall()
     return [AppointmentRecord.from_row(row) for row in rows]
+
+
+# ---------------------------------------------------------------------------
+# wall cancellations (the board's Horarios page cancelling by hand)
+# ---------------------------------------------------------------------------
+#
+# This is where the control centre's cancel buttons connect: the FastAPI
+# routes in ``vortex/observability/live.py`` (``/api/wall/appointments/cancel``
+# and ``/api/wall/agenda/cancel[-preview]``) are the only callers. A wall
+# cancellation is not a call, so it writes no ``calls`` row — one
+# ``wall_cancellations`` row per slot, and when the appointment also exists
+# in ``appointments`` its ``status`` flips to ``cancelled``, the same word a
+# phone cancellation writes through ``database/hooks.py``.
+
+
+def insert_wall_cancellation(
+    conn: sqlite3.Connection,
+    *,
+    provider_id: str,
+    site_id: str,
+    slot_start: str,
+    appointment_id: str | None = None,
+    patient_name: str | None = None,
+    provider_name: str | None = None,
+) -> WallCancellationRecord:
+    """Record one hand-cancelled diary slot. ``slot_start`` is ISO-8601 with
+    an explicit offset; the caller normalises to the minute."""
+    row = conn.execute(
+        """
+        INSERT INTO wall_cancellations
+            (provider_id, site_id, slot_start,
+             appointment_id, patient_name, provider_name, cancelled_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        RETURNING *
+        """,
+        (
+            provider_id,
+            site_id,
+            slot_start,
+            appointment_id,
+            patient_name,
+            provider_name,
+            now_iso(),
+        ),
+    ).fetchone()
+    return WallCancellationRecord.from_row(row)
+
+
+def list_wall_cancellations(conn: sqlite3.Connection) -> list[WallCancellationRecord]:
+    """Every hand-cancelled slot — the set the agenda filters out per request."""
+    rows = conn.execute("SELECT * FROM wall_cancellations ORDER BY slot_start").fetchall()
+    return [WallCancellationRecord.from_row(row) for row in rows]
+
+
+def cancel_appointment_rows(
+    conn: sqlite3.Connection, *, provider_id: str, day_from: date, day_to: date
+) -> list[str]:
+    """Batch path: flip every live ``appointments`` row of this doctor whose
+    slot falls inside [``day_from``, ``day_to``] to ``cancelled``. Returns the
+    ids it touched. Rows this database never knew are unaffected by design —
+    their cancellation lives only in ``wall_cancellations``."""
+    rows = conn.execute(
+        """
+        UPDATE appointments SET status = 'cancelled', updated_at = ?
+        WHERE provider_id = ?
+          AND substr(slot_start, 1, 10) BETWEEN ? AND ?
+          AND status IN ('scheduled', 'confirmed')
+        RETURNING id
+        """,
+        (now_iso(), provider_id, day_from.isoformat(), day_to.isoformat()),
+    ).fetchall()
+    return [str(row["id"]) for row in rows]
+
+
+def cancel_appointment_row(
+    conn: sqlite3.Connection,
+    *,
+    appointment_id: str | None = None,
+    provider_id: str | None = None,
+    slot_start: str | None = None,
+) -> str | None:
+    """Single path: flip one live ``appointments`` row to ``cancelled`` and
+    return its id — by ``appointment_id`` when there is one, else by the
+    doctor-and-minute the slot key names. ``None`` when nothing live matched."""
+    if appointment_id:
+        rows = conn.execute(
+            """
+            UPDATE appointments SET status = 'cancelled', updated_at = ?
+            WHERE id = ? AND status IN ('scheduled', 'confirmed')
+            RETURNING id
+            """,
+            (now_iso(), appointment_id),
+        ).fetchall()
+        if rows:
+            return str(rows[0]["id"])
+    if provider_id and slot_start:
+        rows = conn.execute(
+            """
+            UPDATE appointments SET status = 'cancelled', updated_at = ?
+            WHERE provider_id = ? AND substr(slot_start, 1, 16) = ?
+              AND status IN ('scheduled', 'confirmed')
+            RETURNING id
+            """,
+            (now_iso(), provider_id, slot_start[:16]),
+        ).fetchall()
+        if rows:
+            return str(rows[0]["id"])
+    return None
 
 
 # ---------------------------------------------------------------------------

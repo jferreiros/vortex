@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import SectionHeader from "../../../components/ui/SectionHeader";
 import Card from "../../../components/ui/Card";
 import Button from "../../../components/ui/Button";
+import { CancelRangeDialog, CancelVisitDialog } from "./CancelDialogs";
 import "./agenda.css";
 
 const STORAGE_KEY = "vortex.clinic.doctorName";
@@ -62,6 +63,8 @@ export default function Agenda() {
     specialties: [],
     types: [],
   });
+  const [rangeOpen, setRangeOpen] = useState(false);
+  const [confirmVisit, setConfirmVisit] = useState(null);
 
   useEffect(() => {
     fetch("/api/wall/agenda-options")
@@ -103,6 +106,13 @@ export default function Agenda() {
   useEffect(() => {
     load(name, month, specialty);
   }, [name, month, specialty, load]);
+
+  function afterCancel() {
+    // The cancelled slots come back as free on the refetch — the visit the
+    // detail pane was showing may be one of them, so it closes too.
+    setSelected(null);
+    load(name, month, specialty);
+  }
 
   function pickDoctor(who) {
     const next = who.trim();
@@ -166,6 +176,11 @@ export default function Agenda() {
         subtitle={
           data?.doctor?.specialty
             || "Elige especialidad o doctor. El calendario enseña las citas del pack."
+        }
+        action={
+          <Button variant="secondary" type="button" onClick={() => setRangeOpen(true)}>
+            Cancelar
+          </Button>
         }
       />
       <div className="agenda-toolbar">
@@ -266,7 +281,7 @@ export default function Agenda() {
               onPick={(visit) => setSelected(visit)}
             />
           </Card>
-          <VisitDetail visit={selected} />
+          <VisitDetail visit={selected} onCancel={() => setConfirmVisit(selected)} />
           </div>
         </div>
       ) : calView === "day" ? (
@@ -360,6 +375,20 @@ export default function Agenda() {
             )}
           </Card>
       )}
+      <CancelRangeDialog
+        open={rangeOpen}
+        onClose={() => setRangeOpen(false)}
+        doctors={options.doctors || []}
+        initialProviderId={(options.doctors.find((row) => row.name === name) || {}).id}
+        today={data?.today}
+        onDone={afterCancel}
+      />
+      <CancelVisitDialog
+        visit={confirmVisit}
+        doctorName={confirmVisit?.provider_name || data?.doctor?.name}
+        onClose={() => setConfirmVisit(null)}
+        onDone={afterCancel}
+      />
     </div>
   );
 }
@@ -477,7 +506,7 @@ function DayList({ visits, selectedKey, onPick }) {
   );
 }
 
-function VisitDetail({ visit }) {
+function VisitDetail({ visit, onCancel }) {
   return (
     <Card padding="lg" className="agenda-visit-wide">
       <div className="agenda-visit-head">
@@ -506,6 +535,13 @@ function VisitDetail({ visit }) {
         <div><dt>Seguro</dt><dd>{visit.insurer || "—"}</dd></div>
         <div><dt>Teléfono</dt><dd>{visit.phone || "—"}</dd></div>
       </dl>
+      {visit.provider_id && visit.slot ? (
+        <div className="agenda-visit-actions">
+          <Button variant="secondary" type="button" onClick={onCancel}>
+            Cancelar esta cita
+          </Button>
+        </div>
+      ) : null}
     </Card>
   );
 }

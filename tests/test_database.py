@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from database import confirmations, db
+from database import confirmations, db, schema
 from database.hooks import persist_submission
 from evals.common.context import make_context
 from vortex.contract import (
@@ -64,7 +64,7 @@ def test_migrate_is_idempotent(db_path: Path) -> None:
     conn2 = db.connect(db_path)  # must not fail re-running the same migration
     version = conn2.execute("PRAGMA user_version").fetchone()[0]
     conn2.close()
-    assert version == 1
+    assert version == len(schema.MIGRATIONS)
 
 
 # ---------------------------------------------------------------------------
@@ -72,7 +72,13 @@ def test_migrate_is_idempotent(db_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-async def _book(tmp_path: Path, db_path: Path, *, call_id: str = "CALL-1") -> None:
+async def _book(
+    tmp_path: Path,
+    db_path: Path,
+    *,
+    call_id: str = "CALL-1",
+    slot: datetime | None = None,
+) -> None:
     ctx = _ctx(tmp_path, call_id, said="Quiero una cita con el médico de cabecera")
     remember_patient(ctx, P00042)
     action = BookAction(
@@ -80,7 +86,7 @@ async def _book(tmp_path: Path, db_path: Path, *, call_id: str = "CALL-1") -> No
         provider_id="PR01",
         location_id="centro",
         appointment_type_id="review",
-        slot=datetime(2026, 9, 25, 10, 0, tzinfo=MADRID),
+        slot=slot or datetime(2026, 9, 25, 10, 0, tzinfo=MADRID),
         policy_id="sanitas",
     )
     await persist_submission(ctx, action, db_path=db_path)
@@ -261,6 +267,96 @@ def test_every_appointment_has_a_booking_call(db_path: Path) -> None:
                 slot_start="2026-09-25T10:00:00+02:00",
                 slot_end="2026-09-25T10:15:00+02:00",
             )
+
+
+# ---------------------------------------------------------------------------
+# wall cancellations (the board's Horarios cancel buttons — see
+# vortex/observability/live.py's /api/wall/... routes, their only caller)
+# ---------------------------------------------------------------------------
+
+
+def test_wall_cancellation_roundtrip(db_path: Path) -> None:
+    with db.connection(db_path) as conn:
+        row = db.insert_wall_cancellation(
+            conn,
+            provider_id="PR01",
+            site_id="centro",
+            slot_start="2026-09-28T09:00:00+02:00",
+            appointment_id="A000645",
+            patient_name="Marta Ruiz",
+            provider_name="Dra. Uno",
+        )
+        rows = db.list_wall_cancellations(conn)
+    assert row.id
+    assert len(rows) == 1
+    assert rows[0].provider_id == "PR01"
+    assert rows[0].site_id == "centro"
+    assert rows[0].slot_start == "2026-09-28T09:00:00+02:00"
+    assert rows[0].appointment_id == "A000645"
+
+
+@pytest.mark.asyncio
+async def test_wall_cancel_row_flips_a_known_appointment_by_id(
+    tmp_path: Path, db_path: Path
+) -> None:
+    await _book(tmp_path, db_path)
+
+    with db.connection(db_path) as conn:
+        call = db.get_call_by_call_id(conn, "CALL-1")
+        touched = db.cancel_appointment_row(conn, appointment_id=call.appointment_id)
+        assert touched == call.appointment_id
+        assert db.get_appointment(conn, call.appointment_id).status == "cancelled"
+        # Idempotent: an already-cancelled row is not touched twice.
+        assert db.cancel_appointment_row(conn, appointment_id=call.appointment_id) is None
+
+
+@pytest.mark.asyncio
+async def test_wall_cancel_row_falls_back_to_provider_and_minute(
+    tmp_path: Path, db_path: Path
+) -> None:
+    """A visit replayed from the log carries no appointment_id — the wall
+    still has to cancel the row, keyed by doctor + minute."""
+    await _book(tmp_path, db_path)
+
+    with db.connection(db_path) as conn:
+        call = db.get_call_by_call_id(conn, "CALL-1")
+        touched = db.cancel_appointment_row(
+            conn, provider_id="PR01", slot_start="2026-09-25T10:00:00+02:00"
+        )
+        assert touched == call.appointment_id
+        assert db.get_appointment(conn, call.appointment_id).status == "cancelled"
+        # A different minute of the same doctor must not match.
+        assert (
+            db.cancel_appointment_row(
+                conn, provider_id="PR01", slot_start="2026-09-25T10:15:00+02:00"
+            )
+            is None
+        )
+
+
+@pytest.mark.asyncio
+async def test_wall_cancel_rows_only_touches_the_window(tmp_path: Path, db_path: Path) -> None:
+    await _book(tmp_path, db_path, call_id="CALL-IN")
+    await _book(
+        tmp_path,
+        db_path,
+        call_id="CALL-OUT",
+        slot=datetime(2026, 10, 6, 10, 0, tzinfo=MADRID),
+    )
+
+    with db.connection(db_path) as conn:
+        in_call = db.get_call_by_call_id(conn, "CALL-IN")
+        out_call = db.get_call_by_call_id(conn, "CALL-OUT")
+        touched = db.cancel_appointment_rows(
+            conn,
+            provider_id="PR01",
+            day_from=datetime(2026, 9, 25).date(),
+            day_to=datetime(2026, 9, 25).date(),
+        )
+        assert touched == [in_call.appointment_id]
+        assert db.get_appointment(conn, in_call.appointment_id).status == "cancelled"
+        # Outside the range: untouched.
+        assert db.get_appointment(conn, out_call.appointment_id).status == "scheduled"
 
 
 # ---------------------------------------------------------------------------
