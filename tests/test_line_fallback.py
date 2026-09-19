@@ -33,7 +33,7 @@ from vortex.contract import (
     action_payload,
     action_route,
 )
-from vortex.line.session import FALLBACK_SUBMIT_PREPARED_ENV, CallMemory, CallSession
+from vortex.line.session import CallMemory, CallSession
 from vortex.line.twilio import StartPayload
 
 NOW = datetime(2026, 9, 18, 10, 0, tzinfo=MADRID)
