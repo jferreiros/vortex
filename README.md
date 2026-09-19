@@ -32,7 +32,9 @@ With `VORTEX_CONFIRMATION_CALLS=true` plus the Twilio keys and
 `VORTEX_PUBLIC_BASE_URL` (the tunnel host), an accepted booking also queues a
 voice call for the day before the slot. The worker dials the patient, this
 server's `/confirmation/*` routes serve the TwiML, and `Gather input="speech"`
-captures the answer: confirmed / not_coming / reschedule_requested (es, ca, gl,
+captures the answer: confirmed / not_coming / reschedule_requested. The question
+itself offers the move out loud ("Si prefiere cambiarla, dígamelo y la movemos
+ahora mismo"), so the caller learns the option exists without guessing (es, ca, gl,
 eu and en scripts; the call inherits the language the caller used, Spanish by
 default). No answer lands as `no_answer` or `unclear`. A reschedule answer does
 not end the call: when the live voice pipeline runs behind the same server the

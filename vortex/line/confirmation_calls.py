@@ -224,24 +224,29 @@ _ASK = {
     "es": (
         "Hola, le llamamos de {clinic} para confirmar su cita. "
         "Mañana tiene cita{with_whom}: {stamp}. "
-        "¿Va a venir? Diga sí para confirmar, o no si no puede venir."
+        "¿Va a venir? Diga sí para confirmar. Si prefiere cambiarla, dígamelo y la movemos "
+        "ahora mismo. Si no puede venir, diga no."
     ),
     "ca": (
         "Hola, li truquem de {clinic} per confirmar la seva cita de demà{with_whom}: {stamp}. "
-        "Hi vindrà? Digui sí per confirmar, o no si no hi pot venir."
+        "Hi vindrà? Digui sí per confirmar. Si prefereix canviar-la, m'ho diu i la movem ara "
+        "mateix. Si no hi pot venir, digui no."
     ),
     "gl": (
         "Hola, chamámoslle de {clinic} para confirmar a súa cita de mañá{with_whom}: {stamp}. "
-        "Vai vir? Diga si para confirmar, ou non se non pode vir."
+        "Vai vir? Diga si para confirmar. Se prefire cambiala, dígamo e movémola agora mesmo. "
+        "Se non pode vir, diga non."
     ),
     "eu": (
         "Kaixo, {clinic} koak gara, biharko hitzordua{with_whom} "
         "berresteko deitzen dizugu: {stamp}. "
-        "Etorriko al zara? Esan bai berresteko, edo ez ezin bazara etorri."
+        "Etorriko al zara? Esan bai berresteko. Aldatzea nahiago baduzu, esadazu eta oraintxe "
+        "bertan mugituko dugu. Ezin bazara etorri, esan ez."
     ),
     "en": (
         "Hello, this is {clinic} calling to confirm your appointment tomorrow{with_whom}: {stamp}. "
-        "Will you come? Say yes to confirm, or no if you can't make it."
+        "Will you come? Say yes to confirm. If you'd rather move it, tell me and we'll change "
+        "it right now. If you can't make it, say no."
     ),
 }
 _WITH_WHOM = {
