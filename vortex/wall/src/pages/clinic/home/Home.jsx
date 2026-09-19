@@ -8,7 +8,6 @@ import Placeholder from "../../../components/ui/Placeholder";
 import HourlyStackedChart from "./charts/HourlyStackedChart";
 import VolumeTrendChart from "./charts/VolumeTrendChart";
 import OccupancyCalendar from "./charts/OccupancyCalendar";
-import PersonalitiesRail from "./PersonalitiesRail";
 import { useHomeOverview, useOccupancy, withDate, formatDuration } from "./useHomeData";
 import "./home.css";
 
@@ -128,8 +127,6 @@ export default function Home() {
           </div>
         }
       />
-
-      <PersonalitiesRail />
 
       <Card padding="lg" className="home-stats">
         {stats.map((s) => (

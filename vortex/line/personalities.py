@@ -26,6 +26,7 @@ import logging
 import os
 import re
 import sqlite3
+import unicodedata
 from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
@@ -48,6 +49,107 @@ TONE_MAX_CHARS = 400
 #: sound moves unless somebody changed it here on purpose.
 VOICE_ES = "es-ES-Chirp3-HD-Aoede"
 VOICE_EN = "en-GB-Chirp3-HD-Aoede"
+
+#: Vorty heads from ``vortex/wall/media``: the bare face plus one accessory
+#: overlay. ``none`` is the face without a hat. The picker stores the stem
+#: (``headset.svg``) in ``avatar``.
+LOOKS: tuple[str, ...] = (
+    "none",
+    "headset",
+    "beanie",
+    "baseball-cap",
+    "sunglasses",
+    "halo",
+    "bow-tie",
+    "antenna",
+)
+
+#: Three ways of talking, in words a receptionist would pick. The English
+#: ``tone`` is what the model sees; ``label`` / ``hint`` / ``role`` /
+#: ``description`` are what the Clinic View shows.
+STYLES: dict[str, dict[str, str]] = {
+    "warm": {
+        "label": "Cálida",
+        "hint": "Saluda, usa el nombre y confirma la cita sin prisa.",
+        "role": "Recepcionista de mostrador",
+        "description": (
+            "Saluda, se toma el tiempo de anotar bien el nombre y la fecha, y "
+            "repite la cita antes de colgar."
+        ),
+        "tone": (
+            "Warm and unhurried. Greet the patient, then use their first name once you "
+            "have it. Say one thing at a time and wait. Read the appointment back before "
+            "you confirm it. When you have to refuse, name the rule in plain words and "
+            "offer the nearest thing you can do."
+        ),
+    },
+    "brisk": {
+        "label": "Directa",
+        "hint": "Va al grano y ofrece dos huecos, no diez.",
+        "role": "Especialista en agenda",
+        "description": (
+            "Va directo a la agenda, ofrece dos huecos en vez de diez y acorta la "
+            "llamada sin cortar al paciente."
+        ),
+        "tone": (
+            "Brisk and precise. Get to the diary quickly. Offer at most two slots and "
+            "name the day, the time and the site. Confirm in one sentence. Never rush "
+            "the patient, but do not fill silence with small talk."
+        ),
+    },
+    "calm": {
+        "label": "Tranquila",
+        "hint": "Repite lo que ha oído y no tiene prisa.",
+        "role": "Coordinadora de atención al paciente",
+        "description": (
+            "Baja el ritmo, repite lo que ha entendido y comprueba que el paciente "
+            "la sigue antes de continuar."
+        ),
+        "tone": (
+            "Calm and steady. Repeat back what the patient told you before you act on "
+            "it. Ask one short question at a time and leave room for an answer. If the "
+            "patient sounds worried, say what happens next before you ask for anything "
+            "else. Escalate rather than guess."
+        ),
+    },
+}
+
+
+def greetings_for(name: str) -> dict[str, str]:
+    return {
+        "es": f"Clínica Arenal, le atiende {name}. ¿En qué puedo ayudarle?",
+        "en": f"Clínica Arenal, {name} speaking. How can I help you?",
+    }
+
+
+def style_fields(style_id: str) -> dict[str, str]:
+    style = STYLES.get(style_id) or STYLES["warm"]
+    return {key: style[key] for key in ("role", "description", "tone")}
+
+
+def normalize_look(value: str) -> str:
+    stem = value.strip().removesuffix(".svg").lower()
+    if stem not in LOOKS:
+        raise ValueError("pick a look from the faces on the form")
+    return "none" if stem == "none" else f"{stem}.svg"
+
+
+def slug_from_name(name: str) -> str:
+    folded = unicodedata.normalize("NFKD", name)
+    ascii_ = "".join(ch for ch in folded if not unicodedata.combining(ch))
+    slug = re.sub(r"[^a-z0-9]+", "-", ascii_.lower()).strip("-")
+    return slug or "persona"
+
+
+def catalog() -> dict[str, Any]:
+    """The simple picker: three ways of talking, the Vorty looks."""
+    return {
+        "styles": [
+            {"id": key, "label": row["label"], "hint": row["hint"]} for key, row in STYLES.items()
+        ],
+        "looks": list(LOOKS),
+    }
+
 
 _SLUG = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 #: A portrait is a bare filename inside ``vortex/wall/media/personalities``. No
@@ -152,78 +254,34 @@ class Personality(PersonalityDraft):
         return self.model_dump(mode="json")
 
 
-#: The three personas a fresh database opens with. Placeholders on purpose: the
-#: copy reads well enough on the card and the portraits are the wall's animated
-#: avatar in three variants (see vortex/wall/media/personalities/README.md).
-#: Name, role and description are Spanish — the clinic's staff reads them; the
-#: tone is English because the model does.
+#: The three personas a fresh database opens with. Portraits are Vorty's
+#: head plus an accessory from ``vortex/wall/media/accessories``.
 SEEDS: tuple[Personality, ...] = (
     Personality(
         slug="lucia",
         name="Lucía",
-        role="Recepcionista de mostrador",
-        description=(
-            "La voz por defecto de la clínica. Saluda, se toma el tiempo de anotar bien "
-            "el nombre y la fecha, y repite la cita antes de colgar. Es la que hay que "
-            "poner en la línea cuando haya dudas."
-        ),
-        tone=(
-            "Warm and unhurried. Greet the patient, then use their first name once you "
-            "have it. Say one thing at a time and wait. Read the appointment back before "
-            "you confirm it. When you have to refuse, name the rule in plain words and "
-            "offer the nearest thing you can do."
-        ),
-        greetings={
-            "es": "Clínica Arenal, buenos días. ¿En qué puedo ayudarle?",
-            "en": "Clínica Arenal, good morning. How can I help you?",
-        },
+        **style_fields("warm"),
+        greetings=greetings_for("Lucía"),
         voices={"es": VOICE_ES, "en": VOICE_EN},
-        avatar="lucia.svg",
+        avatar="headset.svg",
         sort_order=0,
     ),
     Personality(
         slug="mateo",
         name="Mateo",
-        role="Especialista en agenda",
-        description=(
-            "La voz para una mañana cargada. Va directo a la agenda, ofrece dos huecos en "
-            "vez de diez y acorta la llamada sin cortar al paciente. Útil cuando la cola "
-            "es larga."
-        ),
-        tone=(
-            "Brisk and precise. Get to the diary quickly. Offer at most two slots and "
-            "name the day, the time and the site. Confirm in one sentence. Never rush "
-            "the patient, but do not fill silence with small talk."
-        ),
-        greetings={
-            "es": "Clínica Arenal, le atiende Mateo. ¿Para qué fecha quiere la cita?",
-            "en": "Clínica Arenal, Mateo speaking. What date are you looking for?",
-        },
+        **style_fields("brisk"),
+        greetings=greetings_for("Mateo"),
         voices={"es": VOICE_ES, "en": VOICE_EN},
-        avatar="mateo.svg",
+        avatar="baseball-cap.svg",
         sort_order=1,
     ),
     Personality(
         slug="carla",
         name="Carla",
-        role="Coordinadora de atención al paciente",
-        description=(
-            "La voz para una llamada difícil. Baja el ritmo, repite lo que ha entendido y "
-            "comprueba que el paciente la sigue antes de continuar. Va bien con un "
-            "paciente nervioso, un síntoma que hay que triar o una cancelación."
-        ),
-        tone=(
-            "Calm and steady. Repeat back what the patient told you before you act on "
-            "it. Ask one short question at a time and leave room for an answer. If the "
-            "patient sounds worried, say what happens next before you ask for anything "
-            "else. Escalate rather than guess."
-        ),
-        greetings={
-            "es": "Clínica Arenal, soy Carla. Cuénteme, ¿qué necesita?",
-            "en": "Clínica Arenal, this is Carla. Tell me, what do you need?",
-        },
+        **style_fields("calm"),
+        greetings=greetings_for("Carla"),
         voices={"es": VOICE_ES, "en": VOICE_EN},
-        avatar="carla.svg",
+        avatar="beanie.svg",
         sort_order=2,
     ),
 )
@@ -352,16 +410,58 @@ def update(settings: Any, slug: str, payload: dict[str, Any] | None) -> Personal
 
     Raises ``KeyError`` when the slug is unknown and ``pydantic.ValidationError``
     when the form does not hold — the route turns those into 404 and 422.
+    ``ValueError`` is a bad ``style`` or ``look`` from the simple picker.
     """
     current = get(settings, slug)
     if current is None:
         raise KeyError(slug)
+    incoming = dict(payload or {})
+    name = str(incoming.get("name") or current.name).strip()
+    if incoming.get("style"):
+        if incoming["style"] not in STYLES:
+            raise ValueError("pick how they talk: cálida, directa or tranquila")
+        incoming.update(style_fields(incoming.pop("style")))
+        incoming["greetings"] = greetings_for(name)
+    if "look" in incoming:
+        incoming["avatar"] = normalize_look(str(incoming.pop("look")))
     base = {key: getattr(current, key) for key in PersonalityDraft.model_fields}
-    draft = PersonalityDraft(**{**base, **(payload or {})})
+    draft = PersonalityDraft(**{**base, **incoming, "name": name})
     stored = current.model_copy(update={**draft.model_dump(), "updated_at": _now()})
     with closing(_connect(settings)) as conn, conn:
         conn.execute(_INSERT, _params(stored))
     return stored
+
+
+def create(settings: Any, payload: dict[str, Any] | None) -> Personality:
+    """A new persona from the simple form: a name, how they talk, a look."""
+    incoming = dict(payload or {})
+    name = str(incoming.get("name") or "").strip()
+    if not name:
+        raise ValueError("ponle un nombre")
+    style_id = incoming.get("style") or "warm"
+    if style_id not in STYLES:
+        raise ValueError("pick how they talk: cálida, directa or tranquila")
+    people = list_all(settings)
+    base = slug_from_name(name)
+    taken = {person.slug for person in people}
+    slug = base
+    n = 2
+    while slug in taken:
+        slug = f"{base}-{n}"
+        n += 1
+    person = Personality(
+        slug=slug,
+        name=name,
+        **style_fields(style_id),
+        greetings=greetings_for(name),
+        voices={"es": VOICE_ES, "en": VOICE_EN},
+        avatar=normalize_look(str(incoming.get("look") or "headset")),
+        sort_order=max((person.sort_order for person in people), default=-1) + 1,
+        active=False,
+    )
+    with closing(_connect(settings)) as conn, conn:
+        conn.execute(_INSERT, _params(person))
+    return person
 
 
 def activate(settings: Any, slug: str) -> Personality:
