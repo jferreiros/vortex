@@ -501,6 +501,14 @@
       "files": ["vortex/conversation/prompt.py", "evals/conversation/scenarios/"],
       "done": "El prompt pide un campo por turno, agrupa dígitos de tres en tres, lee el id una sola vez, y aplica 'el último valor gana' en correcciones. Un escenario por regla en evals/conversation.",
       "why": "Los alfanuméricos son el fallo número uno del sector (ServiceNow EVA, mar 2026). Con ruido a 5 dB un nombre o un dígito hay que confirmarlo, y el caller difícil cambia de id a media frase. Ver docs/research/02-stt-landscape.md y 03-turn-detection.md."
+    },
+    {
+      "id": "T64", "wave": "w6", "lane": "linea", "kind": "voz",
+      "title": "Voz · Gemini-TTS para catalán en lugar de ca-ES-Standard-B",
+      "problems": [11], "weight": 3, "size": "1 h", "blocked_by": [],
+      "files": ["vortex/settings.py", "vortex/line/pipecat_voice.py"],
+      "done": "GeminiTTSService con gemini-2.5-flash-tts habla ca/gl/eu; Standard-B queda tras GOOGLE_TTS_STANDARD_FALLBACK. Comparado a oído por Twilio con dos frases.",
+      "why": "Chirp 3 HD no tiene catalán. El scorer no nos oye, pero el jurado sí. Ver docs/research/06-google-and-tts.md."
     }
   ]
 }
