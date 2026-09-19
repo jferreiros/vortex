@@ -31,7 +31,14 @@ from typing import Any
 
 from evals.bench import pricing
 from evals.common.context import make_context, submitted_actions
-from evals.common.results import RESULTS_DIR, CaseResult, RunResult, git_info, now_stamp
+from evals.common.results import (
+    RESULTS_DIR,
+    CaseResult,
+    RunResult,
+    git_info,
+    now_stamp,
+    prompt_mode,
+)
 from evals.common.snapshot_clinic import SnapshotClinicClient
 from evals.conversation.brains.base import Trace
 from evals.conversation.brains.openai_brain import ModelBrain, spec_for
@@ -292,6 +299,8 @@ async def run_all(
         started_at=now_stamp(),
         mode={
             "model": spec.id,
+            # What the score belongs to: a hypothesis is a (prompt_version, model) pair.
+            **prompt_mode(),
             "cases": len(cases),
             "concurrency": concurrency,
             "clinic": "snapshot",
