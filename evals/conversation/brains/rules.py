@@ -27,6 +27,7 @@ from vortex.conversation.prompt import (
     emergency_line_for,
     goodbye_for,
     idle_prompt_for,
+    idle_submit_line_for,
     refusal_line_for,
 )
 from vortex.tools import ToolError
@@ -47,6 +48,7 @@ class _State:
     record: dict[str, Any] | None = None  # the identified patient record
     record_of: str | None = None  # "caller" or "patient": whose details found the record
     decided: bool = False
+    idle_count: int = 0
     #: The sites the last clinic_facts answer named, for a caller who then
     #: says "book me there" (problem 16: they act on what we told them).
     told_sites: list[str] = field(default_factory=list)
@@ -75,6 +77,12 @@ class RulesBrain:
             s.refuse = "out_of_scope"
             return self._reply(trace, refusal_line_for("en"))
         if m.get("silence_secs") or turn.silence_secs:
+            # Same policy as the voice idle handler: first silence re-prompts,
+            # second silence submits whatever the call already knows.
+            s.idle_count += 1
+            if s.idle_count >= 2:
+                await self._decide(trace)
+                return self._reply(trace, idle_submit_line_for("en"))
             return self._reply(trace, idle_prompt_for("en"))
         if m.get("off_topic"):
             return self._reply(

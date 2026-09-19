@@ -392,6 +392,15 @@ WAIT_LINES: dict[str, str] = {
     "eu": "Momentu bat, mesedez.",
 }
 
+# Spoken on the second idle, just before we submit what the call already knows.
+IDLE_SUBMIT_LINES: dict[str, str] = {
+    "en": "I'll note what we have so far. Thank you for calling.",
+    "es": "Anoto lo que tenemos por ahora. Gracias por llamar.",
+    "ca": "Anoto el que tenim de moment. Gràcies per trucar.",
+    "gl": "Anoto o que temos por agora. Grazas por chamar.",
+    "eu": "Orain artekoa idatziko dut. Eskerrik asko deitzeagatik.",
+}
+
 # Said the moment triage flags a red flag. "112" is the check the harness runs.
 EMERGENCY_LINES: dict[str, str] = {
     "en": "This sounds like an emergency. Please hang up and call 112 right now.",
@@ -432,6 +441,10 @@ def greeting_for(language: str | None = None) -> str:
 def idle_prompt_for(language: str | None = None) -> str:
     """The first "are you still there?", in the language the call is in."""
     return _line(IDLE_PROMPTS, language)
+
+
+def idle_submit_line_for(language: str | None = None) -> str:
+    return _line(IDLE_SUBMIT_LINES, language)
 
 
 def idle_patience_for(language: str | None = None) -> str:
