@@ -97,11 +97,11 @@ DEFAULT_ARBITER_MODEL = "deepseek-v4-flash"
 # Anything below this floor is raised to the default. Do not lower it.
 MIN_TOKENS_FOR_A_BOOKING = 256
 DEFAULT_LLM_MAX_TOKENS = 320
-# Same Helmcode perk as the primary. On a first-token timeout the retry is
-# re-issued against this model instead of the hung one. qwen3.6 is ~2 s with
-# tools; do not make it the primary — it loops prepare_booking/submit_action
-# on problem 1. Empty disables the swap.
-DEFAULT_LLM_ALT_MODEL = "qwen3.6"
+# Off unless set. qwen3.6 is ~2 s with tools on the same Helmcode perk, but
+# it loops prepare_booking/submit_action on problem 1, so a hang must not
+# spend the retry there. Set LLM_ALT_MODEL=qwen3.6 only if Helmcode is mute
+# and problem 1 is not on the line.
+DEFAULT_LLM_ALT_MODEL = ""
 
 
 def _llm_max_tokens() -> int:
