@@ -23,7 +23,7 @@ import httpx
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from nicegui import app, ui
 
-from vortex.observability import auth, explain, insights
+from vortex.observability import auth, explain, insights, pricing
 from vortex.observability.business_insights import business_insights
 from vortex.observability.calllog import read_recent
 from vortex.observability.demo import write_scripted_call
@@ -370,18 +370,28 @@ def _footer() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _stat(n: str, label: str, dot: str | None = None) -> None:
+def _stat(n: str, label: str, dot: str | None = None, note: str | None = None) -> None:
     with ui.element("div").classes("stat"):
         with ui.element("div").classes("n row"):
             if dot:
                 _dot(dot)
             ui.label(n)
         ui.label(label).classes("l")
+        if note:
+            ui.label(note).classes("l")
+
+
+def _priced_note(cost: insights.CostSummary) -> str | None:
+    """'2 of 3 calls priced', only when some call had a leg with no price."""
+    if not cost.metered or cost.priced == cost.metered:
+        return None
+    return f"{cost.priced} of {cost.metered} calls priced"
 
 
 def _kpis(cards: list[CallCard]) -> None:
     s = explain.stats_for(cards)
     rate = "—" if s.submit_rate is None else f"{s.submit_rate * 100:.0f}%"
+    cost = insights.cost_per_call(cards)
     with ui.element("div").classes("stat-grid"):
         _stat(str(s.calls), explain.KPI_LABEL["calls"])
         _stat(str(s.live), explain.KPI_LABEL["live"], "live" if s.live else None)
@@ -394,6 +404,9 @@ def _kpis(cards: list[CallCard]) -> None:
             explain.KPI_LABEL["handle"],
         )
         _stat(_ms(s.median_tool_ms), explain.KPI_LABEL["tool"])
+        # Ninth tile: the grid is auto-fit minmax(140px, 1fr), so it wraps to
+        # a second row on a narrow screen instead of squeezing the other eight.
+        _stat(pricing.eur(cost.avg_list_eur, 3), explain.KPI_LABEL["cost"], note=_priced_note(cost))
 
 
 def _stages(card: CallCard | None) -> None:
@@ -537,6 +550,30 @@ def _outcome(card: CallCard | None) -> None:
                     ui.label(str(value)).classes("mono")
 
 
+def _cost_rows(card: CallCard | None) -> list[tuple[str, str | None]]:
+    """What this call cost, leg by leg. Empty when the call was never metered.
+
+    Cost is not patient data, so the public page shows these rows too: the
+    jury's question is what one answered call costs, and the answer belongs
+    next to the call it came from.
+    """
+    cost = pricing.price_call(card.usage if card else None)
+    if not cost.metered:
+        return []
+    partial = " · partial" if cost.partial else ""
+    llm = f"{pricing.count(cost.llm_tokens_in)} in / {pricing.count(cost.llm_tokens_out)} out"
+    llm += f" · {pricing.eur(cost.llm_list_eur)} list"
+    if cost.perk:
+        llm += " · perk"
+    return [
+        ("Cost (list)", f"{pricing.eur(cost.total_list_eur)}{partial}"),
+        ("Cost (we pay)", f"{pricing.eur(cost.total_eur)}{partial}"),
+        ("STT", f"{cost.stt_seconds:.1f} s · {pricing.eur(cost.stt_eur)}"),
+        ("LLM", llm),
+        ("TTS", f"{pricing.count(cost.tts_characters)} chars · {pricing.eur(cost.tts_eur)}"),
+    ]
+
+
 def _record(card: CallCard | None, *, public: bool = False) -> None:
     with ui.element("div").classes("section-title"):
         ui.label("Record").classes("t")
@@ -544,7 +581,7 @@ def _record(card: CallCard | None, *, public: bool = False) -> None:
     phone = card.from_number if card else None
     if public and phone:
         phone = insights.mask_phone(phone)
-    rows = [
+    rows: list[tuple[str, str | None]] = [
         ("Patient", card.patient_name if card else None),
         ("Phone", phone),
         ("Doctor", card.provider_name if card else None),
@@ -555,6 +592,7 @@ def _record(card: CallCard | None, *, public: bool = False) -> None:
         ("Duration", _duration(card) if card else None),
         ("Started", _clock(card.started_at) if card else None),
         ("Call id", card.call_id if card else None),
+        *_cost_rows(card),
     ]
     for label, value in rows:
         with ui.element("div").classes("kv"):
@@ -703,6 +741,7 @@ def _calls_table(
                 ("Why not booked", ""),
                 ("Tools", "narrow-hide"),
                 ("Duration", "narrow-hide"),
+                ("€", "narrow-hide"),
                 ("Call id", "narrow-hide"),
             ):
                 with ui.element("th").classes(extra):
@@ -733,6 +772,11 @@ def _calls_table(
                         ui.label(str(len(card.tools)))
                     with ui.element("td").classes("num narrow-hide"):
                         ui.label(_duration(card))
+                    with ui.element("td").classes("num narrow-hide"):
+                        # List price, three decimals. An em dash means the call
+                        # was never metered, not that it was free.
+                        cost = pricing.price_call(card.usage)
+                        ui.label(pricing.eur(cost.total_list_eur, 3) if cost.metered else "—")
                     with ui.element("td").classes("id narrow-hide"):
                         ui.label(card.call_id)
 

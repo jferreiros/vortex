@@ -184,3 +184,28 @@ async def test_unsigned_root_is_sign_in_not_the_wall(
     await user.should_see("Team sign-in")
     await user.should_not_see("Recent calls")
     await user.should_not_see("Overview")
+
+
+# New tests go below this line: the guard above reads the settings the wall
+# test leaves behind, so nothing may be inserted between the two.
+
+
+async def test_insights_shows_what_a_call_costs(seeded: Path, user: User) -> None:
+    await user.open("/insights")
+    await user.should_see("€/call (list)")
+    await user.should_see("€/call (we pay)")
+    await user.should_see("€ today (list)")
+    await user.should_see("p95 handle time")
+    # The seeded refusal ends on a Gemini voice with no published price, so the
+    # page has to say which leg it left out rather than quietly averaging it in.
+    await user.should_see("1 of 2 calls priced")
+    await user.should_see("gemini-2.5-flash-tts")
+
+
+async def test_call_page_shows_the_cost_of_that_call(seeded: Path, user: User) -> None:
+    ids = [line.split('"call_id": "')[1].split('"')[0] for line in seeded.read_text().splitlines()]
+    booked = next(i for i in ids if i.startswith("demo-book"))
+    await user.open(f"/call/{booked}")
+    await user.should_see("Cost (list)")
+    await user.should_see("Cost (we pay)")
+    await user.should_see("perk")
