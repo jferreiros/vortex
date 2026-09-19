@@ -13,10 +13,10 @@ def _card(cid: str, status_kind: str | None, reason: str | None = None, **kw) ->
 
 def test_reasons_and_outcomes_are_sorted_bars() -> None:
     cards = [
-        _card("a", "no-action", "specialty_not_covered"),
-        _card("b", "no-action", "specialty_not_covered"),
-        _card("c", "no-action", "no_availability"),
-        _card("d", "book"),
+        _card("a", "no-action", "specialty_not_covered", submit_status="accepted"),
+        _card("b", "no-action", "specialty_not_covered", submit_status="accepted"),
+        _card("c", "no-action", "no_availability", submit_status="accepted"),
+        _card("d", "book", submit_status="accepted"),
     ]
     bars = insights.reasons(cards, {"specialty_not_covered": "Not covered"})
     assert [b.key for b in bars] == ["specialty_not_covered", "no_availability"]
@@ -25,6 +25,18 @@ def test_reasons_and_outcomes_are_sorted_bars() -> None:
     assert bars[1].share == 0.5
     outcomes = insights.outcomes(cards)
     assert outcomes[0].key == "refused"
+
+
+def test_outcomes_count_unsent_action_as_ended() -> None:
+    """A prepared book that never reached /submit is ended, not booked."""
+    cards = [
+        _card("sent", "book", submit_status="accepted"),
+        _card("unsent", "book"),
+        _card("route_only", "cancel", submit_route="/api/v1/submit/cancel"),
+    ]
+    bars = insights.outcomes(cards)
+    by_key = {b.key: b.value for b in bars}
+    assert by_key == {"booked": 1, "ended": 1, "cancelled": 1}
 
 
 def test_tool_latency_slowest_first_and_failures() -> None:
