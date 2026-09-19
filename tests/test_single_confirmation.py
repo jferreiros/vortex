@@ -169,14 +169,29 @@ def test_a_yes_that_names_something_new_is_not_an_affirmation(said: str) -> None
         "I understand",
         "Okay, I understand.",
         "thanks anyway",
+        "I understand, thank you",
         "ya veo",
         "lo entiendo",
         "entendido",
+        "entendido, gracias",
     ],
 )
 def test_accepting_the_refusal_is_not_a_yes_to_another_policy(said: str) -> None:
     assert is_refusal_acceptance(said)
     assert not is_affirmation(said)
+
+
+@pytest.mark.parametrize(
+    "said",
+    [
+        "I understand, can I pay myself?",
+        "I see, is there anything on Friday",
+        "entendido, puedo pagarlo yo",
+    ],
+)
+def test_an_acceptance_carrying_a_new_request_is_not_accepting_the_refusal(said: str) -> None:
+    """A phrase inside a longer request is a request: the stored refusal must wait."""
+    assert not is_refusal_acceptance(said)
 
 
 @pytest.mark.parametrize(
