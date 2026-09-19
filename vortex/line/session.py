@@ -114,6 +114,8 @@ class CallMemory:
         self.confirmed = False
 
     def remember_prepared(self, tool: str, action: Action) -> None:
+        if self.prepared is not None and self.prepared != action:
+            self.confirmed = False
         self.prepared = action
         self.prepared_tool = tool
         self.forget_rejection()
