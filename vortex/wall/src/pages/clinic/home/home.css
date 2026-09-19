@@ -5,15 +5,114 @@
   max-width: var(--content-max-width);
 }
 
+/* Header stat (top-right of the page header) ----------------------------------*/
+
+.home-header-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  text-align: right;
+}
+
+.home-header-stat-value {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  font-weight: var(--weight-bold);
+  color: var(--color-primary-deep);
+}
+
+.home-header-stat-label {
+  font-size: var(--text-xs);
+  color: var(--color-mute);
+}
+
+/* KPI row ----------------------------------------------------------------------*/
+
 .home-stats {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: var(--space-6);
 }
 
+/* Occupancy card -----------------------------------------------------------------*/
+
+.occupancy-filters {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.occupancy-body {
+  display: grid;
+  grid-template-columns: 1fr auto 220px;
+  gap: var(--space-6);
+  align-items: center;
+  min-width: 0;
+}
+
+.occupancy-left {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.occupancy-headline {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  color: var(--color-warn);
+}
+
+.occupancy-headline svg {
+  align-self: center;
+}
+
+.occupancy-headline-value {
+  font-family: var(--font-display);
+  font-size: var(--text-3xl);
+  font-weight: var(--weight-bold);
+}
+
+.occupancy-headline-label {
+  font-size: var(--text-sm);
+  color: var(--color-mute);
+}
+
+.occupancy-divider {
+  width: 1px;
+  align-self: stretch;
+  background: var(--color-border);
+}
+
+.occupancy-right {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.occupancy-month-kicker {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--color-mute);
+}
+
+.occupancy-month-value {
+  font-family: var(--font-display);
+  font-size: var(--text-3xl);
+  font-weight: var(--weight-bold);
+  color: var(--color-ink);
+}
+
+.occupancy-month-label {
+  font-size: var(--text-xs);
+  color: var(--color-faint);
+}
+
+/* Activity grid -----------------------------------------------------------------*/
+
 .home-grid {
   display: grid;
-  grid-template-columns: 1.6fr 1fr;
+  grid-template-columns: 1.4fr 1fr;
   gap: var(--space-6);
   align-items: start;
 }
@@ -23,39 +122,7 @@
   margin-bottom: var(--space-4);
 }
 
-.home-decision-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-}
-
-.home-decision-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-2);
-  border-bottom: 1px solid var(--color-border);
-  font-size: var(--text-sm);
-  color: var(--color-ink);
-}
-
-.home-decision-row:last-child {
-  border-bottom: none;
-}
-
-.home-decision-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--color-primary);
-  flex: 0 0 auto;
-}
-
-.home-decision-time {
-  margin-left: auto;
-  color: var(--color-faint);
-  font-size: var(--text-xs);
-}
+/* Responsive ----------------------------------------------------------------------*/
 
 @media (max-width: 1024px) {
   .home-stats {
@@ -64,10 +131,25 @@
   .home-grid {
     grid-template-columns: 1fr;
   }
+  .occupancy-body {
+    grid-template-columns: 1fr;
+    gap: var(--space-5);
+  }
+  .occupancy-divider {
+    width: auto;
+    height: 1px;
+  }
+  .home-header-stat {
+    align-items: flex-start;
+    text-align: left;
+  }
 }
 
 @media (max-width: 640px) {
   .home-stats {
     grid-template-columns: 1fr;
+  }
+  .occupancy-filters {
+    flex-direction: column;
   }
 }

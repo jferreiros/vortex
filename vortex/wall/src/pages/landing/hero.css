@@ -3,136 +3,168 @@
   height: 100vh;
   min-height: 640px;
   display: flex;
-  align-items: center;
-  justify-content: center;
   overflow: hidden;
-  background: linear-gradient(185deg, #0e2a1f 0%, #1c5540 48%, var(--color-bg) 100%);
-  color: #f3faf6;
+  background: #ffffff;
+  color: var(--color-primary-deep);
 }
 
-.landing-hero-inner {
-  position: relative;
-  z-index: 1;
+.landing-hero-content {
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: var(--space-6);
-  text-align: center;
-  padding: var(--space-6) var(--space-5) 100px;
   width: 100%;
+  will-change: opacity;
 }
 
-.landing-hero-avatar-wrap {
-  will-change: transform, opacity;
+/* The centered row: avatar + headline, sharing one vertical center ---------------*/
+
+.landing-hero-row {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: center;
+  gap: var(--space-8);
+  width: 100%;
+  max-width: 1680px;
+  margin: 0 auto;
+  padding: 0 var(--space-8);
+  will-change: transform;
+}
+
+.landing-hero-avatar-col {
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .landing-hero-avatar {
-  position: relative;
-  width: min(30vw, 300px);
-  height: min(30vw, 300px);
-  border-radius: 50%;
+  width: min(40vw, 620px);
+  height: min(40vw, 620px);
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  box-shadow: 0 30px 70px rgba(0, 0, 0, 0.35);
-  overflow: hidden;
-  color: #eafff2;
 }
 
 .landing-hero-avatar-img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
-  object-position: center 38%;
+  object-fit: contain;
+  filter: drop-shadow(0 26px 40px rgba(31, 92, 67, 0.18));
 }
 
-.landing-hero-avatar-glow {
-  position: absolute;
-  inset: -30%;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(94, 224, 168, 0.35), transparent 70%);
-  z-index: -1;
-}
+/* Headline + copy, vertically centered against the avatar -------------------------*/
 
-.landing-hero-avatar-ring {
-  position: absolute;
-  border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  animation: landing-pulse 4.5s ease-in-out infinite;
-}
-
-.landing-hero-avatar-ring.r1 {
-  inset: -14%;
-}
-
-.landing-hero-avatar-ring.r2 {
-  inset: -30%;
-  animation-delay: -2.2s;
-}
-
-@keyframes landing-pulse {
-  0%, 100% { transform: scale(1); opacity: 0.7; }
-  50% { transform: scale(1.06); opacity: 0.25; }
-}
-
-.landing-hero-kicker {
-  display: block;
-  font-family: var(--font-display);
-  font-weight: var(--weight-bold);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  font-size: 13px;
-  color: #9fe8c4;
-  margin-bottom: var(--space-4);
-}
-
-.landing-hero-copy h1 {
-  font-family: var(--font-display);
-  font-weight: var(--weight-bold);
-  font-size: var(--text-hero);
-  line-height: 1.05;
-  letter-spacing: -0.01em;
-  color: #ffffff;
-}
-
-.landing-hero-copy p {
-  margin: var(--space-5) auto 0;
-  max-width: 540px;
-  font-size: var(--text-md);
-  line-height: var(--leading-relaxed);
-  color: rgba(243, 250, 246, 0.78);
-}
-
-.landing-scroll-cue {
-  position: absolute;
-  bottom: var(--space-7);
-  left: 50%;
-  transform: translateX(-50%);
+.landing-hero-text-col {
   display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  text-align: left;
+}
+
+.landing-hero-text-col h1 {
+  font-family: "Space Grotesk", var(--font-display), sans-serif;
+  font-weight: 700;
+  line-height: 0.98;
+  letter-spacing: -0.02em;
+  color: var(--color-primary-deep);
+}
+
+.landing-hero-hi {
+  font-size: clamp(88px, 12.5vw, 196px);
+}
+
+.landing-hero-imvorty {
+  font-size: clamp(40px, 5.6vw, 80px);
+}
+
+.landing-hero-text-col p {
+  max-width: 30ch;
+  font-size: clamp(18px, 1.8vw, 26px);
+  line-height: var(--leading-relaxed);
+  color: rgba(31, 92, 67, 0.75);
+}
+
+.landing-hero-text-col p strong {
+  font-weight: var(--weight-bold);
+  color: var(--color-primary-deep);
+}
+
+/* CTA, pinned to the very bottom of the section, independent of the row -----------*/
+
+.landing-hero-cta-wrap {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: center;
+  padding: var(--space-6) 0 var(--space-7);
+}
+
+.landing-hero-cta {
+  appearance: none;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  display: inline-flex;
   flex-direction: column;
   align-items: center;
   gap: var(--space-2);
-  font-size: var(--text-xs);
-  color: rgba(243, 250, 246, 0.6);
+  color: var(--color-primary-deep);
 }
 
-.landing-scroll-cue-arrow {
+.landing-hero-cta span {
+  font-family: "Space Grotesk", var(--font-display), sans-serif;
+  font-weight: 700;
+  font-size: var(--text-lg);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-bottom: 2px solid transparent;
+  transition: border-color var(--duration-fast) var(--ease-standard);
+}
+
+.landing-hero-cta:hover span {
+  border-color: var(--color-primary-deep);
+}
+
+.landing-hero-cta svg {
   animation: landing-bob 2s ease-in-out infinite;
 }
 
 @keyframes landing-bob {
   0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(6px); }
+  50% { transform: translateY(5px); }
 }
 
-@media (max-width: 640px) {
-  .landing-hero-avatar {
-    width: 56vw;
-    height: 56vw;
+/* Responsive -----------------------------------------------------------------------*/
+
+@media (max-width: 900px) {
+  .landing-hero-row {
+    grid-template-columns: 1fr;
+    text-align: center;
+    gap: var(--space-5);
+    padding: var(--space-6) var(--space-5) 0;
   }
-  .landing-hero-copy p {
-    font-size: var(--text-sm);
+  .landing-hero-text-col {
+    align-items: center;
+    text-align: center;
+  }
+  .landing-hero-text-col p {
+    max-width: 40ch;
+  }
+  .landing-hero-avatar {
+    width: 54vw;
+    height: 54vw;
+  }
+}
+
+@media (max-width: 480px) {
+  .landing-hero-avatar {
+    width: 66vw;
+    height: 66vw;
+  }
+  .landing-hero-hi {
+    font-size: clamp(64px, 22vw, 110px);
+  }
+  .landing-hero-imvorty {
+    font-size: clamp(30px, 9vw, 46px);
   }
 }
