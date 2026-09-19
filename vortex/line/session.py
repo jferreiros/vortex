@@ -49,6 +49,7 @@ from vortex.contract import (
 from vortex.diary.tools import find_slots
 from vortex.identity.tools import PATIENT_PREFERENCES_KEY, resolve_caller_line
 from vortex.line.sms import (
+    SMS_BUDGET_SECS,
     SmsClient,
     action_fingerprint,
     make_sms_client,
@@ -110,8 +111,11 @@ UNSCORED_REFUSAL = NoAction(reason="out_of_scope")
 COLD_BOOKING_HORIZON_DAYS = 14
 
 # How long ``close`` will wait for in-flight SMS confirmations before giving up.
-# Twilio is usually well under a second; this only bounds a hung POST.
-SMS_DRAIN_TIMEOUT_SECS = 5.0
+# Twilio is usually well under a second; this only bounds a hung send. It is the
+# whole ``SMS_BUDGET_SECS``, the detail lookup included, because a shorter drain
+# would cancel a POST that is still inside the client's own timeout and throw
+# away a valid Twilio response.
+SMS_DRAIN_TIMEOUT_SECS = SMS_BUDGET_SECS
 
 
 def refusal_for(reason: DeclineReason) -> Action:
