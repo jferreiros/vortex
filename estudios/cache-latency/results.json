@@ -1,0 +1,560 @@
+{
+  "generated_at": "2026-09-19T12:50:22.619736+02:00",
+  "runs_per_tool": 60,
+  "live": false,
+  "scenarios": {
+    "no_cache": {
+      "tools": {
+        "find_patient": {
+          "n": 60,
+          "min_ms": 2.873,
+          "p50_ms": 3.526,
+          "p95_ms": 11.807,
+          "max_ms": 36.355,
+          "mean_ms": 5.078,
+          "api_requests_per_call": 1.0,
+          "routes_per_call": {
+            "GET /api/v1/directory": 1.0
+          }
+        },
+        "validate_national_id": {
+          "n": 60,
+          "min_ms": 0.028,
+          "p50_ms": 0.185,
+          "p95_ms": 0.26,
+          "max_ms": 0.319,
+          "mean_ms": 0.169,
+          "api_requests_per_call": 0.0,
+          "routes_per_call": {}
+        },
+        "build_registration": {
+          "n": 60,
+          "min_ms": 2.78,
+          "p50_ms": 3.363,
+          "p95_ms": 17.439,
+          "max_ms": 30.217,
+          "mean_ms": 4.667,
+          "api_requests_per_call": 1.0,
+          "routes_per_call": {
+            "GET /api/v1/clinic": 1.0
+          }
+        },
+        "resolve_date": {
+          "n": 60,
+          "min_ms": 2.57,
+          "p50_ms": 2.981,
+          "p95_ms": 15.573,
+          "max_ms": 17.289,
+          "mean_ms": 3.94,
+          "api_requests_per_call": 1.0,
+          "routes_per_call": {
+            "GET /api/v1/clinic": 1.0
+          }
+        },
+        "find_slots": {
+          "n": 60,
+          "min_ms": 6.151,
+          "p50_ms": 7.828,
+          "p95_ms": 10.926,
+          "max_ms": 20.362,
+          "mean_ms": 8.104,
+          "api_requests_per_call": 2.0,
+          "routes_per_call": {
+            "GET /api/v1/availability": 1.0,
+            "GET /api/v1/clinic": 1.0
+          }
+        },
+        "list_appointments": {
+          "n": 60,
+          "min_ms": 2.427,
+          "p50_ms": 3.247,
+          "p95_ms": 5.854,
+          "max_ms": 37.011,
+          "mean_ms": 4.489,
+          "api_requests_per_call": 1.0,
+          "routes_per_call": {
+            "GET /api/v1/patients/P00042/appointments": 1.0
+          }
+        },
+        "prepare_booking": {
+          "n": 60,
+          "min_ms": 4.638,
+          "p50_ms": 5.753,
+          "p95_ms": 14.653,
+          "max_ms": 16.306,
+          "mean_ms": 6.597,
+          "api_requests_per_call": 2.0,
+          "routes_per_call": {
+            "GET /api/v1/availability": 1.0,
+            "GET /api/v1/clinic": 1.0
+          }
+        },
+        "prepare_reschedule": {
+          "n": 60,
+          "min_ms": 4.073,
+          "p50_ms": 4.676,
+          "p95_ms": 18.853,
+          "max_ms": 33.476,
+          "mean_ms": 5.983,
+          "api_requests_per_call": 2.0,
+          "routes_per_call": {
+            "GET /api/v1/directory": 1.0,
+            "GET /api/v1/patients/P00001/appointments": 1.0
+          }
+        },
+        "prepare_cancel": {
+          "n": 60,
+          "min_ms": 4.212,
+          "p50_ms": 4.806,
+          "p95_ms": 21.298,
+          "max_ms": 27.731,
+          "mean_ms": 5.868,
+          "api_requests_per_call": 2.0,
+          "routes_per_call": {
+            "GET /api/v1/directory": 1.0,
+            "GET /api/v1/patients/P00042/appointments": 1.0
+          }
+        },
+        "check_eligibility": {
+          "n": 60,
+          "min_ms": 9.228,
+          "p50_ms": 10.473,
+          "p95_ms": 15.892,
+          "max_ms": 29.865,
+          "mean_ms": 11.199,
+          "api_requests_per_call": 3.0,
+          "routes_per_call": {
+            "GET /api/v1/availability": 1.0,
+            "GET /api/v1/clinic": 1.0,
+            "GET /api/v1/directory": 1.0
+          }
+        },
+        "triage": {
+          "n": 60,
+          "min_ms": 0.283,
+          "p50_ms": 0.327,
+          "p95_ms": 0.365,
+          "max_ms": 3.756,
+          "mean_ms": 0.387,
+          "api_requests_per_call": 0.0,
+          "routes_per_call": {}
+        },
+        "nearest_location": {
+          "n": 60,
+          "min_ms": 2.939,
+          "p50_ms": 3.416,
+          "p95_ms": 15.087,
+          "max_ms": 16.275,
+          "mean_ms": 4.146,
+          "api_requests_per_call": 1.0,
+          "routes_per_call": {
+            "GET /api/v1/clinic": 1.0
+          }
+        },
+        "find_provider": {
+          "n": 60,
+          "min_ms": 2.836,
+          "p50_ms": 3.223,
+          "p95_ms": 13.287,
+          "max_ms": 18.058,
+          "mean_ms": 4.078,
+          "api_requests_per_call": 1.0,
+          "routes_per_call": {
+            "GET /api/v1/clinic": 1.0
+          }
+        },
+        "clinic_facts": {
+          "n": 60,
+          "min_ms": 2.713,
+          "p50_ms": 3.281,
+          "p95_ms": 16.357,
+          "max_ms": 23.877,
+          "mean_ms": 4.339,
+          "api_requests_per_call": 1.0,
+          "routes_per_call": {
+            "GET /api/v1/clinic": 1.0
+          }
+        }
+      },
+      "meaning": "fresh HTTP client per call, nothing reused"
+    },
+    "current": {
+      "tools": {
+        "find_patient": {
+          "n": 60,
+          "min_ms": 2.968,
+          "p50_ms": 5.09,
+          "p95_ms": 6.305,
+          "max_ms": 7.811,
+          "mean_ms": 4.966,
+          "api_requests_per_call": 1.98,
+          "routes_per_call": {
+            "GET /api/v1/directory": 1.0,
+            "GET /api/v1/patients/P00001/appointments": 0.98
+          }
+        },
+        "validate_national_id": {
+          "n": 60,
+          "min_ms": 0.005,
+          "p50_ms": 0.005,
+          "p95_ms": 0.012,
+          "max_ms": 0.027,
+          "mean_ms": 0.006,
+          "api_requests_per_call": 0.0,
+          "routes_per_call": {}
+        },
+        "build_registration": {
+          "n": 60,
+          "min_ms": 0.192,
+          "p50_ms": 0.207,
+          "p95_ms": 0.31,
+          "max_ms": 7.214,
+          "mean_ms": 0.341,
+          "api_requests_per_call": 0.03,
+          "routes_per_call": {
+            "GET /api/v1/clinic": 0.02,
+            "GET /api/v1/patients/P00001/appointments": 0.02
+          }
+        },
+        "resolve_date": {
+          "n": 60,
+          "min_ms": 0.033,
+          "p50_ms": 0.034,
+          "p95_ms": 0.067,
+          "max_ms": 0.137,
+          "mean_ms": 0.039,
+          "api_requests_per_call": 0.0,
+          "routes_per_call": {}
+        },
+        "find_slots": {
+          "n": 60,
+          "min_ms": 3.286,
+          "p50_ms": 4.032,
+          "p95_ms": 5.558,
+          "max_ms": 6.2,
+          "mean_ms": 4.28,
+          "api_requests_per_call": 1.0,
+          "routes_per_call": {
+            "GET /api/v1/availability": 1.0
+          }
+        },
+        "list_appointments": {
+          "n": 60,
+          "min_ms": 2.137,
+          "p50_ms": 2.565,
+          "p95_ms": 3.223,
+          "max_ms": 3.363,
+          "mean_ms": 2.614,
+          "api_requests_per_call": 1.0,
+          "routes_per_call": {
+            "GET /api/v1/patients/P00042/appointments": 1.0
+          }
+        },
+        "prepare_booking": {
+          "n": 60,
+          "min_ms": 2.155,
+          "p50_ms": 2.513,
+          "p95_ms": 3.143,
+          "max_ms": 3.802,
+          "mean_ms": 2.594,
+          "api_requests_per_call": 1.0,
+          "routes_per_call": {
+            "GET /api/v1/availability": 1.0
+          }
+        },
+        "prepare_reschedule": {
+          "n": 60,
+          "min_ms": 4.24,
+          "p50_ms": 5.461,
+          "p95_ms": 6.175,
+          "max_ms": 6.854,
+          "mean_ms": 5.401,
+          "api_requests_per_call": 2.0,
+          "routes_per_call": {
+            "GET /api/v1/directory": 1.0,
+            "GET /api/v1/patients/P00001/appointments": 1.0
+          }
+        },
+        "prepare_cancel": {
+          "n": 60,
+          "min_ms": 4.501,
+          "p50_ms": 5.32,
+          "p95_ms": 6.234,
+          "max_ms": 7.203,
+          "mean_ms": 5.361,
+          "api_requests_per_call": 2.0,
+          "routes_per_call": {
+            "GET /api/v1/directory": 1.0,
+            "GET /api/v1/patients/P00042/appointments": 1.0
+          }
+        },
+        "check_eligibility": {
+          "n": 60,
+          "min_ms": 6.02,
+          "p50_ms": 8.065,
+          "p95_ms": 10.028,
+          "max_ms": 11.954,
+          "mean_ms": 8.185,
+          "api_requests_per_call": 2.0,
+          "routes_per_call": {
+            "GET /api/v1/availability": 1.0,
+            "GET /api/v1/directory": 1.0
+          }
+        },
+        "triage": {
+          "n": 60,
+          "min_ms": 0.086,
+          "p50_ms": 0.088,
+          "p95_ms": 0.137,
+          "max_ms": 0.189,
+          "mean_ms": 0.095,
+          "api_requests_per_call": 0.0,
+          "routes_per_call": {}
+        },
+        "nearest_location": {
+          "n": 60,
+          "min_ms": 0.164,
+          "p50_ms": 0.17,
+          "p95_ms": 0.228,
+          "max_ms": 0.369,
+          "mean_ms": 0.183,
+          "api_requests_per_call": 0.0,
+          "routes_per_call": {}
+        },
+        "find_provider": {
+          "n": 60,
+          "min_ms": 0.02,
+          "p50_ms": 0.021,
+          "p95_ms": 0.027,
+          "max_ms": 0.058,
+          "mean_ms": 0.022,
+          "api_requests_per_call": 0.0,
+          "routes_per_call": {}
+        },
+        "clinic_facts": {
+          "n": 60,
+          "min_ms": 0.018,
+          "p50_ms": 0.019,
+          "p95_ms": 0.037,
+          "max_ms": 0.075,
+          "mean_ms": 0.021,
+          "api_requests_per_call": 0.0,
+          "routes_per_call": {}
+        }
+      },
+      "meaning": "shared client; only the catalogue is cached (production today)"
+    },
+    "full_memory": {
+      "tools": {
+        "find_patient": {
+          "n": 60,
+          "min_ms": 0.037,
+          "p50_ms": 0.038,
+          "p95_ms": 0.065,
+          "max_ms": 0.112,
+          "mean_ms": 0.041,
+          "api_requests_per_call": 0.0,
+          "routes_per_call": {}
+        },
+        "validate_national_id": {
+          "n": 60,
+          "min_ms": 0.004,
+          "p50_ms": 0.005,
+          "p95_ms": 0.009,
+          "max_ms": 0.025,
+          "mean_ms": 0.006,
+          "api_requests_per_call": 0.0,
+          "routes_per_call": {}
+        },
+        "build_registration": {
+          "n": 60,
+          "min_ms": 0.187,
+          "p50_ms": 0.197,
+          "p95_ms": 0.328,
+          "max_ms": 0.422,
+          "mean_ms": 0.221,
+          "api_requests_per_call": 0.0,
+          "routes_per_call": {}
+        },
+        "resolve_date": {
+          "n": 60,
+          "min_ms": 0.031,
+          "p50_ms": 0.032,
+          "p95_ms": 0.061,
+          "max_ms": 0.112,
+          "mean_ms": 0.036,
+          "api_requests_per_call": 0.0,
+          "routes_per_call": {}
+        },
+        "find_slots": {
+          "n": 60,
+          "min_ms": 0.796,
+          "p50_ms": 0.86,
+          "p95_ms": 0.979,
+          "max_ms": 1.372,
+          "mean_ms": 0.876,
+          "api_requests_per_call": 0.0,
+          "routes_per_call": {}
+        },
+        "list_appointments": {
+          "n": 60,
+          "min_ms": 0.019,
+          "p50_ms": 0.021,
+          "p95_ms": 0.063,
+          "max_ms": 0.077,
+          "mean_ms": 0.025,
+          "api_requests_per_call": 0.0,
+          "routes_per_call": {}
+        },
+        "prepare_booking": {
+          "n": 60,
+          "min_ms": 0.106,
+          "p50_ms": 0.11,
+          "p95_ms": 0.154,
+          "max_ms": 0.192,
+          "mean_ms": 0.119,
+          "api_requests_per_call": 0.0,
+          "routes_per_call": {}
+        },
+        "prepare_reschedule": {
+          "n": 60,
+          "min_ms": 0.06,
+          "p50_ms": 0.062,
+          "p95_ms": 0.104,
+          "max_ms": 0.143,
+          "mean_ms": 0.069,
+          "api_requests_per_call": 0.0,
+          "routes_per_call": {}
+        },
+        "prepare_cancel": {
+          "n": 60,
+          "min_ms": 0.044,
+          "p50_ms": 0.045,
+          "p95_ms": 0.068,
+          "max_ms": 0.07,
+          "mean_ms": 0.047,
+          "api_requests_per_call": 0.0,
+          "routes_per_call": {}
+        },
+        "check_eligibility": {
+          "n": 60,
+          "min_ms": 1.7,
+          "p50_ms": 1.766,
+          "p95_ms": 1.931,
+          "max_ms": 2.075,
+          "mean_ms": 1.784,
+          "api_requests_per_call": 0.0,
+          "routes_per_call": {}
+        },
+        "triage": {
+          "n": 60,
+          "min_ms": 0.085,
+          "p50_ms": 0.087,
+          "p95_ms": 0.157,
+          "max_ms": 0.205,
+          "mean_ms": 0.096,
+          "api_requests_per_call": 0.0,
+          "routes_per_call": {}
+        },
+        "nearest_location": {
+          "n": 60,
+          "min_ms": 0.163,
+          "p50_ms": 0.169,
+          "p95_ms": 0.217,
+          "max_ms": 0.356,
+          "mean_ms": 0.18,
+          "api_requests_per_call": 0.0,
+          "routes_per_call": {}
+        },
+        "find_provider": {
+          "n": 60,
+          "min_ms": 0.019,
+          "p50_ms": 0.02,
+          "p95_ms": 0.048,
+          "max_ms": 0.058,
+          "mean_ms": 0.023,
+          "api_requests_per_call": 0.0,
+          "routes_per_call": {}
+        },
+        "clinic_facts": {
+          "n": 60,
+          "min_ms": 0.017,
+          "p50_ms": 0.017,
+          "p95_ms": 0.043,
+          "max_ms": 0.071,
+          "mean_ms": 0.019,
+          "api_requests_per_call": 0.0,
+          "routes_per_call": {}
+        }
+      },
+      "meaning": "everything in local memory (warm snapshot cache)"
+    }
+  },
+  "network_floor": {
+    "health_keepalive": {
+      "n": 60,
+      "min_ms": 144.845,
+      "p50_ms": 145.338,
+      "p95_ms": 355.269,
+      "max_ms": 606.481,
+      "mean_ms": 174.09
+    },
+    "health_fresh_connection": {
+      "n": 30,
+      "min_ms": 429.376,
+      "p50_ms": 434.94,
+      "p95_ms": 461.16,
+      "max_ms": 504.722,
+      "mean_ms": 439.22
+    },
+    "clinic_unauthenticated_status": 403,
+    "clinic_unauthenticated_floor": {
+      "n": 30,
+      "min_ms": 145.027,
+      "p50_ms": 145.458,
+      "p95_ms": 173.738,
+      "max_ms": 465.103,
+      "mean_ms": 157.641
+    }
+  },
+  "cache_build_local": {
+    "wall_time_s": 0.226,
+    "requests": 48,
+    "response_bytes": 712736,
+    "spans": 3,
+    "specialties": 6,
+    "slots_pulled": 2775,
+    "patients_pulled": 15,
+    "appointments_pulled": 7,
+    "calendar": [
+      "2026-09-07",
+      "2026-10-16"
+    ]
+  },
+  "storage": {
+    "synthetic_scale": {
+      "patients": 3000,
+      "appointments": 6000,
+      "slots": 2775
+    },
+    "json": {
+      "build_s": 0.0266,
+      "load_s": 0.0314,
+      "size_mb": 3.056,
+      "patient_by_phone_scan_ms": 0.184,
+      "note": "a query is a full scan unless the whole file is re-indexed in memory after load"
+    },
+    "sqlite": {
+      "build_s": 0.115,
+      "size_mb": 3.883,
+      "patient_by_phone_us": 7.8,
+      "slots_by_day_us": 57.7
+    },
+    "memory": {
+      "build_s": 0.0019,
+      "payload_mb_serialized": 3.056,
+      "patient_by_phone_us": 0.14,
+      "note": "payload_mb_serialized is the JSON floor; live Python objects sit ~2-4x above it"
+    }
+  }
+}
