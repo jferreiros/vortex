@@ -314,9 +314,17 @@ async def run_pipecat_call(
             audio_in_sample_rate=LINE_SAMPLE_RATE,
             audio_out_sample_rate=LINE_SAMPLE_RATE,
             enable_metrics=True,
+            # The one flag behind all three usage emitters: without it
+            # ``FrameProcessor.start_{llm,stt,tts}_usage_metrics`` return
+            # silently and no ``MetricsFrame`` carrying usage is ever pushed,
+            # so the jury wall has no quantities to price a call with.
+            enable_usage_metrics=True,
         ),
         observers=[_CallLogObserver(session), hangup],
     )
+    # The params above are what makes the counters real; say so on the session
+    # so ``call.usage`` can tell a measured zero from an unmeasured lane.
+    session.usage.metered = True
     hangup.bind(task)
 
     @transport.event_handler("on_client_connected")
@@ -789,28 +797,63 @@ def _make_tool_filler_speaker(session: CallSession, state: _LanguageState, task:
 def _CallLogObserver(  # noqa: N802 - factory that returns an observer
     session: CallSession, confirmations: ConfirmationPolicy | None = None
 ):
-    """Log user and assistant text, count media frames, and watch for the yes.
+    """Log user and assistant text, count media frames, meter the providers.
 
     The frame stream is where both sides of the call already pass in order, so
     the confirmation guard reads it here: TTS text is the agent's turn, a
     transcription is the caller's reply to it. When that reply is an agreement
     to a read-back, ``CallSession.confirm_prepared`` submits what is prepared
     instead of letting the model ask a second time.
+
+    It is also where the providers' own usage lands. With
+    ``enable_usage_metrics`` on, Soniox, the LLM service and each TTS service
+    push a ``MetricsFrame`` with what they just billed; the observer sums them
+    into ``session.usage`` for the ``call.usage`` line. A frame is pushed at
+    every link it crosses, so each one is counted once, keyed by frame id -
+    pipecat's own ``MetricsLogObserver`` de-duplicates the same way.
     """
     from pipecat.frames.frames import (
         InputAudioRawFrame,
+        MetricsFrame,
         OutputAudioRawFrame,
         TranscriptionFrame,
         TTSTextFrame,
     )
+    from pipecat.metrics.metrics import (
+        LLMUsageMetricsData,
+        STTUsageMetricsData,
+        TTSUsageMetricsData,
+    )
     from pipecat.observers.base_observer import BaseObserver, FramePushed
 
     policy = confirmations if confirmations is not None else ConfirmationPolicy()
+    # Frame ids already counted. Per observer, so per socket.
+    metered_frames: set[int] = set()
+
+    def record_usage(frame: Any) -> None:
+        if frame.id in metered_frames:
+            return
+        counted = False
+        for item in frame.data or ():
+            if isinstance(item, LLMUsageMetricsData):
+                session.usage.add_llm(item.value)
+            elif isinstance(item, STTUsageMetricsData):
+                session.usage.add_stt(item.value.audio_seconds)
+            elif isinstance(item, TTSUsageMetricsData):
+                session.usage.add_tts(item.processor, item.model, item.value)
+            else:
+                # TTFB, processing time, turn predictions: timings, not money.
+                continue
+            counted = True
+        if counted:
+            metered_frames.add(frame.id)
 
     class Observer(BaseObserver):
         async def on_push_frame(self, data: FramePushed) -> None:
             frame = data.frame
-            if isinstance(frame, TranscriptionFrame):
+            if isinstance(frame, MetricsFrame):
+                record_usage(frame)
+            elif isinstance(frame, TranscriptionFrame):
                 session.ctx.log.user_turn(frame.text)
                 decision = policy.on_user_text(
                     frame.text, prepared=session.memory.prepared is not None
