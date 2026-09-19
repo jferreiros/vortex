@@ -16,12 +16,17 @@ def _say(card: CallCard, text: str) -> CallCard:
 
 
 def _find_slots(
-    card: CallCard, *, date_from: str, time_from: str | None = None, slots=None
+    card: CallCard, *, date_from: str, time_from: str | None = None, slots=None, **extra_args
 ) -> CallCard:
     card.tools.append(
         ToolStep(
             name="find_slots",
-            args={"date_from": date_from, "date_to": date_from, "time_from": time_from},
+            args={
+                "date_from": date_from,
+                "date_to": date_from,
+                "time_from": time_from,
+                **extra_args,
+            },
             result={"slots": slots or []},
             status="ok",
         )
@@ -138,6 +143,30 @@ def test_provider_ranking_no_suggestion_when_nobody_flagged() -> None:
     assert out["suggested_action"] is None
 
 
+def test_provider_ranking_explains_why_requests_did_not_book() -> None:
+    booked = _say(_card("a", "book"), "quiero con la dra ortiz")
+    booked.action_payload = {"provider_id": "PR01"}
+
+    on_leave = _say(_card("b", "no-action", "provider_on_leave"), "necesito a la dra ortiz")
+    out_of_network = _say(
+        _card("c", "no-action", "provider_not_in_network"), "quiero a la doctora ortiz"
+    )
+    elsewhere = _say(_card("d", "book"), "pedí a la dra ortiz")
+    elsewhere.action_payload = {"provider_id": "PR02"}
+    registered = _say(_card("e", "register"), "soy nueva, con la dra ortiz")
+
+    out = bi.provider_ranking([booked, on_leave, out_of_network, elsewhere, registered])
+    row = next(r for r in out["providers"] if r["id"] == "PR01")
+    assert row["requests"] == 5
+    assert row["booked"] == 1
+    assert row["unmet"] == 2
+    assert row["unmet_reasons"] == [
+        {"key": "provider_unavailable", "label": "Médico concreto no disponible", "count": 2}
+    ]
+    assert row["booked_elsewhere"] == 1
+    assert row["other_outcomes"] == 1  # the register call: named, no appointment sought
+
+
 def test_requested_provider_ids_uses_resolved_name_too() -> None:
     card = _card("a", "no-action", "no_availability", provider_name="Dr. Sáez")
     assert "PR02" in bi.requested_provider_ids(card)
@@ -173,6 +202,61 @@ def test_heatmap_with_no_calls_has_empty_grid_and_no_suggestion() -> None:
     assert len(out["rows"]) == 7
     assert all(c["demand"] == 0 for r in out["rows"] for c in r["cells"])
     assert out["suggested_action"] is None
+
+
+def _cell(view: dict, weekday: int, band: str) -> dict:
+    return next(c for c in view["rows"][weekday]["cells"] if c["band"] == band)
+
+
+def test_heatmap_marks_each_sites_closed_cells_from_its_hours() -> None:
+    out = bi.demand_supply_heatmap([])
+    sites = {s["id"]: s for s in out["sites"]}
+    assert set(sites) == {"centro", "norte", "sur"}
+
+    # Weekdays 09:00–20:00 cover all four bands; Sunday is shut everywhere.
+    assert sites["norte"]["open"][0] == [True] * 4
+    assert sites["norte"]["open"][6] == [False] * 4
+    # Norte does not open Saturday; Centro opens 09:00–14:00 (a band that
+    # half-overlaps the site's hours still counts as open).
+    assert sites["norte"]["open"][5] == [False] * 4
+    assert sites["centro"]["open"][5] == [True, True, False, False]
+    # Sur shuts Friday lunchtime.
+    assert sites["sur"]["open"][4] == [True, True, False, False]
+    # The combined view marks a cell open while any site is.
+    assert out["open"][5] == [True, True, False, False]
+    assert out["open"][6] == [False] * 4
+    assert sites["sur"]["hours_label"] == "L–J 09:00–20:00 · V 09:00–14:00"
+
+
+def test_heatmap_splits_demand_and_supply_per_site() -> None:
+    # 2026-09-22 is a Tuesday.
+    to_sur = _find_slots(
+        _card("a"), date_from="2026-09-22", time_from="16:00:00", location_id="sur"
+    )
+    anywhere = _find_slots(_card("b"), date_from="2026-09-22", time_from="16:00:00")
+    physio = _find_slots(
+        _card("c"), date_from="2026-09-22", time_from="16:00:00", specialty_id="physiotherapy"
+    )
+    offered_sur = _find_slots(
+        _card("d"),
+        date_from="2026-09-22",
+        slots=[{"start": "2026-09-22T16:30:00+02:00", "provider_id": "PR05", "location_id": "sur"}],
+    )
+    out = bi.demand_supply_heatmap([to_sur, anywhere, physio, offered_sur])
+    sites = {s["id"]: s for s in out["sites"]}
+
+    # A request counts once in the network view, and against every site it
+    # could have landed in: Sur explicitly, all three when no site is named,
+    # Sur only for physiotherapy (its one provider sits there).
+    assert _cell(out, 1, "Tarde")["demand"] == 3
+    assert _cell(sites["sur"], 1, "Tarde")["demand"] == 3
+    assert _cell(sites["centro"], 1, "Tarde")["demand"] == 1
+    assert _cell(sites["norte"], 1, "Tarde")["demand"] == 1
+
+    # An offered slot lands on its own site only.
+    assert _cell(out, 1, "Tarde")["availability"] == 1
+    assert _cell(sites["sur"], 1, "Tarde")["availability"] == 1
+    assert _cell(sites["norte"], 1, "Tarde")["availability"] == 0
 
 
 def test_business_insights_bundles_everything_and_lists_data_gaps() -> None:
@@ -293,3 +377,281 @@ def test_cancellation_daily_breakdown_only_appears_with_volume() -> None:
     ]
     daily = bi.cancellation_slots(many, now=_NOW)["daily"]
     assert daily == [{"date": "2026-09-19", "freed": 5, "relocated": 0, "lost": 5}]
+
+
+def test_cancellation_lead_time_buckets_and_median() -> None:
+    # One cancellation 12 h ahead of the slot, one 6 d ahead.
+    close = _cancelled(
+        _listed(
+            _card("a", started_at="2026-09-19T10:00:00+00:00"),
+            appointment_id="A1",
+            provider_id="PR01",
+            start="2026-09-19T22:00:00+00:00",
+        ),
+        appointment_id="A1",
+        ts="2026-09-19T10:30:00+00:00",
+    )
+    far = _cancelled(
+        _listed(
+            _card("b", started_at="2026-09-19T10:00:00+00:00"),
+            appointment_id="A2",
+            provider_id="PR01",
+            start="2026-09-25T10:00:00+00:00",
+        ),
+        appointment_id="A2",
+        ts="2026-09-19T10:30:00+00:00",
+    )
+    lead = bi.cancellation_slots([close, far], now=_NOW)["lead_time"]
+    assert lead["count"] == 2
+    assert lead["median_hours"] == 78.0  # median of 12 h and 144 h
+    counts = {b["key"]: b["count"] for b in lead["buckets"]}
+    assert counts == {"under_24h": 1, "h24_48": 0, "h48_7d": 1, "over_7d": 0}
+    assert lead["suggested_action"]
+
+
+def test_cancellation_lead_time_skips_the_call_without_started_at() -> None:
+    freed = _cancelled(
+        _listed(
+            _card("a"),  # no started_at
+            appointment_id="A1",
+            provider_id="PR01",
+            start="2026-09-21T09:00:00+00:00",
+        ),
+        appointment_id="A1",
+        ts="2026-09-19T08:00:00+00:00",
+    )
+    lead = bi.cancellation_slots([freed], now=_NOW)["lead_time"]
+    assert lead["count"] == 0
+    assert lead["median_hours"] is None
+
+
+def test_cancellation_relocation_speed_measures_minutes_to_reoccupation() -> None:
+    start = "2026-09-25T09:00:00+00:00"
+    freed = _cancelled(
+        _listed(
+            _card("a", started_at="2026-09-20T08:00:00+00:00"),
+            appointment_id="A1",
+            provider_id="PR01",
+            start=start,
+        ),
+        appointment_id="A1",
+        ts="2026-09-20T08:05:00+00:00",
+    )
+    rebook = _booked(
+        _card("b", started_at="2026-09-20T08:35:00+00:00"), provider_id="PR01", slot=start
+    )
+    out = bi.cancellation_slots([freed, rebook], now=_NOW)
+    assert out["relocated"] == 1
+    # From the cancel submit (08:05) to the rebooking call's start (08:35).
+    assert out["relocation_speed"] == {"count": 1, "median_minutes": 30.0}
+
+
+def test_cancel_rate_is_over_every_appointment_action() -> None:
+    start = "2026-09-25T09:00:00+00:00"
+    cards = [
+        _booked(_card("b1"), provider_id="PR01", slot=start),
+        _booked(_card("b2"), provider_id="PR02", slot=start),
+        _cancelled(
+            _listed(_card("c1"), appointment_id="A1", provider_id="PR01", start=start),
+            appointment_id="A1",
+            ts="2026-09-19T08:00:00+00:00",
+        ),
+        _card("x", "no-action", "no_availability"),  # not an appointment action
+    ]
+    out = bi.cancellation_slots(cards, now=_NOW)
+    assert out["cancel_rate"] == {"cancels": 1, "appointments": 3, "pct": 33.3}
+
+
+def test_cancellations_by_provider_rank_freed_and_lost() -> None:
+    cards = [
+        _cancelled(
+            _listed(
+                _card("a"),
+                appointment_id="A1",
+                provider_id="PR01",
+                start="2026-09-19T09:00:00+00:00",
+            ),
+            appointment_id="A1",
+            ts="2026-09-18T08:00:00+00:00",
+        ),
+        _cancelled(
+            _listed(
+                _card("b"),
+                appointment_id="A2",
+                provider_id="PR01",
+                start="2026-09-25T09:00:00+00:00",
+            ),
+            appointment_id="A2",
+            ts="2026-09-18T08:00:00+00:00",
+        ),
+        _cancelled(
+            _listed(
+                _card("c"),
+                appointment_id="A3",
+                provider_id="PR02",
+                start="2026-09-19T10:00:00+00:00",
+            ),
+            appointment_id="A3",
+            ts="2026-09-18T08:00:00+00:00",
+        ),
+    ]
+    rows = bi.cancellation_slots(cards, now=_NOW)["by_provider"]
+    assert rows == [
+        {"id": "PR01", "name": "Dra. Ortiz", "freed": 2, "lost": 1},
+        {"id": "PR02", "name": "Dr. Sáez", "freed": 1, "lost": 1},
+    ]
+
+
+def test_classify_cancel_reason_buckets() -> None:
+    assert (
+        bi.classify_cancel_reason(
+            _say(_card("a"), "me equivoqué de día, la tenía mal apuntada")
+        )
+        == "mistake"
+    )
+    assert (
+        bi.classify_cancel_reason(_say(_card("b"), "ya estoy mejor, ya se me ha pasado"))
+        == "health"
+    )
+    assert (
+        bi.classify_cancel_reason(
+            _say(_card("c"), "me ha surgido una reunión en el trabajo")
+        )
+        == "scheduling"
+    )
+    assert (
+        bi.classify_cancel_reason(_say(_card("d"), "porque al final no me hace falta"))
+        == "no_longer_needed"
+    )
+    assert (
+        bi.classify_cancel_reason(_say(_card("e"), "sí, cancélemela por favor"))
+        == "unknown"
+    )
+    assert bi.classify_cancel_reason(_card("f")) == "unknown"
+    assert bi.classify_cancel_reason(_say(_card("g"), "es que tengo un compromiso")) == "other"
+
+
+def test_cancel_reasons_keep_residual_buckets_last_even_when_larger() -> None:
+    def _mk(cid: str, text: str) -> CallCard:
+        card = _listed(
+            _card(cid),
+            appointment_id=f"A-{cid}",
+            provider_id="PR01",
+            start="2026-09-19T09:00:00+00:00",
+        )
+        card = _cancelled(card, appointment_id=f"A-{cid}", ts="2026-09-18T08:00:00+00:00")
+        return _say(card, text)
+
+    # One specific reason (mistake) with a single case; three residual "other"
+    # cases outnumber it, yet must still print below it.
+    cards = [_mk("m1", "me equivoqué de día")] + [
+        _mk(f"o{i}", "es que tengo un compromiso") for i in range(3)
+    ]
+    out = bi.cancellation_slots(cards, now=_NOW)
+    keys = [r["key"] for r in out["reasons"]]
+    assert keys[0] == "mistake"
+    assert keys[-1] == "other"
+    assert out["reasons"][0]["count"] == 1
+    assert out["reasons"][-1]["count"] == 3
+
+
+def test_cancel_reasons_are_not_sorted_by_count() -> None:
+    def _mk(cid: str, text: str) -> CallCard:
+        card = _listed(
+            _card(cid),
+            appointment_id=f"A-{cid}",
+            provider_id="PR01",
+            start="2026-09-19T09:00:00+00:00",
+        )
+        card = _cancelled(card, appointment_id=f"A-{cid}", ts="2026-09-18T08:00:00+00:00")
+        return _say(card, text)
+
+    # "scheduling" has a single case, "mistake" has five — a count-based sort
+    # would put mistake first. It must not: the fixed bucket order wins.
+    cards = [_mk("s1", "me ha surgido un imprevisto")] + [
+        _mk(f"m{i}", "me equivoqué de día") for i in range(5)
+    ]
+    out = bi.cancellation_slots(cards, now=_NOW)
+    keys = [r["key"] for r in out["reasons"]]
+    assert keys.index("scheduling") < keys.index("mistake")
+
+
+def test_waitlist_counts_unmet_callers_who_wanted_a_lost_slot() -> None:
+    freed = _cancelled(
+        _listed(
+            _card("a"),
+            appointment_id="A1",
+            provider_id="PR01",
+            start="2026-09-19T09:00:00+00:00",
+        ),
+        appointment_id="A1",
+        ts="2026-09-18T08:00:00+00:00",
+    )
+    u1 = _say(_card("u1", "no-action", "no_availability"), "quiero a la dra ortiz")
+    u2 = _say(_card("u2", "no-action", "provider_on_leave"), "necesito a la dra ortiz")
+    # A different doctor and no matching band: does not count.
+    u3 = _say(_card("u3", "no-action", "no_availability"), "quiero al dr sáez")
+    out = bi.cancellation_slots([freed, u1, u2, u3], now=_NOW)
+    assert out["lost"] == 1
+    assert out["waitlist"]["lost_with_demand"] == 1
+    assert out["waitlist"]["callers"] == 2
+    assert out["waitlist"]["suggested_action"]
+
+
+def test_waitlist_ignores_relocated_and_pending_slots() -> None:
+    start = "2026-09-25T09:00:00+00:00"
+    pending = _cancelled(
+        _listed(_card("a"), appointment_id="A1", provider_id="PR01", start=start),
+        appointment_id="A1",
+        ts="2026-09-18T08:00:00+00:00",
+    )
+    relocated = _cancelled(
+        _listed(_card("b"), appointment_id="A2", provider_id="PR02", start=start),
+        appointment_id="A2",
+        ts="2026-09-18T08:00:00+00:00",
+    )
+    rebook = _booked(_card("r"), provider_id="PR02", slot=start)
+    unmet = _say(_card("u", "no-action", "no_availability"), "quiero a la dra ortiz")
+    out = bi.cancellation_slots([pending, relocated, rebook, unmet], now=_NOW)
+    assert out["waitlist"]["callers"] == 0
+    assert out["waitlist"]["suggested_action"] is None
+
+
+def test_repeat_cancellers_counted_without_exposing_numbers() -> None:
+    cards = [
+        _cancelled(
+            _listed(
+                _card("a", from_number="+34611"),
+                appointment_id="A1",
+                provider_id="PR01",
+                start="2026-09-25T09:00:00+00:00",
+            ),
+            appointment_id="A1",
+            ts="2026-09-19T08:00:00+00:00",
+        ),
+        _cancelled(
+            _listed(
+                _card("b", from_number="+34611"),
+                appointment_id="A2",
+                provider_id="PR01",
+                start="2026-09-26T09:00:00+00:00",
+            ),
+            appointment_id="A2",
+            ts="2026-09-19T09:00:00+00:00",
+        ),
+        _cancelled(
+            _listed(
+                _card("c", from_number="+34622"),
+                appointment_id="A3",
+                provider_id="PR02",
+                start="2026-09-26T10:00:00+00:00",
+            ),
+            appointment_id="A3",
+            ts="2026-09-19T09:30:00+00:00",
+        ),
+        # Same number but not a cancel action: does not count.
+        _card("d", "no-action", "no_availability", from_number="+34611"),
+    ]
+    out = bi.cancellation_slots(cards, now=_NOW)
+    assert out["repeat_callers"] == {"callers": 1, "cancellations": 2}
+    assert "+34611" not in str(out)
