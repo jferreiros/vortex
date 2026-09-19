@@ -100,6 +100,22 @@ async def test_cartociudad_resolves_alcala_200_to_a_portal(
     assert calls == ["Calle Alcalá 200"]
 
 
+async def test_cartociudad_asks_the_service_for_madrid_only(
+    clean_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """limit=5 runs on the service side, so the province filter must too."""
+    seen: list[dict[str, Any]] = []
+
+    async def fake_get(url: str, *, params: dict[str, Any], headers=None):
+        seen.append(params)
+        return CARTOCIUDAD_ALCALA_PAYLOAD
+
+    monkeypatch.setattr(geo, "_http_get_json", fake_get)
+    settings = settings_module.Settings(geocoder="cartociudad", geocoder_url="")
+    assert await geo.geocode_live("Calle Alcalá 200", settings) == ALCALA_200_PORTAL
+    assert seen[0]["provincia_filter"] == geo.CARTOCIUDAD_PROVINCE
+
+
 async def test_cartociudad_tolerates_the_alcla_misspelling(
     clean_env, monkeypatch: pytest.MonkeyPatch
 ) -> None:
