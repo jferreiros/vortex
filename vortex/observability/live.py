@@ -681,52 +681,6 @@ def _facts(health: dict[str, Any] | None) -> None:
 # ---------------------------------------------------------------------------
 
 
-@ui.page("/wall")
-def wall_page() -> None:
-    _apply_chrome()
-    ui.page_title("Vortex · Live")
-    stage = ui.element("div").classes("shell")
-    rendered: dict[str, Any] = {"sig": None}
-
-    def redraw() -> None:
-        cards, health = _load_cards()
-        sig = _signature(cards, health)
-        if sig == rendered["sig"]:
-            return
-        rendered["sig"] = sig
-        featured = _feature(cards)
-        live_count = sum(1 for c in cards if c.live)
-        stage.clear()
-        with stage:
-            slot = _nav("/wall", team=False)
-            with slot:
-                _line_pill(health)
-            with ui.element("main").classes("page"):
-                with ui.element("div").classes("page-head"):
-                    with ui.element("div"):
-                        ui.label("Live").classes("title")
-                        ui.label(explain.wall_sub(CLINIC_NAME)).classes("sub")
-                    if live_count:
-                        with ui.element("div").classes("live-badge"):
-                            _dot("live")
-                            ui.label(f"{live_count} on the line" if live_count > 1 else "On a call")
-                    else:
-                        _pill("Idle · waiting for the next call", "off", "mute")
-                _live_strip(cards, featured, public=True)
-                _call_panel(featured, verbose=False, public=True)
-                ui.element("div").style("height: 48px")
-                with ui.element("div").classes("section-title"):
-                    ui.label("Recent calls").classes("t")
-                    ui.label("Click a row for the full story").classes("m")
-                _calls_table(cards, link=True, limit=12, public=True)
-                ui.element("div").style("height: 32px")
-                _facts(health)
-            _footer()
-
-    redraw()
-    ui.timer(0.5, redraw)
-
-
 @ui.page("/call/{call_id}")
 def call_page(call_id: str) -> None:
     """One call, by id. Public. The same panel as Live, plus every request."""
@@ -1073,7 +1027,7 @@ def main() -> None:
 
 # The clinic console (Overview, Agents, Patients, Insights, Settings) registers
 # its pages on import. It imports this module, so it must come last.
-from vortex.observability import console  # noqa: E402, F401
+from vortex.observability import console, liveflow  # noqa: E402, F401
 
 if __name__ in {"__main__", "__mp_main__"}:
     main()
