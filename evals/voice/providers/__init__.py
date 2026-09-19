@@ -29,6 +29,10 @@ def make_stt(key: str, *, real: bool) -> STTProvider:
         from evals.voice.providers.cartesia import CartesiaSTT
 
         return CartesiaSTT(key)
+    if key.startswith("soniox"):
+        from evals.voice.providers.soniox import SonioxSTT
+
+        return SonioxSTT(key)
     raise ValueError(f"no STT adapter for {key!r}")
 
 

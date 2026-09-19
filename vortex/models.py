@@ -85,9 +85,9 @@ class ModelSpec:
         Six retries with the SDK's backoff: a bench saturates a tokens-per-
         minute limit within seconds, and a 429 is a wait, not a verdict.
         """
-        from openai import AsyncOpenAI
+        from vortex.observability.tracing import async_openai_client
 
-        return AsyncOpenAI(
+        return async_openai_client(
             api_key=self.api_key or "missing",
             base_url=self.base_url or None,
             timeout=timeout,

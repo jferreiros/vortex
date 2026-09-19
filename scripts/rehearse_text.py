@@ -207,13 +207,13 @@ class Rehearsal:
         verbose: bool = False,
         max_tokens: int | None = None,
     ) -> None:
-        from openai import AsyncOpenAI
+        from vortex.observability.tracing import async_openai_client
 
         self.persona = persona
         self.settings = settings
         self.verbose = verbose
         self.max_tokens = max_tokens or settings.llm_max_tokens
-        self.client = AsyncOpenAI(
+        self.client = async_openai_client(
             api_key=settings.llm_api_key or "none", base_url=settings.llm_base_url or None
         )
         self.extra = llm_extra(settings)

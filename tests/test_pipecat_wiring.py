@@ -226,6 +226,44 @@ def test_stt_terms_boost_the_clinic_vocabulary() -> None:
     assert "Clínica Arenal" in stt_terms(object())
 
 
+def test_stt_terms_include_dictation_vocabulary() -> None:
+    """Letter names, email punctuation, domains, months and insurers (T57)."""
+    from vortex.clinic.client import FakeClinicClient
+    from vortex.clinic.fixtures import INSURER_NAMES
+    from vortex.conversation.stt_context import (
+        MAX_CONTEXT_CHARS,
+        stt_context_size,
+        stt_terms,
+    )
+
+    class Ctx:
+        clinic = FakeClinicClient()
+
+    terms = stt_terms(Ctx())
+
+    for letter in ("be", "uve", "i griega", "zeta", "eñe", "equis", "hache"):
+        assert letter in terms
+    for letter in ("efa", "enya", "ve baixa", "i grega", "ics", "essa"):
+        assert letter in terms
+
+    for punct in ("arroba", "punto", "guion", "guion bajo"):
+        assert punct in terms
+
+    for domain in ("gmail", "gmail.com", "hotmail", "outlook.com", "yahoo.es", "icloud.com"):
+        assert domain in terms
+
+    for month in ("enero", "septiembre", "gener", "setembre", "January", "September"):
+        assert month in terms
+
+    for insurer in INSURER_NAMES.values():
+        assert insurer in terms
+    assert "Caser" in terms
+    assert "Nueva Mutua" in terms
+
+    assert stt_context_size(Ctx()) < MAX_CONTEXT_CHARS
+    assert stt_context_size(object()) < MAX_CONTEXT_CHARS
+
+
 async def test_language_watcher_pushes_a_tts_settings_frame(voice_settings) -> None:
     """The watcher turns a Catalan transcript into a voice switch, once."""
     pytest.importorskip("pipecat")
@@ -616,16 +654,18 @@ async def test_the_idle_handler_speaks_the_prompt_in_the_call_language(voice_set
 
 
 def test_vad_mode_wires_our_turn_strategies() -> None:
-    """In VAD mode the aggregator gets the conversation lane's strategies.
+    """The aggregator always gets the conversation lane's strategies.
 
-    Without them it falls back to its defaults, which load the smart-turn v3
-    model and ignore ``enable_interruptions``. In Soniox mode the STT service
-    installs ``ExternalUserTurnStrategies`` itself, so nothing is passed.
+    Without them it falls back to its defaults (smart-turn v3) or, in Soniox
+    mode, to ExternalUserTurnStrategies that ignore interrupt_min_words.
     """
     pytest.importorskip("pipecat")
     from pipecat.processors.aggregators.llm_response_universal import LLMUserAggregatorParams
     from pipecat.turns.user_start import MinWordsUserTurnStartStrategy, VADUserTurnStartStrategy
-    from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
+    from pipecat.turns.user_stop import (
+        ExternalUserTurnStopStrategy,
+        SpeechTimeoutUserTurnStopStrategy,
+    )
     from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
     from vortex.conversation.turns import TurnSettings
@@ -643,4 +683,12 @@ def test_vad_mode_wires_our_turn_strategies() -> None:
     ]
 
     soniox_params = _user_aggregator_params(TurnSettings())
-    assert soniox_params.user_turn_strategies is None
+    assert isinstance(soniox_params.user_turn_strategies, UserTurnStrategies)
+    assert [type(s) for s in soniox_params.user_turn_strategies.start] == [
+        MinWordsUserTurnStartStrategy,
+    ]
+    assert [type(s) for s in soniox_params.user_turn_strategies.stop] == [
+        ExternalUserTurnStopStrategy,
+    ]
+    assert soniox_params.user_turn_strategies.start[0]._min_words == 2
+    assert soniox_params.user_turn_strategies.stop[0].resolves_proposed_turn_stop_frames is True

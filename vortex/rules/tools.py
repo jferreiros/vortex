@@ -23,6 +23,10 @@ Where each answer comes from:
   coordinates, among the sites that can serve the request (``rules/geo.py``).
 - ``find_provider`` matches a spoken name against the catalogue, and reports
   the near-miss pairs as ambiguous rather than picking one.
+- ``clinic_facts`` answers the caller's questions about the clinic itself -
+  which site opens on a Saturday, who sits at Norte, is there a site in Getafe
+  - off the catalogue (``rules/facts.py``). The caller books on the answer, so
+  it is never given from memory.
 
 A refusal carrying one of the five *insurance* reasons is the signal for
 problem 17: the plan on file will not cover this, and the caller may hold a
@@ -44,6 +48,8 @@ from vortex.contract import (
     BlockedProvider,
     Catalogue,
     CheckEligibilityInput,
+    ClinicFacts,
+    ClinicFactsInput,
     DeclineReason,
     EligibilityVerdict,
     FindProviderInput,
@@ -58,7 +64,7 @@ from vortex.contract import (
     recall_patient,
     remember_patient,
 )
-from vortex.rules import eligibility, geo
+from vortex.rules import eligibility, facts, geo
 from vortex.rules import triage as triage_table
 
 _TITLES = {"dr", "dra", "d", "doctor", "doctora"}
@@ -397,3 +403,16 @@ async def find_provider(ctx: ToolContext, args: FindProviderInput) -> ProviderMa
             rejection=Rejection(reason="provider_on_leave", detail=on_leave.reason),
         )
     return ProviderMatch(status="found", provider=provider)
+
+
+async def clinic_facts(ctx: ToolContext, args: ClinicFactsInput) -> ClinicFacts:
+    """Which sites, who sits where, when a site opens - from the catalogue.
+
+    Problem 16 is scored on the booking made after the answer: tell a caller
+    Norte opens on Saturday and they ask for Norte on Saturday, which no tool
+    can book. So the answer is the catalogue's, filtered to what they asked,
+    and the site ids in it are the ids ``find_slots`` then takes.
+    """
+    catalogue = await ctx.clinic.catalogue()
+    today = ctx.now.astimezone(MADRID).date()
+    return facts.answer(catalogue, args, today)

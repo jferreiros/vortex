@@ -141,6 +141,10 @@ def test_prompt_names_every_rule_the_score_depends_on() -> None:
         "patient_id from find_patient",
         "list_appointments",
         "last stated request",
+        "One field per turn",
+        "groups of three",
+        "read back once",
+        "Last value wins",
         "call 112",
         "medical_emergency",
         "Never ask a returning patient whether they have been here before",
@@ -152,8 +156,7 @@ def test_prompt_names_every_rule_the_score_depends_on() -> None:
         "no_availability",
         "Do not submit before the caller agrees",
         "Are you still there?",
-        "Saturday only Centro opens",
-        "Monday 12 October",
+        "clinic_facts and say only its answer, never memory",
     ):
         assert needle in text, needle
 
@@ -230,10 +233,28 @@ def test_turn_settings_are_english_first_and_interruptible() -> None:
         turns.enable_interruptions = False  # type: ignore[misc]
 
 
-def test_soniox_mode_leaves_turn_strategies_to_the_stt_service() -> None:
-    # Passing strategies in Soniox mode would override the external ones the
-    # STT installs and break turn endings; the factory says None on purpose.
-    assert user_turn_strategies(TurnSettings(soniox_turn_detection=True)) is None
+def test_soniox_mode_keeps_the_min_words_barge_in_gate() -> None:
+    """Soniox mode must pass our strategies, not leave None for the STT.
+
+    Returning None lets Soniox install ExternalUserTurnStrategies, where any
+    VAD start interrupts and interrupt_min_words never runs.
+    """
+    pytest.importorskip("pipecat")
+    from pipecat.turns.user_start import MinWordsUserTurnStartStrategy
+    from pipecat.turns.user_stop import ExternalUserTurnStopStrategy
+
+    strategies = user_turn_strategies(
+        TurnSettings(soniox_turn_detection=True, interrupt_min_words=2)
+    )
+    assert strategies is not None
+    assert len(strategies.start) == 1
+    assert isinstance(strategies.start[0], MinWordsUserTurnStartStrategy)
+    assert strategies.start[0]._min_words == 2
+    assert strategies.start[0]._use_interim is True
+    assert len(strategies.stop) == 1
+    assert isinstance(strategies.stop[0], ExternalUserTurnStopStrategy)
+    # A turn opened by the word gate still closes on Soniox's stop proposal.
+    assert strategies.stop[0].resolves_proposed_turn_stop_frames is True
 
 
 def test_vad_mode_builds_strategies_that_honour_the_settings() -> None:

@@ -39,6 +39,7 @@ from vortex.contract import (
 from vortex.line.submit import DryRunSubmitClient, SubmitApi, SubmitClient, submit_action
 from vortex.line.twilio import StartPayload
 from vortex.observability.calllog import CallLog
+from vortex.observability.tracing import observe_span
 from vortex.settings import Settings, get_settings
 
 # The tool the model calls to send an action itself. It goes through
@@ -165,6 +166,7 @@ class CallSession:
     # Every action this call sent, in order, whatever the platform answered.
     # The fallback reads it so it never repeats an action already on its way.
     sent_actions: list[Action] = field(default_factory=list)
+    end_reason: str = ""
     _closed: bool = False
 
     @property
@@ -262,6 +264,7 @@ class CallSession:
         if self._closed:
             return
         self._closed = True
+        self.end_reason = reason
         self.ctx.log.event(
             "call.ended",
             reason=reason,
@@ -291,6 +294,13 @@ class CallSession:
         if self.has_accepted_submission:
             return
         branch, action, why = self.fallback_action()
+        with observe_span(
+            "submit-fallback",
+            input={"branch": branch, "why": why, "route": action_route(action)},
+        ) as span:
+            await self._send_fallback(branch, action, why, span)
+
+    async def _send_fallback(self, branch: str, action: Action, why: str, span: Any = None) -> None:
         # The call already sent this exact action (a dry run, or a send the
         # platform never acknowledged). Repeating it buys a 409 at best.
         repeat = action in self.sent_actions
@@ -302,6 +312,8 @@ class CallSession:
             skipped=repeat,
             sent_so_far=len(self.submitted),
         )
+        if span is not None:
+            span.update(output={"skipped": repeat, "branch": branch})
         if repeat:
             return
         await self.submit(action)

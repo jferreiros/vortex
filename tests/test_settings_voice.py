@@ -38,6 +38,11 @@ VOICE_KEYS = (
     "VORTEX_TTS_PROVIDER_ALT",
     "VORTEX_VOICE_MODE",
     "VORTEX_GEOCODER_URL",
+    "LANGFUSE_PUBLIC_KEY",
+    "LANGFUSE_SECRET_KEY",
+    "LANGFUSE_BASE_URL",
+    "LANGFUSE_TRACING_ENVIRONMENT",
+    "VORTEX_ENV",
 )
 
 
@@ -359,6 +364,8 @@ def test_describe_never_leaks_a_key(clean_env) -> None:
         "HELMCODE_API_KEY": "helmcode-secret",
         "ELEVENLABS_API_KEY": "elevenlabs-secret",
         "ARBITER_API_KEY": "arbiter-secret",
+        "LANGFUSE_PUBLIC_KEY": "pk-lf-secret",
+        "LANGFUSE_SECRET_KEY": "sk-lf-secret",
     }
     s = _settings(clean_env, VORTEX_TTS_PROVIDER="elevenlabs", **secrets)
     described = s.describe()
@@ -369,6 +376,7 @@ def test_describe_never_leaks_a_key(clean_env) -> None:
     assert described["has_llm_key"] is True
     assert described["has_elevenlabs_key"] is True
     assert described["has_arbiter_key"] is True
+    assert described["has_langfuse_keys"] is True
     assert described["llm_provider"] == "helmcode"
     assert described["tts_provider"] == "elevenlabs"
     assert described["tts_provider_alt"] == "google"

@@ -50,6 +50,12 @@ def test_default_candidates_exclude_paid(monkeypatch: pytest.MonkeyPatch) -> Non
     assert "helmcode/qwen3.6" in defaults
 
 
+def test_default_candidates_exclude_prose_only_cloudflare_qwen() -> None:
+    # Probe returned prose and no tool call; keep it off the default set.
+    defaults = {r["id"] for r in pricing.entries() if r.get("default")}
+    assert "cloudflare/@cf/qwen/qwen3-30b-a3b-fp8" not in defaults
+
+
 def test_explicit_model_outside_the_catalogue_runs(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("HELMCODE_API_KEY", "k")
     from vortex.settings import reset_settings
