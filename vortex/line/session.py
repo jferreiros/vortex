@@ -44,6 +44,7 @@ from vortex.contract import (
     SubmitInput,
     SubmitResult,
     ToolContext,
+    TriageResult,
     action_route,
 )
 from vortex.diary.tools import find_slots
@@ -80,6 +81,22 @@ SUBMIT_TOOL = "submit_action"
 # agreed, what they prepare goes out in the same turn: see
 # ``CallSession.confirm_prepared``.
 PREPARE_TOOLS: tuple[str, ...] = ("prepare_booking", "prepare_reschedule", "prepare_cancel")
+
+# What the caller wants, as the domain tools reveal it. The classification
+# itself lives inside the model - no tool asks "what is your goal" - so the
+# first tool call that can only mean one thing is where the intent becomes
+# observable for the log: a ``prepare_*`` is drawn up only for the action it
+# names, and ``build_registration`` only runs for a caller the directory does
+# not know. ``triage`` means "escalate" only when it flags an emergency; a
+# routing answer says nothing about the goal yet. And ``submit_action`` needs
+# no mapping at all: the action's own ``kind`` is already the intent
+# vocabulary (book / register / reschedule / cancel / no-action / escalate).
+TOOL_INTENTS: dict[str, str] = {
+    "prepare_booking": "book",
+    "prepare_reschedule": "reschedule",
+    "prepare_cancel": "cancel",
+    "build_registration": "register",
+}
 
 # What counts as an action the platform holds for this call. A 200 or a 409
 # (the same action twice) is a record; everything else is not, ``dry_run``
@@ -123,6 +140,19 @@ def refusal_for(reason: DeclineReason) -> Action:
     if reason == "medical_emergency":
         return EscalateAction(reason=reason)
     return NoAction(reason=reason)
+
+
+def _intent_revealed(tool: str, result: BaseModel) -> str | None:
+    """The intent a finished tool call reveals, or ``None`` when it reveals none.
+
+    See ``TOOL_INTENTS`` for the mapping. ``triage`` is the one tool whose
+    name alone is ambiguous: it routes a symptom to a specialty on every
+    urgent-care call, so it only says "escalate" when the result flags the
+    emergency.
+    """
+    if isinstance(result, TriageResult):
+        return "escalate" if result.emergency else None
+    return TOOL_INTENTS.get(tool)
 
 
 def policy_for(patient: PatientRecord, slot: Slot) -> str:
@@ -393,6 +423,9 @@ class CallSession:
     # Fingerprints of actions we already texted, so a 409 duplicate does not
     # SMS the caller twice for the same booking or cancel.
     _sms_notified: set[str] = field(default_factory=set)
+    # The last intent this call logged, so ``call.intent`` is written only when
+    # the best guess changes - a re-classification, not a repeat.
+    _intent: str = ""
 
     @property
     def call_id(self) -> str:
@@ -497,12 +530,15 @@ class CallSession:
                 # What left the process, reason override included, so the
                 # fallback can tell a re-send from a first try.
                 self.sent_actions.append(with_verdict_reason(self.ctx, sent))
+            if sent is not None:
+                self._note_intent(sent.kind, tool=name)
             if result.status in ACCEPTED_STATUSES:
                 self.arm_hangup("submit_accepted")
                 if sent is not None:
                     self._queue_sms(submitted_action(self.ctx, sent))
         else:
             self.memory.observe(name, result)
+            self._note_intent(_intent_revealed(name, result), tool=name)
             if self.memory.superseded_slot:
                 self.ctx.log.event(
                     "plan.superseded",
@@ -513,6 +549,19 @@ class CallSession:
                 self.memory.superseded_slot = ""
             await self._submit_after_prepare(name)
         return result
+
+    def _note_intent(self, intent: str | None, *, tool: str) -> None:
+        """Log ``call.intent`` when the best guess at the caller's goal changes.
+
+        The values are the submit vocabulary the platform scores. A tool that
+        says nothing about the goal passes ``None`` and the guess stands; a
+        later tool that re-classifies logs again - the wall reads the most
+        recent one (``wall_timeline.latest_intent``).
+        """
+        if not intent or intent == self._intent:
+            return
+        self._intent = intent
+        self.ctx.log.event("call.intent", intent=intent, tool=tool)
 
     def confirm_prepared(self, why: str) -> None:
         """The caller said yes to the plan we read back. Never ask a second time.
@@ -652,6 +701,11 @@ class CallSession:
         result = await submit_action(self.ctx, SubmitInput(action=action))
         self.submitted.append(result)
         self.sent_actions.append(with_verdict_reason(self.ctx, action))
+        # The submissions that leave through here - a confirmed plan, an
+        # accepted refusal, the end-of-call fallback - never passed the model's
+        # ``submit_action`` tool, so this is where their intent lands in the
+        # log: what the call ended as is what it wanted, on our best claim.
+        self._note_intent(action.kind, tool="session.submit")
         if result.status in ACCEPTED_STATUSES:
             self._queue_sms(submitted_action(self.ctx, action))
         return result
