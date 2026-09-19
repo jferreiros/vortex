@@ -71,7 +71,7 @@ def test_lookups_are_retrievers_and_writes_are_tools() -> None:
     assert tracing.tool_observation_name("find_patient") == "find-patient"
 
 
-def test_trace_call_is_a_noop_without_keys(clean_langfuse, tmp_path) -> None:
+def _open_session(tmp_path) -> CallSession:
     start = StartPayload.model_validate(
         {
             "streamSid": "MZ-trace",
@@ -79,9 +79,13 @@ def test_trace_call_is_a_noop_without_keys(clean_langfuse, tmp_path) -> None:
             "customParameters": {"from_number": "+34600111222"},
         }
     )
-    session = CallSession.open(
+    return CallSession.open(
         start, settings=Settings(calls_log_path=tmp_path / "calls.jsonl"), now=NOW
     )
+
+
+def test_trace_call_is_a_noop_without_keys(clean_langfuse, tmp_path) -> None:
+    session = _open_session(tmp_path)
     with tracing.trace_call(session) as observation:
         assert observation is None
         session.end_reason = "pipeline_finished"
@@ -113,6 +117,73 @@ def test_a_failed_tool_records_the_error_type_and_not_its_text(clean_langfuse) -
         raise ValueError("invalid input for find_patient: 12345678Z +34600111222")
 
     assert observation.updates == [{"output": {"error": "ValueError"}, "level": "ERROR"}]
+
+
+class _BrokenObservation:
+    def update(self, **_fields) -> None:
+        raise RuntimeError("langfuse is down")
+
+
+class _BrokenClient:
+    def start_as_current_observation(self, **_kwargs):
+        raise RuntimeError("langfuse is down")
+
+    def flush(self) -> None:
+        raise RuntimeError("langfuse is down")
+
+
+class _UnflushableClient(_FakeClient):
+    def flush(self) -> None:
+        raise RuntimeError("langfuse is down")
+
+
+def test_a_tracer_that_cannot_start_yields_no_observation(clean_langfuse) -> None:
+    clean_langfuse.setattr(tracing, "_client", lambda: _BrokenClient())
+
+    with tracing.observe_tool("submit_action", {}) as observation:
+        assert observation is None
+    with tracing.observe_span("submit-fallback", input={"branch": "silence"}) as span:
+        assert span is None
+
+
+def test_a_failed_update_never_reaches_the_tool_that_already_submitted(clean_langfuse) -> None:
+    clean_langfuse.setattr(tracing, "_client", lambda: _FakeClient(_BrokenObservation()))
+
+    with tracing.observe_tool("submit_action", {}) as observation:
+        observation.update(output={"status": "accepted"})
+
+
+def test_the_tool_error_still_propagates_when_the_tracer_is_broken(clean_langfuse) -> None:
+    clean_langfuse.setattr(tracing, "_client", lambda: _FakeClient(_BrokenObservation()))
+
+    with pytest.raises(ValueError), tracing.observe_tool("find_patient", {}):
+        raise ValueError("invalid input for find_patient")
+
+
+def test_trace_call_closes_the_call_when_the_update_and_flush_fail(
+    clean_langfuse, tmp_path
+) -> None:
+    clean_langfuse.setattr(tracing, "_client", lambda: _UnflushableClient(_BrokenObservation()))
+    session = _open_session(tmp_path)
+
+    with tracing.trace_call(session):
+        session.end_reason = "pipeline_finished"
+
+    assert session.end_reason == "pipeline_finished"
+
+
+def test_trace_call_keeps_the_crash_that_the_server_must_see(clean_langfuse, tmp_path) -> None:
+    clean_langfuse.setattr(tracing, "_client", lambda: _BrokenClient())
+    session = _open_session(tmp_path)
+
+    with pytest.raises(RuntimeError, match="pipeline"), tracing.trace_call(session):
+        raise RuntimeError("pipeline crashed")
+
+
+def test_flush_is_quiet_when_langfuse_is_down(clean_langfuse) -> None:
+    clean_langfuse.setattr(tracing, "_client", lambda: _BrokenClient())
+
+    tracing.flush()
 
 
 def test_async_openai_client_is_plain_openai_when_off(clean_langfuse) -> None:
