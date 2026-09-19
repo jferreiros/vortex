@@ -12,7 +12,7 @@ from dataclasses import dataclass, replace
 from statistics import median
 from typing import Any
 
-from vortex.observability.view import CallCard, ToolStep
+from vortex.observability.view import CallCard, ToolStep, Turn, fold_turns
 
 # ---------------------------------------------------------------------------
 # Vocabulary
@@ -296,6 +296,7 @@ EVENT_TEXT: dict[str, str] = {
     "call.started": "The socket opened and a fresh pipeline started.",
     "submit.sent": "Posted the action to the platform.",
     "submit.result": "The platform answered the submission.",
+    "call.usage": "The providers' counters for this call were metered.",
     "call.ended": "The socket closed.",
     "call.summary": "The call was summarised.",
     "call.crashed": "The pipeline crashed.",
@@ -305,7 +306,7 @@ EVENT_TEXT: dict[str, str] = {
 def is_lifecycle(event: dict[str, Any]) -> bool:
     """True for the socket, submission and summary lines; false for turns and tools."""
     kind = str(event.get("kind") or "")
-    return not (kind.startswith("turn.") or kind.startswith("tool."))
+    return not kind.startswith(("turn.", "tool."))
 
 
 def event_text(event: dict[str, Any]) -> str:
@@ -330,6 +331,17 @@ def event_detail(event: dict[str, Any]) -> str:
         frames_in = event.get("media_frames_in", "?")
         frames_out = event.get("media_frames_out", "?")
         bits.append(f"frames in {frames_in}, out {frames_out}")
+    if kind == "call.usage":
+        stt = event.get("stt") if isinstance(event.get("stt"), dict) else {}
+        llm = event.get("llm") if isinstance(event.get("llm"), dict) else {}
+        voices = event.get("tts") if isinstance(event.get("tts"), list) else []
+        chars = sum(int(v.get("characters") or 0) for v in voices if isinstance(v, dict))
+        bits.append(f"stt {float(stt.get('audio_seconds') or 0):.1f} s")
+        bits.append(
+            f"llm {int(llm.get('prompt_tokens') or 0)} in"
+            f" / {int(llm.get('completion_tokens') or 0)} out"
+        )
+        bits.append(f"tts {chars} chars")
     if kind == "call.summary" and event.get("duration_ms") is not None:
         bits.append(f"{event['duration_ms']} ms")
     if kind == "call.crashed" and event.get("error"):
@@ -397,6 +409,18 @@ def stats_for(cards: list[CallCard]) -> Stats:
     return stats
 
 
+KPI_LABEL: dict[str, str] = {
+    "calls": "calls",
+    "live": "on a call",
+    "booked": "booked",
+    "refused": "no action",
+    "escalated": "escalated",
+    "submitted": "submitted",
+    "handle": "handle",
+    "tool": "tool ms",
+    "cost": "€/call (list)",
+}
+
 LIVE_SUB = "The call as it happens. Each card is a turn or a tool. The one that is speaking pulses."
 
 
@@ -441,6 +465,16 @@ class Beat:
     ms: float | None = None
 
 
+#: Submission statuses the platform counts as a hand-off it accepted.
+SUBMIT_OK_STATUS = frozenset({"submitted", "accepted"})
+
+
+def submit_beat_dot(event: dict[str, Any]) -> str:
+    """A ``submit.result`` line is only green when the platform took the action."""
+    result = event.get("result") if isinstance(event.get("result"), dict) else {}
+    return "ok" if result.get("status") in SUBMIT_OK_STATUS else "warn"
+
+
 def _beat_dot_for_status(status: str) -> str:
     if status == "live":
         return "live"
@@ -452,7 +486,7 @@ def _beat_dot_for_status(status: str) -> str:
 
 
 def _finish_tool_beat(
-    card: CallCard, name: str, ts: str | None, ms: float | None, *, fail: str = ""
+    name: str, result: Any, ts: str | None, ms: float | None, *, fail: str = ""
 ) -> Beat:
     if fail:
         return Beat(
@@ -464,22 +498,20 @@ def _finish_tool_beat(
             dot="bad",
             ms=ms,
         )
-    step = next((item for item in reversed(card.tools) if item.name == name), None)
-    said = step_text(step) if step is not None else "Done."
     return Beat(
         kind="tool",
         title=tool_description(name),
-        text=said,
+        text=step_text(ToolStep(name=name, result=result, ms=ms, status="ok")),
         tool=name,
         ts=ts,
-        dot="ok" if step is None or step.status != "fail" else "bad",
-        ms=ms if ms is not None else (step.ms if step is not None else None),
+        dot="ok",
+        ms=ms,
     )
 
 
 def _beats_from_turns_and_tools(card: CallCard) -> list[Beat]:
     beats: list[Beat] = []
-    for turn in card.turns:
+    for turn in fold_turns(list(card.turns)):
         if turn.role == "user":
             beats.append(Beat("patient", "Patient", turn.text, ts=turn.ts))
         else:
@@ -514,15 +546,42 @@ def workflow_beats(card: CallCard | None) -> list[Beat]:
         )
     ]
     pending: dict[str, int] = {}
+    speech = fold_turns(list(card.turns))
+    if not speech:
+        speech = fold_turns(
+            [
+                Turn(
+                    "user" if str(event.get("kind")) == "turn.user" else "assistant",
+                    str(event.get("text") or ""),
+                    event.get("ts") if isinstance(event.get("ts"), str) else None,
+                )
+                for event in card.events
+                if event.get("kind") in {"turn.user", "turn.assistant"}
+            ]
+        )
+    speech_i = 0
+
+    def flush_speech_until(limit: str | None) -> None:
+        nonlocal speech_i
+        while speech_i < len(speech):
+            turn = speech[speech_i]
+            if limit is not None and (turn.ts or "") > limit:
+                break
+            if turn.role == "user":
+                beats.append(Beat("patient", "Patient", turn.text, ts=turn.ts))
+            else:
+                beats.append(Beat("agent", "Agent", turn.text, ts=turn.ts))
+            speech_i += 1
+
     if card.events:
         for event in card.events:
             kind = str(event.get("kind") or "")
             ts = event.get("ts") if isinstance(event.get("ts"), str) else None
-            if kind == "turn.user":
-                beats.append(Beat("patient", "Patient", str(event.get("text") or ""), ts=ts))
-            elif kind == "turn.assistant":
-                beats.append(Beat("agent", "Agent", str(event.get("text") or ""), ts=ts))
-            elif kind == "tool.called":
+            if kind in {"turn.user", "turn.assistant"}:
+                continue
+            if kind in {"tool.called", "tool.returned", "tool.failed", "submit.result"}:
+                flush_speech_until(ts)
+            if kind == "tool.called":
                 name = str(event.get("tool") or "")
                 pending[name] = len(beats)
                 beats.append(
@@ -540,7 +599,10 @@ def workflow_beats(card: CallCard | None) -> list[Beat]:
                 name = str(event.get("tool") or "")
                 ms = event.get("ms")
                 beat = _finish_tool_beat(
-                    card, name, ts, float(ms) if isinstance(ms, (int, float)) else None
+                    name,
+                    event.get("result"),
+                    ts,
+                    float(ms) if isinstance(ms, (int, float)) else None,
                 )
                 index = pending.pop(name, None)
                 if index is not None:
@@ -550,7 +612,7 @@ def workflow_beats(card: CallCard | None) -> list[Beat]:
             elif kind == "tool.failed":
                 name = str(event.get("tool") or "")
                 error = str(event.get("error") or "unknown error")
-                beat = _finish_tool_beat(card, name, ts, None, fail=error)
+                beat = _finish_tool_beat(name, None, ts, None, fail=error)
                 index = pending.pop(name, None)
                 if index is not None:
                     beats[index] = beat
@@ -563,9 +625,10 @@ def workflow_beats(card: CallCard | None) -> list[Beat]:
                         title="Submitted to the platform",
                         text=event_detail(event) or event_text(event),
                         ts=ts,
-                        dot="ok",
+                        dot=submit_beat_dot(event),
                     )
                 )
+        flush_speech_until(None)
     else:
         beats.extend(_beats_from_turns_and_tools(card))
 

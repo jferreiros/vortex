@@ -247,10 +247,24 @@ one model's decisions without a key.
 
 ## Baselines and diffs
 
+Every saved run records the prompt it ran under: `mode.prompt_version` and
+`mode.prompt_sha256`, beside `mode.model`. The prompt text itself is a
+versioned file, `vortex/conversation/prompts/<version>.md`
+(`<version>` = `v<N>-<slug>`); `vortex/conversation/prompt.py` loads the one
+named by `VORTEX_PROMPT_VERSION`, or the latest on disk when the variable is
+unset. A version file is never edited in place — a change is a new version,
+the old one stays for the diff — so a run's score belongs to a
+`(prompt_version, model)` pair, and a hypothesis is one pair compared
+against another, not "the prompt" against a model.
+
 `evals/baselines/<layer>.json` is the accepted reference, committed. Every run
 is diffed against the previous run (`broke`, `fixed`, `new`, `gone`) and
-against the baseline. `make evals-accept LAYER=logic` promotes the latest run.
-Accept after a lane lands and the board moved for a reason you can name.
+against the baseline. `make evals-accept LAYER=logic` promotes the latest run:
+for a run that carries the pair, the baseline file is keyed by it
+(`<layer>__<prompt_version>__<model>.json`) and later runs diff against the
+baseline of their own pair, falling back to the layer-wide file until one is
+accepted. Accept after a lane lands and the board moved for a reason you can
+name.
 
 ## Selftest
 

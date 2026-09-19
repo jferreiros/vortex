@@ -1,0 +1,98 @@
+# Read-back protocol (T55 / research move 3): one field per turn, digits in
+# groups of three, confirmable fields read back once, last value wins.
+# The rules brain proves the tool path still scores when the caller follows
+# each rule; the prompt names the rules for the live model.
+# The call connects Friday 18 September 2026, 09:00 Europe/Madrid.
+group: readback
+now: "2026-09-18T09:00:00+02:00"
+
+scenarios:
+  - id: readback.one_field_per_turn_registers
+    problem: 4
+    # Registration collected one field per turn — never a dump of demographics.
+    caller:
+      - says: "Hello, I'm not a patient yet. I'd like to register. My given name is Ana."
+        means: {identify: {name: "Ana"}, request: {intent: register}, register: {given_name: Ana}}
+      - says: "First surname García."
+        means: {identify: {name: "Ana García"}, register: {first_surname: García}}
+      - says: "Second surname Pérez."
+        means: {identify: {name: "Ana García Pérez"}, register: {second_surname: Pérez}}
+      - says: "Date of birth the second of January nineteen ninety."
+        means: {identify: {date_of_birth: "1990-01-02"}, register: {date_of_birth: "1990-01-02"}}
+      - says: "DNI one two three four five six seven eight Z."
+        means: {identify: {national_id: "12345678Z"}, register: {national_id: "12345678Z"}}
+      - says: "Phone six one two, zero zero zero, one one one."
+        means: {register: {phone: "+34612000111"}}
+      - says: "Email ana punto garcia arroba gmail punto com."
+        means: {register: {email: "ana.garcia@gmail.com"}}
+      - says: "Adeslas."
+        means: {register: {insurer: adeslas}}
+      - says: "No appointment today, thanks. Just the registration."
+        means: {decline: true, end: true}
+    expect:
+      actions:
+        - kind: register
+          given_name: Ana
+          first_surname: García
+          second_surname: Pérez
+          national_id: "12345678Z"
+          date_of_birth: "1990-01-02"
+          phone: "+34612000111"
+          email: "ana.garcia@gmail.com"
+          insurer: adeslas
+      must_not_call: [prepare_booking]
+      trajectory_contains: [find_patient, build_registration, submit_action]
+
+  - id: readback.digits_in_groups_of_three
+    problem: 12
+    # Phone dictated in groups of three — the spoken form the prompt asks for.
+    caller:
+      - says: "Hi, I need the earliest General Practice appointment. Marta Ruiz López."
+        means: {identify: {name: "Marta Ruiz López"}, request: {intent: book, specialty_id: general_practice}}
+      - says: "Six one two, three four five, six seven eight."
+        means: {identify: {phone: "612345678"}}
+      - says: "Yes, book that one."
+        means: {accept: true}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00042
+          slot: {$earliest_slot: {specialty_id: general_practice, patient_id: P00042}}
+      privacy_of: [P00042]
+      must_not_call: [build_registration]
+
+  - id: readback.name_confirmed_once_then_books
+    problem: 12
+    # Name misheard once, spelled once, then the booking — one confirmation loop,
+    # not a second read-back of the same field.
+    caller:
+      - says: "Good morning, earliest General Practice please. Marta Luis López, born twelfth of March eighty-five."
+        means: {identify: {name: "Marta Luis López", date_of_birth: "1985-03-12"}, request: {intent: book, specialty_id: general_practice}}
+      - says: "Ruiz. R, U, I, Z. Marta Ruiz López."
+        means: {clear: [name], identify: {name: "Marta Ruiz López"}}
+      - says: "Yes, that's me. The first slot is fine."
+        means: {accept: true}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00042
+          slot: {$earliest_slot: {specialty_id: general_practice, patient_id: P00042}}
+      privacy_of: [P00042]
+      must_not_call: [build_registration]
+
+  - id: readback.last_value_wins_on_correction
+    problem: 13
+    # Mid-sentence ID correction: the second value is the one that books.
+    caller:
+      - says: "Hello, earliest General Practice. Marta Ruiz. DNI one two three four five six seven eight A — no, wait, Z. One two three four five six seven eight Z."
+        means: {identify: {name: "Marta Ruiz", national_id: "12345678Z"}, request: {intent: book, specialty_id: general_practice}}
+      - says: "Yes, that slot works. Thank you."
+        means: {accept: true}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00042
+          appointment_type_id: review
+          slot: {$earliest_slot: {specialty_id: general_practice, patient_id: P00042}}
+      privacy_of: [P00042, P00043]
+      must_not_call: [build_registration]

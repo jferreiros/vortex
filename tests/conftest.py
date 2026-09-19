@@ -26,6 +26,11 @@ def offline_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> setting
         "CLOUDFLARE_API_TOKEN",
         "VERCEL_AI_GATEWAY_KEY",
         "ELEVENLABS_API_KEY",
+        "DISCORD_WEBHOOK_URL",
+        "DISCORD_CALLS_WEBHOOK_URL",
+        "DISCORD_NOTIFY_IN_TESTS",
+        "VORTEX_JEV_ARBITER",
+        "TYPESAFE_API_KEY",
     ):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("VORTEX_VOICE_MODE", "stub")
@@ -52,6 +57,11 @@ def _unset_dotenv_keys() -> None:
         "CLOUDFLARE_API_TOKEN",
         "VERCEL_AI_GATEWAY_KEY",
         "ELEVENLABS_API_KEY",
+        "DISCORD_WEBHOOK_URL",
+        "DISCORD_CALLS_WEBHOOK_URL",
+        "DISCORD_NOTIFY_IN_TESTS",
+        "VORTEX_JEV_ARBITER",
+        "TYPESAFE_API_KEY",
     ):
         os.environ.pop(key, None)
 

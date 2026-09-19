@@ -7,14 +7,22 @@ Layout under ``evals/results/``::
     summary.md                     the cross-layer summary (CI reads this)
     report.html                    the same, for a screen
 
-``evals/baselines/<layer>.json`` is the accepted reference. ``python -m evals
-accept`` copies the latest run there. A run is compared with both the previous
-run and the baseline.
+Every saved run records ``prompt_version`` and its ``prompt_sha256`` in
+``mode``, beside ``model``, so two runs are comparable and a hypothesis is a
+``(prompt_version, model)`` pair.
+
+``evals/baselines/<layer>.json`` is the accepted reference. For a run that
+carries the pair, the baseline is keyed by it:
+``<layer>__<prompt_version>__<model>.json`` - ``python -m evals accept``
+promotes the pair, and a run is diffed against the baseline of its own pair,
+falling back to the layer file when none exists yet. A run without the pair
+(logic, voice, corpus) uses the layer file as before.
 """
 
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
@@ -27,6 +35,14 @@ RESULTS_DIR = EVALS_DIR / "results"
 BASELINES_DIR = EVALS_DIR / "baselines"
 
 STATUSES = ("pass", "fail", "error", "unverified", "skipped")
+
+
+def prompt_mode() -> dict[str, str]:
+    """The prompt version in force and its sha256, for a RunResult.mode."""
+    from vortex.conversation.prompt import active_prompt_version, prompt_sha256
+
+    version = active_prompt_version()
+    return {"prompt_version": version, "prompt_sha256": prompt_sha256(version)}
 
 
 @dataclass
@@ -127,6 +143,9 @@ def now_stamp() -> str:
 
 
 def save_run(run: RunResult, results_dir: Path = RESULTS_DIR) -> Path:
+    # Every run records the prompt it ran under, whatever the runner remembered.
+    for key, value in prompt_mode().items():
+        run.mode.setdefault(key, value)
     layer_dir = results_dir / run.layer
     (layer_dir / "history").mkdir(parents=True, exist_ok=True)
     data = run.to_json()
@@ -156,18 +175,50 @@ def load_latest(layer: str, results_dir: Path = RESULTS_DIR) -> RunResult | None
     return load_run(results_dir / layer / "latest.json")
 
 
-def load_baseline(layer: str, baselines_dir: Path = BASELINES_DIR) -> RunResult | None:
-    return load_run(baselines_dir / f"{layer}.json")
+def _model_slug(model: str) -> str:
+    """A model id safe for a filename: ``helmcode/qwen3.6`` -> ``helmcode--qwen3.6``."""
+    return re.sub(r"[^A-Za-z0-9._-]+", "--", model).strip("-")
 
 
-def accept_baseline(layer: str, results_dir: Path = RESULTS_DIR) -> Path | None:
+def baseline_path(
+    layer: str,
+    mode: dict[str, Any] | None = None,
+    baselines_dir: Path = BASELINES_DIR,
+) -> Path:
+    """Where this run's baseline lives.
+
+    A run that carries both a ``prompt_version`` and a ``model`` is keyed by
+    the pair: ``<layer>__<prompt_version>__<model>.json``. Anything else
+    (logic, voice, corpus, a rules-brain run) uses the layer file.
+    """
+    if mode:
+        version, model = mode.get("prompt_version") or "", mode.get("model") or ""
+        if version and model:
+            return baselines_dir / f"{layer}__{version}__{_model_slug(model)}.json"
+    return baselines_dir / f"{layer}.json"
+
+
+def load_baseline(
+    layer: str, baselines_dir: Path = BASELINES_DIR, mode: dict[str, Any] | None = None
+) -> RunResult | None:
+    """The accepted reference for this run: its own pair's baseline if there is
+    one, else the layer-wide one."""
+    run = load_run(baseline_path(layer, mode, baselines_dir))
+    if run is None and mode:
+        run = load_run(baselines_dir / f"{layer}.json")
+    return run
+
+
+def accept_baseline(
+    layer: str, results_dir: Path = RESULTS_DIR, baselines_dir: Path = BASELINES_DIR
+) -> Path | None:
     latest = results_dir / layer / "latest.json"
     if not latest.exists():
         return None
-    BASELINES_DIR.mkdir(parents=True, exist_ok=True)
-    target = BASELINES_DIR / f"{layer}.json"
-    # The baseline is for diffing statuses. Drop the bulky per-case payloads.
+    baselines_dir.mkdir(parents=True, exist_ok=True)
     data = json.loads(latest.read_text())
+    target = baseline_path(layer, data.get("mode"), baselines_dir)
+    # The baseline is for diffing statuses. Drop the bulky per-case payloads.
     for case in data.get("cases", []):
         case.pop("extra", None)
         case["details"] = case.get("details", [])[:3]

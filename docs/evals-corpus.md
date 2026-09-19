@@ -10,6 +10,7 @@ make evals-corpus      # roster integrity + the probes, no keys, ~40 ms
 make evals-corpus LOG=logs/calls.jsonl   # score real practice calls
 make evals-fetch       # refresh the roster (each morning of the event)
 make evals-snapshot    # freeze the real clinic; needs PLATFORM_API_KEY
+make evals-hydrate     # rebuild synthetic-data/ from the roster (LIVE=1 hits the API)
 ```
 
 `make evals` runs layers 1, 2 and 4 and is still the CI entry point.
@@ -33,7 +34,8 @@ It is the only published ground truth in the challenge. A copy lives at
 **Re-fetch it each morning.** The roster is fixed — one seed builds it for every
 process — but "the earliest appointment" is anchored to 09:00 Europe/Madrid on
 the day it is dialled, so a booking answer changes overnight. A stale roster
-judges yesterday's call correctly and today's wrong.
+judges yesterday's call correctly and today's wrong. `make evals-fetch` prints
+the anchor of the file it saw; the runner gates on the same fact.
 
 ## The judge
 
@@ -91,6 +93,18 @@ Twenty more situations the docs state and no public case exercises are listed
 as skipped with the reason, including the nine refusal reasons the roster never
 reaches. A board that omits what it could not test is a board that lies.
 
+## The isolated pack (`synthetic-data/`)
+
+`make evals-hydrate` writes patients, already-booked appointments and one
+CallLog JSONL per problem into `synthetic-data/` at the repo root — same payload
+shape as `vortex/clinic/fixtures.py`, different folder. It does not touch the
+fixtures, `logs/calls.jsonl`, or the gitignored `evals/corpus/world/` snapshot.
+
+`FakeClinicClient()` still reads the small invented fixtures. Pass
+`data_dir=Path("synthetic-data")` to look up the published ids (`P00001`,
+`A001101`, …) offline. `LIVE=1` enriches charts and diaries from the clinic API
+when a key is set.
+
 ## What is still blocked
 
 The roster's answers name real ids — `P00001`, `PR01`, `centro`, `review`, a
@@ -108,3 +122,84 @@ shapes become buildable cases.
 **Run the snapshot the moment the key lands.** It is the difference between an
 eval suite that checks we produce a well-formed answer and one that checks we
 produce the right one.
+
+## Judging real calls
+
+A practice call is free, repeatable every 30 seconds, and the organisers play
+real audio through real speech recognition at our socket. It is the highest
+fidelity voice eval available and it costs nothing:
+
+```bash
+make evals-corpus LOG=logs/calls.jsonl CASE=simple_booking-14a8720daa02
+```
+
+Nothing names the case for us. `start.customParameters` carries `call_id` and
+`from_number` and nothing else, and the submissions readback carries `call_id`,
+`record` and `received_at`. So the join is ours: `from_number` names the
+persona, but the organisers reuse a persona across problems, so it identifies
+only **26 of the 73** cases on its own. The joiner uses the number when it is
+unambiguous, refuses to guess when it is not, and `CASE=` says which.
+
+**Watch the anchor.** The roster file is the export at one day's anchor (09:00
+Europe/Madrid). "The earliest appointment" means the earliest from the day
+after the call, so from the next day onward the slot in an "earliest" answer
+has moved while the problem page shows today's. The runner therefore refuses
+to score them across the gap: a judged call dialled on a day other than its
+case's `reference_time` comes back `skipped` — with `STALE ANCHOR` on the
+notes — never `fail`, so a moved answer cannot silently fail the agent. Cases
+whose accepted answers carry no slot (registers, cancels, refusals) still
+score, and a call dialled on the anchor day itself still scores in full.
+Scoring resumes either when you judge a call from the anchor day or when the
+organisers re-export and `make evals-fetch` lands the new anchor; the fetch
+prints the anchor of every file it sees and warns when it is behind.
+
+## Finding a caller for a rule nobody publishes
+
+`make evals-discover` sweeps the live API by plan, by patient and by provider,
+and records in `world/blocked-samples.json` a real query that triggers each
+decline reason, plus a one-line note for each the API cannot report. The
+published roster reaches two of the eleven rule reasons. The sweep reaches
+eight, including `provider_on_leave`, `not_eligible_age` and
+`insurer_referral_required`, each as a concrete patient and specialty a lane can
+build a caller around. The eighth, `allowance_exhausted`, needed a wider net:
+the cap is per patient **and specialty** on the record plan, and none of the
+roster's own 24 patients has a spent plan. So the sweep asks `/directory` for
+each persona's name — ten fuzzy matches a query, hundreds of patients outside
+the roster — and walks the harvested patients past every specialty until a
+spent plan turns up (`P00016`, an axa holder whose dermatology visits for the
+year are gone, was the first).
+
+**The window decides whether a rule is visible at all.** `blocked` reports a
+rule only when it stops the whole window asked for:
+
+| Query | Result |
+| --- | --- |
+| `provider_id=PR02`, 21–30 September (inside his leave) | 0 slots, `blocked: provider_on_leave` |
+| `provider_id=PR02`, 21 September – 4 October | 50 slots in October, `blocked: []` |
+
+One day past the end of the leave and the rule disappears — Dr. Requena simply
+looks available. An agent that widens its search until it finds something never
+learns why the caller cannot have what they asked for, and problem 3 turns on
+exactly that.
+
+Three reasons no query reaches — `location_hours`, `type_not_offered` and
+`patient_history`. The endpoint has no lever that expresses them:
+
+- A window a site is shut for the whole of returns zero slots with
+  `blocked: []` — the same signature as a full calendar. Site hours live only
+  in the catalogue, so this refusal is the agent's to derive.
+- `/availability` takes no `appointment_type` filter; the type is resolved
+  from the specialty and the patient's record, and every provider offers both
+  the new and the returning type of their specialty, so no query can ask for
+  one a provider lacks.
+- History enters the API only as `has_visited_before`, which picks the type,
+  and referrals, which satisfy `referral_required` — never as a block.
+
+The sweep still probes all three shapes on every run — shut windows asked
+about a provider who sits at that site, with and without a patient; any
+catalogue type gap asked of the gap's own provider and a patient of its kind;
+harvested patients past every provider and site — and prints one line per
+reason it cannot reach. A shape whose probes did not all come back is held as
+unverified rather than impossible: a lost query is not an answer. If the
+clinic ever starts reporting one, the same probe records it as a sample
+instead. They are never quietly dropped.

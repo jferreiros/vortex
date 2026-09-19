@@ -10,4 +10,4 @@ Owner: the observability lane.
 from vortex.observability.calllog import CallLog, group_by_call, read_recent
 from vortex.observability.view import CallCard, build_calls
 
-__all__ = ["CallLog", "CallCard", "build_calls", "group_by_call", "read_recent"]
+__all__ = ["CallCard", "CallLog", "build_calls", "group_by_call", "read_recent"]

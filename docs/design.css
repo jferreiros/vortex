@@ -176,6 +176,18 @@ svg {
   display: block;
 }
 
+.icon {
+  width: 16px;
+  height: 16px;
+  max-width: 16px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex: 0 0 auto;
+}
+
 :focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
@@ -557,6 +569,9 @@ svg {
   font: var(--text-caption-sm);
   color: var(--body);
   margin-top: var(--space-xs);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Key/value row inside a card or column. */
@@ -818,6 +833,14 @@ table.ds td.num {
   border: 1px solid var(--hairline);
 }
 
+.transcript {
+  max-height: 64dvh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
+  padding-right: var(--space-sm);
+}
+
 /* ------------------------------------------------------------------ */
 /* Console components (wall, ops, call detail)                         */
 /* ------------------------------------------------------------------ */
@@ -857,15 +880,15 @@ table.ds td.num {
 }
 
 .page-head .title {
-  font: var(--text-display-lg);
+  font: var(--text-heading-lg);
   color: var(--ink);
 }
 
 .page-head .sub {
-  font: var(--text-body-md);
+  font: var(--text-body-sm);
   color: var(--body);
   margin-top: var(--space-xs);
-  max-width: 70ch;
+  max-width: 56ch;
 }
 
 /* The four stages of a call. `.done` is behind us, `.now` is in progress. */
@@ -1191,12 +1214,17 @@ table.ds td.num {
 .app {
   display: grid;
   grid-template-columns: 240px minmax(0, 1fr);
-  min-height: 100vh;
+  height: 100dvh;
+  min-height: 100dvh;
+  overflow: hidden;
 }
 
 @media (max-width: 850px) {
   .app {
     grid-template-columns: 1fr;
+    height: auto;
+    min-height: 0;
+    overflow: visible;
   }
 }
 
@@ -1207,10 +1235,8 @@ table.ds td.num {
   display: flex;
   flex-direction: column;
   gap: var(--space-xs);
-  position: sticky;
-  top: 0;
-  height: 100vh;
-  overflow: auto;
+  height: 100dvh;
+  overflow: hidden;
 }
 
 @media (max-width: 850px) {
@@ -1338,6 +1364,15 @@ table.ds td.num {
 
 .content {
   min-width: 0;
+  height: 100dvh;
+  overflow: auto;
+}
+
+@media (max-width: 850px) {
+  .content {
+    height: auto;
+    overflow: visible;
+  }
 }
 
 /* Preview chip: sample or roadmap surface. Always next to the thing it labels. */
@@ -1583,11 +1618,34 @@ table.ds td.num {
   margin-bottom: var(--space-xl);
 }
 
+.wf-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: var(--space-xl);
+  align-items: start;
+}
+
+.wf-side {
+  position: sticky;
+  top: 0;
+}
+
+@media (max-width: 1024px) {
+  .wf-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .wf-side {
+    position: static;
+  }
+}
+
 .workflow {
   display: flex;
   flex-direction: column;
   gap: var(--space-md);
-  max-width: 720px;
+  min-height: 0;
+  padding-bottom: var(--space-xl);
 }
 
 .wf-card {
@@ -1642,4 +1700,134 @@ table.ds td.num {
   .table-wrap {
     overflow-x: visible;
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* Doctor calendar (/calendar)                                         */
+/* ------------------------------------------------------------------ */
+
+.cal-rail {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--space-md);
+}
+
+.cal-doc {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  text-align: left;
+  border: 1px solid var(--hairline);
+  border-radius: var(--rounded-lg);
+  background: var(--canvas);
+  padding: var(--space-md) var(--space-lg);
+  cursor: pointer;
+  min-width: 0;
+}
+
+.cal-doc.on {
+  border-color: var(--ink);
+}
+
+.cal-doc .row {
+  gap: var(--space-sm);
+}
+
+.cal-doc-name {
+  font: var(--text-body-sm-strong);
+  color: var(--ink);
+}
+
+.cal-doc-spec,
+.cal-doc-count {
+  font: var(--text-caption-sm);
+  color: var(--body);
+}
+
+.cal-bar {
+  height: 6px;
+  border-radius: var(--rounded-full);
+  background: var(--surface-soft);
+  border: 1px solid var(--hairline);
+  overflow: hidden;
+}
+
+.cal-bar-fill {
+  height: 100%;
+  background: var(--ink);
+}
+
+.cal-grid-wrap {
+  overflow-x: auto;
+  padding-bottom: var(--space-sm);
+}
+
+.cal-grid {
+  display: grid;
+  gap: 2px;
+  min-width: max-content;
+  align-items: stretch;
+}
+
+.cal-corner,
+.cal-colhead,
+.cal-timelabel {
+  position: sticky;
+  background: var(--canvas);
+  z-index: 1;
+}
+
+.cal-corner {
+  top: 0;
+  left: 0;
+  z-index: 2;
+}
+
+.cal-colhead {
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--space-xs) var(--space-sm);
+}
+
+.cal-dow {
+  font: var(--text-caption-sm);
+  color: var(--body);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.cal-date {
+  font: var(--text-body-sm-strong);
+  color: var(--ink);
+}
+
+.cal-timelabel {
+  left: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: var(--space-sm);
+  font: var(--text-caption-sm);
+  color: var(--body);
+  font-variant-numeric: tabular-nums;
+}
+
+.cal-cell {
+  height: 18px;
+  border-radius: var(--rounded-sm);
+}
+
+.cal-cell.free {
+  background: var(--surface-soft);
+  border: 1px solid var(--hairline);
+}
+
+.cal-cell.booked {
+  background: var(--ink);
+}
+
+.cal-cell.off {
+  background: transparent;
 }

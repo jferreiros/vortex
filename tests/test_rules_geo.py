@@ -58,7 +58,7 @@ def test_nearest_picks_the_closer_of_two_known_points() -> None:
 
 
 def test_the_gazetteer_resolves_a_town_and_a_castellana_address_offline() -> None:
-    """No ``VORTEX_GEOCODER_URL`` is set in tests: this must never hit a network."""
+    """No ``VORTEX_GEOCODER`` is set in tests: this must never hit a network."""
     assert geo.gazetteer_lookup("Getafe") is not None
     assert geo.gazetteer_lookup("Paseo de la Castellana 200, Madrid") is not None
     assert geo.gazetteer_lookup("somewhere nobody has ever published") is None
@@ -98,3 +98,29 @@ async def test_an_address_nobody_can_place_is_a_question_not_a_refusal_reason(
     assert result.location_id is None
     assert result.rejection is not None
     assert result.rejection.reason == "out_of_scope"
+
+
+async def test_nearest_location_passes_socket_settings_to_locate(
+    ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Live geocoding must use the call's Settings, never get_settings()."""
+    from vortex.settings import Settings
+
+    socket_settings = Settings(geocoder="cartociudad", geocoder_url="")
+    ctx.settings = socket_settings  # type: ignore[attr-defined]
+    seen: list[Settings] = []
+
+    caches: list[geo.GeocodeCache] = []
+
+    async def fake_locate(address: str, settings: Settings, cache: geo.GeocodeCache):
+        seen.append(settings)
+        caches.append(cache)
+        return geo.gazetteer_lookup(address)
+
+    monkeypatch.setattr(geo, "locate", fake_locate)
+    await nearest_location(
+        ctx, NearestLocationInput(address="Getafe", specialty_id="general_practice")
+    )
+    assert seen == [socket_settings]
+    # The cache the tool hands down is this call's own, never a module global.
+    assert caches == [ctx.state[geo.GEOCODE_CACHE_KEY]]
