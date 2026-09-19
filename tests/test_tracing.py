@@ -1,4 +1,4 @@
-"""Langfuse tracing stays off without keys and never writes phone numbers or ids."""
+"""Langfuse tracing stays off without keys and exports only what the allowlist names."""
 
 from __future__ import annotations
 
@@ -52,14 +52,59 @@ def test_mask_phone_keeps_only_the_last_four() -> None:
 def test_redact_masks_national_ids_and_phones() -> None:
     payload = {
         "national_id": "12345678Z",
-        "name": "Ana",
-        "note": "call +34 600 111 222 about 12345678Z",
+        "phone": "+34600111222",
+        "status": "call +34 600 111 222 about 12345678Z",
     }
     redacted = tracing.redact(payload)
     assert redacted["national_id"] == "***5678"
-    assert redacted["name"] == "Ana"
-    assert "12345678Z" not in redacted["note"]
-    assert "600 111 222" not in redacted["note"]
+    assert redacted["phone"] == "***1222"
+    assert "12345678Z" not in redacted["status"]
+    assert "600 111 222" not in redacted["status"]
+
+
+def test_redact_drops_every_field_the_allowlist_does_not_name() -> None:
+    payload = {
+        "given_name": "Ana",
+        "first_surname": "Ruiz",
+        "email": "ana@example.com",
+        "address": "Calle Mayor 1, Madrid",
+        "date_of_birth": "1990-01-01",
+        "note": "recurring migraines since March",
+        "complaint": "me duele el pecho",
+    }
+    redacted = tracing.redact(payload)
+    assert set(redacted) == set(payload)
+    assert set(redacted.values()) == {"[redacted]"}
+
+
+def test_redact_keeps_the_shape_of_a_record_without_its_content() -> None:
+    result = {
+        "status": "found",
+        "patient": {
+            "patient_id": "P00042",
+            "given_name": "Marta",
+            "email": "marta@example.com",
+            "insurer": "DKV",
+            "has_visited_before": True,
+        },
+        "ask_for": "",
+    }
+    redacted = tracing.redact(result)
+    assert redacted["status"] == "found"
+    assert redacted["patient"]["insurer"] == "DKV"
+    assert redacted["patient"]["has_visited_before"] is True
+    assert redacted["patient"]["given_name"] == "[redacted]"
+    assert redacted["patient"]["email"] == "[redacted]"
+    assert redacted["patient"]["patient_id"].startswith("anon-")
+
+
+def test_correlation_identifiers_become_stable_pseudonyms() -> None:
+    first = tracing.redact({"call_id": "CA-1", "appointment_id": "A-7"})
+    second = tracing.redact({"call_id": "CA-1", "appointment_id": "A-8"})
+    assert first["call_id"] == second["call_id"]
+    assert "CA-1" not in first["call_id"]
+    assert first["appointment_id"] != second["appointment_id"]
+    assert tracing.pseudonym("") == "unknown"
 
 
 def test_lookups_are_retrievers_and_writes_are_tools() -> None:
@@ -85,6 +130,25 @@ def test_trace_call_is_a_noop_without_keys(clean_langfuse, tmp_path) -> None:
         assert observation is None
         session.end_reason = "pipeline_finished"
     assert session.call_id == "CA-trace"
+
+
+def test_the_exported_call_input_carries_no_raw_identifier(clean_langfuse, tmp_path) -> None:
+    start = StartPayload.model_validate(
+        {
+            "streamSid": "MZ-trace",
+            "callSid": "CA-trace",
+            "customParameters": {"from_number": "+34600111222", "problem_id": "P3"},
+        }
+    )
+    session = CallSession.open(
+        start, settings=Settings(calls_log_path=tmp_path / "calls.jsonl"), now=NOW
+    )
+    exported = tracing._call_input(session)
+    assert exported["call_id"] == tracing.pseudonym("CA-trace")
+    assert "CA-trace" not in exported["call_id"]
+    assert exported["from_number"] == "***1222"
+    assert exported["custom_parameters"]["problem_id"] == "P3"
+    assert exported["custom_parameters"]["from_number"] == "***1222"
 
 
 def test_async_openai_client_is_plain_openai_when_off(clean_langfuse) -> None:
