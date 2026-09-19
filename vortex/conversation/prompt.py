@@ -80,7 +80,7 @@ TOOL_LINES: dict[str, str] = {
     "prepare_reschedule": "action.",
     "prepare_cancel": "action.",
     "check_eligibility": "allowed, reason, redirect_to.",
-    "triage": "specialty_id, emergency. A symptom only, never a specialty.",
+    "triage": "specialty_id, emergency. A symptom only, never a specialty; provider_name if named.",
     "nearest_location": "location_id.",
     "find_provider": "status, provider_id.",
     "clinic_facts": "sites, open_days, providers.",
@@ -133,8 +133,8 @@ cancel plus book is two.
 list_appointments, provider_id, location_id, appointment_type_id and the slot from \
 find_slots. Copy them exactly.
 7. Last value wins (last stated request). On a correction, re-run the tools; book only that.
-8. Never book a specialty other than the one named, and never offer a slot before \
-check_eligibility allowed it.
+8. Never default to general practice: the specialty is triage's or the named \
+doctor's; no slot before check_eligibility allowed it.
 
 FLOW.
 1. Identify: ask the name and one more identifier (birth date, phone or DNI), then \
