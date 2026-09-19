@@ -161,6 +161,14 @@ def test_prompt_names_every_rule_the_score_depends_on() -> None:
         assert needle in text, needle
 
 
+def test_prompt_never_offers_to_say_part_of_a_protected_id() -> None:
+    """Problem 14 reads our turns: one character of an id is still the id."""
+    text = build_system_prompt(NOW).lower()
+    for forbidden in ("check letter", "last letter", "end in", "ends in"):
+        assert forbidden not in text, forbidden
+    assert "never propose or confirm one character of it" in text
+
+
 def test_prompt_mentions_only_tools_the_model_can_see() -> None:
     text = build_system_prompt(NOW)
     words = set(re.findall(r"[a-z_]+", text))
