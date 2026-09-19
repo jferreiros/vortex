@@ -19,7 +19,7 @@
 | vortex/line/aic\_filter.py             |       22 |        1 |     95% |        45 |
 | vortex/line/gemini\_live\_voice.py     |       91 |       55 |     40% |102-106, 124-225, 230-250 |
 | vortex/line/llm\_timeout.py            |      124 |        2 |     98% |  259, 272 |
-| vortex/line/pipecat\_voice.py          |      214 |       87 |     59% |84-85, 92-261, 265, 360, 511, 561-564, 590-591, 616-636 |
+| vortex/line/pipecat\_voice.py          |      226 |       88 |     61% |107-108, 115-288, 292, 387, 538, 588-591, 617-618, 666-686 |
 | vortex/line/privacy.py                 |       72 |        5 |     93% |61, 85, 88, 94, 154 |
 | vortex/line/server.py                  |       73 |       20 |     73% |46-48, 61-62, 67, 72, 80-82, 90-92, 94-96, 101-106 |
 | vortex/line/session.py                 |      153 |        3 |     98% |197, 266, 317 |
@@ -50,7 +50,7 @@
 | vortex/rules/triage.py                 |       57 |        5 |     91% |205-206, 217, 225, 230 |
 | vortex/settings.py                     |      211 |        2 |     99% |  344, 496 |
 | vortex/tools.py                        |       93 |        7 |     92% |257, 264, 275-277, 279, 298 |
-| **TOTAL**                              | **5928** |  **946** | **84%** |           |
+| **TOTAL**                              | **5940** |  **947** | **84%** |           |
 
 6 empty files skipped.
 
