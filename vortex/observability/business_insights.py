@@ -798,7 +798,7 @@ def cancellation_slots(cards: list[CallCard], *, now: datetime | None = None) ->
 #: Surfaced by the API too (``data_gaps``), not just this docstring, so the
 #: console can show it next to the numbers it actually has.
 DATA_GAPS: list[str] = [
-    "The caller's verbal rejection of an offered slot (\"esa hora no me viene bien\") is not a "
+    'The caller\'s verbal rejection of an offered slot ("esa hora no me viene bien") is not a '
     "structured event — only inferable from turn.user keywords. An explicit "
     "`slot.declined_by_caller` event carrying the offered slot would replace the NLP fallback "
     "in classify_unmet with a real signal.",
@@ -808,7 +808,7 @@ DATA_GAPS: list[str] = [
     "A booked action's payload does not always carry provider_id (it depends on which tool built "
     "it); the ranking falls back to the provider name view.py already extracted, which can be "
     "missing if find_slots was not the last tool to touch that call's provider data.",
-    "find_slots calls with no time_from (\"cualquier hora\") and calls where the caller genuinely "
+    'find_slots calls with no time_from ("cualquier hora") and calls where the caller genuinely '
     "never said a time both land in the heatmap's all_day_demand bucket — there is no field that "
     "tells the two apart.",
     "A `cancel` submission carries only the appointment_id, never the provider/slot it freed — "
