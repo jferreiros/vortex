@@ -72,6 +72,7 @@ from vortex.conversation.turns import (
     is_refusal_acceptance,
     user_turn_strategies,
 )
+from vortex.line import voice_config
 from vortex.line.aic_filter import build_audio_in_filter
 from vortex.line.llm_timeout import first_token_guard
 from vortex.line.session import CallSession
@@ -259,7 +260,10 @@ async def run_pipecat_call(
         timeout_log_event=ctx.log.event,
     )
 
-    tts = _make_tts_stage(settings, language_state)
+    # The wall's "Voz del agente" card, read per socket: a change lands on the
+    # next call, never mid-flight.
+    voice_cfg = voice_config.load(settings)
+    tts = _make_tts_stage(settings, language_state, voice_cfg)
 
     # ---- tools: every registry entry becomes a function the model can call ----
     def make_handler(tool_name: str):
@@ -281,9 +285,12 @@ async def run_pipecat_call(
     # prompt can open knowing who the line belongs to instead of spending the
     # first minute of the call asking.
     caller = await session.resolve_caller_line()
-    context = LLMContext(
-        initial_messages(ctx.now, caller=caller), tools=ToolsSchema(standard_tools=schemas)
-    )
+    messages = initial_messages(ctx.now, caller=caller)
+    # Tono/Amabilidad are not TTS fields: they arrive as one extra line on the
+    # system prompt. Empty at neutral, so an untouched card changes nothing.
+    if directive := voice_config.style_directive(voice_cfg):
+        messages[0]["content"] += f"\n{directive}"
+    context = LLMContext(messages, tools=ToolsSchema(standard_tools=schemas))
     aggregators = LLMContextAggregatorPair(context, user_params=_user_aggregator_params(turns))
 
     # Ends the call from our side once the platform holds an action and the
@@ -300,7 +307,7 @@ async def run_pipecat_call(
     if settings.tts_supports_language_switch:
         # Only worth a processor when the pair can say more than one language.
         # ElevenLabs alone is Spanish-only, so the watcher would be a no-op.
-        stages.append(_LanguageWatcher(session, language_state))
+        stages.append(_LanguageWatcher(session, language_state, voice_cfg))
     stages += [
         aggregators.user(),
         llm,
@@ -424,13 +431,15 @@ class _LanguageState:
         self.language = language
 
 
-def _make_tts_stage(settings: Any, state: _LanguageState) -> Any:
+def _make_tts_stage(
+    settings: Any, state: _LanguageState, vcfg: voice_config.VoiceConfig | None = None
+) -> Any:
     """One TTS service, or a router over two when primary and alternate differ."""
-    primary = _make_tts(settings, settings.tts_provider, state)
+    primary = _make_tts(settings, settings.tts_provider, state, vcfg)
     if not settings.tts_is_routed:
         return primary
     return _TTSRouter(
-        settings, state, primary, _make_tts(settings, settings.tts_provider_alt, state)
+        settings, state, primary, _make_tts(settings, settings.tts_provider_alt, state, vcfg)
     )
 
 
@@ -454,7 +463,10 @@ def _llm_extra_body(settings: Any) -> dict[str, Any]:
 
 
 def _make_tts(
-    settings: Any, provider: str | None = None, state: _LanguageState | None = None
+    settings: Any,
+    provider: str | None = None,
+    state: _LanguageState | None = None,
+    vcfg: voice_config.VoiceConfig | None = None,
 ) -> Any:
     """Build one TTS service (or a Chirp|Gemini pair for Google).
 
@@ -464,6 +476,8 @@ def _make_tts(
     """
     name = provider or settings.tts_provider
     voice, language = tts_voice_for(DEFAULT_LANGUAGE, settings, name)
+    if vcfg:
+        voice = voice_config.apply_gender(voice, vcfg.voice)
     if not voice:
         # Builds fine, then fails on every utterance. Say so once, loudly.
         log.warning("TTS provider %s has no Spanish voice configured", name)
@@ -481,10 +495,11 @@ def _make_tts(
                 voice=voice,
                 model=settings.elevenlabs_model,
                 language=language,
+                **({"speed": voice_config.elevenlabs_speed(vcfg)} if vcfg else {}),
             ),
         )
 
-    return _make_google_tts(settings, voice, language, state)
+    return _make_google_tts(settings, voice, language, state, vcfg)
 
 
 def _make_google_tts(
@@ -492,6 +507,7 @@ def _make_google_tts(
     voice: str,
     language: Any,
     state: _LanguageState | None,
+    vcfg: voice_config.VoiceConfig | None = None,
 ) -> Any:
     """Chirp HTTP for en/es; Gemini-TTS for ca/gl/eu unless Standard fallback."""
     from pipecat.services.google.tts import GoogleHttpTTSService
@@ -501,7 +517,11 @@ def _make_google_tts(
         credentials=settings.google_tts_credentials_json or None,
         credentials_path=settings.google_application_credentials or None,
         sample_rate=LINE_SAMPLE_RATE,
-        settings=GoogleHttpTTSService.Settings(voice=voice, language=language),
+        settings=GoogleHttpTTSService.Settings(
+            voice=voice,
+            language=language,
+            **({"speaking_rate": voice_config.speaking_rate(vcfg)} if vcfg else {}),
+        ),
     )
     if not settings.google_tts_uses_gemini:
         # Research 06 fallback: one HTTP service, Standard-* for ca/gl/eu.
@@ -510,6 +530,8 @@ def _make_google_tts(
     from pipecat.services.google.tts import GeminiTTSService
 
     gemini_voice, gemini_language = tts_voice_for("ca", settings, "google")
+    if vcfg:
+        gemini_voice = voice_config.apply_gender(gemini_voice, vcfg.voice)
     gemini = GeminiTTSService(
         credentials=settings.google_tts_credentials_json or None,
         credentials_path=settings.google_application_credentials or None,
@@ -518,6 +540,8 @@ def _make_google_tts(
             model=settings.google_tts_gemini_model,
             voice=gemini_voice,
             language=gemini_language,
+            # No speaking_rate on this service: pace goes in its prompt.
+            **({"prompt": voice_config.gemini_prompt(vcfg)} if vcfg else {}),
         ),
     )
     language_state = state if state is not None else _LanguageState()
@@ -665,7 +689,9 @@ def _PrivacyGuard(  # noqa: N802 - factory that returns a processor
 
 
 def _LanguageWatcher(  # noqa: N802 - factory that returns a processor
-    session: CallSession, state: _LanguageState | None = None
+    session: CallSession,
+    state: _LanguageState | None = None,
+    vcfg: voice_config.VoiceConfig | None = None,
 ):
     """Switch the voice when the caller switches language.
 
@@ -717,6 +743,8 @@ def _LanguageWatcher(  # noqa: N802 - factory that returns a processor
                     return
                 provider = settings.tts_provider_for(language)
                 voice, tts_language = tts_voice_for(language, settings, provider)
+                if vcfg:
+                    voice = voice_config.apply_gender(voice, vcfg.voice)
                 previous, self._state.language = self._state.language, language
                 session.ctx.log.event(
                     "voice.language_switch",
