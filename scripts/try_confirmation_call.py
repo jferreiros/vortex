@@ -20,9 +20,9 @@ from datetime import datetime, timedelta
 
 from vortex.contract import MADRID
 from vortex.line.confirmation_calls import (
+    ConfirmationCall,
     DryRunCallsClient,
     ask_text,
-    build_confirmation_call,
     confirmation_store_from_settings,
     make_calls_client,
     twilio_calls_configured,
@@ -55,21 +55,23 @@ async def main() -> int:
 
     when = datetime.now(tz=MADRID).replace(hour=11, minute=0, second=0, microsecond=0)
     when = when + timedelta(days=1)
-    call = build_confirmation_call(
+    # A manual demo trigger, not the scheduler: the <24h rule and the lead are
+    # for the automated path, so the row is built directly and dialled now.
+    import uuid
+
+    now = datetime.now(tz=MADRID)
+    call = ConfirmationCall(
+        confirmation_id=uuid.uuid4().hex,
         to=args.to,
-        when=when,
+        appointment_at=when.isoformat(),
+        call_at=now.isoformat(),
         language=args.lang,
         provider_name="Dra. Ortiz",
         location_name="Arenal Centro",
         provider_id="PR01",
         location_id="centro",
         patient_id="P00042",
-        # The script dials right now, so the lead is 0: call_at is informational
-        # here and the worker's due-claim never sees this row's clock.
-        now=datetime.now(tz=MADRID),
-        lead=timedelta(seconds=0),
     )
-    assert call is not None
 
     print("=== confirmation call preview ===")
     print(f"to: {call.to}  lang: {call.language}")
