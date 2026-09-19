@@ -19,10 +19,10 @@ import logging
 from datetime import UTC, datetime
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, PlainTextResponse
+from fastapi import Body, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse, PlainTextResponse, Response
 
-from vortex.line import twilio
+from vortex.line import twilio, voice_config
 from vortex.line.session import CallSession
 from vortex.observability.calllog import group_by_call, read_calls, read_recent
 from vortex.observability.discord_calls import enabled as discord_calls_on
@@ -106,6 +106,31 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def design_css() -> PlainTextResponse:
         """The design tokens for /mic. One source: vortex/observability/design.css."""
         return PlainTextResponse(DESIGN_CSS.read_text(encoding="utf-8"), media_type="text/css")
+
+    # ---- the wall's "Voz del agente" card ----------------------------------
+    # The board proxies these three; the db file lives on this process's log
+    # volume. Writes apply to calls opened after the PUT — a call in flight
+    # keeps the voice it started with.
+
+    @app.get("/voice-config")
+    async def get_voice_config() -> dict[str, object]:
+        return voice_config.load(settings).to_dict()
+
+    @app.put("/voice-config")
+    async def put_voice_config(payload: dict = Body(default=None)) -> dict[str, object]:
+        return voice_config.save(settings, payload).to_dict()
+
+    @app.post("/voice-preview")
+    async def voice_preview(payload: dict = Body(default=None)) -> Response:
+        """One MP3 of the greeting with the posted (or stored) settings, for
+        the wall's Try button. Synthesised off the event loop — the Google
+        client is blocking."""
+        cfg = voice_config.preview_config(settings, payload)
+        try:
+            audio = await asyncio.to_thread(voice_config.synthesize_preview, settings, cfg)
+        except Exception as exc:
+            raise HTTPException(503, f"voice preview unavailable: {exc}") from exc
+        return Response(content=audio, media_type="audio/mpeg")
 
     @app.websocket(settings.ws_path)
     async def call_socket(ws: WebSocket) -> None:
