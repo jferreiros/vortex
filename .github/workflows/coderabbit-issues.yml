@@ -1,0 +1,57 @@
+# Files one issue per major CodeRabbit finding, from the review the
+# `coderabbit` workflow left as an artifact.
+#
+# It is a workflow of its own so that `issues: write` never rides along with
+# the job that checks out a pull request and runs the CodeRabbit CLI on it.
+# `workflow_run` always takes this file and the script it runs from the
+# default branch, whatever the pull request contains.
+#
+# Not part of `gate`: it can never block a merge. Docs: docs/ci.md, last section.
+
+name: coderabbit-issues
+
+on:
+  workflow_run:
+    workflows: [coderabbit]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read    # read the artifact of the run that triggered this
+  issues: write    # one issue per major finding
+
+jobs:
+  file:
+    name: coderabbit issues (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7   # the default branch, never the PR head
+        with:
+          persist-credentials: false
+
+      - name: Download the review from the run that triggered this
+        id: artifact
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: coderabbit-review
+          path: coderabbit-review
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - name: File every major finding as an issue
+        if: steps.artifact.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The artifact comes from a run on the PR head, so nothing in it is
+          # trusted: the number is reduced to its digits before it is used.
+          pr=$(tr -dc '0-9' < coderabbit-review/pr-number.txt | head -c 10)
+          if [ -z "$pr" ] || [ ! -s coderabbit-review/review.txt ]; then
+            echo "No PR number or no review in the artifact. Nothing to file."
+            exit 0
+          fi
+          python scripts/ci/coderabbit_issues.py coderabbit-review/review.txt \
+            --pr "$pr" --repo "$GITHUB_REPOSITORY" | tee -a "$GITHUB_STEP_SUMMARY"

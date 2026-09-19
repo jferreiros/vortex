@@ -17,10 +17,13 @@ concurrency:
   group: coderabbit-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
+# This job checks out the pull request and runs the CodeRabbit CLI on it, so
+# its token stays as narrow as the review comment needs. Filing an issue per
+# major finding needs `issues: write`, and that lives in the trusted
+# .github/workflows/coderabbit-issues.yml, which runs from the default branch.
 permissions:
   contents: read
   pull-requests: write   # the review comment
-  issues: write          # one issue per major finding
 
 jobs:
   review:
@@ -132,13 +135,20 @@ jobs:
             echo "Posted a new comment"
           fi
 
-      - name: File every major finding as an issue
+      # coderabbit-issues.yml picks this up and files the major findings.
+      - name: Write the PR number next to the review
         if: steps.key.outputs.present == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          python scripts/ci/coderabbit_issues.py review.txt \
-            --pr "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" | tee -a "$GITHUB_STEP_SUMMARY"
+        run: echo "$PR_NUMBER" > pr-number.txt
+
+      - name: Upload the review for the issue-filing workflow
+        if: steps.key.outputs.present == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coderabbit-review
+          path: |
+            review.txt
+            pr-number.txt
+          if-no-files-found: ignore
 
       - name: Report the CLI result (advisory)
         if: steps.key.outputs.present == 'true' && steps.review.outputs.status != '0'

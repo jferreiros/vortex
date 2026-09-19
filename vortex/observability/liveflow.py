@@ -1,6 +1,6 @@
 """The Live flow: the call in progress as three acts, on a dark canvas.
 
-``/wall`` is public and made for a projector. ``/calls/live`` is the same
+``/wall/flow`` is public and made for a projector. ``/calls/live`` is the same
 page inside the team console. Both render incrementally: a turn or a tool
 call is appended when it happens and never rebuilt, so cards enter once, the
 speaker pulses, the current stage glows and the verdict lands once.
@@ -160,7 +160,7 @@ def _skeleton(scene: Scene, *, public: bool) -> tuple[ui.element, ui.element, ui
     root = ui.element("div").classes("livepage")
     with root:
         with ui.element("header").classes("live-head"):
-            ui.link("Vortex", "/wall" if public else "/").classes("brand")
+            ui.link("Vortex", "/wall/flow" if public else "/").classes("brand")
             ui.label(live.CLINIC_NAME).classes("clinic")
             state_slot = ui.element("div").classes("row")
             ui.element("div").classes("grow")
@@ -169,7 +169,7 @@ def _skeleton(scene: Scene, *, public: bool) -> tuple[ui.element, ui.element, ui
                 if public:
                     ui.link("Console", "/").classes("pill mute")
                 else:
-                    ui.link("Open the wall ↗", "/wall", new_tab=True).classes("pill mute")
+                    ui.link("Open the wall ↗", "/wall/flow", new_tab=True).classes("pill mute")
         stage = ui.element("div").classes("live-body")
         foot = ui.element("footer").classes("live-foot")
     return state_slot, stage, foot
@@ -419,7 +419,7 @@ def _page(*, public: bool) -> None:
     ui.timer(0.4, tick)
 
 
-@ui.page("/wall")
+@ui.page("/wall/flow")
 def wall_page() -> None:
     _page(public=True)
 

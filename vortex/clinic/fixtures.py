@@ -12,6 +12,11 @@ Ids and people here are invented. They mirror the traps the docs describe
 (near-miss surnames, a provider on leave, a same-name pair) so the lanes can
 rehearse against them. Keep the set small.
 
+The published Problems-page cases live in ``synthetic-data/`` (same keys,
+separate folder). ``FakeClinicClient()`` keeps this small set;
+``FakeClinicClient(data_dir=...)`` reads the pack. Regenerate with
+``make evals-hydrate``.
+
 Owner: clinic/. Add fixtures here when a lane needs a new shape to test against.
 """
 
@@ -225,7 +230,7 @@ def schedule(location_id: str, location_name: str, hours: dict[str, str]) -> dic
     return {"location_id": location_id, "location_name": location_name, "days": days(hours)}
 
 
-CENTRO_HOURS = schedule("centro", "Arenal Centro", WEEKDAYS_9_20)
+CENTRO_HOURS = schedule("centro", "Arenal Centro", WEEKDAYS_9_20 | {"saturday": "09:00–14:00"})
 NORTE_HOURS = schedule("norte", "Arenal Norte", WEEKDAYS_9_20)
 SUR_HOURS = schedule("sur", "Arenal Sur", WEEKDAYS_9_20 | {"friday": "09:00–14:00"})
 
@@ -488,7 +493,9 @@ PATIENTS: list[dict[str, Any]] = [
         "sex": "M",
         "has_visited_before": True,
         "insurer": "cigna",
-        "referrals": [],
+        # Holds a dermatology referral: problem 6's control case, the referred
+        # adult whose booking goes through with nothing to refuse.
+        "referrals": ["dermatology"],
         "note": "Fake record. Published cases: orthopaedics Thursday, general practice Saturday.",
         "match_score": 1.0,
         "matched_fields": ["name"],
@@ -644,6 +651,70 @@ PATIENTS: list[dict[str, Any]] = [
         "match_score": 1.0,
         "matched_fields": ["name"],
     },
+    {
+        "patient_id": "P00201",
+        "given_name": "Laura",
+        "first_surname": "Gómez",
+        "second_surname": "Herrera",
+        "national_id": "55667788Z",
+        "date_of_birth": "1990-05-14",
+        "phone": "699112233",
+        "sex": "F",
+        "has_visited_before": True,
+        "insurer": "asisa",
+        "referrals": [],
+        "note": "Fake record. Seen once before, by D. Álvaro Cid.",
+        "match_score": 1.0,
+        "matched_fields": ["name"],
+    },
+    {
+        "patient_id": "P00202",
+        "given_name": "Manuel",
+        "first_surname": "Torres",
+        "second_surname": "Domínguez",
+        "national_id": "66778899D",
+        "date_of_birth": "1979-11-02",
+        "phone": "688223344",
+        "sex": "M",
+        "has_visited_before": False,
+        "insurer": "asisa",
+        "referrals": [],
+        "note": "Fake record. Never seen.",
+        "match_score": 1.0,
+        "matched_fields": ["name"],
+    },
+    {
+        "patient_id": "P00203",
+        "given_name": "Elvira",
+        "first_surname": "Castro",
+        "second_surname": "Molina",
+        "national_id": "77889900D",
+        "date_of_birth": "1995-02-20",
+        "phone": "677334455",
+        "sex": "F",
+        "has_visited_before": False,
+        "insurer": "nueva_mutua",
+        "referrals": [],
+        "note": "Fake record. Never seen.",
+        "match_score": 1.0,
+        "matched_fields": ["name"],
+    },
+    {
+        "patient_id": "P00204",
+        "given_name": "Sofía",
+        "first_surname": "Pérez",
+        "second_surname": "Ruiz",
+        "national_id": "",
+        "date_of_birth": "2012-05-14",
+        "phone": "",
+        "sex": "F",
+        "has_visited_before": True,
+        "insurer": "dkv",
+        "referrals": [],
+        "note": "Fake record. Child. Father (Antonio Pérez Martín) usually calls. Seen by Iglesia.",
+        "match_score": 1.0,
+        "matched_fields": ["phone"],
+    },
 ]
 
 #: ``AppointmentOut``. The platform sends no status: ``when=upcoming`` is the
@@ -684,5 +755,14 @@ APPOINTMENTS: list[dict[str, Any]] = [
         "appointment_type_id": "first_visit",
         "start_time": "2024-04-08T11:00:00+02:00",
         "duration_minutes": 30,
+    },
+    {
+        "appointment_id": "A0003",
+        "patient_id": "P00204",
+        "provider_id": "PR05",
+        "location_id": "sur",
+        "appointment_type_id": "review",
+        "start_time": "2026-09-22T11:15:00+02:00",
+        "duration_minutes": 15,
     },
 ]

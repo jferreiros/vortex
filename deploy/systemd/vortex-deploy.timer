@@ -1,0 +1,12 @@
+[Unit]
+Description=Watch origin/main and deploy Vortex
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=60s
+AccuracySec=10s
+Persistent=true
+Unit=vortex-deploy.service
+
+[Install]
+WantedBy=timers.target

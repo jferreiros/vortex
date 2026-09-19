@@ -4,6 +4,7 @@ from vortex.contract import ALL_REASONS
 from vortex.observability.explain import (
     ACTION_LABEL,
     EVENT_TEXT,
+    KPI_LABEL,
     LIVE_SUB,
     REASON_TEXT,
     STAGES,
@@ -148,6 +149,7 @@ def test_screen_words_say_patient_never_caller() -> None:
             *EVENT_TEXT.values(),
             *ACTION_LABEL.values(),
             LIVE_SUB,
+            *KPI_LABEL.values(),
             wall_sub("Clínica Arenal"),
         ]
     )
@@ -218,3 +220,90 @@ def test_workflow_beats_follow_the_line_and_pulse_the_speaker() -> None:
     assert ended[-1].kind == "outcome"
     assert ended[-1].title == "Booked"
     assert all(not beat.speaking for beat in ended)
+
+
+def test_workflow_beats_give_each_tool_call_its_own_result() -> None:
+    card = CallCard(call_id="CA-twice", from_number="+34600")
+    card.events = [
+        {"kind": "call.started", "ts": "t0", "from_number": "+34600"},
+        {"kind": "tool.called", "ts": "t1", "tool": "find_slots"},
+        {
+            "kind": "tool.returned",
+            "ts": "t2",
+            "tool": "find_slots",
+            "ms": 30,
+            "result": {"slots": [], "blocked": [{"reason": "location_hours"}]},
+        },
+        {"kind": "tool.called", "ts": "t3", "tool": "find_slots"},
+        {
+            "kind": "tool.returned",
+            "ts": "t4",
+            "tool": "find_slots",
+            "ms": 40,
+            "result": {"slots": [{"start": "2026-09-21T10:15:00+02:00"}]},
+        },
+    ]
+    card.tools = [
+        ToolStep(
+            "find_slots",
+            status="ok",
+            ms=30.0,
+            result={"slots": [], "blocked": [{"reason": "location_hours"}]},
+        ),
+        ToolStep(
+            "find_slots",
+            status="ok",
+            ms=40.0,
+            result={"slots": [{"start": "2026-09-21T10:15:00+02:00"}]},
+        ),
+    ]
+    tools = [beat for beat in workflow_beats(card) if beat.kind == "tool"]
+    assert len(tools) == 2
+    assert tools[0].text == "No slot free. 1 blocked by a rule."
+    assert tools[0].ms == 30.0
+    assert tools[1].text == "1 slot(s) free. First: 2026-09-21T10:15:00+02:00"
+    assert tools[1].ms == 40.0
+
+
+def test_workflow_beats_fold_repeated_turns() -> None:
+    card = CallCard(call_id="CA-dup", from_number="+34600")
+    card.events = [
+        {"kind": "call.started", "ts": "t0", "from_number": "+34600"},
+        {"kind": "turn.assistant", "ts": "t1", "text": "Hello."},
+        {"kind": "turn.assistant", "ts": "t2", "text": "Hello."},
+        {"kind": "turn.user", "ts": "t3", "text": "Hi."},
+        {"kind": "turn.user", "ts": "t4", "text": "Hi."},
+    ]
+    card.turns = [
+        Turn("assistant", "Hello.", "t1"),
+        Turn("assistant", "Hello.", "t2"),
+        Turn("user", "Hi.", "t3"),
+        Turn("user", "Hi.", "t4"),
+    ]
+    kinds_and_text = [(beat.kind, beat.text) for beat in workflow_beats(card)]
+    assert kinds_and_text == [
+        ("start", "+34600 · inbound scheduling"),
+        ("agent", "Hello."),
+        ("patient", "Hi."),
+    ]
+
+
+def test_workflow_beats_only_paint_an_accepted_submission_green() -> None:
+    def submit_dot(status: str) -> str:
+        card = CallCard(call_id=f"CA-{status}", from_number="+34600")
+        card.events = [
+            {"kind": "call.started", "ts": "t0", "from_number": "+34600"},
+            {
+                "kind": "submit.result",
+                "ts": "t1",
+                "route": "/api/v1/submit/book",
+                "result": {"status": status, "http_status": 422},
+            },
+        ]
+        beat = next(beat for beat in workflow_beats(card) if beat.kind == "submit")
+        return beat.dot
+
+    assert submit_dot("accepted") == "ok"
+    assert submit_dot("submitted") == "ok"
+    assert submit_dot("rejected") == "warn"
+    assert submit_dot("error") == "warn"
