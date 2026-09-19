@@ -69,6 +69,7 @@ from vortex.conversation.turns import (
     TurnSettings,
     default_turn_settings,
     effective_vad_stop_secs,
+    is_refusal_acceptance,
     user_turn_strategies,
 )
 from vortex.line.aic_filter import build_audio_in_filter
@@ -861,6 +862,12 @@ def _CallLogObserver(  # noqa: N802 - factory that returns an observer
                 )
                 if decision.confirmed:
                     session.confirm_prepared(decision.why)
+                elif (
+                    session.memory.prepared is None
+                    and session.memory.last_rejection is not None
+                    and is_refusal_acceptance(frame.text)
+                ):
+                    session.accept_refusal(f"caller accepted the refusal: {frame.text.strip()}")
             elif isinstance(frame, TTSTextFrame):
                 session.ctx.log.assistant_turn(frame.text)
                 policy.on_assistant_text(frame.text)
