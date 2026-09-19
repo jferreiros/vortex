@@ -396,13 +396,26 @@ def check_when(when: str) -> None:
 
 
 class ClinicClient:
-    """Live client. Every request carries the team key."""
+    """Live client. Every request carries the team key.
 
-    def __init__(self, base_url: str, api_key: str, *, timeout: float = 10.0):
+    ``transport`` replaces the network layer and nothing else: the same routes,
+    headers and JSON, answered in process. Offline tests pass one in so they
+    can exercise this client without binding a socket.
+    """
+
+    def __init__(
+        self,
+        base_url: str,
+        api_key: str,
+        *,
+        timeout: float = 10.0,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ):
         self._http = httpx.AsyncClient(
             base_url=base_url.rstrip("/"),
             headers={"X-Api-Key": api_key},
             timeout=timeout,
+            transport=transport,
         )
         self._catalogue: Catalogue | None = None
         self._catalogue_lock = asyncio.Lock()
