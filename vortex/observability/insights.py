@@ -78,7 +78,7 @@ def calls_by_hour(cards: list[CallCard]) -> list[Bar]:
         except ValueError:
             continue
         if stamp.tzinfo is None:
-            stamp = stamp.replace(tzinfo=ZoneInfo("UTC"))
+            continue
         counter[stamp.astimezone(MADRID).hour] += 1
     if not counter:
         return []

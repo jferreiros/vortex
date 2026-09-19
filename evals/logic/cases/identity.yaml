@@ -23,6 +23,39 @@ cases:
     args: {value: "12345678A"}
     expect: {normalized: "12345678A", kind: dni, valid: false, expected_letter: "Z"}
 
+  - id: identity.dni.one_edit_repair_unique
+    problem: 4
+    tool: validate_national_id
+    # Heard 6 for 3 (seis/tres); letter Z fits only 12345678.
+    args: {value: "12645678Z"}
+    expect:
+      normalized: "12345678Z"
+      kind: dni
+      valid: true
+      repaired_from: "12645678Z"
+      ask_digit_positions: {$len: 0}
+
+  - id: identity.dni.one_edit_repair_ambiguous
+    problem: 4
+    tool: validate_national_id
+    # Several 1-edit readings fit Z; re-ask the digits that disagree.
+    args: {value: "12345778Z"}
+    expect:
+      normalized: "12345778Z"
+      kind: dni
+      valid: false
+      ask_digit_positions: [0, 5, 7]
+
+  - id: identity.nie.one_edit_repair_unique
+    problem: 4
+    tool: validate_national_id
+    args: {value: "X1264567L"}
+    expect:
+      normalized: "X1234567L"
+      kind: nie
+      valid: true
+      repaired_from: "X1264567L"
+
   - id: identity.nie.x_prefix_valid
     problem: 4
     tool: validate_national_id
