@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from evals.corpus.catalogue import PROBLEMS, Case, Roster, load
+from evals.corpus.clinic_day import build_clinic_day_events, mix_from_events
 from evals.corpus.probes import (
     KNOWN_INTERACTIONS,
     RED_FLAGS,
@@ -100,10 +101,16 @@ Regenerate:
 
     make evals-hydrate          # from public-cases.json, no key
     make evals-hydrate LIVE=1   # enrich charts and diaries from the API
+    uv run python -m evals.corpus.clinic_day   # just the 19 Sep clinic day
 
 `FakeClinicClient()` still reads the small invented fixtures. To read this pack:
 
     FakeClinicClient(data_dir=Path("synthetic-data"))
+
+`logs/clinic_day.jsonl` is a 19 Sep 2026 clinic day (not a published case):
+more volume than the previous mock, 15-20% unresolved by the agent, at most
+10% of those escalated (with `medical_emergency`), the rest refused with a
+typed `reason`, and three REGISTER calls for new patients.
 
 Never written here: the full availability calendar (`evals/corpus/world/`),
 the live call log (`logs/calls.jsonl`), or the fixtures the unit tests own.
@@ -875,6 +882,7 @@ def build_logs(roster: Roster) -> dict[str, list[dict[str, Any]]]:
         grouped[case.problem_id].extend(events)
     for problem_id, events in build_probe_logs().items():
         grouped[problem_id].extend(events)
+    grouped["clinic_day"].extend(build_clinic_day_events())
     return grouped
 
 
@@ -1021,6 +1029,7 @@ def build(
     appointments = build_appointments(roster, patients)
     logs = build_logs(roster)
     manifest = build_manifest(roster, patients, appointments, logs)
+    manifest["clinic_day"] = mix_from_events(logs.get("clinic_day", []))
     return patients, appointments, manifest, logs
 
 
