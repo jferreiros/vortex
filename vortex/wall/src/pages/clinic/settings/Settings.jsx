@@ -29,7 +29,7 @@ const PERMISSIONS_CONFIG = [
   { key: "canBook", label: "Reservar citas" },
   { key: "canReschedule", label: "Reprogramar citas" },
   { key: "canCancel", label: "Cancelar citas" },
-  { key: "canRegister", label: "Registrar pacientes" },
+  { key: "canRegister", label: "Registrar paciente nuevo" },
   { key: "canInfo", label: "Información de clínica" },
   { key: "canEscalate", label: "Escalar urgencias" },
 ];
@@ -188,6 +188,15 @@ export default function Settings() {
                 </div>
               </div>
             ))}
+            <div className="settings-row">
+              <div>
+                <span className="settings-row-label">Probar</span>
+              </div>
+              {/* TODO: wire to a short TTS sample with the current slider values */}
+              <Button variant="secondary" onClick={() => {}}>
+                ▶ Try
+              </Button>
+            </div>
             <div className="settings-row">
               <div>
                 <span className="settings-row-label">Voz</span>
