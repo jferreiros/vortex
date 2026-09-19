@@ -12,6 +12,13 @@
   padding-bottom: var(--space-9);
 }
 
+/* Shared by every KPI and panel-head glyph (see Analytics.jsx's ICONS). The
+   colour is set by the parent that positions it, never here, so one glyph
+   works on a mute label and an ink heading alike. */
+.analytics-icon {
+  flex: none;
+}
+
 /* --- KPI strip ----------------------------------------------------------- */
 
 .analytics-kpis {
@@ -27,14 +34,20 @@
 }
 
 .analytics-kpi-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: var(--text-xs);
   font-weight: var(--weight-medium);
   color: var(--color-mute);
 }
 
+/* The KPI row is the page's headline, so it reads a size up from the panel
+   stats below it (--text-2xl vs --text-lg) — hierarchy through scale, not
+   colour or a border. */
 .analytics-kpi-value {
   font-family: var(--font-display);
-  font-size: var(--text-xl);
+  font-size: var(--text-2xl);
   font-weight: var(--weight-bold);
   color: var(--color-ink);
   letter-spacing: -0.01em;
@@ -44,7 +57,11 @@
 .analytics-kpi-caption {
   margin: 0;
   font-size: var(--text-xs);
-  color: var(--color-faint);
+  /* --color-mute, not --color-faint: this caption is often the only place a
+     number's caveat lives ("sin muestras", "Langfuse no conectado"), so it
+     needs to clear the same contrast bar as the other secondary text —
+     matches how Insights treats its own footnotes. */
+  color: var(--color-mute);
 }
 
 /* --- Panels -------------------------------------------------------------- */
@@ -62,6 +79,19 @@
   gap: var(--space-5);
 }
 
+.analytics-panel-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+/* Optical alignment: nudge the glyph down to the heading's cap height
+   instead of the head block's own top edge. */
+.analytics-panel-head .analytics-icon {
+  margin-top: 3px;
+  color: var(--color-mute);
+}
+
 .analytics-panel-head h2 {
   margin: 0;
   font-family: var(--font-display);
@@ -76,25 +106,31 @@
   color: var(--color-mute);
 }
 
+/* The funnel is the page's other headline element besides the KPI row, so
+   its heading reads a size up from the five panels that follow it. */
+.analytics-funnel .analytics-panel-head h2 {
+  font-size: var(--text-xl);
+}
+
 .analytics-empty {
   margin: 0;
   padding: var(--space-6) 0;
   text-align: center;
   font-size: var(--text-sm);
-  color: var(--color-faint);
+  color: var(--color-mute);
 }
 
 .analytics-note {
   margin: 0;
   font-size: var(--text-xs);
   line-height: var(--leading-normal);
-  color: var(--color-faint);
+  color: var(--color-mute);
 }
 
 .analytics-foot {
   margin: 0;
   font-size: var(--text-xs);
-  color: var(--color-faint);
+  color: var(--color-mute);
 }
 
 /* --- Sankey -------------------------------------------------------------- */
@@ -382,6 +418,7 @@
   border-bottom: 1px solid var(--color-border);
   color: var(--color-ink);
   white-space: nowrap;
+  transition: background var(--duration-fast) var(--ease-standard);
 }
 
 .analytics-table tbody tr:hover td {
@@ -490,6 +527,24 @@
   font-style: normal;
   font-size: var(--text-xs);
   color: var(--color-faint);
+}
+
+/* --- Range toggle ---------------------------------------------------------
+   .home-chip (home.css) ships with no hover or focus-visible state at all.
+   Scoped here rather than edited at the source, since that file is shared
+   with Home and Statistics and out of this page's remit. */
+
+.analytics-page .home-chip {
+  transition: background var(--duration-fast) var(--ease-standard);
+}
+
+.analytics-page .home-chip:not(.on):hover {
+  background: var(--color-bg);
+}
+
+.analytics-page .home-chip:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
 }
 
 /* --- Narrow ------------------------------------------------------------- */
