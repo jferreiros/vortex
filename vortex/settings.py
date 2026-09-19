@@ -362,10 +362,6 @@ class Settings:
         default_factory=lambda: _env("LANGFUSE_TRACING_ENVIRONMENT") or _env("VORTEX_ENV")
     )
 
-    # Optional Hugging Face token for summarising a patient's receptionist
-    # note on the doctor calendar. Missing = show the note as written.
-    hf_token: str = field(default_factory=lambda: _env("HF_TOKEN"))
-
     # Live geocoder for problem 15 (vortex/rules/geo.py). Empty = gazetteer only.
     # VORTEX_GEOCODER: cartociudad | nominatim | "" (off).
     # cartociudad = IGN free candidates API, no key. nominatim needs a URL.
@@ -391,11 +387,10 @@ class Settings:
     cold_booking_timeout_secs: float = 6.0
 
     # --- SMS confirmations (Twilio) -------------------------------------------
-    # After an accepted book/cancel we text the calling number. Off with the
-    # flag, or dry-run when the Twilio keys below are missing.
-    sms_confirmations: bool = field(
-        default_factory=lambda: _env_flag("VORTEX_SMS_CONFIRMATIONS", "true")
-    )
+    # After an accepted book/cancel we text the calling number. Opt-in: live
+    # messaging needs the flag on, and is dry-run when the Twilio keys below are
+    # missing. Off by default so no deployment texts a patient unasked.
+    sms_confirmations: bool = field(default_factory=lambda: _env_flag("VORTEX_SMS_CONFIRMATIONS"))
     twilio_account_sid: str = field(default_factory=lambda: _env("TWILIO_ACCOUNT_SID"))
     twilio_auth_token: str = field(default_factory=lambda: _env("TWILIO_AUTH_TOKEN"))
     # Prefer a Messaging Service; otherwise a bare From number works.
@@ -612,7 +607,6 @@ class Settings:
             "has_langfuse_keys": bool(self.langfuse_public_key and self.langfuse_secret_key),
             "langfuse_base_url": self.langfuse_base_url,
             "langfuse_environment": self.langfuse_environment,
-            "has_hf_token": bool(self.hf_token),
             "geocoder": self.geocoder or ("nominatim" if self.geocoder_url else ""),
             "sms_confirmations": self.sms_confirmations,
             "has_twilio_sms": bool(

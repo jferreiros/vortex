@@ -6,7 +6,10 @@ an accepted book/cancel texts the calling number; everything else stays quiet.
 
 from __future__ import annotations
 
+import json
+from collections.abc import Iterator
 from datetime import date, datetime
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -19,6 +22,7 @@ from vortex.contract import (
     Appointment,
     BookAction,
     CancelAction,
+    EscalateAction,
     NoAction,
     RegisterAction,
     RescheduleAction,
@@ -26,22 +30,28 @@ from vortex.contract import (
     action_payload,
     action_route,
 )
+from vortex.line import session as session_module
 from vortex.line.session import CallSession
 from vortex.line.sms import (
     DryRunSmsClient,
+    SmsResult,
     TwilioSmsClient,
     action_fingerprint,
     booking_confirmation_text,
     cancellation_confirmation_text,
     format_slot_es,
     make_sms_client,
+    resolve_details,
     twilio_is_configured,
 )
+from vortex.line.submit import SUBMITTED_ACTION_KEY
 from vortex.line.twilio import StartPayload
+from vortex.observability.tracing import mask_phone
 from vortex.settings import Settings, get_settings, reset_settings
 
 NOW = datetime(2026, 9, 18, 10, 0, tzinfo=MADRID)
 SLOT = datetime(2026, 9, 24, 16, 30, tzinfo=MADRID)
+REMEMBERED_START = datetime(2026, 9, 30, 10, 0, tzinfo=MADRID)
 CALLER = "+34600111222"
 PATIENT = "P00042"
 
@@ -73,6 +83,19 @@ class DryRunSubmitter(AcceptingSubmitter):
 class RejectingSubmitter(AcceptingSubmitter):
     async def submit(self, call_id: str, action: Action) -> SubmitResult:
         return SubmitResult(status="rejected", http_status=422, detail="nope")
+
+
+class RecordingSmsClient(DryRunSmsClient):
+    """Dry-run client that also keeps the typed ``SmsResult`` of every send."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.results: list[SmsResult] = []
+
+    async def send(self, *, to: str, body: str) -> SmsResult:
+        result = await super().send(to=to, body=body)
+        self.results.append(result)
+        return result
 
 
 def a_booking() -> BookAction:
@@ -107,22 +130,35 @@ def make_session(
     submitter = submitter or AcceptingSubmitter()
     session.submitter = submitter
     session.ctx.submitter = submitter
-    session.sms = DryRunSmsClient()
+    session.sms = RecordingSmsClient()
     return session
 
 
-def remember_appointment(session: CallSession) -> None:
+def sms_events(settings: Settings, call_id: str) -> list[dict[str, Any]]:
+    path = Path(settings.calls_log_path)
+    lines = [json.loads(line) for line in path.read_text().splitlines()]
+    return [x for x in lines if x["call_id"] == call_id and x["kind"].startswith("sms.")]
+
+
+def one_sms_event(settings: Settings, call_id: str, kind: str) -> dict[str, Any]:
+    """The single ``sms.*`` event of that kind, with its typed payload fields."""
+    matching = [event for event in sms_events(settings, call_id) if event["kind"] == kind]
+    assert len(matching) == 1
+    return matching[0]
+
+
+def remember_appointment(session: CallSession, *, start: datetime = REMEMBERED_START) -> None:
     appointment = Appointment(
         appointment_id="A0001",
         patient_id=PATIENT,
         provider_id="PR01",
         location_id="centro",
         appointment_type_id="review",
-        start=datetime(2026, 9, 30, 10, 0, tzinfo=MADRID),
+        start=start,
     )
-    session.ctx.state.setdefault("diary_appointments", {})[
-        appointment.appointment_id
-    ] = appointment.model_dump(mode="json")
+    session.ctx.state.setdefault("diary_appointments", {})[appointment.appointment_id] = (
+        appointment.model_dump(mode="json")
+    )
 
 
 # ---- render helpers ---------------------------------------------------------
@@ -134,6 +170,11 @@ def test_format_slot_es_uses_madrid_wall_clock() -> None:
     assert "24" in text
     assert "septiembre" in text
     assert "16:30" in text
+
+
+def test_format_slot_es_refuses_a_naive_datetime() -> None:
+    with pytest.raises(ValueError, match="offset"):
+        format_slot_es(SLOT.replace(tzinfo=None))
 
 
 def test_booking_text_includes_doctor_and_site_when_known() -> None:
@@ -219,52 +260,107 @@ async def test_twilio_client_reports_http_errors() -> None:
 # ---- session hook -----------------------------------------------------------
 
 
+@pytest.fixture
+def sms_settings(offline_settings: Settings, monkeypatch: pytest.MonkeyPatch) -> Iterator[Settings]:
+    """Offline settings with the opt-in SMS flag turned on."""
+    monkeypatch.setenv("VORTEX_SMS_CONFIRMATIONS", "true")
+    reset_settings()
+    yield get_settings()
+    reset_settings()
+
+
 @pytest.mark.asyncio
-async def test_accepted_booking_sends_sms(offline_settings: Settings) -> None:
-    session = make_session(offline_settings, "CA-book-sms")
+async def test_accepted_booking_sends_sms(sms_settings: Settings) -> None:
+    session = make_session(sms_settings, "CA-book-sms")
     sms = session.sms
-    assert isinstance(sms, DryRunSmsClient)
+    assert isinstance(sms, RecordingSmsClient)
 
     await session.submit(a_booking())
     await session.close()
 
-    assert len(sms.sent) == 1
-    to, body = sms.sent[0]
-    assert to == CALLER
-    assert "Cita confirmada" in body
-    assert "16:30" in body
+    assert len(sms.results) == 1
+    assert sms.results[0].status == "dry_run"
+    assert sms.results[0].to == CALLER
+    event = one_sms_event(sms_settings, "CA-book-sms", "sms.dry_run")
+    assert event["action_kind"] == "book"
+    assert event["when"] == SLOT.isoformat()
+    assert event["missing"] == []
 
 
 @pytest.mark.asyncio
-async def test_accepted_cancel_sends_sms(offline_settings: Settings) -> None:
-    session = make_session(offline_settings, "CA-cancel-sms")
+async def test_accepted_cancel_sends_sms(sms_settings: Settings) -> None:
+    session = make_session(sms_settings, "CA-cancel-sms")
     remember_appointment(session)
     sms = session.sms
-    assert isinstance(sms, DryRunSmsClient)
+    assert isinstance(sms, RecordingSmsClient)
 
     await session.submit(a_cancel())
     await session.close()
 
-    assert len(sms.sent) == 1
-    to, body = sms.sent[0]
-    assert to == CALLER
-    assert "Cita cancelada" in body
-    assert "10:00" in body
+    assert len(sms.results) == 1
+    assert sms.results[0].status == "dry_run"
+    assert sms.results[0].to == CALLER
+    event = one_sms_event(sms_settings, "CA-cancel-sms", "sms.dry_run")
+    assert event["action_kind"] == "cancel"
+    assert event["when"] == REMEMBERED_START.isoformat()
+    assert event["appointment_id"] == "A0001"
 
 
 @pytest.mark.asyncio
 async def test_cancel_without_remembered_appointment_still_texts(
-    offline_settings: Settings,
+    sms_settings: Settings,
 ) -> None:
-    session = make_session(offline_settings, "CA-cancel-bare")
+    session = make_session(sms_settings, "CA-cancel-bare")
     sms = session.sms
-    assert isinstance(sms, DryRunSmsClient)
+    assert isinstance(sms, RecordingSmsClient)
 
     await session.submit(a_cancel())
     await session.close()
 
-    assert len(sms.sent) == 1
-    assert "Cita cancelada" in sms.sent[0][1]
+    assert len(sms.results) == 1
+    assert sms.results[0].status == "dry_run"
+    assert sms.results[0].to == CALLER
+    event = one_sms_event(sms_settings, "CA-cancel-bare", "sms.dry_run")
+    assert event["action_kind"] == "cancel"
+    assert event["when"] == ""
+    assert event["missing"] == ["appointment_details"]
+
+
+@pytest.mark.asyncio
+async def test_resolve_details_uses_the_remembered_appointment(
+    offline_settings: Settings,
+) -> None:
+    session = make_session(offline_settings, "CA-cancel-details")
+    remember_appointment(session)
+
+    known = await resolve_details(session.ctx, a_cancel())
+    session.ctx.state["diary_appointments"].clear()
+    unknown = await resolve_details(session.ctx, a_cancel())
+    await session.close()
+
+    assert known.when == REMEMBERED_START
+    assert known.provider_name == "Dra. Ortiz"
+    assert known.location_name == "Arenal Centro"
+    assert known.missing == []
+    assert unknown.when is None
+    assert unknown.missing == ["appointment_details"]
+
+
+@pytest.mark.asyncio
+async def test_resolve_details_drops_a_naive_remembered_start(
+    offline_settings: Settings,
+) -> None:
+    session = make_session(offline_settings, "CA-cancel-naive")
+    remember_appointment(session, start=REMEMBERED_START.replace(tzinfo=None))
+
+    details = await resolve_details(session.ctx, a_cancel())
+    await session.close()
+
+    assert details.when is None
+    assert details.missing == ["naive_appointment_start"]
+    text = cancellation_confirmation_text(when=details.when)
+    assert "Cita cancelada" in text
+    assert "septiembre" not in text
 
 
 @pytest.mark.asyncio
@@ -291,10 +387,8 @@ async def test_cancel_without_remembered_appointment_still_texts(
         ),
     ],
 )
-async def test_non_book_cancel_actions_do_not_sms(
-    offline_settings: Settings, action: Action
-) -> None:
-    session = make_session(offline_settings, "CA-no-sms")
+async def test_non_book_cancel_actions_do_not_sms(sms_settings: Settings, action: Action) -> None:
+    session = make_session(sms_settings, "CA-no-sms")
     sms = session.sms
     assert isinstance(sms, DryRunSmsClient)
 
@@ -305,8 +399,8 @@ async def test_non_book_cancel_actions_do_not_sms(
 
 
 @pytest.mark.asyncio
-async def test_missing_from_number_skips_sms(offline_settings: Settings) -> None:
-    session = make_session(offline_settings, "CA-no-from", from_number=None)
+async def test_missing_from_number_skips_sms(sms_settings: Settings) -> None:
+    session = make_session(sms_settings, "CA-no-from", from_number=None)
     sms = session.sms
     assert isinstance(sms, DryRunSmsClient)
 
@@ -319,11 +413,9 @@ async def test_missing_from_number_skips_sms(offline_settings: Settings) -> None
 @pytest.mark.asyncio
 @pytest.mark.parametrize("submitter_cls", [DryRunSubmitter, RejectingSubmitter])
 async def test_non_accepted_submit_skips_sms(
-    offline_settings: Settings, submitter_cls: type[AcceptingSubmitter]
+    sms_settings: Settings, submitter_cls: type[AcceptingSubmitter]
 ) -> None:
-    session = make_session(
-        offline_settings, "CA-not-accepted", submitter=submitter_cls()
-    )
+    session = make_session(sms_settings, "CA-not-accepted", submitter=submitter_cls())
     sms = session.sms
     assert isinstance(sms, DryRunSmsClient)
 
@@ -334,8 +426,8 @@ async def test_non_accepted_submit_skips_sms(
 
 
 @pytest.mark.asyncio
-async def test_duplicate_status_does_not_double_text(offline_settings: Settings) -> None:
-    session = make_session(offline_settings, "CA-dup", submitter=AcceptingSubmitter())
+async def test_duplicate_status_does_not_double_text(sms_settings: Settings) -> None:
+    session = make_session(sms_settings, "CA-dup", submitter=AcceptingSubmitter())
     sms = session.sms
     assert isinstance(sms, DryRunSmsClient)
     booking = a_booking()
@@ -351,8 +443,8 @@ async def test_duplicate_status_does_not_double_text(offline_settings: Settings)
 
 
 @pytest.mark.asyncio
-async def test_submit_action_tool_path_also_sends_sms(offline_settings: Settings) -> None:
-    session = make_session(offline_settings, "CA-tool-sms")
+async def test_submit_action_tool_path_also_sends_sms(sms_settings: Settings) -> None:
+    session = make_session(sms_settings, "CA-tool-sms")
     sms = session.sms
     assert isinstance(sms, DryRunSmsClient)
     booking = a_booking()
@@ -365,6 +457,84 @@ async def test_submit_action_tool_path_also_sends_sms(offline_settings: Settings
 
     assert len(sms.sent) == 1
     assert sms.sent[0][0] == CALLER
+
+
+@pytest.mark.asyncio
+async def test_sms_stays_silent_without_the_opt_in(offline_settings: Settings) -> None:
+    assert not offline_settings.sms_confirmations
+    session = make_session(offline_settings, "CA-opt-in")
+    sms = session.sms
+    assert isinstance(sms, DryRunSmsClient)
+
+    await session.submit(a_booking())
+    await session.close()
+
+    assert sms.sent == []
+
+
+@pytest.mark.asyncio
+async def test_submit_records_the_action_the_arbiter_decided(
+    offline_settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("VORTEX_JEV_ARBITER", "true")
+    reset_settings()
+    session = make_session(get_settings(), "CA-arbiter-state")
+    escalation = EscalateAction(reason="medical_emergency")
+
+    async def escalate_instead(ctx: Any, action: Action) -> Action:
+        return escalation
+
+    from vortex.jev import arbiter
+
+    monkeypatch.setattr(arbiter, "review", escalate_instead)
+
+    await session.submit(NoAction(reason="patient_not_found"))
+    await session.close()
+
+    routes = [route for route, _ in session.submitter.sent]  # type: ignore[attr-defined]
+    assert routes == [action_route(escalation)]
+    assert session.ctx.state[SUBMITTED_ACTION_KEY] == escalation
+    reset_settings()
+
+
+@pytest.mark.asyncio
+async def test_a_booking_the_submission_replaced_sends_no_sms(
+    sms_settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The arbiter can turn a booking into an escalation before the POST."""
+    session = make_session(sms_settings, "CA-arbiter-sms")
+    sms = session.sms
+    assert isinstance(sms, DryRunSmsClient)
+
+    async def submit_an_escalation(ctx: Any, args: Any) -> SubmitResult:
+        ctx.state[SUBMITTED_ACTION_KEY] = EscalateAction(reason="medical_emergency")
+        return SubmitResult(status="accepted", http_status=200)
+
+    monkeypatch.setattr(session_module, "submit_action", submit_an_escalation)
+
+    await session.submit(a_booking())
+    await session.close()
+
+    assert sms.sent == []
+
+
+@pytest.mark.asyncio
+async def test_sms_events_never_persist_the_number_or_the_body(
+    sms_settings: Settings,
+) -> None:
+    session = make_session(sms_settings, "CA-sms-privacy")
+
+    await session.submit(a_booking())
+    await session.close()
+
+    logged = sms_events(sms_settings, "CA-sms-privacy")
+    assert [event["kind"] for event in logged] == ["sms.sending", "sms.dry_run"]
+    for event in logged:
+        assert event["to"] == mask_phone(CALLER)
+        assert "body" not in event
+        assert "provider_name" not in event
+        assert "location_name" not in event
+        assert CALLER not in json.dumps(event, ensure_ascii=False)
 
 
 @pytest.mark.asyncio
