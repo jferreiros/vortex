@@ -1,4 +1,4 @@
-.PHONY: install run smoke test call replay try-api tunnel tail lint fmt board design-sync rehearse evals evals-logic evals-conversation evals-voice evals-report evals-accept evals-selftest evals-discord logs-discord langfuse-check
+.PHONY: install run smoke test call replay try-api tunnel tail lint fmt board design-sync rehearse evals evals-logic evals-conversation evals-voice evals-replay evals-report evals-accept evals-selftest evals-discord logs-discord langfuse-check
 
 PORT ?= 7860
 BOARD_PORT ?= 8080
@@ -51,7 +51,7 @@ fmt:
 	uv run ruff format . && uv run ruff check --fix .
 
 # ---- evals (see docs/evals.md) ---------------------------------------------
-.PHONY: evals evals-logic evals-conversation evals-voice evals-report evals-accept evals-selftest evals-discord evals-hydrate evals-snapshot evals-fetch evals-coverage
+.PHONY: evals evals-logic evals-conversation evals-voice evals-replay evals-report evals-accept evals-selftest evals-discord evals-hydrate evals-snapshot evals-fetch evals-coverage
 
 evals:            ## layers 1 + 2 + 4, no keys needed; the CI entry point (exit 1 on failure)
 	uv run python -m evals ci
@@ -85,6 +85,9 @@ evals-snapshot:   ## freeze the real clinic for offline judging; needs PLATFORM_
 
 evals-hydrate:    ## rebuild synthetic-data/ from public-cases.json (LIVE=1 hits the API)
 	uv run python -m evals.corpus.hydrate $(if $(LIVE),--live,)
+
+evals-replay:     ## the 73 official cases through the agent on the real snapshot; score out of 196
+	uv run python -m evals replay --max-eur $(or $(MAX_EUR),1.00) $(if $(ONLY),--only $(ONLY),) $(if $(MODEL),--model $(MODEL),) $(if $(C),--concurrency $(C),) $(if $(TURNS),--turns $(TURNS),)
 
 evals-report:     ## rebuild evals/results/summary.md and report.html
 	uv run python -m evals report
