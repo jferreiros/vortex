@@ -9,14 +9,15 @@ Interruption handling is entirely ours (the platform does no barge-in).
 switch now belongs to the *user turn strategies* the user aggregator runs
 (``pipecat.turns``). Two paths, chosen by ``soniox_turn_detection``:
 
-- ``True`` (default): Soniox's own endpoint detection ends the turn. The STT
-  service is built with ``vad_force_turn_endpoint=False`` and
-  ``should_interrupt=enable_interruptions``; it then installs
-  ``ExternalUserTurnStrategies(enable_interruptions=...)`` on the aggregator
-  itself through its metadata frame. Nothing else to wire.
-- ``False``: pipecat's VAD starts and ends the turn. Then the aggregator must
-  be given ``user_turn_strategies=user_turn_strategies(settings)`` (below), or
-  it falls back to its defaults, which load the smart-turn v3 model and ignore
+- ``True`` (default): Soniox's own endpoint detection ends the turn
+  (``vad_force_turn_endpoint=False``). We pass our own strategies so the
+  ``interrupt_min_words`` barge-in gate still runs: ``MinWordsUserTurnStartStrategy``
+  starts the turn, ``ExternalUserTurnStopStrategy`` closes it on Soniox's
+  ``ProposedUserStoppedSpeakingFrame``. Without that override the STT would
+  install ``ExternalUserTurnStrategies`` and every VAD blip would interrupt.
+- ``False``: pipecat's VAD starts and ends the turn. The aggregator must be
+  given ``user_turn_strategies=user_turn_strategies(settings)`` (below), or it
+  falls back to its defaults, which load the smart-turn v3 model and ignore
   ``enable_interruptions``.
 
 Either way the line lane passes the strategies, never a ``PipelineParams``
@@ -51,6 +52,7 @@ DEFAULT_EXPOSED_TOOLS: list[str] = [
     "triage",
     "nearest_location",
     "find_provider",
+    "clinic_facts",
     "submit_action",
 ]
 
@@ -59,8 +61,9 @@ DEFAULT_EXPOSED_TOOLS: list[str] = [
 class TurnSettings:
     # The caller may talk over the agent while it reads options (problem 13).
     enable_interruptions: bool = True
-    # In VAD mode, words the caller must say before a barge-in counts. One
-    # word is "uh-huh" or the television; two is a correction.
+    # Words the caller must say before a barge-in counts while the bot speaks.
+    # One word is "uh-huh" or the television; two is a correction. Applies in
+    # both Soniox and VAD turn modes (via MinWordsUserTurnStartStrategy).
     interrupt_min_words: int = 2
     # Noisy-caller settings (problem 12): a higher bar before Silero calls it
     # speech, so a bus going past does not become a barge-in. No denoiser in
@@ -99,25 +102,37 @@ def default_turn_settings() -> TurnSettings:
 
 
 def user_turn_strategies(settings: TurnSettings | None = None) -> Any | None:
-    """The pipecat ``UserTurnStrategies`` for these settings, or ``None``.
+    """The pipecat ``UserTurnStrategies`` for these settings.
 
-    ``None`` in Soniox turn-detection mode: the STT service installs
-    ``ExternalUserTurnStrategies`` itself, and a value passed here would
-    override it and break turn endings. In VAD mode it returns a VAD start
-    strategy gated on ``interrupt_min_words`` while the bot speaks, and a
-    speech-timeout stop strategy, both honouring ``enable_interruptions``.
+    Soniox mode: word-count start gate plus Soniox's external stop proposal, so
+    noise cannot barge in on a single VAD blip while endpointing still closes
+    the turn. VAD mode: VAD start (optionally gated on ``interrupt_min_words``)
+    and a speech-timeout stop. Both honour ``enable_interruptions``.
 
     Imports pipecat lazily so the server and the tests start without it.
     """
     turns = settings or default_turn_settings()
-    if turns.soniox_turn_detection:
-        return None
-    from pipecat.turns.user_start import (
-        MinWordsUserTurnStartStrategy,
-        VADUserTurnStartStrategy,
-    )
-    from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
+    from pipecat.turns.user_start import MinWordsUserTurnStartStrategy
     from pipecat.turns.user_turn_strategies import UserTurnStrategies
+
+    if turns.soniox_turn_detection:
+        from pipecat.turns.user_stop import ExternalUserTurnStopStrategy
+
+        return UserTurnStrategies(
+            start=[
+                MinWordsUserTurnStartStrategy(
+                    min_words=turns.interrupt_min_words,
+                    use_interim=True,
+                    enable_interruptions=turns.enable_interruptions,
+                )
+            ],
+            stop=[
+                ExternalUserTurnStopStrategy(timeout=0.5, wait_for_transcript=True),
+            ],
+        )
+
+    from pipecat.turns.user_start import VADUserTurnStartStrategy
+    from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
 
     start: list[Any] = [
         VADUserTurnStartStrategy(enable_interruptions=turns.enable_interruptions),

@@ -20,12 +20,14 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import httpx
+from fastapi.responses import HTMLResponse, JSONResponse
 from nicegui import app, ui
 
 from vortex.observability import auth, explain, insights
 from vortex.observability.calllog import read_recent
 from vortex.observability.demo import write_scripted_call
 from vortex.observability.view import CallCard, build_calls, flatten_grouped
+from vortex.observability.wall_timeline import build_timeline, call_summary, latest_intent
 from vortex.settings import REPO_ROOT, get_settings
 
 LINE_URL = os.environ.get("VORTEX_LINE_URL", "http://127.0.0.1:7860").rstrip("/")
@@ -36,6 +38,10 @@ _HERE = Path(__file__).parent
 DESIGN_CSS = (_HERE / "design.css").read_text(encoding="utf-8")
 BOARD_CSS = (_HERE / "board.css").read_text(encoding="utf-8")
 EVALS_SUMMARY = REPO_ROOT / "evals" / "results" / "summary.json"
+#: The react-spring per-call "zoom" page (vortex/observability/wall-app/),
+#: built by `npm run build`. /call/{id} above is the NiceGUI page; this is
+#: an animated alternative at /call/{id}/zoom, additive and never required.
+WALL_APP_DIST = _HERE / "wall-app" / "dist"
 
 MADRID = ZoneInfo("Europe/Madrid")
 
@@ -99,12 +105,7 @@ def _load_cards() -> tuple[list[CallCard], dict[str, Any] | None]:
 
 
 def _feature(cards: list[CallCard]) -> CallCard | None:
-    """The call the wall shows: the oldest live one, so the panel does not
-    jump between sockets while a burst runs; else the newest ended call."""
-    live = [c for c in cards if c.live]
-    if live:
-        return live[-1]
-    return cards[0] if cards else None
+    return explain.featured_call(cards)
 
 
 def _prune_presence() -> list[str]:
@@ -525,6 +526,62 @@ def _call_panel(card: CallCard | None, *, verbose: bool, public: bool = False) -
             _record(card, public=public)
 
 
+def _workflow_panel(card: CallCard | None, *, public: bool = False) -> None:
+    """The jury demo: one card per turn and tool, pulsing while someone speaks."""
+    beats = explain.workflow_beats(card)
+    reached = explain.stage_of(card)
+    with ui.element("div").classes("wf-head"):
+        with ui.element("div"):
+            ui.label(_caller(card, public=public) if card else "Waiting for a call").classes(
+                "heading-md"
+            )
+            stage_text = explain.STAGES[max(reached - 1, 0)][1] if reached else "Listen"
+            if card and card.live:
+                ui.label(f"{stage_text} · {_duration(card)}").classes("caption-sm")
+            elif card:
+                ui.label(explain.outcome_title(card)).classes("caption-sm")
+        if card and card.live:
+            with ui.element("div").classes("live-badge"):
+                _dot("live")
+                ui.label("Speaking" if any(beat.speaking for beat in beats) else "On a call")
+        elif card:
+            _pill(explain.outcome_title(card), _status_dot(card.status))
+    if not beats:
+        with ui.element("div").classes("empty-state"):
+            ui.label("No call on the line").classes("t")
+            ui.label("The next inbound call builds this workflow card by card.").classes("d")
+        return
+    with ui.element("div").classes("workflow"):
+        for beat in beats:
+            if beat.kind == "outcome":
+                with ui.element("div").classes("outcome"):
+                    ui.label("Outcome").classes("label")
+                    with ui.element("div").classes("title"):
+                        _dot(beat.dot)
+                        ui.label(beat.title)
+                    ui.label(beat.text).classes("text")
+                    if card and card.decline_reason:
+                        ui.label(card.decline_reason).classes("reason")
+                continue
+            classes = f"wf-card {beat.kind}"
+            if beat.speaking:
+                classes += " speaking"
+            with ui.element("article").classes(classes):
+                with ui.element("div").classes("wf-meta"):
+                    _dot(beat.dot)
+                    ui.label(beat.title).classes("wf-who")
+                    if beat.tool:
+                        ui.label(beat.tool).classes("command-tag")
+                    ui.element("div").classes("grow")
+                    if beat.ms is not None:
+                        ui.label(_ms(beat.ms)).classes("caption-sm")
+                    elif card is not None:
+                        stamp = _turn_time(card, beat.ts)
+                        if stamp:
+                            ui.label(stamp).classes("caption-sm mono")
+                ui.label(beat.text).classes("wf-text")
+
+
 def _live_strip(cards: list[CallCard], featured: CallCard | None, *, public: bool = False) -> None:
     live = [c for c in cards if c.live]
     if len(live) < 2:
@@ -563,18 +620,18 @@ def _calls_table(
             ui.label("No calls yet").classes("t")
             ui.label("Press Play to dial the line, or wait for the platform.").classes("d")
         return
-    with ui.element("table").classes("table"):
+    with ui.element("div").classes("table-wrap"), ui.element("table").classes("table"):
         with ui.element("thead"), ui.element("tr"):
-            for head in (
-                "Time",
-                "Patient",
-                "Outcome",
-                "Why not booked",
-                "Tools",
-                "Duration",
-                "Call id",
+            for head, extra in (
+                ("Time", ""),
+                ("Patient", ""),
+                ("Outcome", ""),
+                ("Why not booked", ""),
+                ("Tools", "narrow-hide"),
+                ("Duration", "narrow-hide"),
+                ("Call id", "narrow-hide"),
             ):
-                with ui.element("th"):
+                with ui.element("th").classes(extra):
                     ui.label(head)
         with ui.element("tbody"):
             for card in cards[:limit]:
@@ -592,12 +649,12 @@ def _calls_table(
                         _dot(_status_dot(card.status))
                         ui.label(explain.STATUS_LABEL.get(card.status, card.status))
                     with ui.element("td").classes("mute"):
-                        ui.label(card.decline_reason or "—")
-                    with ui.element("td").classes("num"):
+                        ui.label(explain.reason_text(card.decline_reason) or "—")
+                    with ui.element("td").classes("num narrow-hide"):
                         ui.label(str(len(card.tools)))
-                    with ui.element("td").classes("num"):
+                    with ui.element("td").classes("num narrow-hide"):
                         ui.label(_duration(card))
-                    with ui.element("td").classes("id"):
+                    with ui.element("td").classes("id narrow-hide"):
                         ui.label(card.call_id)
 
 
@@ -650,23 +707,19 @@ def wall_page() -> None:
             slot = _nav("/wall", team=False)
             with slot:
                 _line_pill(health)
+                zoom_id = featured.call_id if featured else "demo"
+                ui.link("Demo", f"/call/{zoom_id}/zoom", new_tab=True).classes("pill mute")
             with ui.element("main").classes("page"):
                 with ui.element("div").classes("page-head"):
                     with ui.element("div"):
                         ui.label("Live").classes("title")
-                        ui.label(
-                            f"Inbound scheduling line for {CLINIC_NAME}. The platform dials our "
-                            "socket and plays a patient. Vortex identifies the caller, applies the "
-                            "clinic's rules and submits one action."
-                        ).classes("sub")
+                        ui.label(explain.wall_sub(CLINIC_NAME)).classes("sub")
                     if live_count:
                         with ui.element("div").classes("live-badge"):
                             _dot("live")
                             ui.label(f"{live_count} on the line" if live_count > 1 else "On a call")
                     else:
                         _pill("Idle · waiting for the next call", "off", "mute")
-                _kpis(cards)
-                ui.element("div").style("height: 32px")
                 _live_strip(cards, featured, public=True)
                 _call_panel(featured, verbose=False, public=True)
                 ui.element("div").style("height: 48px")
@@ -702,6 +755,7 @@ def call_page(call_id: str) -> None:
             slot = _nav("", team=False)
             with slot:
                 _line_pill(health)
+                ui.link("Demo", f"/call/{call_id}/zoom", new_tab=True).classes("pill mute")
             with ui.element("main").classes("page"):
                 with ui.element("div").classes("page-head"):
                     with ui.element("div"):
@@ -729,36 +783,74 @@ def call_page(call_id: str) -> None:
     ui.timer(0.6, redraw)
 
 
+@app.get("/api/wall/timeline/{call_id}")
+def wall_timeline_api(call_id: str) -> JSONResponse:
+    """The chat+tool timeline the react-spring zoom page polls."""
+    events, health = _load_events()
+    items = build_timeline(events, call_id)
+    intent = latest_intent(events, call_id)
+    call = call_summary(events, call_id)
+    call["submit_window_secs"] = get_settings().submit_window_secs
+    return JSONResponse(
+        {
+            "call_id": call_id,
+            "items": items,
+            "intent": intent,
+            "call": call,
+            "line_up": health is not None,
+        }
+    )
+
+
+if WALL_APP_DIST.exists():
+    app.add_static_files("/wall-assets", str(WALL_APP_DIST))
+    _WALL_INDEX_HTML = (WALL_APP_DIST / "index.html").read_text(encoding="utf-8")
+
+    @app.get("/call/{call_id}/zoom")
+    def call_zoom_page(call_id: str) -> HTMLResponse:
+        """The react-spring zoom page: voice orb, live tool demo, extracted
+        info with the rule behind each, final action.
+
+        Built by ``npm run build`` in ``vortex/observability/wall-app/``. It
+        reads its data from ``/api/wall/timeline/{call_id}`` above, client-side.
+        Additive: ``/call/{call_id}`` (no ``/zoom``) stays the NiceGUI page.
+        """
+        del call_id  # the SPA reads the id itself from window.location
+        return HTMLResponse(_WALL_INDEX_HTML)
+
+
 # ---------------------------------------------------------------------------
 # Team pages
 # ---------------------------------------------------------------------------
 
 
 def _login_form() -> None:
-    with ui.element("main").classes("page"), ui.element("div").classes("card login"):
-        ui.label("Team sign-in").classes("heading-lg")
-        ui.label("The public wall is at /wall. This side is for the team.").classes("body-sm")
-        ui.element("div").style("height: 16px")
-        password = ui.input(placeholder="password", password=True).props("dense outlined")
-        password.classes("w-full")
-        status = ui.label("").classes("error")
+    with ui.element("main").classes("page"):
+        with ui.element("div").classes("card login"):
+            ui.label("Team sign-in").classes("heading-lg")
+            ui.label("The public wall is at /wall. This side is for the team.").classes("body-sm")
+            ui.element("div").style("height: 16px")
+            password = ui.input(placeholder="password", password=True).props("dense outlined")
+            password.classes("w-full")
+            status = ui.label("").classes("error")
 
-        def submit() -> None:
-            ip = _client_ip()
-            if not auth.login_allowed(ip):
-                status.set_text("Too many attempts. Wait ten minutes.")
-                return
-            auth.record_login_attempt(ip)
-            if auth.check_password(password.value or ""):
-                app.storage.user["ops"] = True
-                ui.navigate.to("/")
-                return
-            status.set_text("Wrong password.")
+            def submit() -> None:
+                ip = _client_ip()
+                if not auth.login_allowed(ip):
+                    status.set_text("Too many attempts. Wait ten minutes.")
+                    return
+                auth.record_login_attempt(ip)
+                if auth.check_password(password.value or ""):
+                    app.storage.user["ops"] = True
+                    ui.navigate.to("/")
+                    return
+                status.set_text("Wrong password.")
 
-        ui.button("Sign in", on_click=submit).props("unelevated no-caps").classes(
-            "button-primary"
-        )
-        password.on("keydown.enter", submit)
+            ui.button("Sign in", on_click=submit).props("unelevated no-caps").classes(
+                "button-primary"
+            )
+            ui.link("Open the wall", "/wall").classes("button-secondary")
+            password.on("keydown.enter", submit)
 
 
 def _logout() -> None:
@@ -846,7 +938,8 @@ def ops_page() -> None:
         cards, health = _load_cards()
         shown = [c for c in cards if _passes(c, state["filter"])]
         if state["id"] is None and shown:
-            state["id"] = shown[0].call_id
+            featured = explain.featured_call(shown)
+            state["id"] = featured.call_id if featured is not None else shown[0].call_id
         card = next((c for c in shown if c.call_id == state["id"]), shown[0] if shown else None)
         names = _prune_presence()
         sig = _signature(cards, health, state["id"], state["filter"], tuple(names))

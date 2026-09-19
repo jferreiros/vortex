@@ -27,6 +27,7 @@ from vortex.contract import ToolContext
 from vortex.diary import tools as diary
 from vortex.identity import tools as identity
 from vortex.line import submit as line_submit
+from vortex.observability.tracing import observe_tool, redact
 from vortex.rules import tools as rules
 
 ToolFn = Callable[[ToolContext, Any], Awaitable[BaseModel]]
@@ -59,7 +60,9 @@ TOOLS: dict[str, ToolSpec] = {
         ToolSpec(
             "validate_national_id",
             "identity",
-            "Normalise a spoken DNI/NIE and check its control letter.",
+            "Normalise a spoken DNI/NIE and check its control letter. "
+            "When the letter does not match, a unique 1-edit digit repair is "
+            "accepted; several repairs set ask_digit_positions to re-ask.",
             contract.ValidateNationalIdInput,
             contract.NationalIdCheck,
             identity.validate_national_id,
@@ -159,6 +162,16 @@ TOOLS: dict[str, ToolSpec] = {
             contract.ProviderMatch,
             rules.find_provider,
         ),
+        ToolSpec(
+            "clinic_facts",
+            "rules",
+            "Answer a question about the clinic from its catalogue: which sites open on a "
+            "day, who consults at a site, whether there is a site in a town. Never answer "
+            "these from memory; the caller books on what you say.",
+            contract.ClinicFactsInput,
+            contract.ClinicFacts,
+            rules.clinic_facts,
+        ),
         # ---- line -------------------------------------------------------
         ToolSpec(
             "submit_action",
@@ -238,6 +251,14 @@ def _parse_stringified(model: type[BaseModel], raw_args: dict[str, Any]) -> dict
 
 async def call_tool(name: str, ctx: ToolContext, raw_args: dict[str, Any]) -> BaseModel:
     """Validate, run, validate, log. The one path every tool call goes through."""
+    with observe_tool(name, raw_args) as observation:
+        result = await _run_tool(name, ctx, raw_args)
+        if observation is not None:
+            observation.update(output=redact(result.model_dump(mode="json")))
+        return result
+
+
+async def _run_tool(name: str, ctx: ToolContext, raw_args: dict[str, Any]) -> BaseModel:
     spec = TOOLS.get(name)
     if spec is None:
         raise ToolError(f"unknown tool: {name}")
