@@ -61,6 +61,7 @@ from vortex.line.confirmation_calls import (
 )
 from vortex.line.sms import (
     SMS_BUDGET_SECS,
+    SMS_DETAILS_BUDGET_SECS,
     SmsClient,
     action_fingerprint,
     make_sms_client,
@@ -840,6 +841,8 @@ class CallSession:
                     provider_id=details.provider_id,
                     location_id=details.location_id,
                     patient_id=action.patient_id,
+                    appointment_id=await self._booked_appointment_id(action),
+                    now=self.ctx.now,
                     lead=lead,
                 )
                 if call is None:
@@ -922,6 +925,31 @@ class CallSession:
         if self.settings.sms_day_before_reminders:
             await self._sync_reminders(action, to=to, details=details)
 
+    async def _booked_appointment_id(self, action: BookAction) -> str:
+        """The platform id of the visit a ``BookAction`` just created.
+
+        Best effort with the SMS details budget: the confirmation call still
+        schedules without it, but a handed-off reschedule needs the real id -
+        ``prepare_reschedule`` rejects anything the clinic API never issued.
+        """
+        try:
+            items = await asyncio.wait_for(
+                self.ctx.clinic.appointments(action.patient_id), SMS_DETAILS_BUDGET_SECS
+            )
+        except Exception as exc:  # noqa: BLE001 - never breaks the call
+            self.ctx.log.event(
+                "confirmation_call.appointment_lookup_failed", error=type(exc).__name__
+            )
+            return ""
+        for item in items:
+            if (
+                item.provider_id == action.provider_id
+                and item.location_id == action.location_id
+                and item.start == action.slot
+            ):
+                return item.appointment_id
+        return ""
+
     async def _sync_reminders(self, action: Action, *, to: str, details: object) -> None:
         """Queue or drop the day-before reminder. Never raises into the call."""
         try:
@@ -945,6 +973,7 @@ class CallSession:
                     provider_id=getattr(details, "provider_id", "") or "",
                     location_id=getattr(details, "location_id", "") or "",
                     patient_id=getattr(action, "patient_id", "") or "",
+                    now=self.ctx.now,
                     lead=lead,
                 )
                 if reminder is None:

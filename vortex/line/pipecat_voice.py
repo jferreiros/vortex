@@ -381,9 +381,7 @@ async def run_pipecat_call(
     session.usage.metered = True
     hangup.bind(task)
 
-    greeting = (
-        handoff_greeting_for(language_state.language) if session.handoff else GREETING
-    )
+    greeting = handoff_greeting_for(language_state.language) if session.handoff else GREETING
 
     @transport.event_handler("on_client_connected")
     async def _on_connected(transport: Any, client: Any) -> None:

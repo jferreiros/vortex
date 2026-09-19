@@ -125,6 +125,21 @@ def test_classify_reply(transcript: str, lang: str, expected: str) -> None:
 # ---- scheduling and store ----------------------------------------------------
 
 
+def test_store_from_settings_is_shared_per_path(tmp_path: Path, monkeypatch) -> None:
+    from vortex import settings as settings_module
+    from vortex.line.confirmation_calls import confirmation_store_from_settings
+
+    monkeypatch.setenv("VORTEX_CONFIRMATION_CALLS_PATH", str(tmp_path / "shared.json"))
+    settings_module.reset_settings()
+    try:
+        settings = settings_module.get_settings()
+        assert confirmation_store_from_settings(settings) is confirmation_store_from_settings(
+            settings
+        )
+    finally:
+        settings_module.reset_settings()
+
+
 def test_build_skips_when_inside_lead_window() -> None:
     call = build_confirmation_call(
         to="+34600000000", when=WHEN, now=WHEN - timedelta(hours=12), lead=timedelta(hours=24)
@@ -164,7 +179,7 @@ def test_no_call_when_booked_within_24h() -> None:
 
 def test_build_refuses_a_naive_datetime() -> None:
     with pytest.raises(ValueError, match="offset"):
-        build_confirmation_call(to="+34600000000", when=datetime(2026, 9, 24, 16, 30))
+        build_confirmation_call(to="+34600000000", when=datetime(2026, 9, 24, 16, 30), now=NOW)
 
 
 @pytest.mark.asyncio
@@ -191,6 +206,21 @@ async def test_store_cancel_matching(tmp_path: Path) -> None:
     cancelled = await cancel_confirmation_calls(store, to="+34600000000", appointment_at=WHEN)
     assert cancelled == 1
     assert store._read()[0].status == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_claim_due_marks_a_bad_call_at_skipped_and_persists(tmp_path: Path) -> None:
+    store = ConfirmationStore(tmp_path / "calls.json")
+    call = _pending()
+    await store.add(call)
+    rows = store._read()
+    rows[0].call_at = "not-a-datetime"
+    store._write(rows)
+    due = await store.claim_due(NOW)
+    assert due == []
+    persisted = store._read()
+    assert persisted[0].status == "skipped"
+    assert persisted[0].detail == "bad_call_at"
 
 
 @pytest.mark.asyncio
@@ -502,9 +532,9 @@ def test_result_endpoint_hands_off_to_the_voice_agent(
 
         import asyncio
 
-        row = asyncio.run(ConfirmationStore(Path(settings.confirmation_calls_path)).get(
-            call.confirmation_id
-        ))
+        row = asyncio.run(
+            ConfirmationStore(Path(settings.confirmation_calls_path)).get(call.confirmation_id)
+        )
         assert row is not None
         assert row.status == "reschedule_requested"
         assert row.detail == "handoff_to_voice_agent"
@@ -526,9 +556,9 @@ def test_result_endpoint_stub_voice_keeps_the_callback_promise(confirmation_clie
 
     import asyncio
 
-    row = asyncio.run(ConfirmationStore(Path(settings.confirmation_calls_path)).get(
-        call.confirmation_id
-    ))
+    row = asyncio.run(
+        ConfirmationStore(Path(settings.confirmation_calls_path)).get(call.confirmation_id)
+    )
     assert row is not None
     assert row.status == "reschedule_requested"
     assert row.detail == "answered"
@@ -537,8 +567,12 @@ def test_result_endpoint_stub_voice_keeps_the_callback_promise(confirmation_clie
 def test_handoff_note_enters_the_prompt() -> None:
     from vortex.conversation.prompt import build_system_prompt, handoff_note_for
 
-    handoff = {"kind": "reschedule", "appointment_id": "apt-1", "patient_id": "pat-9",
-               "language": "es"}
+    handoff = {
+        "kind": "reschedule",
+        "appointment_id": "apt-1",
+        "patient_id": "pat-9",
+        "language": "es",
+    }
     note = handoff_note_for(handoff)
     assert "apt-1" in note and "pat-9" in note and "Spanish" in note
     prompt = build_system_prompt(WHEN, handoff=handoff)
