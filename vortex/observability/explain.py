@@ -452,6 +452,16 @@ class Beat:
     ms: float | None = None
 
 
+#: Submission statuses the platform counts as a hand-off it accepted.
+SUBMIT_OK_STATUS = frozenset({"submitted", "accepted"})
+
+
+def submit_beat_dot(event: dict[str, Any]) -> str:
+    """A ``submit.result`` line is only green when the platform took the action."""
+    result = event.get("result") if isinstance(event.get("result"), dict) else {}
+    return "ok" if result.get("status") in SUBMIT_OK_STATUS else "warn"
+
+
 def _beat_dot_for_status(status: str) -> str:
     if status == "live":
         return "live"
@@ -601,7 +611,7 @@ def workflow_beats(card: CallCard | None) -> list[Beat]:
                         title="Submitted to the platform",
                         text=event_detail(event) or event_text(event),
                         ts=ts,
-                        dot="ok",
+                        dot=submit_beat_dot(event),
                     )
                 )
         flush_speech_until(None)
