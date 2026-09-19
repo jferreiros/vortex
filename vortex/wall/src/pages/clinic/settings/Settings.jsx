@@ -209,6 +209,7 @@ export default function Settings() {
           </div>
         </Card>
 
+        <div className="settings-pair">
         {/* 2. Reserva y duración de llamada */}
         <Card padding="lg" className="settings-group">
           <div className="settings-group-head">
@@ -305,6 +306,7 @@ export default function Settings() {
             </div>
           </div>
         </Card>
+        </div>
 
         {/* 4. Voz del agente (roscas) */}
         <Card padding="lg" className="settings-group settings-group-wide">
