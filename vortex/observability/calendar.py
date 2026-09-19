@@ -128,15 +128,15 @@ def _apply_book(
     call_id: str,
     *,
     appointment_id: str = "",
-) -> None:
+) -> Booking | None:
     """Place the slot a BOOK (or the new leg of a RESCHEDULE) names."""
     provider_id = str(payload.get("provider_id") or "")
     location_id = str(payload.get("location_id") or "")
     start = _parse_dt(payload.get("slot"))
     if not provider_id or start is None:
-        return
+        return None
     start = start.replace(second=0, microsecond=0)
-    bookings[_key(provider_id, location_id, start)] = Booking(
+    booking = Booking(
         provider_id=provider_id,
         location_id=location_id,
         start=start,
@@ -145,6 +145,8 @@ def _apply_book(
         appointment_id=appointment_id,
         call_id=call_id,
     )
+    bookings[_key(provider_id, location_id, start)] = booking
+    return booking
 
 
 def bookings_from_events(
@@ -157,11 +159,13 @@ def bookings_from_events(
     history: a BOOK takes a slot, a CANCEL frees the one its ``appointment_id``
     names, a RESCHEDULE frees the old slot and takes the new one. CANCEL and the
     old leg of a RESCHEDULE carry no slot of their own, so they are resolved
-    through ``appt_index`` (the pre-existing appointments from the pack). A
-    cancel for an appointment with no known provider simply frees nothing.
+    against the bookings this replay has already placed, then against
+    ``appt_index`` (the pre-existing appointments from the pack). A cancel for
+    an appointment with no known provider simply frees nothing.
     """
     appt_index = appt_index or {}
     bookings: dict[BookingKey, Booking] = {}
+    replayed: dict[str, Booking] = {}
     for event in events:
         if event.get("kind") != "submit.result":
             continue
@@ -174,11 +178,13 @@ def bookings_from_events(
         call_id = str(event.get("call_id") or "")
         appointment_id = str(payload.get("appointment_id") or "")
         if action in {"CANCEL", "RESCHEDULE"}:
-            existing = appt_index.get(appointment_id)
+            existing = replayed.pop(appointment_id, None) or appt_index.get(appointment_id)
             if existing is not None:
                 bookings.pop(_key(existing.provider_id, existing.location_id, existing.start), None)
         if action in {"BOOK", "RESCHEDULE"}:
-            _apply_book(bookings, payload, call_id, appointment_id=appointment_id)
+            booked = _apply_book(bookings, payload, call_id, appointment_id=appointment_id)
+            if booked is not None and appointment_id:
+                replayed[appointment_id] = booked
     return bookings
 
 
