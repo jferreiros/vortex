@@ -306,6 +306,9 @@ async def test_business_insights_endpoint_falls_back_and_fills_blocks(
     body = resp.json()
 
     assert body["range_days"] == 30
+    # A value between the pills clamps to the nearest supported window.
+    clamped = await user.http_client.get("/api/wall/business-insights?days=45")
+    assert clamped.json()["range_days"] == 30
     assert body["source"]["kind"] == "jsonl_fallback"
     assert body["source"]["calls"] == 2
     assert body["calls_considered"] == 2
