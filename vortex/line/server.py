@@ -18,6 +18,7 @@ import asyncio
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import Body, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, PlainTextResponse, Response
@@ -117,11 +118,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return voice_config.load(settings).to_dict()
 
     @app.put("/voice-config")
-    async def put_voice_config(payload: dict = Body(default=None)) -> dict[str, object]:
+    async def put_voice_config(
+        payload: Annotated[dict | None, Body()] = None,
+    ) -> dict[str, object]:
         return voice_config.save(settings, payload).to_dict()
 
     @app.post("/voice-preview")
-    async def voice_preview(payload: dict = Body(default=None)) -> Response:
+    async def voice_preview(payload: Annotated[dict | None, Body()] = None) -> Response:
         """One MP3 of the greeting with the posted (or stored) settings, for
         the wall's Try button. Synthesised off the event loop — the Google
         client is blocking."""
