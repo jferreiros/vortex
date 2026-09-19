@@ -361,8 +361,3 @@ body:has(.app) .nicegui-content {
   height: 32px !important;
   padding: 0 14px !important;
 }
-
-.page-head .button-quiet {
-  white-space: nowrap;
-  flex: 0 0 auto;
-}
