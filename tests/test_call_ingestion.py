@@ -242,7 +242,41 @@ def test_load_events_insights_scope_asks_by_date(feed, monkeypatch, tmp_path) ->
     assert calls_seen[0] == {"since": cutoff.isoformat()}
 
 
-def test_load_events_prefers_hosted_sql_on_a_dated_window(feed, monkeypatch, offline_settings) -> None:
+def test_load_events_prefers_hosted_sql_on_recent(feed, monkeypatch, offline_settings) -> None:
+    """The live wall reads hosted tables first too — not only dated windows."""
+    from vortex.observability import supabase_log
+
+    path = Path(offline_settings.calls_log_path)
+    hosted = {
+        "CA-hosted": [
+            {
+                "ts": "2026-09-10T10:00:00.000+00:00",
+                "call_id": "CA-hosted",
+                "kind": "call.started",
+            }
+        ]
+    }
+
+    def boom(*_a: object, **_k: object) -> _Resp:
+        raise AssertionError("recent reads must not hit the line when hosted data is in")
+
+    monkeypatch.setattr(feed.httpx, "get", boom)
+    monkeypatch.setattr(supabase_log, "uses_this_log", lambda _path: True)
+    monkeypatch.setattr(
+        supabase_log,
+        "fetch_window",
+        lambda **_kw: (hosted, {"calls": 1, "events": 1, "truncated": False}),
+    )
+
+    events, health, source = feed.load_events("recent", path)
+    assert source["kind"] == "supabase"
+    assert health is None
+    assert events[0]["call_id"] == "CA-hosted"
+
+
+def test_load_events_prefers_hosted_sql_on_a_dated_window(
+    feed, monkeypatch, offline_settings
+) -> None:
     """Home / Insights read the hosted tables first so a board with no
     line volume still paints the same cards the product DB already holds."""
     from vortex.observability import supabase_log

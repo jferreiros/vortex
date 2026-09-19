@@ -9,6 +9,7 @@ import { LANGUAGE_LABEL, STATUS_LABEL } from "../../../lib/labels";
 import { toolMeta } from "../../../lib/tools";
 import { ToolIcon } from "../../../lib/icons";
 import { PLACEHOLDER_CALLS } from "./placeholderCalls";
+import useLiveCalls from "./useLiveCalls";
 import vortyAnimated from "../../../../media/avatar2d_animated.svg";
 import "./live-call-detail.css";
 
@@ -145,7 +146,8 @@ export default function LiveCallDetail() {
   const navigate = useNavigate();
   const { callId } = resolveRawId(rawParam);
   const { items, call } = useCallTimeline(callId);
-  const listed = placeholderFor(rawParam);
+  const { calls: liveCalls } = useLiveCalls();
+  const listed = liveCalls.find((c) => c.id === rawParam) || placeholderFor(rawParam);
   const streamedTurns = items.filter((it) => it.type === "turn");
   const streamedTools = items.filter((it) => it.type === "tool");
   const turns = streamedTurns.length ? streamedTurns : listed?.turns || [];
@@ -154,7 +156,7 @@ export default function LiveCallDetail() {
   const name = callerName(items, listed, call);
   const direction = listed?.direction || "inbound";
   const streamRef = useRef(null);
-  const index = PLACEHOLDER_CALLS.findIndex((c) => c.id === rawParam);
+  const index = liveCalls.findIndex((c) => c.id === rawParam);
   const hasPager = index >= 0;
   const [, tick] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -179,7 +181,7 @@ export default function LiveCallDetail() {
 
   function go(delta) {
     if (!hasPager) return;
-    const next = PLACEHOLDER_CALLS[index + delta];
+    const next = liveCalls[index + delta];
     if (next) navigate(`/clinic/live-calls/${next.id}`);
   }
 
@@ -194,11 +196,11 @@ export default function LiveCallDetail() {
                   ‹
                 </button>
                 <span>
-                  {index + 1} / {PLACEHOLDER_CALLS.length}
+                  {index + 1} / {liveCalls.length}
                 </span>
                 <button
                   type="button"
-                  disabled={index === PLACEHOLDER_CALLS.length - 1}
+                  disabled={index === liveCalls.length - 1}
                   onClick={() => go(1)}
                   aria-label="Next call"
                 >

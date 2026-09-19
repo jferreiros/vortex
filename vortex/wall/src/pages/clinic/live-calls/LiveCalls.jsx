@@ -3,8 +3,9 @@ import SectionHeader from "../../../components/ui/SectionHeader";
 import Card from "../../../components/ui/Card";
 import { PhaseIcon, ToolIcon } from "../../../lib/icons";
 import { toolMeta } from "../../../lib/tools";
-import { LANGUAGE_LABEL, REASON_LABEL } from "../../../lib/labels";
+import { LANGUAGE_LABEL, PHASE_LABEL, REASON_LABEL, phaseView } from "../../../lib/labels";
 import patientTimelines from "../../../data/patientTimelines.json";
+import useLiveCalls from "./useLiveCalls";
 import "./live-calls.css";
 
 // Placeholder name→id lookup until calls carry a real patient_id — falls
@@ -12,7 +13,9 @@ import "./live-calls.css";
 const PATIENT_ID_BY_NAME = Object.fromEntries(
   patientTimelines.patients.map((p) => [p.name, p.patientId])
 );
-function patientIdFor(name) {
+function patientIdFor(call) {
+  if (call?.patient_id) return call.patient_id;
+  const name = call?.patient || call;
   return PATIENT_ID_BY_NAME[name] || patientTimelines.patients[0].patientId;
 }
 
@@ -25,36 +28,6 @@ function HistoryIcon() {
     </svg>
   );
 }
-
-// PLACEHOLDER: live call feed. There is no "list every active call" endpoint
-// yet — vortex/observability's API exposes one call's timeline at a time
-// (GET /api/wall/timeline/{call_id}). Only the first row uses the real
-// scripted demo (call_id "demo") so clicking through actually works end to
-// end; the rest are illustrative cards with no live data behind them yet,
-// which is exactly what they should look like until that endpoint exists.
-// Only calls still in progress belong here — a call that has ended is either
-// rejected or escalated, and moves to the review panel on the right.
-const ACTIVE_CALLS = [
-  { id: "demo", patient: "Lucía Ruiz López", site: "Arenal Centro", phaseKey: "speaking", phaseLabel: "Hablando", duration: "00:32", language: "es" },
-  { id: "call-2", patient: "Sin identificar", site: "Arenal Norte", phaseKey: "listening", phaseLabel: "Escuchando", duration: "00:08", language: "ca" },
-  { id: "call-3", patient: "Antonio Pérez Gil", site: "Arenal Centro", phaseKey: "working", tool: "find_slots", duration: "01:14", language: "es" },
-  { id: "call-5", patient: "María Torres Vidal", site: "Arenal Sur", phaseKey: "speaking", phaseLabel: "Hablando", duration: "00:51", language: "es" },
-];
-
-// "Rechazada" = the agent submitted NO_ACTION. `reason` is one of the closed
-// 18-value vocabulary (see .claude/skills/submit-action) — the exact rule
-// that bit — plus the moment it happened and a way to ring the caller back.
-const REJECTED_CALLS = [
-  { id: "rej-1", patient: "Sin identificar", phone: "+34 611 224 578", time: "11:42:07", reason: "no_availability" },
-  { id: "rej-2", patient: "Marcos Iglesias Peña", phone: "+34 699 015 332", time: "11:26:51", reason: "location_hours" },
-  { id: "rej-3", patient: "Sin identificar", phone: "+34 622 887 140", time: "10:58:19", reason: "out_of_scope" },
-];
-
-// "Escalada" = handed off to a human. The reason is the thing worth showing.
-const ESCALATED_CALLS = [
-  { id: "call-4", patient: "Ana Salas Ferrer", time: "11:39:22", reason: "Síntomas que requieren triaje clínico" },
-  { id: "esc-2", patient: "Jorge Nieto Campos", time: "11:15:40", reason: "Solicita cambio fuera de la ventana permitida" },
-];
 
 function PhoneIcon() {
   return (
@@ -84,7 +57,10 @@ function EscalateIcon() {
 }
 
 function ActiveCallCard({ call, onOpen, onOpenHistory }) {
-  const step = call.phaseKey === "working" && call.tool ? toolMeta(call.tool) : null;
+  const view = phaseView(call);
+  const phaseKey = call.phaseKey || (view.key.toLowerCase().includes("listen") ? "listening" : call.tool ? "working" : "speaking");
+  const phaseLabel = call.phaseLabel || view.label || PHASE_LABEL[call.phase] || call.phase;
+  const step = phaseKey === "working" && call.tool ? toolMeta(call.tool) : null;
 
   return (
     <Card
@@ -117,8 +93,8 @@ function ActiveCallCard({ call, onOpen, onOpenHistory }) {
       <div className="live-call-card-bottom">
         <span className="live-call-chip">{LANGUAGE_LABEL[call.language] || call.language}</span>
         <span className="live-call-phase">
-          {step ? <ToolIcon name={call.tool} size={16} /> : <PhaseIcon phase={call.phaseKey} size={16} />}
-          {step ? step.label : call.phaseLabel}
+          {step ? <ToolIcon name={call.tool} size={16} /> : <PhaseIcon phase={phaseKey} size={16} />}
+          {step ? step.label : phaseLabel}
         </span>
       </div>
     </Card>
@@ -145,9 +121,9 @@ function RejectedRow({ call, onOpenHistory }) {
           </button>
           <a
             className="feed-row-call"
-            href={`tel:${call.phone.replace(/\s+/g, "")}`}
-            title={`Devolver llamada a ${call.phone}`}
-            aria-label={`Devolver llamada a ${call.phone}`}
+            href={call.phone ? `tel:${String(call.phone).replace(/\s+/g, "")}` : undefined}
+            title={call.phone ? `Devolver llamada a ${call.phone}` : "Sin teléfono"}
+            aria-label={call.phone ? `Devolver llamada a ${call.phone}` : "Sin teléfono"}
           >
             <PhoneIcon />
           </a>
@@ -181,27 +157,32 @@ function EscalatedRow({ call, onOpenHistory }) {
 
 export default function LiveCalls() {
   const navigate = useNavigate();
+  const { calls, rejected, escalated } = useLiveCalls();
   const openCall = (id) => navigate(`/clinic/live-calls/${id}`);
-  const openHistory = (patientName) => navigate(`/clinic/patient-timeline/${patientIdFor(patientName)}`);
+  const openHistory = (call) => navigate(`/clinic/patient-timeline/${patientIdFor(call)}`);
 
   return (
     <div className="live-calls-page">
       <SectionHeader
-        eyebrow={`${ACTIVE_CALLS.length} activas`}
+        eyebrow={`${calls.length} activas`}
         title="Live Calls"
         subtitle="Llamadas en curso ahora mismo. Selecciona una para ver el detalle completo."
       />
 
+      {calls.length === 0 ? (
+        <p className="live-calls-empty">Ninguna llamada en curso.</p>
+      ) : (
       <div className="live-calls-grid">
-        {ACTIVE_CALLS.map((call) => (
+        {calls.map((call) => (
           <ActiveCallCard
             key={call.id}
             call={call}
             onOpen={() => openCall(call.id)}
-            onOpenHistory={() => openHistory(call.patient)}
+            onOpenHistory={() => openHistory(call)}
           />
         ))}
       </div>
+      )}
 
       <aside className="feed-panel">
         <div className="feed-half feed-half-rejected">
@@ -210,11 +191,11 @@ export default function LiveCalls() {
               <AlertIcon />
               <span className="feed-panel-title">Llamadas rechazadas</span>
             </span>
-            <span className="feed-panel-count">{REJECTED_CALLS.length}</span>
+            <span className="feed-panel-count">{rejected.length}</span>
           </div>
           <ul className="feed-list">
-            {REJECTED_CALLS.map((call) => (
-              <RejectedRow key={call.id} call={call} onOpenHistory={() => openHistory(call.patient)} />
+            {rejected.map((call) => (
+              <RejectedRow key={call.id} call={call} onOpenHistory={() => openHistory(call)} />
             ))}
           </ul>
         </div>
@@ -227,11 +208,11 @@ export default function LiveCalls() {
               <EscalateIcon />
               <span className="feed-panel-title">Llamadas escaladas</span>
             </span>
-            <span className="feed-panel-count">{ESCALATED_CALLS.length}</span>
+            <span className="feed-panel-count">{escalated.length}</span>
           </div>
           <ul className="feed-list">
-            {ESCALATED_CALLS.map((call) => (
-              <EscalatedRow key={call.id} call={call} onOpenHistory={() => openHistory(call.patient)} />
+            {escalated.map((call) => (
+              <EscalatedRow key={call.id} call={call} onOpenHistory={() => openHistory(call)} />
             ))}
           </ul>
         </div>

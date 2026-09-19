@@ -16,6 +16,7 @@ tmp file for tests).
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -303,6 +304,7 @@ def list_appointments(
     date_from: date | None = None,
     date_to: date | None = None,
     statuses: tuple[str, ...] = OPEN_STATUSES,
+    patient_id: str | None = None,
 ) -> list[AppointmentRecord]:
     """Appointments in a date window, oldest slot first.
 
@@ -322,6 +324,9 @@ def list_appointments(
     if date_to is not None:
         clauses.append("substr(slot_start, 1, 10) <= ?")
         params.append(date_to.isoformat())
+    if patient_id:
+        clauses.append("patient_id = ?")
+        params.append(patient_id)
     from database.remote import mirrors_product, select
 
     if mirrors_product(conn):
@@ -334,6 +339,8 @@ def list_appointments(
                 records = [r for r in records if r.slot_start[:10] >= date_from.isoformat()]
             if date_to is not None:
                 records = [r for r in records if r.slot_start[:10] <= date_to.isoformat()]
+            if patient_id:
+                records = [r for r in records if r.patient_id == patient_id]
             return records
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     rows = conn.execute(
@@ -451,7 +458,9 @@ def cancel_appointment_rows(
     from database.remote import after_write
 
     for appointment_id in ids:
-        synced = conn.execute("SELECT * FROM appointments WHERE id = ?", (appointment_id,)).fetchone()
+        synced = conn.execute(
+            "SELECT * FROM appointments WHERE id = ?", (appointment_id,)
+        ).fetchone()
         if synced is not None:
             after_write(conn, "appointments", synced, "id")
     return ids
@@ -538,3 +547,142 @@ def call_with_appointment(
         return None
     appt = get_appointment(conn, call.appointment_id) if call.appointment_id else None
     return call, appt
+
+
+# ---------------------------------------------------------------------------
+# clinic console (settings, pathways, patterns, suggestion rejections)
+# ---------------------------------------------------------------------------
+
+CLINIC_SETTINGS_DEFAULTS: dict[str, Any] = {
+    "minimum_booking_lead_hours": 24,
+    "patient_identification_fields_required": 1,
+    "call_time_cap_minutes": 3,
+}
+
+
+def get_clinic_settings(conn: sqlite3.Connection) -> dict[str, Any]:
+    from database.remote import mirrors_product, select
+
+    if mirrors_product(conn):
+        remote = select("clinic_settings", {"id": "eq.1"})
+        if remote:
+            row = remote[0]
+            return {
+                "minimum_booking_lead_hours": int(row["minimum_booking_lead_hours"]),
+                "patient_identification_fields_required": int(
+                    row["patient_identification_fields_required"]
+                ),
+                "call_time_cap_minutes": int(row["call_time_cap_minutes"]),
+            }
+    row = conn.execute("SELECT * FROM clinic_settings WHERE id = 1").fetchone()
+    if row is None:
+        return dict(CLINIC_SETTINGS_DEFAULTS)
+    return {
+        "minimum_booking_lead_hours": int(row["minimum_booking_lead_hours"]),
+        "patient_identification_fields_required": int(
+            row["patient_identification_fields_required"]
+        ),
+        "call_time_cap_minutes": int(row["call_time_cap_minutes"]),
+    }
+
+
+def put_clinic_settings(conn: sqlite3.Connection, values: dict[str, Any]) -> dict[str, Any]:
+    lead = max(2, min(96, int(values.get("minimum_booking_lead_hours", 24))))
+    fields = max(1, min(4, int(values.get("patient_identification_fields_required", 1))))
+    cap = 3
+    ts = now_iso()
+    row = conn.execute(
+        """
+        INSERT INTO clinic_settings
+            (id, minimum_booking_lead_hours, patient_identification_fields_required,
+             call_time_cap_minutes, updated_at)
+        VALUES (1, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            minimum_booking_lead_hours = excluded.minimum_booking_lead_hours,
+            patient_identification_fields_required =
+                excluded.patient_identification_fields_required,
+            call_time_cap_minutes = excluded.call_time_cap_minutes,
+            updated_at = excluded.updated_at
+        RETURNING *
+        """,
+        (lead, fields, cap, ts),
+    ).fetchone()
+    from database.remote import after_write
+
+    after_write(conn, "clinic_settings", row, "id")
+    return get_clinic_settings(conn)
+
+
+def get_wall_document(conn: sqlite3.Connection, kind: str) -> dict[str, Any] | None:
+    from database.remote import mirrors_product, select
+
+    if mirrors_product(conn):
+        remote = select("wall_documents", {"kind": f"eq.{kind}"})
+        if remote:
+            body = remote[0].get("body")
+            if isinstance(body, dict):
+                return body
+            if isinstance(body, str):
+                parsed = json.loads(body)
+                return parsed if isinstance(parsed, dict) else None
+    row = conn.execute("SELECT body FROM wall_documents WHERE kind = ?", (kind,)).fetchone()
+    if row is None:
+        return None
+    parsed = json.loads(row["body"])
+    return parsed if isinstance(parsed, dict) else None
+
+
+def put_wall_document(conn: sqlite3.Connection, kind: str, body: dict[str, Any]) -> dict[str, Any]:
+    payload = json.dumps(body, ensure_ascii=False)
+    ts = now_iso()
+    row = conn.execute(
+        """
+        INSERT INTO wall_documents (kind, body, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(kind) DO UPDATE SET
+            body = excluded.body,
+            updated_at = excluded.updated_at
+        RETURNING *
+        """,
+        (kind, payload, ts),
+    ).fetchone()
+    from database.remote import mirrors_product, safe_upsert
+
+    if mirrors_product(conn):
+        payload = dict(row)
+        payload["body"] = body
+        safe_upsert("wall_documents", [payload], "kind")
+    return body
+
+
+def list_suggestion_rejections(conn: sqlite3.Connection, patient_id: str) -> list[str]:
+    from database.remote import mirrors_product, select
+
+    if mirrors_product(conn):
+        remote = select(
+            "suggestion_rejections",
+            {"patient_id": f"eq.{patient_id}", "select": "pattern_id"},
+        )
+        if remote is not None:
+            return [str(r["pattern_id"]) for r in remote]
+    rows = conn.execute(
+        "SELECT pattern_id FROM suggestion_rejections WHERE patient_id = ?",
+        (patient_id,),
+    ).fetchall()
+    return [str(r["pattern_id"]) for r in rows]
+
+
+def add_suggestion_rejection(conn: sqlite3.Connection, patient_id: str, pattern_id: str) -> None:
+    ts = now_iso()
+    row = conn.execute(
+        """
+        INSERT INTO suggestion_rejections (patient_id, pattern_id, rejected_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(patient_id, pattern_id) DO UPDATE SET rejected_at = excluded.rejected_at
+        RETURNING *
+        """,
+        (patient_id, pattern_id, ts),
+    ).fetchone()
+    from database.remote import after_write
+
+    after_write(conn, "suggestion_rejections", row, "patient_id,pattern_id")

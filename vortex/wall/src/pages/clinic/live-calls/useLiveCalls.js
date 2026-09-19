@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { PLACEHOLDER_CALLS } from "./placeholderCalls";
 
-/* The "in progress right now" feed, shared by the Live Calls list and the
-   detail pager so the two never disagree about which calls exist.
+/* The "in progress right now" feed, shared by Home, Live Calls, and the
+   detail pager so the three never disagree about which calls exist.
 
    It opens on PLACEHOLDER_CALLS and swaps to GET /api/wall/live-calls as
    soon as the first answer lands — including an empty one. An empty real
@@ -14,9 +14,14 @@ import { PLACEHOLDER_CALLS } from "./placeholderCalls";
    board itself, so a failure here means the board is going down anyway. */
 
 const POLL_MS = 4000;
+const EMPTY = { calls: [], rejected: [], escalated: [] };
 
 export function useLiveCalls() {
-  const [calls, setCalls] = useState(PLACEHOLDER_CALLS);
+  const [feed, setFeed] = useState({
+    calls: PLACEHOLDER_CALLS,
+    rejected: [],
+    escalated: [],
+  });
   const cancelled = useRef(false);
 
   useEffect(() => {
@@ -28,7 +33,11 @@ export function useLiveCalls() {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const json = await response.json();
         if (cancelled.current || !Array.isArray(json?.calls)) return;
-        setCalls(json.calls);
+        setFeed({
+          calls: json.calls,
+          rejected: Array.isArray(json.rejected) ? json.rejected : EMPTY.rejected,
+          escalated: Array.isArray(json.escalated) ? json.escalated : EMPTY.escalated,
+        });
       } catch {
         // Keep the last good list — the mock on the very first failure.
       }
@@ -42,7 +51,7 @@ export function useLiveCalls() {
     };
   }, []);
 
-  return calls;
+  return feed;
 }
 
 export default useLiveCalls;
