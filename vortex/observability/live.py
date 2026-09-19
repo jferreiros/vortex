@@ -765,6 +765,8 @@ def call_page(call_id: str) -> None:
         rendered["sig"] = sig
         stage.clear()
         with stage:
+            # Session flag only. _ops_ok() is true when auth is off, and this route is public.
+            team = bool(app.storage.user.get("ops"))
             slot = _nav("", team=False)
             with slot:
                 _line_pill(health)
@@ -774,7 +776,7 @@ def call_page(call_id: str) -> None:
                     with ui.element("div"):
                         ui.link("← Live", "/wall").classes("caption-sm")
                         ui.label(
-                            _caller(card, public=not _ops_ok()) if card else "Unknown call"
+                            _caller(card, public=not team) if card else "Unknown call"
                         ).classes("title")
                         ui.label(call_id).classes("sub mono")
                     if card:
@@ -788,7 +790,6 @@ def call_page(call_id: str) -> None:
                         ui.label("No call with this id yet").classes("t")
                         ui.label("It appears here as soon as the socket opens.").classes("d")
                 else:
-                    team = _ops_ok()
                     _call_panel(card, verbose=team, public=not team)
             _footer()
 
