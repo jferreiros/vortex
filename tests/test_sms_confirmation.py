@@ -7,6 +7,7 @@ an accepted book/cancel texts the calling number; everything else stays quiet.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -247,9 +248,18 @@ async def test_twilio_client_reports_http_errors() -> None:
 # ---- session hook -----------------------------------------------------------
 
 
+@pytest.fixture
+def sms_settings(offline_settings: Settings, monkeypatch: pytest.MonkeyPatch) -> Iterator[Settings]:
+    """Offline settings with the opt-in SMS flag turned on."""
+    monkeypatch.setenv("VORTEX_SMS_CONFIRMATIONS", "true")
+    reset_settings()
+    yield get_settings()
+    reset_settings()
+
+
 @pytest.mark.asyncio
-async def test_accepted_booking_sends_sms(offline_settings: Settings) -> None:
-    session = make_session(offline_settings, "CA-book-sms")
+async def test_accepted_booking_sends_sms(sms_settings: Settings) -> None:
+    session = make_session(sms_settings, "CA-book-sms")
     sms = session.sms
     assert isinstance(sms, RecordingSmsClient)
 
@@ -262,8 +272,8 @@ async def test_accepted_booking_sends_sms(offline_settings: Settings) -> None:
 
 
 @pytest.mark.asyncio
-async def test_accepted_cancel_sends_sms(offline_settings: Settings) -> None:
-    session = make_session(offline_settings, "CA-cancel-sms")
+async def test_accepted_cancel_sends_sms(sms_settings: Settings) -> None:
+    session = make_session(sms_settings, "CA-cancel-sms")
     remember_appointment(session)
     sms = session.sms
     assert isinstance(sms, RecordingSmsClient)
@@ -278,9 +288,9 @@ async def test_accepted_cancel_sends_sms(offline_settings: Settings) -> None:
 
 @pytest.mark.asyncio
 async def test_cancel_without_remembered_appointment_still_texts(
-    offline_settings: Settings,
+    sms_settings: Settings,
 ) -> None:
-    session = make_session(offline_settings, "CA-cancel-bare")
+    session = make_session(sms_settings, "CA-cancel-bare")
     sms = session.sms
     assert isinstance(sms, RecordingSmsClient)
 
@@ -336,10 +346,8 @@ async def test_resolve_details_uses_the_remembered_appointment(
         ),
     ],
 )
-async def test_non_book_cancel_actions_do_not_sms(
-    offline_settings: Settings, action: Action
-) -> None:
-    session = make_session(offline_settings, "CA-no-sms")
+async def test_non_book_cancel_actions_do_not_sms(sms_settings: Settings, action: Action) -> None:
+    session = make_session(sms_settings, "CA-no-sms")
     sms = session.sms
     assert isinstance(sms, DryRunSmsClient)
 
@@ -350,8 +358,8 @@ async def test_non_book_cancel_actions_do_not_sms(
 
 
 @pytest.mark.asyncio
-async def test_missing_from_number_skips_sms(offline_settings: Settings) -> None:
-    session = make_session(offline_settings, "CA-no-from", from_number=None)
+async def test_missing_from_number_skips_sms(sms_settings: Settings) -> None:
+    session = make_session(sms_settings, "CA-no-from", from_number=None)
     sms = session.sms
     assert isinstance(sms, DryRunSmsClient)
 
@@ -364,9 +372,9 @@ async def test_missing_from_number_skips_sms(offline_settings: Settings) -> None
 @pytest.mark.asyncio
 @pytest.mark.parametrize("submitter_cls", [DryRunSubmitter, RejectingSubmitter])
 async def test_non_accepted_submit_skips_sms(
-    offline_settings: Settings, submitter_cls: type[AcceptingSubmitter]
+    sms_settings: Settings, submitter_cls: type[AcceptingSubmitter]
 ) -> None:
-    session = make_session(offline_settings, "CA-not-accepted", submitter=submitter_cls())
+    session = make_session(sms_settings, "CA-not-accepted", submitter=submitter_cls())
     sms = session.sms
     assert isinstance(sms, DryRunSmsClient)
 
@@ -377,8 +385,8 @@ async def test_non_accepted_submit_skips_sms(
 
 
 @pytest.mark.asyncio
-async def test_duplicate_status_does_not_double_text(offline_settings: Settings) -> None:
-    session = make_session(offline_settings, "CA-dup", submitter=AcceptingSubmitter())
+async def test_duplicate_status_does_not_double_text(sms_settings: Settings) -> None:
+    session = make_session(sms_settings, "CA-dup", submitter=AcceptingSubmitter())
     sms = session.sms
     assert isinstance(sms, DryRunSmsClient)
     booking = a_booking()
@@ -394,8 +402,8 @@ async def test_duplicate_status_does_not_double_text(offline_settings: Settings)
 
 
 @pytest.mark.asyncio
-async def test_submit_action_tool_path_also_sends_sms(offline_settings: Settings) -> None:
-    session = make_session(offline_settings, "CA-tool-sms")
+async def test_submit_action_tool_path_also_sends_sms(sms_settings: Settings) -> None:
+    session = make_session(sms_settings, "CA-tool-sms")
     sms = session.sms
     assert isinstance(sms, DryRunSmsClient)
     booking = a_booking()
@@ -408,6 +416,19 @@ async def test_submit_action_tool_path_also_sends_sms(offline_settings: Settings
 
     assert len(sms.sent) == 1
     assert sms.sent[0][0] == CALLER
+
+
+@pytest.mark.asyncio
+async def test_sms_stays_silent_without_the_opt_in(offline_settings: Settings) -> None:
+    assert not offline_settings.sms_confirmations
+    session = make_session(offline_settings, "CA-opt-in")
+    sms = session.sms
+    assert isinstance(sms, DryRunSmsClient)
+
+    await session.submit(a_booking())
+    await session.close()
+
+    assert sms.sent == []
 
 
 @pytest.mark.asyncio
@@ -437,10 +458,10 @@ async def test_submit_records_the_action_the_arbiter_decided(
 
 @pytest.mark.asyncio
 async def test_a_booking_the_submission_replaced_sends_no_sms(
-    offline_settings: Settings, monkeypatch: pytest.MonkeyPatch
+    sms_settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The arbiter can turn a booking into an escalation before the POST."""
-    session = make_session(offline_settings, "CA-arbiter-sms")
+    session = make_session(sms_settings, "CA-arbiter-sms")
     sms = session.sms
     assert isinstance(sms, DryRunSmsClient)
 
@@ -458,14 +479,14 @@ async def test_a_booking_the_submission_replaced_sends_no_sms(
 
 @pytest.mark.asyncio
 async def test_sms_events_never_persist_the_number_or_the_body(
-    offline_settings: Settings,
+    sms_settings: Settings,
 ) -> None:
-    session = make_session(offline_settings, "CA-sms-privacy")
+    session = make_session(sms_settings, "CA-sms-privacy")
 
     await session.submit(a_booking())
     await session.close()
 
-    logged = sms_events(offline_settings, "CA-sms-privacy")
+    logged = sms_events(sms_settings, "CA-sms-privacy")
     assert [event["kind"] for event in logged] == ["sms.sending", "sms.dry_run"]
     for event in logged:
         assert event["to"] == mask_phone(CALLER)
