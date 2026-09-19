@@ -146,6 +146,8 @@ export function CancelRangeDialog({ open, onClose, doctors, initialProviderId, t
           {result.cancelled === 0
             ? "No había citas en ese rango."
             : `Hecho: ${result.cancelled} cita${result.cancelled === 1 ? "" : "s"} de ${result.doctor} cancelada${result.cancelled === 1 ? "" : "s"}.`}
+          {result.rebookings_queued > 0 &&
+            ` Se llamará a ${result.rebookings_queued} paciente${result.rebookings_queued === 1 ? "" : "s"} para buscar otro hueco.`}
         </p>
       ) : (
         <div className="agenda-cancel-fields">
@@ -267,6 +269,9 @@ export function CancelVisitDialog({ visit, doctorName, onClose, onDone }) {
             <div><dt>Cuándo</dt><dd>{visit.when}</dd></div>
             <div><dt>Centro</dt><dd>{visit.location_name || "—"}</dd></div>
           </dl>
+          <p className="agenda-cancel-note">
+            El paciente pasará a la cola de reagendado: se le llamará para buscar otro hueco.
+          </p>
           {error && <p className="agenda-error">{error}</p>}
         </div>
       )}

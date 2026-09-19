@@ -353,3 +353,46 @@ async def test_the_time_range_is_read_in_madrid_whatever_offset_the_slot_carries
     assert matched.matched_slot is not None
     assert matched.matched_slot.start.utcoffset() == timedelta(0)
     assert time(10, 0) <= matched.matched_slot.start.astimezone(MADRID).time() < time(11, 0)
+
+
+def test_wall_cancel_request_queues_a_reschedule_callback(tmp_path: Path) -> None:
+    """A hand-cancelled slot becomes one pending reschedule: deterministic id
+    and WALLC- call_id off the slot key, window from tomorrow to slot+30d."""
+    from vortex.diary.rebooking import wall_cancel_request
+
+    slot = datetime(2026, 9, 22, 11, 15, tzinfo=MADRID)
+    request = wall_cancel_request(
+        provider_id="PR05",
+        location_id="sur",
+        slot_start=slot,
+        patient_id="P00042",
+        appointment_id="A0003",
+        specialty_id="orthopaedics",
+        today=date(2026, 9, 18),
+    )
+    assert request is not None
+    assert request.intent == "reschedule"
+    assert request.source_reason == "wall_cancel"
+    assert request.appointment_id == "A0003"
+    assert request.date_from == date(2026, 9, 19)  # never same-day
+    assert request.date_to == date(2026, 10, 22)
+    assert request.call_id.startswith("WALLC-")
+
+    store = RebookingStore(tmp_path / "rebooking.sqlite3")
+    store.add(request)
+    store.add(request)  # same slot confirmed twice stays one row
+    assert [row.request_id for row in store.pending()] == [request.request_id]
+
+
+def test_wall_cancel_request_skips_a_visit_with_no_patient(tmp_path: Path) -> None:
+    """No patient on the visit means nobody to call — no queue row."""
+    from vortex.diary.rebooking import wall_cancel_request
+
+    request = wall_cancel_request(
+        provider_id="PR05",
+        location_id="sur",
+        slot_start=datetime(2026, 9, 22, 11, 15, tzinfo=MADRID),
+        patient_id="",
+        today=date(2026, 9, 18),
+    )
+    assert request is None
