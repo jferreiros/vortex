@@ -81,7 +81,7 @@ function Chat({ items, language }) {
             <animated.div style={style} className={`d11-row ${isUser ? "user" : "assistant"}`}>
               <div className="d11-avatar">
                 {isUser ? (
-                  <PersonIcon size={13} />
+                  <PersonIcon size={34} />
                 ) : (
                   <img src="/wall/vorty-face" alt="" />
                 )}

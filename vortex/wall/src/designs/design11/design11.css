@@ -319,14 +319,17 @@
 }
 
 .design11-root .d11-row.user {
-  justify-content: flex-end;
+  /* row-reverse flips which physical edge is the flex "end", so flex-start
+     (not flex-end) is what actually pushes this row against the right
+     edge of the transcript. */
+  justify-content: flex-start;
   flex-direction: row-reverse;
 }
 
 .design11-root .d11-avatar {
   flex: 0 0 auto;
-  width: 20px;
-  height: 20px;
+  width: 38px;
+  height: 38px;
   border-radius: 50%;
   overflow: hidden;
   display: flex;
