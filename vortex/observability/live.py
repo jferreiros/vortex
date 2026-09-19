@@ -374,19 +374,20 @@ def _transcript(card: CallCard | None) -> None:
             ui.label("Nothing said yet").classes("t")
             ui.label("The transcript streams here as the call goes on.").classes("d")
         return
-    for turn in card.turns:
-        with ui.element("div").classes(f"turn {turn.role}"):
-            ui.label("Patient" if turn.role == "user" else "Vortex").classes("who")
-            ui.label(turn.text).classes("bubble")
-            stamp = _turn_time(card, turn.ts)
-            if stamp:
-                ui.label(stamp).classes("caption-sm mono")
-    if card.live:
-        with ui.element("div").classes("turn assistant"):
-            ui.label("Vortex").classes("who")
-            with ui.element("div").classes("typing"):
-                for _ in range(3):
-                    ui.element("i")
+    with ui.element("div").classes("transcript"):
+        for turn in card.turns:
+            with ui.element("div").classes(f"turn {turn.role}"):
+                ui.label("Patient" if turn.role == "user" else "Vortex").classes("who")
+                ui.label(turn.text).classes("bubble")
+                stamp = _turn_time(card, turn.ts)
+                if stamp:
+                    ui.label(stamp).classes("caption-sm mono")
+        if card.live:
+            with ui.element("div").classes("turn assistant"):
+                ui.label("Vortex").classes("who")
+                with ui.element("div").classes("typing"):
+                    for _ in range(3):
+                        ui.element("i")
 
 
 def _decisions(card: CallCard | None, *, verbose: bool = False) -> None:
@@ -474,7 +475,7 @@ def _outcome(card: CallCard | None) -> None:
             _dot(_status_dot(status) if card else "off")
             ui.label(explain.outcome_title(card))
         ui.label(explain.outcome_text(card)).classes("text")
-        if card and card.decline_reason:
+        if card and card.decline_reason and card.status in {"refused", "escalated", "ended"}:
             ui.label(card.decline_reason).classes("reason")
         rows = [(k, v) for k, v in explain.payload_rows(card) if k != "reason"] if card else []
         if rows:
@@ -589,7 +590,16 @@ def _workflow_panel(card: CallCard | None, *, public: bool = False) -> None:
                         _dot(ending.dot)
                         ui.label(ending.title)
                     ui.label(ending.text).classes("text")
-                    if card and card.decline_reason:
+                    if (
+                        card
+                        and card.decline_reason
+                        and card.status
+                        in {
+                            "refused",
+                            "escalated",
+                            "ended",
+                        }
+                    ):
                         ui.label(card.decline_reason).classes("reason")
                 ui.element("div").style("height: 24px")
             _record(card, public=public)
@@ -662,7 +672,12 @@ def _calls_table(
                         _dot(_status_dot(card.status))
                         ui.label(explain.STATUS_LABEL.get(card.status, card.status))
                     with ui.element("td").classes("mute"):
-                        ui.label(explain.reason_text(card.decline_reason) or "—")
+                        why = (
+                            explain.reason_text(card.decline_reason) or "—"
+                            if card.status in {"refused", "escalated", "ended"}
+                            else "—"
+                        )
+                        ui.label(why)
                     with ui.element("td").classes("num narrow-hide"):
                         ui.label(str(len(card.tools)))
                     with ui.element("td").classes("num narrow-hide"):
@@ -720,8 +735,6 @@ def wall_page() -> None:
             slot = _nav("/wall", team=False)
             with slot:
                 _line_pill(health)
-                zoom_id = featured.call_id if featured else "demo"
-                ui.link("Demo", f"/call/{zoom_id}/zoom", new_tab=True).classes("pill mute")
             with ui.element("main").classes("page"):
                 with ui.element("div").classes("page-head"):
                     with ui.element("div"):
@@ -770,7 +783,6 @@ def call_page(call_id: str) -> None:
             slot = _nav("", team=False)
             with slot:
                 _line_pill(health)
-                ui.link("Demo", f"/call/{call_id}/zoom", new_tab=True).classes("pill mute")
             with ui.element("main").classes("page"):
                 with ui.element("div").classes("page-head"):
                     with ui.element("div"):
@@ -839,6 +851,9 @@ if WALL_APP_DIST.exists():
 
 
 def _login_form() -> None:
+    slot = _nav("/", team=False)
+    with slot:
+        ui.link("Open the wall", "/wall").classes("pill mute")
     with ui.element("main").classes("page"):
         with ui.element("div").classes("card login"):
             ui.label("Team sign-in").classes("heading-lg")

@@ -112,7 +112,7 @@ def _attention(cards: list[CallCard]) -> list[tuple[str, str, str, str, str]]:
 def overview_page() -> None:
     live._apply_chrome()
     if not live._ops_ok():
-        ui.navigate.to("/wall")
+        live._login_form()
         return
     ui.page_title("Vortex · Overview")
     cards, health = live._load_cards()
