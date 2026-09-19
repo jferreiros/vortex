@@ -25,6 +25,7 @@ from vortex.contract import (
     BlockedProvider,
     BookAction,
     BookingResult,
+    CallerLineMatch,
     EligibilityVerdict,
     FindPatientResult,
     NoAction,
@@ -37,6 +38,7 @@ from vortex.contract import (
     action_payload,
     action_route,
 )
+from vortex.identity.tools import PATIENT_PREFERENCES_KEY
 from vortex.line.session import CallMemory, CallSession
 from vortex.line.twilio import StartPayload
 
@@ -79,9 +81,9 @@ class HangingSubmitter:
 # --- helpers -----------------------------------------------------------------
 
 
-def make_session(settings, call_id: str = "CA-fallback") -> CallSession:
+def make_session(settings, call_id: str = "CA-fallback", clinic: Any = None) -> CallSession:
     start = StartPayload(streamSid=f"MZ-{call_id}", callSid=call_id, customParameters={})
-    return CallSession.open(start, settings=settings, now=NOW)
+    return CallSession.open(start, settings=settings, clinic=clinic, now=NOW)
 
 
 def sent(session: CallSession) -> list[tuple[str, dict[str, Any]]]:
@@ -512,7 +514,8 @@ async def test_an_unfinished_lookup_ends_on_patient_not_found(offline_settings) 
     assert event["branch"] == "identity_pending"
 
 
-async def test_an_identified_patient_leaves_the_default_alone(offline_settings) -> None:
+async def test_an_identified_patient_clears_the_unfinished_lookup(offline_settings) -> None:
+    """A later match ends ``patient_not_found``: the call knows whose it is."""
     session = make_session(offline_settings, "CA-identified")
     session.ctx.log.user_turn("mi fecha de nacimiento es 12 de marzo del 85")
     session.memory.observe("find_patient", FindPatientResult(status="not_found"))
@@ -520,7 +523,9 @@ async def test_an_identified_patient_leaves_the_default_alone(offline_settings) 
     await session.close()
 
     assert session.memory.identity_pending is False
-    assert sent(session)[0][1]["reason"] == "out_of_scope"
+    route, payload = sent(session)[0]
+    assert route == "/api/v1/submit/book"
+    assert payload["patient_id"] == FAKE_PATIENT.patient_id
 
 
 async def test_a_named_rule_outranks_an_unfinished_lookup(offline_settings) -> None:
@@ -534,6 +539,175 @@ async def test_a_named_rule_outranks_an_unfinished_lookup(offline_settings) -> N
     await session.close()
 
     assert sent(session)[0][1]["reason"] == "specialty_not_covered"
+
+
+# --- the cold booking: out_of_scope is a certain zero -------------------------
+
+
+class BrokenCatalogue:
+    """A clinic that is down. The refusal the fallback already had must go out."""
+
+    async def catalogue(self) -> Any:
+        raise RuntimeError("the clinic is down")
+
+
+class SlowCatalogue:
+    """A clinic that never answers, so the timeout is the thing under test."""
+
+    async def catalogue(self) -> Any:
+        await asyncio.sleep(30)
+        raise AssertionError("unreachable")
+
+
+def line_owner(session: CallSession, patient: Any = FAKE_PATIENT) -> None:
+    """What the caller-id lookup leaves behind on a call that resolves nothing."""
+    session.memory.caller_line = CallerLineMatch(
+        looked_up=True, from_number=patient.phone, patient=patient, candidates=[patient]
+    )
+
+
+def habit(session: CallSession, patient_id: str, provider_id: str, location_id: str = "") -> None:
+    """What the identity lane mines off a patient's visit history in the background."""
+    session.ctx.state[PATIENT_PREFERENCES_KEY] = {
+        "patient_id": patient_id,
+        "provider_preference": provider_id,
+        "location_preference": location_id,
+    }
+
+
+async def test_a_silent_call_books_the_doctor_the_line_always_uses(offline_settings) -> None:
+    """Nobody said a word, and the call still ends on the booking it can defend.
+
+    The caller-id lookup named the line's owner before the greeting and mined
+    the one doctor every past visit of theirs used. ``out_of_scope`` wins no
+    published case, so that habit is worth more than the refusal.
+    """
+    session = make_session(offline_settings, "CA-cold-habit")
+    line_owner(session)
+    habit(session, FAKE_PATIENT.patient_id, "PR02")
+
+    await session.close()
+
+    route, payload = sent(session)[0]
+    assert route == "/api/v1/submit/book"
+    assert payload["patient_id"] == "P00042"
+    assert payload["provider_id"] == "PR02"
+    assert payload["location_id"] == "norte"
+    assert payload["policy_id"] == "sanitas"
+    assert payload["slot"] > NOW.isoformat()
+    (fallback,) = events(offline_settings, "CA-cold-habit", "submit.fallback")
+    assert fallback["branch"] == "cold_booking"
+    (booking,) = events(offline_settings, "CA-cold-habit", "submit.cold_booking")
+    assert booking["from_line"] is True
+
+
+async def test_the_appointment_type_comes_off_the_slot(offline_settings) -> None:
+    """Never a type we chose: the platform compares the slot's own id exactly."""
+    session = make_session(offline_settings, "CA-cold-type")
+    line_owner(session)
+    habit(session, FAKE_PATIENT.patient_id, "PR04")
+
+    await session.close()
+
+    assert sent(session)[0][1]["appointment_type_id"] == "dermatology_review"
+
+
+async def test_without_a_habit_the_cold_booking_asks_for_general_practice(
+    offline_settings,
+) -> None:
+    """``/availability`` answers no query naming neither provider nor specialty."""
+    session = make_session(offline_settings, "CA-cold-gp")
+    line_owner(session)
+
+    await session.close()
+
+    route, payload = sent(session)[0]
+    assert route == "/api/v1/submit/book"
+    assert payload["provider_id"] == "PR01"
+    assert payload["location_id"] == "centro"
+
+
+async def test_a_habit_mined_for_somebody_else_is_not_used(offline_settings) -> None:
+    """The line owner's doctor is not the doctor of whoever the call identified."""
+    session = make_session(offline_settings, "CA-cold-other")
+    line_owner(session)
+    habit(session, "P00107", "PR02")
+
+    await session.close()
+
+    assert session._habits_of(FAKE_PATIENT) == (None, None)
+    assert sent(session)[0][1]["provider_id"] == "PR01"
+
+
+async def test_a_named_reason_is_never_traded_for_a_cold_booking(offline_settings) -> None:
+    """The rule that bit outranks the guess. This is what F1 and F3 established."""
+    session = make_session(offline_settings, "CA-cold-vs-rule")
+    line_owner(session)
+    habit(session, FAKE_PATIENT.patient_id, "PR02")
+    session.ctx.log.user_turn("quiero cita con el dermatologo")
+    session.memory.observe(
+        "check_eligibility",
+        EligibilityVerdict(
+            allowed=False,
+            rejection=Rejection(reason="referral_required", detail="dermatology needs one"),
+        ),
+    )
+
+    await session.close()
+
+    route, payload = sent(session)[0]
+    assert route == "/api/v1/submit/no-action"
+    assert payload["reason"] == "referral_required"
+    assert events(offline_settings, "CA-cold-vs-rule", "submit.cold_booking") == []
+
+
+async def test_a_prepared_action_is_never_traded_for_a_cold_booking(offline_settings) -> None:
+    """A plan a tool drew up is the call's own answer, not a guess off the line."""
+    session = make_session(offline_settings, "CA-cold-vs-prepared")
+    line_owner(session)
+    habit(session, FAKE_PATIENT.patient_id, "PR02")
+    session.memory.observe("prepare_booking", BookingResult(action=a_booking()))
+
+    await session.close()
+
+    assert sent(session)[0][1]["provider_id"] == "PR05"
+    assert events(offline_settings, "CA-cold-vs-prepared", "submit.cold_booking") == []
+
+
+async def test_a_line_on_no_record_still_ends_on_out_of_scope(offline_settings) -> None:
+    """No patient, no booking to guess at. The refusal is all there is."""
+    session = make_session(offline_settings, "CA-cold-nobody")
+    session.memory.caller_line = CallerLineMatch(looked_up=True, from_number="+34600000000")
+
+    await session.close()
+
+    assert sent(session)[0][1]["reason"] == "out_of_scope"
+    assert events(offline_settings, "CA-cold-nobody", "submit.cold_booking") == []
+
+
+async def test_a_clinic_that_is_down_leaves_the_refusal_alone(offline_settings) -> None:
+    session = make_session(offline_settings, "CA-cold-broken", clinic=BrokenCatalogue())
+    line_owner(session)
+
+    await session.close()
+
+    assert sent(session)[0][1]["reason"] == "out_of_scope"
+    (failure,) = events(offline_settings, "CA-cold-broken", "submit.cold_booking_failed")
+    assert "RuntimeError" in failure["detail"]
+
+
+async def test_the_cold_booking_gives_up_inside_the_submit_window(offline_settings) -> None:
+    """A booking that misses the window is worth less than a refusal that makes it."""
+    settings = dataclasses.replace(offline_settings, cold_booking_timeout_secs=0.05)
+    session = make_session(settings, "CA-cold-slow", clinic=SlowCatalogue())
+    line_owner(session)
+
+    started = time.monotonic()
+    await session.close()
+
+    assert time.monotonic() - started < settings.submit_window_secs
+    assert sent(session)[0][1]["reason"] == "out_of_scope"
+    assert events(settings, "CA-cold-slow", "submit.cold_booking_timed_out")
 
 
 # --- what stops the fallback --------------------------------------------------
