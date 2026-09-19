@@ -1857,13 +1857,30 @@ button.cal-cell .q-btn__content,
   cursor: pointer;
 }
 
+.cal-cell.off {
+  background: transparent;
+}
+
+button.cal-cell,
+.cal-cell.q-btn {
+  height: 18px !important;
+  min-height: 18px !important;
+  min-width: 0 !important;
+  padding: 0 !important;
+  border-radius: var(--rounded-sm) !important;
+  font-size: 0 !important;
+  color: transparent !important;
+}
+
+button.cal-cell .q-btn__content,
+.cal-cell.q-btn .q-btn__content {
+  width: 100%;
+  height: 100%;
+}
+
 .cal-cell.booked.on {
   outline: 2px solid var(--ink);
   outline-offset: 2px;
-}
-
-.cal-cell.off {
-  background: transparent;
 }
 
 .page-head .button-quiet {
