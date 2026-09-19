@@ -45,15 +45,35 @@ const MOCK_STATS = {
       { id: "sur", name: "Arenal Sur", services: MOCK_SERVICES },
     ],
   },
+  // Same shape business_insights.demand_supply_heatmap serves: 7 weekday
+  // rows x the 4 bands, an `open` matrix per site for the "Cerrado" cells,
+  // and `suggested_action` naming the hottest gap.
   heatmap: {
-    bands: ["Mañana", "Mediodía", "Tarde"],
-    rows: [
-      { weekday: "Lun", cells: [{ band: "a", demand: 8, availability: 6 }, { band: "b", demand: 3, availability: 4 }, { band: "c", demand: 12, availability: 5 }] },
-      { weekday: "Mar", cells: [{ band: "a", demand: 6, availability: 6 }, { band: "b", demand: 2, availability: 4 }, { band: "c", demand: 9, availability: 7 }] },
-      { weekday: "Mié", cells: [{ band: "a", demand: 5, availability: 5 }, { band: "b", demand: 1, availability: 3 }, { band: "c", demand: 7, availability: 8 }] },
-      { weekday: "Jue", cells: [{ band: "a", demand: 7, availability: 4 }, { band: "b", demand: 4, availability: 2 }, { band: "c", demand: 14, availability: 0 }] },
-      { weekday: "Vie", cells: [{ band: "a", demand: 9, availability: 7 }, { band: "b", demand: 2, availability: 3 }, { band: "c", demand: 8, availability: 6 }] },
+    bands: ["Mañana", "Mediodía", "Tarde", "Tarde-noche"],
+    open: [
+      [true, true, true, true],
+      [true, true, true, true],
+      [true, true, true, true],
+      [true, true, true, true],
+      [true, true, true, false],
+      [true, true, false, false],
+      [false, false, false, false],
     ],
+    rows: [
+      { weekday: "Lunes", all_day_demand: 0, cells: [{ band: "Mañana", demand: 8, availability: 6 }, { band: "Mediodía", demand: 3, availability: 4 }, { band: "Tarde", demand: 12, availability: 5 }, { band: "Tarde-noche", demand: 4, availability: 2 }] },
+      { weekday: "Martes", all_day_demand: 0, cells: [{ band: "Mañana", demand: 6, availability: 6 }, { band: "Mediodía", demand: 2, availability: 4 }, { band: "Tarde", demand: 9, availability: 7 }, { band: "Tarde-noche", demand: 3, availability: 0 }] },
+      { weekday: "Miércoles", all_day_demand: 0, cells: [{ band: "Mañana", demand: 5, availability: 5 }, { band: "Mediodía", demand: 1, availability: 3 }, { band: "Tarde", demand: 7, availability: 8 }, { band: "Tarde-noche", demand: 2, availability: 1 }] },
+      { weekday: "Jueves", all_day_demand: 0, cells: [{ band: "Mañana", demand: 7, availability: 4 }, { band: "Mediodía", demand: 4, availability: 2 }, { band: "Tarde", demand: 14, availability: 0 }, { band: "Tarde-noche", demand: 6, availability: 0 }] },
+      { weekday: "Viernes", all_day_demand: 0, cells: [{ band: "Mañana", demand: 9, availability: 7 }, { band: "Mediodía", demand: 2, availability: 3 }, { band: "Tarde", demand: 8, availability: 6 }, { band: "Tarde-noche", demand: 0, availability: 0 }] },
+      { weekday: "Sábado", all_day_demand: 0, cells: [{ band: "Mañana", demand: 4, availability: 3 }, { band: "Mediodía", demand: 1, availability: 1 }, { band: "Tarde", demand: 0, availability: 0 }, { band: "Tarde-noche", demand: 0, availability: 0 }] },
+      { weekday: "Domingo", all_day_demand: 0, cells: [{ band: "Mañana", demand: 0, availability: 0 }, { band: "Mediodía", demand: 0, availability: 0 }, { band: "Tarde", demand: 0, availability: 0 }, { band: "Tarde-noche", demand: 0, availability: 0 }] },
+    ],
+    sites: [
+      { id: "centro", name: "Arenal Centro", hours_label: "L–V 09:00–20:00", open: null, rows: null },
+      { id: "norte", name: "Arenal Norte", hours_label: "L–V 09:00–20:00 · S 09:00–14:00", open: null, rows: null },
+      { id: "sur", name: "Arenal Sur", hours_label: "L–V 10:00–14:00", open: null, rows: null },
+    ],
+    suggested_action: "Los jueves en la franja de tarde concentran 14 peticiones de cita con solo 0 huecos ofrecidos ese tramo: abrir agenda ahí capturaría la mayor bolsa de demanda sin horario.",
   },
 };
 
@@ -287,57 +307,93 @@ function ServiceOccupancy({ occupancy }) {
   );
 }
 
-function Heatmap({ heatmap }) {
-  const rows = heatmap?.rows ?? [];
-  const bands = heatmap?.bands ?? [];
+// Seven day columns x the four bands the clinic splits its hours into.
+// A cell is one (weekday, band): pedidas on top, ofrecidas underneath —
+// or "Cerrado" when the selected centre does not open that band at all,
+// which is why the site picker exists: a demand gap only matters if the
+// clinic could have been open to catch it.
+function Heatmap({ view }) {
+  const rows = view?.rows ?? [];
+  const bands = view?.bands ?? [];
+  const open = view?.open;
   const hasDemand = rows.some((r) => r.cells.some((c) => c.demand > 0));
-  if (!hasDemand) {
-    return <p className="insights-empty">No timed requests in this period.</p>;
+  const hasSupply = rows.some((r) => r.cells.some((c) => c.availability > 0));
+  const hasClosed = (open ?? []).some((row) => row.some((o) => o === false));
+  if (!hasDemand && !hasSupply && !hasClosed) {
+    return <p className="insights-empty">Sin peticiones con franja horaria en este período.</p>;
   }
   const max = Math.max(1, ...rows.flatMap((r) => r.cells.map((c) => c.demand)));
   return (
     <div className="heatmap">
-      <div className="heatmap-grid" style={{ gridTemplateColumns: `72px repeat(${bands.length}, 1fr)` }}>
+      {view?.hoursLabel && <p className="heatmap-hours">{view.hoursLabel}</p>}
+      <div className="heatmap-grid" style={{ gridTemplateColumns: `96px repeat(${rows.length}, 1fr)` }}>
         <div className="heatmap-corner" />
-        {bands.map((b) => (
-          <div className="heatmap-band-label" key={b}>
-            {b}
+        {rows.map((row) => (
+          <div className="heatmap-col-label" key={row.weekday}>
+            {row.weekday}
           </div>
         ))}
-        {rows.map((row) => (
-          <Fragment key={row.weekday}>
-            <div className="heatmap-weekday">{row.weekday}</div>
-            {row.cells.map((cell) => {
+        {bands.map((band, bi) => (
+          <Fragment key={band}>
+            <div className="heatmap-row-label">{band}</div>
+            {rows.map((row, wi) => {
+              const cell = row.cells[bi] ?? { band, demand: 0, availability: 0 };
+              if (open?.[wi]?.[bi] === false) {
+                return (
+                  <div key={row.weekday} className="heatmap-cell closed" title={`${row.weekday} · ${band}: cerrado`}>
+                    <span className="heatmap-closed-label">Cerrado</span>
+                  </div>
+                );
+              }
               const intensity = cell.demand / max;
               const gap = cell.demand > 0 && cell.availability === 0;
               return (
                 <div
-                  key={cell.band}
+                  key={row.weekday}
                   className={`heatmap-cell ${gap ? "gap" : ""}`}
                   style={{ "--intensity": intensity }}
-                  title={`${row.weekday} · ${cell.band}: ${cell.demand} asked, ${cell.availability} offered`}
+                  title={`${row.weekday} · ${band}: ${cell.demand} pedidas, ${cell.availability} ofrecidas`}
                 >
-                  <span>
-                    {cell.demand}
-                    <em>/{cell.availability}</em>
-                  </span>
+                  <span className="heatmap-demand">{cell.demand || "·"}</span>
+                  <span className="heatmap-availability">{cell.availability}</span>
                 </div>
               );
             })}
           </Fragment>
         ))}
       </div>
-      <p className="insights-footnote">Asked / offered. Darker cells are more requested. Outline marks demand with no slot offered.</p>
+      <div className="heatmap-legend">
+        <span>
+          <i className="heatmap-swatch demand" /> N pedidas / ofrecidas
+        </span>
+        <span>
+          <i className="heatmap-swatch gap" /> Demanda sin oferta
+        </span>
+        <span>
+          <i className="heatmap-swatch closed" /> Cerrado
+        </span>
+      </div>
+      {view?.suggestion && <p className="insights-footnote">{view.suggestion}</p>}
     </div>
   );
 }
 
 export default function Insights() {
   const [days, setDays] = useState(30);
+  const [site, setSite] = useState("all");
   const data = useBusinessInsights(days) ?? MOCK_STATS;
   const unmet = data.unavailability ?? {};
   const cancel = data.cancellations ?? {};
   const calls = data.calls_considered ?? 0;
+  const heatmap = data.heatmap;
+  const siteView = site !== "all" ? heatmap?.sites?.find((s) => s.id === site) : null;
+  const heatmapView = {
+    rows: siteView?.rows ?? heatmap?.rows,
+    bands: heatmap?.bands,
+    open: siteView?.open ?? heatmap?.open,
+    hoursLabel: siteView?.hours_label ?? null,
+    suggestion: site === "all" ? heatmap?.suggested_action : null,
+  };
   const unmetPct = calls ? Math.round((100 * (unmet.unmet_total ?? 0)) / calls) : 0;
   const topReason = unmet.buckets?.[0];
 
@@ -414,8 +470,34 @@ export default function Insights() {
       </div>
 
       <Card padding="lg" className="insights-panel">
-        <h2>Demand vs hours offered</h2>
-        <Heatmap heatmap={data.heatmap} />
+        <div className="insights-panel-head">
+          <div>
+            <h2>Horas pico sin horario</h2>
+            <p className="insights-panel-sub">
+              Demanda solicitada frente a huecos realmente ofrecidos, por día y franja.
+            </p>
+          </div>
+          <div className="home-toolbar" role="tablist" aria-label="Centro">
+            <button
+              type="button"
+              className={`home-chip ${site === "all" ? "on" : ""}`}
+              onClick={() => setSite("all")}
+            >
+              Todas
+            </button>
+            {(heatmap?.sites ?? []).map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                className={`home-chip ${site === s.id ? "on" : ""}`}
+                onClick={() => setSite(s.id)}
+              >
+                {s.name}
+              </button>
+            ))}
+          </div>
+        </div>
+        <Heatmap view={heatmapView} />
       </Card>
 
       <Card padding="lg" className="insights-panel">
