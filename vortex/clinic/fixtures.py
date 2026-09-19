@@ -651,7 +651,7 @@ PATIENTS: list[dict[str, Any]] = [
         "second_surname": "Ruiz",
         "national_id": "",
         "date_of_birth": "2012-05-14",
-        "phone": "655555555",
+        "phone": "",
         "sex": "F",
         "has_visited_before": True,
         "insurer": "dkv",
