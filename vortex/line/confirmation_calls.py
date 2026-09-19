@@ -55,7 +55,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal, Protocol
-from xml.sax.saxutils import escape
+from xml.sax.saxutils import escape, quoteattr
 
 import httpx
 
@@ -352,7 +352,7 @@ def no_speech_text(language: str) -> str:
 
 def _gather(action_url: str, locale: str, say: str, *, timeout: int = 10) -> str:
     return (
-        f'<Gather input="speech" language="{locale}" action="{escape(action_url)}" '
+        f'<Gather input="speech" language="{locale}" action={quoteattr(action_url)} '
         f'method="POST" speechTimeout="auto" timeout="{timeout}">'
         f'<Say language="{locale}">{escape(say)}</Say>'
         f"</Gather>"
@@ -404,11 +404,11 @@ def twiml_handoff_to_agent(call: ConfirmationCall, ws_url: str) -> str:
         "language": call.language,
     }
     rendered = "".join(
-        f'<Parameter name="{escape(k)}" value="{escape(v)}"/>' for k, v in params.items()
+        f"<Parameter name={quoteattr(k)} value={quoteattr(v)}/>" for k, v in params.items()
     )
     inner = (
         f'<Say language="{voice}">{escape(text)}</Say>'
-        f'<Connect><Stream url="{escape(ws_url)}">{rendered}</Stream></Connect>'
+        f"<Connect><Stream url={quoteattr(ws_url)}>{rendered}</Stream></Connect>"
     )
     return twiml_response(inner)
 
@@ -417,9 +417,9 @@ def handoff_ws_url(public_base_url: str) -> str:
     """The ``/ws`` voice-agent URL behind the public base, as a websocket URL."""
     base = public_base_url.rstrip("/")
     if base.startswith("https://"):
-        base = "wss://" + base[len("https://"):]
+        base = "wss://" + base[len("https://") :]
     elif base.startswith("http://"):
-        base = "ws://" + base[len("http://"):]
+        base = "ws://" + base[len("http://") :]
     return base + "/ws"
 
 
@@ -572,13 +572,23 @@ def default_calls_path(settings: Settings) -> Path:
     return settings.calls_log_path.with_name("confirmation_calls.json")
 
 
+#: One store per resolved path, so the asyncio.Lock is shared by the webhooks,
+#: the worker and the booking session alike. Without this each built its own
+#: instance and a concurrent read-modify-write lost rows (double-dialling).
+_STORES: dict[Path, ConfirmationStore] = {}
+
+
 def confirmation_store_from_settings(settings: Settings) -> ConfirmationStore:
     path = (
         Path(settings.confirmation_calls_path)
         if settings.confirmation_calls_path
         else default_calls_path(settings)
     )
-    return ConfirmationStore(path)
+    store = _STORES.get(path)
+    if store is None:
+        store = ConfirmationStore(path)
+        _STORES[path] = store
+    return store
 
 
 class ConfirmationStore:
@@ -682,6 +692,7 @@ class ConfirmationStore:
         async with self._lock:
             rows = self._read()
             due: list[ConfirmationCall] = []
+            changed = False
             now_aware = now if now.tzinfo is not None else now.replace(tzinfo=MADRID)
             for row in rows:
                 if row.status != "pending":
@@ -691,6 +702,7 @@ class ConfirmationStore:
                 except ValueError:
                     row.status = "skipped"
                     row.detail = "bad_call_at"
+                    changed = True
                     continue
                 if call_at.tzinfo is None:
                     call_at = call_at.replace(tzinfo=MADRID)
@@ -698,7 +710,7 @@ class ConfirmationStore:
                     row.status = "calling"
                     row.detail = "claimed"
                     due.append(ConfirmationCall(**asdict(row)))
-            if due:
+            if due or changed:
                 self._write(rows)
             return due
 
@@ -822,15 +834,13 @@ def build_confirmation_call(
     location_id: str = "",
     patient_id: str = "",
     appointment_id: str = "",
-    now: datetime | None = None,
+    now: datetime,
     lead: timedelta | None = None,
 ) -> ConfirmationCall | None:
     """Return a pending call for ``when - lead``, or ``None`` when that is past."""
     if when.tzinfo is None:
         raise ValueError(f"appointment datetime must carry an offset: {when.isoformat()}")
-    clock = now or datetime.now(tz=MADRID)
-    if clock.tzinfo is None:
-        clock = clock.replace(tzinfo=MADRID)
+    clock = now if now.tzinfo is not None else now.replace(tzinfo=MADRID)
     if when - clock < MIN_BOOKING_GAP:
         return None
     gap = lead if lead is not None else timedelta(days=1)
@@ -867,7 +877,7 @@ async def schedule_confirmation_call(
     location_id: str = "",
     patient_id: str = "",
     appointment_id: str = "",
-    now: datetime | None = None,
+    now: datetime,
     lead: timedelta | None = None,
 ) -> ConfirmationCall | None:
     call = build_confirmation_call(

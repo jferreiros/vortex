@@ -22,9 +22,9 @@ from vortex.contract import MADRID
 from vortex.line.confirmation_calls import (
     ConfirmationCall,
     DryRunCallsClient,
+    TwilioCallsClient,
     ask_text,
     confirmation_store_from_settings,
-    make_calls_client,
     twilio_calls_configured,
     twiml_ask,
 )
@@ -99,14 +99,20 @@ async def main() -> int:
         print("ERROR: --live needs a public base URL (--base-url or VORTEX_PUBLIC_BASE_URL)")
         print("       so Twilio can fetch /confirmation/twiml from this server.")
         return 2
-    if not twilio_calls_configured(settings):
+    creds = (
+        settings.twilio_account_sid,
+        settings.twilio_auth_token,
+        settings.twilio_from_number,
+    )
+    if not all(creds):
         print("ERROR: --live needs TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER")
-        print("       and VORTEX_PUBLIC_BASE_URL.")
         return 2
 
     store = confirmation_store_from_settings(settings)
     await store.add(call)
-    client = make_calls_client(settings)
+    # Build the real client from the credentials themselves: --base-url may be
+    # the only public URL, and make_calls_client would silently dry-run then.
+    client = TwilioCallsClient(creds[0], creds[1], from_number=creds[2])
     twiml_url = f"{base}/confirmation/twiml?cid={call.confirmation_id}"
     status_url = f"{base}/confirmation/status?cid={call.confirmation_id}"
     try:
