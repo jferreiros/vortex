@@ -245,6 +245,42 @@ def test_wer_is_zero_for_equal_and_counts_edits() -> None:
     assert audio.word_error_rate("a b c d", "") == 1.0
 
 
+def test_entity_cer_folds_spoken_dni_phone_email_and_names() -> None:
+    assert (
+        audio.entity_char_error_rate(
+            "dni",
+            "12345678Z",
+            "Mi DNI es uno dos tres cuatro cinco seis siete ocho zeta",
+        )
+        == 0.0
+    )
+    assert (
+        audio.entity_char_error_rate(
+            "phone",
+            "612345678",
+            "mi teléfono es seis uno dos tres cuatro cinco seis siete ocho",
+        )
+        == 0.0
+    )
+    assert (
+        audio.entity_char_error_rate(
+            "email",
+            "marta.ruiz@gmail.com",
+            "el correo es marta punto ruiz arroba gmail punto com",
+        )
+        == 0.0
+    )
+    assert (
+        audio.entity_char_error_rate(
+            "name",
+            "Marta Ruiz López",
+            "Hola, soy Marta Ruiz López y quiero cita",
+        )
+        == 0.0
+    )
+    assert audio.entity_char_error_rate("dni", "12345678Z", "12345678A") == pytest.approx(1 / 9)
+
+
 def test_noise_keeps_length_and_caps_peaks() -> None:
     import numpy as np
 
