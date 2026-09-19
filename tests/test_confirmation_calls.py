@@ -386,3 +386,48 @@ def test_status_callback_never_overwrites_an_answer(confirmation_client) -> None
     row = asyncio.run(store.get(call.confirmation_id))
     assert row is not None
     assert row.status == "confirmed"
+
+
+# ---- the scheduler is generic: a second job rides the same machinery ----------
+
+
+def test_a_second_job_registers_and_uses_its_own_policy() -> None:
+    from vortex.line.confirmation_calls import CALL_JOBS, register_job
+
+    class WaitlistOfferJob:
+        job_id = "waitlist_offer_test"
+
+        def call_at(self, *, when, lead):
+            return when - timedelta(hours=2)  # its own schedule
+
+        def ask_twiml(self, call, base_url, *, attempt, reprompt):
+            return "TWIML"
+
+        def classify(self, transcript, language):
+            return "confirmed"
+
+        def ack(self, outcome, language):
+            return "ack"
+
+        def final_unclear(self, language):
+            return "unclear"
+
+        def no_speech(self, language):
+            return "nospeech"
+
+    register_job(WaitlistOfferJob())
+    try:
+        call = build_confirmation_call(
+            to="+34662046392",
+            when=WHEN,
+            job="waitlist_offer_test",
+            now=NOW,
+            lead=timedelta(hours=2),
+        )
+        assert call is not None
+        assert call.job == "waitlist_offer_test"
+        assert call.call_dt == WHEN - timedelta(hours=2)
+        job = CALL_JOBS[call.job]
+        assert job.classify("whatever", "es") == "confirmed"
+    finally:
+        CALL_JOBS.pop("waitlist_offer_test", None)
