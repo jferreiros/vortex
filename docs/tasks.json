@@ -61,6 +61,14 @@
       "deadline": "Domingo 06:00 muro · 11:00 jurado",
       "goal": "Medir en bucle, congelar, y enseñarlo.",
       "why": "El ranking guarda el mejor Run All, no el último. Y la mitad de la nota del jurado es lo que podemos enseñar."
+    },
+    {
+      "id": "w6",
+      "label": "Bloque 6",
+      "title": "La voz · lo que dice la investigación",
+      "deadline": "Sábado, en paralelo a los retos",
+      "goal": "Meter en el prompt y el stack lo que la investigación de STT/turnos ya midió.",
+      "why": "Los alfanuméricos y el ruido a 5 dB son el fallo número uno del sector. Un protocolo de lectura en el prompt es barato y apunta a los retos 4, 12 y 13."
     }
   ],
   "tasks": [
@@ -493,6 +501,11 @@
       "files": ["vortex/identity/dictation.py", "vortex/identity/tools.py", "tests/"],
       "done": "\"ana punto garcia arroba gmail punto com\" → ana.garcia@gmail.com, en es/ca/en, validado con email-validator sin DNS; el teléfono pasa por phonenumbers región ES. Tests con diez dictados.",
       "why": "El reto 4 falla con un carácter mal. Hoy no hay ningún mapeador de formas habladas en vortex/. Las librerías están probadas en docs/research/05-structured-data.md."
-    }
+      "id": "T55", "wave": "w6", "lane": "conv", "kind": "voz",
+      "title": "Voz · Protocolo de lectura en voz alta en el prompt",
+      "problems": [4, 12, 13], "weight": 4, "size": "1 h", "blocked_by": [],
+      "files": ["vortex/conversation/prompt.py", "evals/conversation/scenarios/"],
+      "done": "El prompt pide un campo por turno, agrupa dígitos de tres en tres, lee el id una sola vez, y aplica 'el último valor gana' en correcciones. Un escenario por regla en evals/conversation.",
+      "why": "Los alfanuméricos son el fallo número uno del sector (ServiceNow EVA, mar 2026). Con ruido a 5 dB un nombre o un dígito hay que confirmarlo, y el caller difícil cambia de id a media frase. Ver docs/research/02-stt-landscape.md y 03-turn-detection.md."    }
   ]
 }
