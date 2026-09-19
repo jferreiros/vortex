@@ -386,6 +386,20 @@ class Settings:
     # worth less than a refusal that makes it.
     cold_booking_timeout_secs: float = 6.0
 
+    # --- SMS confirmations (Twilio) -------------------------------------------
+    # After an accepted book/cancel we text the calling number. Off with the
+    # flag, or dry-run when the Twilio keys below are missing.
+    sms_confirmations: bool = field(
+        default_factory=lambda: _env_flag("VORTEX_SMS_CONFIRMATIONS", "true")
+    )
+    twilio_account_sid: str = field(default_factory=lambda: _env("TWILIO_ACCOUNT_SID"))
+    twilio_auth_token: str = field(default_factory=lambda: _env("TWILIO_AUTH_TOKEN"))
+    # Prefer a Messaging Service; otherwise a bare From number works.
+    twilio_messaging_service_sid: str = field(
+        default_factory=lambda: _env("TWILIO_MESSAGING_SERVICE_SID")
+    )
+    twilio_from_number: str = field(default_factory=lambda: _env("TWILIO_FROM_NUMBER"))
+
     @property
     def clinic_is_live(self) -> bool:
         if self.clinic_mode == "live":
@@ -595,6 +609,12 @@ class Settings:
             "langfuse_base_url": self.langfuse_base_url,
             "langfuse_environment": self.langfuse_environment,
             "geocoder": self.geocoder or ("nominatim" if self.geocoder_url else ""),
+            "sms_confirmations": self.sms_confirmations,
+            "has_twilio_sms": bool(
+                self.twilio_account_sid
+                and self.twilio_auth_token
+                and (self.twilio_messaging_service_sid or self.twilio_from_number)
+            ),
         }
 
 

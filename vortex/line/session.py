@@ -31,6 +31,7 @@ from vortex.contract import (
     Action,
     BookAction,
     CallerLineMatch,
+    CancelAction,
     DeclineReason,
     EligibilityVerdict,
     EscalateAction,
@@ -47,6 +48,14 @@ from vortex.contract import (
 )
 from vortex.diary.tools import find_slots
 from vortex.identity.tools import PATIENT_PREFERENCES_KEY, resolve_caller_line
+from vortex.line.sms import (
+    SmsClient,
+    action_fingerprint,
+    make_sms_client,
+    notification_payload,
+    render_confirmation_text,
+    resolve_details,
+)
 from vortex.line.submit import (
     DryRunSubmitClient,
     SubmitApi,
@@ -98,6 +107,10 @@ UNSCORED_REFUSAL = NoAction(reason="out_of_scope")
 # is the longest span ``/availability`` answers in one request, and a slot past
 # it is not what a caller who asked for nothing in particular wanted anyway.
 COLD_BOOKING_HORIZON_DAYS = 14
+
+# How long ``close`` will wait for in-flight SMS confirmations before giving up.
+# Twilio is usually well under a second; this only bounds a hung POST.
+SMS_DRAIN_TIMEOUT_SECS = 5.0
 
 
 def refusal_for(reason: DeclineReason) -> Action:
@@ -367,6 +380,14 @@ class CallSession:
     # refusal. Reserved before the task starts, and never given back: a send
     # the platform did not take is the end-of-call fallback's to retry.
     _refusal_spawned: bool = False
+    # SMS client for post-accept book/cancel texts. Built in ``open`` from
+    # settings (Twilio when configured, dry-run otherwise). Tests swap it.
+    sms: SmsClient = field(default_factory=lambda: make_sms_client(get_settings()))
+    # In-flight SMS tasks. Drained in ``close`` so a hangup does not cancel them.
+    _sms_pending: set[asyncio.Task[Any]] = field(default_factory=set)
+    # Fingerprints of actions we already texted, so a 409 duplicate does not
+    # SMS the caller twice for the same booking or cancel.
+    _sms_notified: set[str] = field(default_factory=set)
 
     @property
     def call_id(self) -> str:
@@ -407,7 +428,13 @@ class CallSession:
         )
         ctx.settings = settings  # type: ignore[attr-defined]
         CallMemory.of(ctx)  # attach it before any tool runs
-        session = cls(settings=settings, start=start, ctx=ctx, submitter=submitter)
+        session = cls(
+            settings=settings,
+            start=start,
+            ctx=ctx,
+            submitter=submitter,
+            sms=make_sms_client(settings),
+        )
         log.event(
             "call.started",
             stream_sid=start.stream_sid,
@@ -456,6 +483,7 @@ class CallSession:
         result = await registry.call_tool(name, self.ctx, raw_args)
         if name == SUBMIT_TOOL and isinstance(result, SubmitResult):
             self.submitted.append(result)
+            sent: Action | None = None
             try:
                 sent = SubmitInput.model_validate(raw_args).action
             except ValidationError:  # pragma: no cover - the registry validated it already
@@ -466,6 +494,8 @@ class CallSession:
                 self.sent_actions.append(with_verdict_reason(self.ctx, sent))
             if result.status in ACCEPTED_STATUSES:
                 self.arm_hangup("submit_accepted")
+                if sent is not None:
+                    self._queue_sms(sent)
         else:
             self.memory.observe(name, result)
             if self.memory.superseded_slot:
@@ -617,6 +647,8 @@ class CallSession:
         result = await submit_action(self.ctx, SubmitInput(action=action))
         self.submitted.append(result)
         self.sent_actions.append(with_verdict_reason(self.ctx, action))
+        if result.status in ACCEPTED_STATUSES:
+            self._queue_sms(action)
         return result
 
     @property
@@ -660,8 +692,65 @@ class CallSession:
         except TimeoutError:
             self.ctx.log.event("submit.fallback_timed_out")
         finally:
+            await self._drain_sms()
             self.ctx.log.summary(reason=reason, usage=self.usage.summary_extras())
+            await self.sms.aclose()
             await self.submitter.aclose()
+
+    def _queue_sms(self, action: Action) -> None:
+        """Fire a confirmation SMS off the submit path. Never blocks the call."""
+        if not isinstance(action, (BookAction, CancelAction)):
+            return
+        if not self.settings.sms_confirmations:
+            self.ctx.log.event("sms.skipped", reason="disabled", action_kind=action.kind)
+            return
+        fingerprint = action_fingerprint(action)
+        if fingerprint in self._sms_notified:
+            self.ctx.log.event("sms.skipped", reason="already_notified", action_kind=action.kind)
+            return
+        self._sms_notified.add(fingerprint)
+        try:
+            task = asyncio.get_running_loop().create_task(self._send_sms(action))
+        except RuntimeError:
+            self._sms_notified.discard(fingerprint)
+            return
+        self._sms_pending.add(task)
+        task.add_done_callback(self._sms_pending_done)
+
+    def _sms_pending_done(self, task: asyncio.Task[Any]) -> None:
+        self._sms_pending.discard(task)
+        if not task.cancelled() and task.exception() is not None:
+            self.ctx.log.event("sms.failed", error=repr(task.exception()))
+
+    async def _send_sms(self, action: Action) -> None:
+        to = self.ctx.from_number
+        if not to:
+            self.ctx.log.event("sms.skipped", reason="no_from_number", action_kind=action.kind)
+            return
+        details = await resolve_details(self.ctx, action)
+        body = render_confirmation_text(action, details)
+        payload = notification_payload(action, details)
+        self.ctx.log.event("sms.sending", to=to, body=body, **payload)
+        result = await self.sms.send(to=to, body=body)
+        self.ctx.log.event(
+            f"sms.{result.status}",
+            to=result.to or to,
+            body=result.body or body,
+            detail=result.detail,
+            sid=result.sid,
+            **payload,
+        )
+
+    async def _drain_sms(self) -> None:
+        if not self._sms_pending:
+            return
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*tuple(self._sms_pending), return_exceptions=True),
+                timeout=SMS_DRAIN_TIMEOUT_SECS,
+            )
+        except TimeoutError:
+            self.ctx.log.event("sms.drain_timed_out", pending=len(self._sms_pending))
 
     async def _fallback_if_silent(self) -> None:
         """Submitting nothing always fails. A typed refusal never scores worse.
