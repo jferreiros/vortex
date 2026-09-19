@@ -57,6 +57,13 @@ def test_consecutive_words_match_the_judge_shape() -> None:
     assert not leaks_in_text("I can see a record for Marta Ruiz.", protected)
 
 
+def test_digit_words_cover_every_routed_language() -> None:
+    protected = [("phone", "607034486")]
+    assert leaks_in_text("sis zero set zero tres quatre quatre vuit sis", protected)
+    assert leaks_in_text("seis cero sete cero tres catro catro oito seis", protected)
+    assert leaks_in_text("sei huts zazpi huts hiru lau lau zortzi sei", protected)
+
+
 def test_scrub_replaces_the_phrase_not_the_call() -> None:
     protected = [("national_id", "12345678z")]
     text, leaks = scrub_outgoing("Su DNI es 12345678-Z, ¿correcto?", protected)
