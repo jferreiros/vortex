@@ -616,16 +616,18 @@ async def test_the_idle_handler_speaks_the_prompt_in_the_call_language(voice_set
 
 
 def test_vad_mode_wires_our_turn_strategies() -> None:
-    """In VAD mode the aggregator gets the conversation lane's strategies.
+    """The aggregator always gets the conversation lane's strategies.
 
-    Without them it falls back to its defaults, which load the smart-turn v3
-    model and ignore ``enable_interruptions``. In Soniox mode the STT service
-    installs ``ExternalUserTurnStrategies`` itself, so nothing is passed.
+    Without them it falls back to its defaults (smart-turn v3) or, in Soniox
+    mode, to ExternalUserTurnStrategies that ignore interrupt_min_words.
     """
     pytest.importorskip("pipecat")
     from pipecat.processors.aggregators.llm_response_universal import LLMUserAggregatorParams
     from pipecat.turns.user_start import MinWordsUserTurnStartStrategy, VADUserTurnStartStrategy
-    from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
+    from pipecat.turns.user_stop import (
+        ExternalUserTurnStopStrategy,
+        SpeechTimeoutUserTurnStopStrategy,
+    )
     from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
     from vortex.conversation.turns import TurnSettings
@@ -643,4 +645,12 @@ def test_vad_mode_wires_our_turn_strategies() -> None:
     ]
 
     soniox_params = _user_aggregator_params(TurnSettings())
-    assert soniox_params.user_turn_strategies is None
+    assert isinstance(soniox_params.user_turn_strategies, UserTurnStrategies)
+    assert [type(s) for s in soniox_params.user_turn_strategies.start] == [
+        MinWordsUserTurnStartStrategy,
+    ]
+    assert [type(s) for s in soniox_params.user_turn_strategies.stop] == [
+        ExternalUserTurnStopStrategy,
+    ]
+    assert soniox_params.user_turn_strategies.start[0]._min_words == 2
+    assert soniox_params.user_turn_strategies.stop[0].resolves_proposed_turn_stop_frames is True
