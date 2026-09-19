@@ -12,20 +12,33 @@ from __future__ import annotations
 import asyncio
 
 from evals.corpus.discover import (
+    _impossible_notes,
     _seed_names,
     _specialty_type,
     _type_gaps,
+    _unverified_notes,
     main,
     probe_unreportable,
     report,
 )
-from vortex.clinic.client import FakeClinicClient, _pick_type, check_directory_query
+from vortex.clinic.client import ClinicApiError, FakeClinicClient, _pick_type, check_directory_query
 from vortex.contract import PatientRecord
 from vortex.settings import reset_settings
 
 
 def _catalogue():
     return asyncio.run(FakeClinicClient().catalogue())
+
+
+class _DeadClinic(FakeClinicClient):
+    """A clinic that answers no availability query, the way a timeout does."""
+
+    async def availability(self, **params):
+        raise ClinicApiError(503, "unavailable")
+
+
+def _discard(reason: str, **sample) -> None:
+    return None
 
 
 # ---- the report ---------------------------------------------------------------
@@ -123,6 +136,28 @@ def test_a_shut_window_never_produces_a_rule_offline() -> None:
     assert stats["location_hours"]["windows"] > 0
     assert stats["location_hours"]["blocked"] == 0
     assert stats["type_not_offered"]["gaps"] == 0
+
+
+# ---- probes that never answered ------------------------------------------------
+
+
+def test_a_shape_whose_probes_all_failed_is_unverified_not_impossible() -> None:
+    """A lost query is not a clinic that reports no rule: the verdict is held."""
+    catalogue = _catalogue()
+    stats = asyncio.run(
+        probe_unreportable(_DeadClinic(), asyncio.Semaphore(4), catalogue, [], _discard)
+    )
+    assert stats["location_hours"]["failed"] == stats["location_hours"]["windows"] > 0
+    unverified = _unverified_notes({}, stats)
+    assert "location_hours" in unverified
+    assert "location_hours" not in _impossible_notes({}, stats, 0, 5, unverified)
+
+
+def test_an_unverified_reason_is_reported_as_unverified(capsys) -> None:
+    report({}, {}, {"location_hours": "3 of 16 shut-window queries got no answer"})
+    out = capsys.readouterr().out
+    assert "unverified, probes lost" in out
+    assert "impossible from the API" not in out
 
 
 # ---- the gate -------------------------------------------------------------------
