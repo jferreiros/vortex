@@ -163,9 +163,15 @@ export default function Settings() {
       <div className="settings-groups">
         {/* 1. Voz del agente */}
         <Card padding="lg" className="settings-group settings-group-top">
-          <div className="settings-group-head">
-            <h3>Voz del agente</h3>
-            <p>Cómo suena el agente.</p>
+          <div className="settings-group-head settings-group-head-action">
+            <div>
+              <h3>Voz del agente</h3>
+              <p>Cómo suena el agente.</p>
+            </div>
+            {/* TODO: wire to a short TTS sample with the current slider values */}
+            <Button variant="secondary" onClick={() => {}}>
+              ▶ Try
+            </Button>
           </div>
           <div className="settings-rows">
             {PERSONALIZATION_CONFIG.map((k) => (
@@ -188,15 +194,6 @@ export default function Settings() {
                 </div>
               </div>
             ))}
-            <div className="settings-row">
-              <div>
-                <span className="settings-row-label">Probar</span>
-              </div>
-              {/* TODO: wire to a short TTS sample with the current slider values */}
-              <Button variant="secondary" onClick={() => {}}>
-                ▶ Try
-              </Button>
-            </div>
             <div className="settings-row">
               <div>
                 <span className="settings-row-label">Voz</span>
