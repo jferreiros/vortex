@@ -91,8 +91,8 @@
       "label": "Bloque 6",
       "title": "La voz · lo que dice la investigación",
       "deadline": "Sábado, en paralelo a los retos",
-      "goal": "Meter en el prompt y el stack lo que la investigación de STT/turnos ya midió.",
-      "why": "Los alfanuméricos y el ruido a 5 dB son el fallo número uno del sector. Un protocolo de lectura en el prompt es barato y apunta a los retos 4, 12 y 13."
+      "goal": "Meter en el prompt, el stack y el código lo que la investigación de voz priorizó por puntos por hora.",
+      "why": "Los alfanuméricos y el ruido a 5 dB son el fallo número uno del sector, y ocho segundos de silencio cuestan el reto 13 entero. Se hace en paralelo, no en vez de los retos."
     },
     {
       "id": "w7",
@@ -1121,6 +1121,14 @@
       "files": [],
       "done": "Quien conduce enseña, sin buscar nada: la llamada entrando, las tools disparando, el registro enviado y el tablero de evals. Ensayado dos veces.",
       "why": "El jurado nos llama en directo el domingo a las 11:00. Buscar una pestaña delante de ellos gasta la mitad del tiempo que tenemos."
+    },
+    {
+      "id": "T59", "wave": "w6", "lane": "conv", "kind": "reto",
+      "title": "Voz · Silencio: repreguntar y enviar en el segundo silencio",
+      "problems": [13], "weight": 4, "size": "30 min", "blocked_by": [],
+      "files": ["vortex/conversation/turns.py", "vortex/line/pipecat_voice.py"],
+      "done": "Primer idle → repregunta; segundo idle → resumen y submit de lo que haya. user_turn_stop_timeout=6.0 como red.",
+      "why": "El caller difícil calla ocho segundos. Hoy hay un aviso a los 6 s y nada después, y la llamada tiene tres minutos."
     },
     {
       "id": "T55",
