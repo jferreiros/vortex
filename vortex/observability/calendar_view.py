@@ -6,8 +6,8 @@ the call log. The source is the synthetic-data pack by default; point
 calls book, move and cancel.
 
 This module reuses the chrome from ``live.py`` (nav, footer, dots, pills) the
-same way ``console.py`` does, and follows DESIGN.md: layout only lives in
-``board.css``, colour comes from the tokens.
+same way ``console.py`` does, and follows DESIGN.md: the ``.cal-*`` component
+lives in ``design.css``, colour comes from the tokens.
 """
 
 from __future__ import annotations
