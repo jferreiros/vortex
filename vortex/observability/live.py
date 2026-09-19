@@ -94,9 +94,7 @@ def _load_events() -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
     try:
         health = httpx.get(f"{LINE_URL}/health", timeout=_LINE_HEALTH_TIMEOUT_S).json()
         grouped = (
-            httpx.get(
-                f"{LINE_URL}/calls", params={"limit": 800}, timeout=_LINE_CALLS_TIMEOUT_S
-            )
+            httpx.get(f"{LINE_URL}/calls", params={"limit": 800}, timeout=_LINE_CALLS_TIMEOUT_S)
             .json()
             .get("calls", {})
         )
