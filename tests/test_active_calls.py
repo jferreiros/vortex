@@ -54,7 +54,10 @@ def _stale_call(path: Path, cid: str = "CA-stale") -> None:
         fh.write(
             json.dumps({"ts": old, "call_id": cid, "kind": "call.started"}) + "\n"
         )
-        fh.write(json.dumps({"ts": old, "call_id": cid, "kind": "turn.user", "text": "hola"}) + "\n")
+        fh.write(
+            json.dumps({"ts": old, "call_id": cid, "kind": "turn.user", "text": "hola"})
+            + "\n"
+        )
 
 
 async def test_active_calls_lists_only_live_calls(
