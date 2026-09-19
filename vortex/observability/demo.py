@@ -16,6 +16,64 @@ BOOK_TURNS = [
     ("assistant", "Listo. Revisión mañana a las 10:15 con la Dra. Ortiz en Centro. Hasta luego."),
 ]
 
+#: What the providers metered on a scripted call. The same shape the line lane
+#: writes for a real one, so every page shows a cost without a live call.
+#: The refusal leans on two Google TTS services on purpose: the Gemini voice
+#: has no published per-character price, which is what a *partial* call looks
+#: like on screen.
+BOOK_USAGE: dict[str, object] = {
+    "metered": True,
+    "stt": {"provider": "soniox", "model": "stt-rt-v5", "audio_seconds": 47.3, "requests": 12},
+    "llm": {
+        "provider": "helmcode",
+        "model": "deepseek-v4-flash",
+        "prompt_tokens": 11840,
+        "completion_tokens": 512,
+        "reasoning_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "requests": 7,
+    },
+    "tts": [
+        {
+            "provider": "google",
+            "service": "GoogleHttpTTSService",
+            "model": "es-ES-Chirp3-HD-Aoede",
+            "characters": 1180,
+            "requests": 6,
+        }
+    ],
+}
+
+REFUSE_USAGE: dict[str, object] = {
+    "metered": True,
+    "stt": {"provider": "soniox", "model": "stt-rt-v5", "audio_seconds": 21.6, "requests": 6},
+    "llm": {
+        "provider": "helmcode",
+        "model": "deepseek-v4-flash",
+        "prompt_tokens": 6420,
+        "completion_tokens": 214,
+        "reasoning_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "requests": 3,
+    },
+    "tts": [
+        {
+            "provider": "google",
+            "service": "GoogleHttpTTSService",
+            "model": "es-ES-Chirp3-HD-Aoede",
+            "characters": 226,
+            "requests": 3,
+        },
+        {
+            "provider": "google",
+            "service": "GeminiTTSService",
+            "model": "gemini-2.5-flash-tts",
+            "characters": 90,
+            "requests": 1,
+        },
+    ],
+}
+
 REFUSE_TURNS = [
     ("assistant", "Clínica Arenal, buenos días. ¿En qué puedo ayudarle?"),
     ("user", "Necesito cita de cardiología para mi padre, tiene DKV."),
@@ -84,6 +142,7 @@ async def write_scripted_call(
             payload,
             {"status": "dry_run", "http_status": None, "detail": "demo"},
         )
+        log.event("call.usage", **REFUSE_USAGE)
         log.event("call.ended", reason="hangup", media_frames_in=0, media_frames_out=0)
         log.summary(reason="hangup")
         return call_id
@@ -173,6 +232,7 @@ async def write_scripted_call(
     )
     await asyncio.sleep(delay_s)
     log.assistant_turn(BOOK_TURNS[6][1])
+    log.event("call.usage", **BOOK_USAGE)
     log.event("call.ended", reason="hangup", media_frames_in=0, media_frames_out=0)
     log.summary(reason="hangup")
     return call_id

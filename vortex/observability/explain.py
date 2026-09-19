@@ -296,6 +296,7 @@ EVENT_TEXT: dict[str, str] = {
     "call.started": "The socket opened and a fresh pipeline started.",
     "submit.sent": "Posted the action to the platform.",
     "submit.result": "The platform answered the submission.",
+    "call.usage": "The providers' counters for this call were metered.",
     "call.ended": "The socket closed.",
     "call.summary": "The call was summarised.",
     "call.crashed": "The pipeline crashed.",
@@ -330,6 +331,17 @@ def event_detail(event: dict[str, Any]) -> str:
         frames_in = event.get("media_frames_in", "?")
         frames_out = event.get("media_frames_out", "?")
         bits.append(f"frames in {frames_in}, out {frames_out}")
+    if kind == "call.usage":
+        stt = event.get("stt") if isinstance(event.get("stt"), dict) else {}
+        llm = event.get("llm") if isinstance(event.get("llm"), dict) else {}
+        voices = event.get("tts") if isinstance(event.get("tts"), list) else []
+        chars = sum(int(v.get("characters") or 0) for v in voices if isinstance(v, dict))
+        bits.append(f"stt {float(stt.get('audio_seconds') or 0):.1f} s")
+        bits.append(
+            f"llm {int(llm.get('prompt_tokens') or 0)} in"
+            f" / {int(llm.get('completion_tokens') or 0)} out"
+        )
+        bits.append(f"tts {chars} chars")
     if kind == "call.summary" and event.get("duration_ms") is not None:
         bits.append(f"{event['duration_ms']} ms")
     if kind == "call.crashed" and event.get("error"):
@@ -406,6 +418,7 @@ KPI_LABEL: dict[str, str] = {
     "submitted": "submitted",
     "handle": "handle",
     "tool": "tool ms",
+    "cost": "€/call (list)",
 }
 
 LIVE_SUB = "The call as it happens. Each card is a turn or a tool. The one that is speaking pulses."
