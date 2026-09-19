@@ -61,12 +61,21 @@ the host. Give it ten seconds, then retry.
 
 ## Deploy
 
+A push or merge into `main` is enough. On the VPS a systemd user timer
+(`vortex-deploy.timer`) looks at `origin/main` every minute and, when it
+moved, runs `deploy/deploy-both.sh`: pull, rebuild the call socket and the
+board, check both public endpoints, then post to Discord `#updates` that the
+latest version is live. GitHub Actions cannot do this job: the box does not
+accept SSH from the public internet, and Discord 403s Actions runner IPs.
+
 ```bash
-deploy/deploy.sh
+deploy/deploy-both.sh            # same path the timer runs
+deploy/deploy-both.sh --force    # rebuild even if main did not move
+deploy/deploy.sh                 # call socket only
 ```
 
-That is the whole thing: fetch `main`, rebuild the image, restart the container,
-wait for it to report healthy, check the public endpoint, and dial it with a
+`deploy/deploy.sh` fetches `main`, rebuilds the image, restarts the container,
+waits for it to report healthy, checks the public endpoint, and dials it with a
 fake call. It prints a green line and the endpoint when all five pass, and a red
 line naming the failed step when they do not. Exit code 0 means the endpoint is
 ready for a run.
@@ -178,28 +187,25 @@ per-socket, so concurrency is not a deployment concern — but do check
 
 ---
 
-## The board lives somewhere else
+## The board
 
 `deploy/deploy.sh` deploys the call socket only. The jury wall and the ops
-board (`vortex.203.0.113.20.sslip.io`) run from a separate clone that root
-owns, built from `Dockerfile.board` with `deploy/compose.yml`:
+board (`https://vortex.203.0.113.20.sslip.io/wall`) are the same factory
+clone, built from `Dockerfile.board` with `deploy/compose.yml`.
+`deploy/deploy-both.sh` (and the timer) publishes both.
 
-```
-/opt/vortex-board          the clone; deploy/.env holds VORTEX_OPS_PASSWORD
-```
+The Discord line after a successful publish needs
+`DISCORD_UPDATES_WEBHOOK_URL` in `deploy/.env` (or the repo `.env`). That
+post has to leave from this machine: Discord 403s GitHub Actions runner IPs.
 
-A merge into `main` does not reach the wall on its own. To redeploy the board:
+To enable the timer on a new box, after the first `deploy/deploy-both.sh`:
 
 ```bash
-ssh vps
-cd /opt/vortex-board
-git fetch origin main && git reset --hard origin/main
-docker compose -f deploy/compose.yml up -d --build
+mkdir -p ~/.config/systemd/user
+cp deploy/systemd/vortex-deploy.* ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now vortex-deploy.timer
 ```
-
-Then open `https://vortex.203.0.113.20.sslip.io/wall`. The container exposes
-no host port, so `curl 127.0.0.1:8080` on the box says nothing: check through
-Traefik.
 
 ## Living next to the other services
 

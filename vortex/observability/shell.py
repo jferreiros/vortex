@@ -12,8 +12,6 @@ from typing import Any
 
 from nicegui import ui
 
-from vortex.observability.icons import NAV, icon
-
 #: (label, path, children). Children render indented under their parent.
 SECTIONS: tuple[tuple[str, str, tuple[tuple[str, str], ...]], ...] = (
     ("Overview", "/", ()),
@@ -43,20 +41,11 @@ def _is_on(active: str, path: str, children: tuple[tuple[str, str], ...]) -> boo
     return active.startswith(path + "/")
 
 
-def _nav_link(label: str, path: str, *, on: bool) -> None:
-    with ui.link("", path).classes("nav-item on" if on else "nav-item"):
-        if path in NAV:
-            icon(NAV[path])
-        ui.label(label)
-
-
 def sidebar(active: str, *, health: dict[str, Any] | None, clinic: str, who: str | None) -> None:
     from vortex.observability import live  # late import: live imports this module
 
     with ui.element("aside").classes("sidebar"):
-        with ui.link("", "/").classes("brand"):
-            icon("mark")
-            ui.label("Vortex")
+        ui.link("Vortex", "/").classes("brand")
         with ui.element("div").classes("clinic-switcher"):
             with ui.element("div"):
                 ui.label(clinic).classes("name")
@@ -64,16 +53,16 @@ def sidebar(active: str, *, health: dict[str, Any] | None, clinic: str, who: str
             ui.label("▾").classes("caret")
         for label, path, children in SECTIONS:
             on = _is_on(active, path, children)
-            _nav_link(label, path, on=on)
+            ui.link(label, path).classes("nav-item on" if on else "nav-item")
             if children and (on or any(active == c for _, c in children)):
                 with ui.element("div").classes("nav-sub"):
                     for sub_label, sub_path in children:
-                        _nav_link(sub_label, sub_path, on=active == sub_path)
+                        ui.link(sub_label, sub_path).classes(
+                            "nav-item on" if active == sub_path else "nav-item"
+                        )
         with ui.element("div").classes("foot"):
             live._line_pill(health, short=True)
-            with ui.link("", "/wall", new_tab=True).classes("nav-item"):
-                icon("wall")
-                ui.label("Open the wall")
+            ui.link("Open the wall ↗", "/wall", new_tab=True).classes("caption-sm")
             if who:
                 ui.label(f"Signed in · {who}").classes("caption-sm")
             ui.button("Sign out", on_click=live._logout).props("flat no-caps").classes(

@@ -47,3 +47,9 @@ def test_index_nav_links_reuse_chip() -> None:
     text = (REPO / "docs" / "index.html").read_text(encoding="utf-8")
     assert ".nav a{" not in text and ".nav a {" not in text
     assert text.count('class="chip"') >= 7
+def test_tasks_html_does_not_redefine_chip() -> None:
+    """Page CSS lays out only; .chip lives in design.css (issue #80)."""
+    text = (REPO / "docs" / "tasks.html").read_text(encoding="utf-8")
+    style = text.split("<style>", 1)[1].split("</style>", 1)[0]
+    assert ".chip{" not in style.replace(" ", "")
+    assert ".chip[aria-pressed" not in style
