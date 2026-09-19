@@ -51,7 +51,7 @@ fmt:
 	uv run ruff format . && uv run ruff check --fix .
 
 # ---- evals (see docs/evals.md) ---------------------------------------------
-.PHONY: evals evals-logic evals-conversation evals-voice evals-replay evals-report evals-accept evals-selftest evals-discord evals-hydrate evals-snapshot evals-fetch evals-coverage
+.PHONY: evals evals-logic evals-conversation evals-voice evals-replay evals-report evals-accept evals-selftest evals-discord evals-hydrate evals-snapshot evals-fetch evals-coverage evals-jev
 
 evals:            ## layers 1 + 2 + 4, no keys needed; the CI entry point (exit 1 on failure)
 	uv run python -m evals ci
@@ -97,6 +97,9 @@ evals-accept:     ## promote the latest run(s) to evals/baselines/ (LAYER=logic|
 
 evals-selftest:   ## the harness tests itself
 	uv run pytest evals/selftest -q
+
+evals-jev:         ## offline TypeSafe Jev spike (arbiter + triage fallback). Needs TYPESAFE_API_KEY
+	uv run python -m evals.jev
 
 evals-discord:    ## post the latest summary.json to #github (needs DISCORD_WEBHOOK_URL)
 	scripts/notify-discord.sh --evals
