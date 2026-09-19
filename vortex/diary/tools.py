@@ -32,6 +32,11 @@ Two distinctions this lane exists to keep apart:
   of availability at one site: they surface as an empty ``find_slots`` answer
   for that day, and the caller is then offered the next open day that keeps
   the rest of the request.
+- **Empty vs nothing.** An empty window is not the end of the call (problem
+  7). ``find_slots`` answers it with ``nearest``: the closest free slots on
+  either side of the window that keep every other constraint, for the caller
+  to accept or turn down. Only when ``nearest`` is empty too is the answer
+  ``no_availability`` and nothing else.
 """
 
 from __future__ import annotations
@@ -45,6 +50,7 @@ from vortex.contract import (
     MADRID,
     Appointment,
     AppointmentList,
+    AppointmentTypeRecord,
     AvailabilityResponse,
     AvailabilityResult,
     BlockedProvider,
@@ -78,6 +84,15 @@ _MAX_SPAN_DAYS = 13
 
 #: How far a closed day may push a request before we call it unbookable.
 _MAX_MOVE_DAYS = 21
+
+#: How far each side of an empty window ``find_slots`` looks for the nearest
+#: alternative: one availability query each way (problem 7).
+_NEAREST_REACH_DAYS = _MAX_SPAN_DAYS
+
+#: How many alternatives ``find_slots`` returns for an empty window: one per
+#: day and part of the day, nearest first. Enough to offer two and hold two
+#: back; short enough to read out on a phone line.
+_NEAREST_LIMIT = 4
 
 #: How many directory records ``_locate_appointment`` may walk as a last resort.
 _MAX_DIRECTORY_SCAN = 25
@@ -336,6 +351,16 @@ def _calendar_date(day_of_month: int, month: int, today: date) -> date | None:
     return None
 
 
+#: A "later than <day>" / "the next one after <day>" phrase is a lower bound,
+#: not a day. Post-canonical Spanish and Catalan land here too: "después de"
+#: surfaces as "despues of" once ``_WORD_ALIASES`` has run.
+_AFTER_PREFIX = re.compile(
+    r"^(?:the )?(?:next(?: one| slot| appointment| available)? )?(?:only )?"
+    r"(?:later than|after|past|from|no earlier than|"
+    r"despues(?: of)?|a partir(?: of| d)?|mes tard(?: of)?|despres(?: of)?)\s+"
+)
+
+
 def _parse_day(text: str, today: date) -> date | None:
     """The day the caller asked for, before any closure moves it."""
     if text in _DAY_OFFSETS:
@@ -376,6 +401,29 @@ def _parse_day(text: str, today: date) -> date | None:
     return None
 
 
+def _after_day(text: str, today: date) -> date | None:
+    """The day a "later than/after <day>" phrase starts from, else ``None``.
+
+    ``None`` is also the answer for an after-phrase that names no day at all
+    ("the next one after the weekend") - it falls back to the normal parse,
+    which refuses it.
+    """
+    match = _AFTER_PREFIX.match(text)
+    if not match:
+        return None
+    inner = text[match.end() :]
+    inner = re.sub(r"\bat \d{1,2}(?:[:.h ]?\d{2})?\b", " ", inner)
+    inner = re.sub(r"\bappoint?ments?\b|\bcitas?\b|\bvisita\b", " ", inner)
+    for _ in range(3):
+        inner = re.sub(
+            r"^(?:my|the|their|your|our|mi|meva|del|of|on|for|at|el|la)\s+",
+            "",
+            inner.strip(),
+        )
+    inner = re.sub(r"\s+", " ", inner).strip()
+    return _parse_day(inner, today) if inner else None
+
+
 async def resolve_date(ctx: ToolContext, args: ResolveDateInput) -> ResolvedWindow:
     """Turn a colloquial phrase into a date window in Europe/Madrid.
 
@@ -413,6 +461,23 @@ async def resolve_date(ctx: ToolContext, args: ResolveDateInput) -> ResolvedWind
         if catalogue.bookable_to:
             date_to = min(date_to, catalogue.bookable_to)
         return _window(opens, max(date_to, opens), part_of_day, moved=False)
+
+    after = _after_day(text, today)
+    if after is not None:
+        # A lower bound, not a day: the window opens on the named day - a later
+        # slot that same day is still an answer - and runs as wide as
+        # /availability takes, so "the first one after theirs" is one search.
+        opens = _first_open_day(catalogue, max(after, tomorrow))
+        if opens is None:
+            return _no_window(
+                today,
+                "clinic_closed",
+                f"nothing opens within {_MAX_MOVE_DAYS} days of {max(after, tomorrow)}",
+            )
+        date_to = opens + timedelta(days=_MAX_SPAN_DAYS)
+        if catalogue.bookable_to:
+            date_to = min(date_to, catalogue.bookable_to)
+        return _window(opens, date_to, part_of_day, moved=opens != after)
 
     asked_for = _parse_day(text, today)
     if asked_for is None:
@@ -499,6 +564,157 @@ def _keeps_blocked(
     return any(_is_open(catalogue, day, reachable) for day in days)
 
 
+async def _fetch(
+    ctx: ToolContext, args: FindSlotsInput, date_from: date, date_to: date
+) -> tuple[list[Slot], dict[str, BlockedProvider], AppointmentTypeRecord | None] | Rejection:
+    """Every slot the clinic offers in ``[date_from, date_to]``, unfiltered.
+
+    Walked in chunks /availability accepts (a span longer than 14 days is a
+    422). The caller's own filters (day of the call, hours, language) are
+    applied afterwards, by ``_bookable`` and ``_within_hours``.
+    """
+    slots: list[Slot] = []
+    blocked: dict[str, BlockedProvider] = {}
+    appointment_type = None
+    for span_from, span_to in _spans(date_from, date_to):
+        try:
+            answer = await ctx.clinic.availability(
+                date_from=span_from,
+                date_to=span_to,
+                provider_id=args.provider_id,
+                specialty_id=args.specialty_id,
+                location_id=args.location_id,
+                patient_id=args.patient_id,
+                insurer=[args.insurer] if args.insurer else None,
+            )
+        except ClinicApiError as exc:
+            return Rejection(
+                reason="no_availability",
+                detail=f"availability {span_from}..{span_to} failed: {exc}",
+            )
+        slots.extend(answer.slots)
+        for entry in answer.blocked:
+            blocked.setdefault(entry.provider_id, entry)
+        appointment_type = appointment_type or answer.appointment_type
+    return slots, blocked, appointment_type
+
+
+def _bookable(
+    catalogue: Catalogue, slots: list[Slot], args: FindSlotsInput, today: date
+) -> list[Slot]:
+    """Drop what can never be offered: the call's own day, and a provider who
+    does not speak the language the caller asked for."""
+    kept = [s for s in slots if s.start.astimezone(MADRID).date() > today]
+    if args.language:
+        speaks = {p.provider_id for p in catalogue.providers if args.language in p.languages}
+        kept = [s for s in kept if s.provider_id in speaks]
+    return kept
+
+
+def _within_hours(slots: list[Slot], time_from: time | None, time_to: time | None) -> list[Slot]:
+    """The slots inside ``[time_from, time_to)``. ``time_to`` is exclusive: a
+    morning window ending at 14:00 does not hold the 14:00 slot."""
+    if time_from is None and time_to is None:
+        return list(slots)
+    low = time_from or time(0, 0)
+    return [
+        s
+        for s in slots
+        if low <= s.start.astimezone(MADRID).time()
+        and (time_to is None or s.start.astimezone(MADRID).time() < time_to)
+    ]
+
+
+def _distance_from_window(
+    slot: Slot, args: FindSlotsInput, date_from: date, date_to: date
+) -> timedelta | None:
+    """How far ``slot`` sits from the asked window, or ``None`` when it is inside.
+
+    A slot on one of the window's days but outside its hours is measured to
+    that day's edge; a slot on another day to the window's first or last
+    instant. Both directions count: the day before is as near as the day after.
+    """
+    local = slot.start.astimezone(MADRID)
+    day, at = local.date(), local.time()
+    low = args.time_from or time(0, 0)
+    if date_from <= day <= date_to:
+        if at < low:
+            return datetime.combine(day, low, tzinfo=MADRID) - local
+        if args.time_to is not None and at >= args.time_to:
+            return local - datetime.combine(day, args.time_to, tzinfo=MADRID)
+        return None
+    if day < date_from:
+        return datetime.combine(date_from, low, tzinfo=MADRID) - local
+    high = args.time_to or DAY_ENDS
+    return local - datetime.combine(date_to, high, tzinfo=MADRID)
+
+
+def _part_of_day(slot: Slot) -> PartOfDay:
+    return "morning" if slot.start.astimezone(MADRID).time() < MORNING_ENDS else "afternoon"
+
+
+async def _nearest(
+    ctx: ToolContext,
+    catalogue: Catalogue,
+    args: FindSlotsInput,
+    same_days: list[Slot],
+    date_from: date,
+    date_to: date,
+    today: date,
+) -> list[Slot]:
+    """The closest free slots outside an empty window (problem 7).
+
+    "The nearest thing that works" is measured in time from the edge of the
+    window the caller asked for, both ways, never before the day after the
+    call. Every other constraint holds - provider, specialty, site, plan,
+    language - so each alternative is one the caller can actually take. One
+    slot per day and part of the day, nearest first, so the model offers
+    distinct choices instead of four consecutive quarter-hours; within a day
+    and part it is the earliest, the platform's own convention for a slot.
+
+    ``same_days`` are the window's own days before the hours filter: a full
+    Friday afternoon's nearest alternative is often that Friday morning. The
+    widening is best effort - an API error here leaves the window's own
+    answer standing.
+    """
+    candidates = list(same_days)
+    low = max(date_from - timedelta(days=_NEAREST_REACH_DAYS), today + timedelta(days=1))
+    if catalogue.bookable_from:
+        low = max(low, catalogue.bookable_from)
+    high = date_to + timedelta(days=_NEAREST_REACH_DAYS)
+    if catalogue.bookable_to:
+        high = min(high, catalogue.bookable_to)
+    for span_from, span_to in (
+        (low, date_from - timedelta(days=1)),
+        (date_to + timedelta(days=1), high),
+    ):
+        if span_from > span_to:
+            continue
+        fetched = await _fetch(ctx, args, span_from, span_to)
+        if isinstance(fetched, Rejection):
+            continue
+        candidates.extend(_bookable(catalogue, fetched[0], args, today))
+
+    # Rank the (day, part of day) buckets by the slot in each closest to the
+    # window; offer each bucket's earliest slot, the platform's own convention.
+    buckets: dict[tuple[date, PartOfDay], tuple[timedelta, Slot]] = {}
+    for slot in candidates:
+        distance = _distance_from_window(slot, args, date_from, date_to)
+        if distance is None:
+            continue
+        key = (slot.start.astimezone(MADRID).date(), _part_of_day(slot))
+        held = buckets.get(key)
+        if held is None:
+            buckets[key] = (distance, slot)
+            continue
+        nearer = min(distance, held[0])
+        earlier = min(slot, held[1], key=lambda s: (s.start, s.provider_id, s.location_id))
+        buckets[key] = (nearer, earlier)
+    ranked = sorted(buckets.values(), key=lambda pair: (pair[0], pair[1].start))
+    nearest = [slot for _, slot in ranked[:_NEAREST_LIMIT]]
+    return nearest
+
+
 async def find_slots(ctx: ToolContext, args: FindSlotsInput) -> AvailabilityResult:
     """Real availability from the clinic, filtered by the caller's constraints.
 
@@ -522,6 +738,13 @@ async def find_slots(ctx: ToolContext, args: FindSlotsInput) -> AvailabilityResu
     (the caller takes the next open day), ``no_availability`` when the sites
     were open and the diaries were simply full. A non-empty ``blocked`` carries
     no rejection: naming the rule as a refusal is the rules lane's call.
+
+    An empty window with nobody blocked also fills ``nearest``: the closest
+    slots on either side that keep the rest of the request, for the caller to
+    accept or decline (problem 7). The rejection still names why the asked
+    window had nothing, and it is what gets submitted if they decline. Empty
+    ``nearest`` with the rejection means the calendar is full: submit
+    ``no_availability`` and nothing else.
 
     Problem 7: a true ``no_availability`` (never ``clinic_closed``, never a
     kept ``blocked`` rule) with ``args.widen_days`` set searches forward that
@@ -548,64 +771,25 @@ async def find_slots(ctx: ToolContext, args: FindSlotsInput) -> AvailabilityResu
             )
         )
 
-    async def ask(span_from: date, span_to: date) -> AvailabilityResponse:
-        """One ``/availability`` call with the caller's constraints, as given."""
-        return await ctx.clinic.availability(
-            date_from=span_from,
-            date_to=span_to,
-            provider_id=args.provider_id,
-            specialty_id=args.specialty_id,
-            location_id=args.location_id,
-            patient_id=args.patient_id,
-            insurer=[args.insurer] if args.insurer else None,
-        )
-
-    slots: list[Slot] = []
-    blocked: dict[str, BlockedProvider] = {}
-    appointment_type = None
-    for span_from, span_to in _spans(date_from, date_to):
-        try:
-            answer = await ask(span_from, span_to)
-        except ClinicApiError as exc:
-            return AvailabilityResult(
-                rejection=Rejection(
-                    reason="no_availability",
-                    detail=f"availability {span_from}..{span_to} failed: {exc}",
-                )
-            )
-        slots.extend(answer.slots)
-        for entry in answer.blocked:
-            blocked.setdefault(entry.provider_id, entry)
-        appointment_type = appointment_type or answer.appointment_type
+    fetched = await _fetch(ctx, args, date_from, date_to)
+    if isinstance(fetched, Rejection):
+        return AvailabilityResult(rejection=fetched)
+    raw, blocked, appointment_type = fetched
 
     # A wide window that found slots hides the rule that emptied its head: the
     # platform only names a rule when it stops the whole window. Re-ask the
     # stretch before the first slot, where the rule is still reported.
-    if slots and not blocked:
-        head_to = min(s.start.astimezone(MADRID).date() for s in slots) - timedelta(days=1)
-        for probe_from, probe_to in _spans(date_from, head_to):
-            try:
-                answer = await ask(probe_from, probe_to)
-            except ClinicApiError:
-                break  # best effort: the wide answer stands as it is
-            slots.extend(answer.slots)
-            for entry in answer.blocked:
-                blocked.setdefault(entry.provider_id, entry)
-            appointment_type = appointment_type or answer.appointment_type
+    if raw and not blocked:
+        head_to = min(s.start.astimezone(MADRID).date() for s in raw) - timedelta(days=1)
+        probe = await _fetch(ctx, args, date_from, head_to)
+        if not isinstance(probe, Rejection):
+            raw.extend(probe[0])
+            for provider_id, entry in probe[1].items():
+                blocked.setdefault(provider_id, entry)
+            appointment_type = appointment_type or probe[2]
 
-    slots = [s for s in slots if s.start.astimezone(MADRID).date() > today]
-    if args.time_from is not None or args.time_to is not None:
-        low = args.time_from or time(0, 0)
-        high = args.time_to
-        slots = [
-            s
-            for s in slots
-            if low <= s.start.astimezone(MADRID).time()
-            and (high is None or s.start.astimezone(MADRID).time() < high)
-        ]
-    if args.language:
-        speaks = {p.provider_id for p in catalogue.providers if args.language in p.languages}
-        slots = [s for s in slots if s.provider_id in speaks]
+    same_days = _bookable(catalogue, raw, args, today)
+    slots = _within_hours(same_days, args.time_from, args.time_to)
     slots.sort(key=lambda s: (s.start, s.provider_id, s.location_id))
 
     sites = _scope_sites(catalogue, args)
@@ -613,15 +797,20 @@ async def find_slots(ctx: ToolContext, args: FindSlotsInput) -> AvailabilityResu
     window_opens = any(_is_open(catalogue, day, sites) for day in days)
     kept = [e for e in blocked.values() if _keeps_blocked(catalogue, e, sites, days)]
 
+    nearest: list[Slot] = []
     rejection = None
     if not slots and not kept:
+        nearest = await _nearest(ctx, catalogue, args, same_days, date_from, date_to, today)
+        detail = (
+            f"every site in {sorted(sites)} is closed {date_from}..{date_to}"
+            if not window_opens
+            else f"no free slot {date_from}..{date_to} within the caller's constraints"
+        )
+        if nearest:
+            detail += f"; nearest alternative {nearest[0].start.isoformat()}"
         rejection = Rejection(
             reason="clinic_closed" if not window_opens else "no_availability",
-            detail=(
-                f"every site in {sorted(sites)} is closed {date_from}..{date_to}"
-                if not window_opens
-                else f"no free slot {date_from}..{date_to} within the caller's constraints"
-            ),
+            detail=detail,
         )
 
     widened = False
@@ -665,6 +854,7 @@ async def find_slots(ctx: ToolContext, args: FindSlotsInput) -> AvailabilityResu
         slots=slots,
         blocked=kept,
         appointment_type=appointment_type,
+        nearest=nearest,
         rejection=rejection,
         widened=widened,
     )
@@ -690,6 +880,31 @@ def _remembered(ctx: ToolContext, appointment_id: str) -> Appointment | None:
     return Appointment.model_validate(raw) if raw else None
 
 
+async def _named(ctx: ToolContext, items: list[Appointment]) -> list[Appointment]:
+    """Fill ``provider_name`` from the catalogue so the model never invents one.
+
+    The wire carries only ``provider_id``. Call 096af75d (19 Sep, the change
+    and cancel run) died on this: the model told the caller their PR07 visit
+    was with PR01's doctor, the caller corrected it with the right name, and
+    the model took the doctor for another patient and refused. With the name
+    on the record, the caller's "with Dra. X" is a check the model can run,
+    not a guess.
+    """
+    if all(a.provider_name for a in items):
+        return items
+    try:
+        catalogue = await ctx.clinic.catalogue()
+    except ClinicApiError:
+        return items
+    names = {p.provider_id: p.name for p in catalogue.providers}
+    return [
+        a
+        if a.provider_name
+        else a.model_copy(update={"provider_name": names.get(a.provider_id, "")})
+        for a in items
+    ]
+
+
 async def _appointments_of(ctx: ToolContext, patient_id: str) -> list[Appointment]:
     """One patient's whole diary, past and future, as the API reports it.
 
@@ -700,6 +915,7 @@ async def _appointments_of(ctx: ToolContext, patient_id: str) -> list[Appointmen
         items = await ctx.clinic.appointments(patient_id, when="all")
     except ClinicApiError:
         items = await ctx.clinic.appointments(patient_id)
+    items = await _named(ctx, items)
     _remember(ctx, items)
     return items
 

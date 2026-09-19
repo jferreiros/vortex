@@ -1,0 +1,722 @@
+/*
+ * live.css — the Live flow: the projector page (/wall) and Calls › Live.
+ *
+ * The one dark surface of the system becomes the whole canvas here, because a
+ * projector in a lit room needs it. Everything still comes from DESIGN.md
+ * tokens; this file only redefines them on `body.theme-live` and adds the
+ * motion the live page needs: cards that enter, a speaker that pulses, a stage
+ * that glows, a verdict that lands.
+ */
+
+body.theme-live {
+  --canvas: #0a0a0a;
+  --surface-soft: #141414;
+  --surface-card: #111111;
+  --surface-dark: #f5f5f5;
+  --on-dark: #0a0a0a;
+  --on-dark-mute: rgba(10, 10, 10, 0.6);
+  --ink: #f5f5f5;
+  --ink-deep: #ffffff;
+  --charcoal: #d4d4d4;
+  --body: #a3a3a3;
+  --mute: #6b6b6b;
+  --hairline: rgba(255, 255, 255, 0.1);
+  --hairline-strong: rgba(255, 255, 255, 0.2);
+  --primary: #f5f5f5;
+  --on-primary: #0a0a0a;
+  --link: #f5f5f5;
+  --now: #e8fbff;
+  --now-glow: rgba(120, 220, 255, 0.35);
+  background: var(--canvas) !important;
+  color: var(--ink);
+}
+
+body.theme-live,
+body.theme-live #app,
+body.theme-live .q-layout,
+body.theme-live .q-page,
+body.theme-live .q-page-container,
+body.theme-live .nicegui-content {
+  background: var(--canvas) !important;
+}
+
+body.theme-live ::selection {
+  background: var(--ink);
+  color: var(--canvas);
+}
+
+/* A faint radial glow behind the stage, the only decoration on the page. */
+.livepage {
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  isolation: isolate;
+}
+
+.livepage::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(60% 40% at 50% 0%, rgba(255, 255, 255, 0.06), transparent 70%),
+    radial-gradient(40% 30% at 85% 100%, rgba(120, 220, 255, 0.05), transparent 70%);
+  pointer-events: none;
+}
+
+/* ------------------------------------------------------------------ */
+/* Header                                                              */
+/* ------------------------------------------------------------------ */
+
+.live-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xl);
+  padding: var(--space-lg) var(--space-xxl);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.live-head .brand {
+  font: var(--text-heading-md);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.live-head .clinic {
+  font: var(--text-body-sm);
+  color: var(--body);
+}
+
+.live-head .row {
+  gap: var(--space-lg);
+}
+
+.live-head .state {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  height: 36px;
+  padding: 0 16px;
+  border-radius: var(--rounded-full);
+  border: 1px solid var(--hairline-strong);
+  font: var(--text-body-sm-strong);
+  color: var(--ink);
+}
+
+.live-head .state.on {
+  background: var(--ink);
+  color: var(--canvas);
+  border-color: var(--ink);
+  box-shadow: 0 0 0 6px rgba(255, 255, 255, 0.06), 0 0 40px var(--now-glow);
+}
+
+.live-head .state.on .dot {
+  background: var(--canvas);
+  animation: ds-pulse 1.2s ease-in-out infinite;
+}
+
+.live-head .meta {
+  font: var(--text-body-sm);
+  color: var(--body);
+}
+
+/* ------------------------------------------------------------------ */
+/* Stage: three acts                                                   */
+/* ------------------------------------------------------------------ */
+
+.live-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.live-stage {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.15fr) minmax(0, 0.8fr);
+  gap: var(--space-xxl);
+  padding: var(--space-xxl);
+  align-items: start;
+}
+
+@media (max-width: 1100px) {
+  .live-stage {
+    grid-template-columns: 1fr;
+  }
+}
+
+.act {
+  min-width: 0;
+}
+
+.act-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-md);
+  margin-bottom: var(--space-lg);
+}
+
+.act-title .t {
+  font: var(--text-heading-md);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+.act-title .m {
+  font: var(--text-caption-sm);
+  color: var(--mute);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------------ */
+/* Act 1: conversation                                                 */
+/* ------------------------------------------------------------------ */
+
+.convo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.say {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: var(--space-md);
+  align-items: start;
+  animation: enter 520ms cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+
+.say.user {
+  grid-template-columns: minmax(0, 1fr) 40px;
+}
+
+.say.user .avatar {
+  order: 2;
+}
+
+.say.user .bubble-wrap {
+  order: 1;
+  justify-self: end;
+  text-align: right;
+}
+
+.avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--rounded-full);
+  display: grid;
+  place-items: center;
+  font: var(--text-caption-sm);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+  background: var(--surface-soft);
+  border: 1px solid var(--hairline);
+  position: relative;
+}
+
+.say.assistant .avatar {
+  background: var(--ink);
+  color: var(--canvas);
+  border-color: var(--ink);
+}
+
+/* The speaker breathes. */
+.say.speaking .avatar::after {
+  content: "";
+  position: absolute;
+  inset: -6px;
+  border-radius: var(--rounded-full);
+  border: 2px solid var(--now);
+  opacity: 0.9;
+  animation: ring 1.4s cubic-bezier(0.32, 0.72, 0, 1) infinite;
+}
+
+.bubble-wrap {
+  max-width: 44ch;
+}
+
+.say .bubble {
+  display: inline-block;
+  text-align: left;
+  font: var(--text-heading-sm);
+  font-weight: 400;
+  color: var(--ink);
+  background: var(--surface-soft);
+  border: 1px solid var(--hairline);
+  border-radius: 18px;
+  padding: 12px 16px;
+}
+
+.say.assistant .bubble {
+  background: var(--surface-card);
+}
+
+.say.speaking .bubble {
+  border-color: var(--hairline-strong);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.04), 0 0 32px rgba(120, 220, 255, 0.08);
+}
+
+.say .who {
+  font: var(--text-caption-sm);
+  color: var(--mute);
+  margin-top: 6px;
+}
+
+/* Sound bars: only while the live call is on and someone is speaking. */
+.bars-live {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 14px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.bars-live i {
+  width: 3px;
+  height: 40%;
+  border-radius: 2px;
+  background: var(--now);
+  animation: bar 0.9s ease-in-out infinite;
+}
+
+.bars-live i:nth-child(2) { animation-delay: 0.15s; }
+.bars-live i:nth-child(3) { animation-delay: 0.3s; }
+.bars-live i:nth-child(4) { animation-delay: 0.45s; }
+
+/* ------------------------------------------------------------------ */
+/* Act 2: workflow                                                     */
+/* ------------------------------------------------------------------ */
+
+.flow {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  padding-left: 28px;
+}
+
+/* The spine. */
+.flow::before {
+  content: "";
+  position: absolute;
+  left: 9px;
+  top: 12px;
+  bottom: 12px;
+  width: 2px;
+  background: var(--hairline);
+}
+
+.node {
+  position: relative;
+  animation: enter 520ms cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+
+.node .knot {
+  position: absolute;
+  left: -28px;
+  top: 6px;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--rounded-full);
+  background: var(--canvas);
+  border: 2px solid var(--hairline-strong);
+  display: grid;
+  place-items: center;
+}
+
+.node .knot i {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--rounded-full);
+  background: var(--mute);
+}
+
+.node.done .knot {
+  border-color: var(--ink);
+}
+
+.node.done .knot i {
+  background: var(--terminal-green);
+}
+
+.node.now .knot {
+  border-color: var(--now);
+  box-shadow: 0 0 0 6px rgba(120, 220, 255, 0.12), 0 0 24px var(--now-glow);
+}
+
+.node.now .knot i {
+  background: var(--now);
+  animation: ds-pulse 1s ease-in-out infinite;
+}
+
+.node.off .knot i {
+  background: var(--hairline-strong);
+}
+
+.node .stage-name {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+  font: var(--text-heading-sm);
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.node.off .stage-name {
+  color: var(--mute);
+}
+
+.node .stage-name .n {
+  font: var(--text-caption-sm);
+  color: var(--mute);
+  font-variant-numeric: tabular-nums;
+}
+
+.node .stage-text {
+  font: var(--text-body-sm);
+  color: var(--body);
+  margin-top: 2px;
+}
+
+.node.off .stage-text {
+  color: var(--mute);
+}
+
+.cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  margin-top: var(--space-md);
+}
+
+.tcard {
+  background: var(--surface-card);
+  border: 1px solid var(--hairline);
+  border-radius: var(--rounded-lg);
+  padding: 12px 14px;
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  animation: enter 520ms cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+
+.tcard.running {
+  border-color: var(--hairline-strong);
+  box-shadow: 0 0 24px rgba(120, 220, 255, 0.08);
+}
+
+.tcard.failed {
+  border-color: rgba(255, 95, 86, 0.5);
+}
+
+.tcard .dot {
+  margin-top: 7px;
+}
+
+.tcard .what {
+  font: var(--text-body-sm-strong);
+  color: var(--ink);
+}
+
+.tcard .tool {
+  font: var(--text-code-sm);
+  font-size: 12px;
+  color: var(--mute);
+  margin-left: 8px;
+}
+
+.tcard .said {
+  font: var(--text-body-sm);
+  color: var(--charcoal);
+  margin-top: 3px;
+}
+
+.tcard.failed .said,
+.tcard .said.bad {
+  color: var(--ink);
+}
+
+.tcard .ms {
+  font: var(--text-caption-sm);
+  color: var(--mute);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  padding-top: 3px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Act 3: outcome                                                      */
+/* ------------------------------------------------------------------ */
+
+.verdict-card {
+  background: var(--surface-dark);
+  color: var(--on-dark);
+  border-radius: 20px;
+  padding: var(--space-xl) var(--space-xxl);
+  position: sticky;
+  top: var(--space-xxl);
+  transition: transform 600ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.verdict-card.landed {
+  animation: land 700ms cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+
+.verdict-card .label {
+  font: var(--text-caption-sm);
+  color: var(--on-dark-mute);
+}
+
+.verdict-card .title {
+  font: var(--text-display-xl);
+  font-size: 44px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+  color: var(--on-dark);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: var(--space-xs);
+}
+
+.verdict-card .title .dot {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+.verdict-card .text {
+  font: var(--text-heading-sm);
+  font-weight: 400;
+  color: var(--on-dark-mute);
+  margin-top: var(--space-md);
+  max-width: 34ch;
+}
+
+.verdict-card .reason {
+  display: inline-flex;
+  margin-top: var(--space-lg);
+  padding: 6px 12px;
+  border-radius: var(--rounded-full);
+  background: rgba(10, 10, 10, 0.08);
+  font: var(--text-code-sm);
+  color: var(--on-dark);
+}
+
+.verdict-card .kv {
+  border-color: rgba(10, 10, 10, 0.12);
+  font: var(--text-body-sm);
+}
+
+.verdict-card .kv > :first-child {
+  color: var(--on-dark-mute);
+}
+
+.verdict-card .kv > :last-child {
+  color: var(--on-dark);
+}
+
+.record-live {
+  margin-top: var(--space-xl);
+}
+
+.record-live .kv {
+  padding: 10px 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Footer strip: the other lines                                       */
+/* ------------------------------------------------------------------ */
+
+.live-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-lg);
+  padding: var(--space-lg) var(--space-xxl);
+  border-top: 1px solid var(--hairline);
+  overflow: hidden;
+}
+
+.live-foot .k {
+  font: var(--text-caption-sm);
+  color: var(--mute);
+  white-space: nowrap;
+}
+
+.line-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: var(--rounded-full);
+  border: 1px solid var(--hairline);
+  font: var(--text-body-sm);
+  color: var(--charcoal);
+  text-decoration: none;
+  white-space: nowrap;
+  animation: enter 400ms cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+
+.line-chip.on {
+  border-color: var(--hairline-strong);
+  color: var(--ink);
+}
+
+.live-foot .stats {
+  margin-left: auto;
+  display: flex;
+  gap: var(--space-xl);
+}
+
+.live-foot .stat-mini {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.live-foot .stat-mini .n {
+  font: var(--text-heading-sm);
+  font-weight: 600;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.live-foot .stat-mini .l {
+  font: var(--text-caption-sm);
+  color: var(--mute);
+}
+
+/* Empty stage. */
+.waiting {
+  display: grid;
+  place-items: center;
+  text-align: center;
+  padding: 120px var(--space-xl);
+}
+
+.waiting .t {
+  font: var(--text-display-lg);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+
+.waiting .d {
+  font: var(--text-body-md);
+  color: var(--body);
+  margin-top: var(--space-sm);
+}
+
+/* ------------------------------------------------------------------ */
+/* Motion                                                              */
+/* ------------------------------------------------------------------ */
+
+@keyframes enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes ring {
+  0% {
+    transform: scale(0.9);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(1.35);
+    opacity: 0;
+  }
+}
+
+@keyframes bar {
+  0%, 100% { height: 30%; }
+  50% { height: 100%; }
+}
+
+@keyframes land {
+  0% {
+    opacity: 0;
+    transform: translateY(14px) scale(0.96);
+  }
+  60% {
+    opacity: 1;
+    transform: translateY(-4px) scale(1.01);
+  }
+  100% {
+    transform: none;
+  }
+}
+
+/* Projector sizes: from three metres, everything one step up. */
+@media (min-width: 1600px) {
+  .say .bubble {
+    font-size: 21px;
+    line-height: 1.45;
+    padding: 14px 18px;
+  }
+
+  .bubble-wrap {
+    max-width: 46ch;
+  }
+
+  .tcard .what {
+    font-size: 16px;
+  }
+
+  .tcard .said {
+    font-size: 15px;
+  }
+
+  .node .stage-name {
+    font-size: 20px;
+  }
+
+  .verdict-card .title {
+    font-size: 52px;
+  }
+
+  .verdict-card .text {
+    font-size: 20px;
+  }
+
+  .record-live .kv {
+    font-size: 15px;
+  }
+
+  .line-chip {
+    height: 36px;
+    font-size: 15px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .say,
+  .node,
+  .tcard,
+  .line-chip,
+  .verdict-card.landed {
+    animation: none;
+  }
+
+  .say.speaking .avatar::after,
+  .bars-live i,
+  .node.now .knot i {
+    animation: none;
+  }
+}

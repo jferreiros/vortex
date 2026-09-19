@@ -12,12 +12,16 @@ from dataclasses import dataclass
 from typing import Literal
 
 CallDirection = Literal["inbound", "outbound"]
-CallPurpose = Literal[
-    "booking", "confirmation", "cancellation", "reschedule", "info", "other"
-]
+CallPurpose = Literal["booking", "confirmation", "cancellation", "reschedule", "info", "other"]
 CallOutcome = Literal[
-    "book", "cancel", "reschedule", "register", "no_action", "escalate",
-    "confirmed", "no_answer",
+    "book",
+    "cancel",
+    "reschedule",
+    "register",
+    "no_action",
+    "escalate",
+    "confirmed",
+    "no_answer",
 ]
 AppointmentStatus = Literal["scheduled", "confirmed", "cancelled", "completed", "no_show"]
 

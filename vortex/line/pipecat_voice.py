@@ -52,6 +52,7 @@ from typing import Any
 from fastapi import WebSocket
 
 from vortex import tools as registry
+from vortex.contract import action_route
 from vortex.conversation.language import (
     DEFAULT_LANGUAGE,
     detect_language,
@@ -60,6 +61,8 @@ from vortex.conversation.language import (
 )
 from vortex.conversation.prompt import (
     GREETING,
+    handoff_greeting_for,
+    idle_submit_line_for,
     initial_messages,
     wait_prompt_for,
 )
@@ -268,7 +271,12 @@ async def run_pipecat_call(
 
     # The language this call is in, shared by the watcher that updates it and
     # the router that reads it. Per call: a closure, never a module global.
+    # A call that arrives through an outbound-call handoff already has its
+    # language: the patient picked it during the confirmation call.
     language_state = _LanguageState()
+    if session.handoff:
+        if handoff_language := normalise_language(session.handoff.get("language")):
+            language_state.language = handoff_language
 
     # ---- LLM: any OpenAI-compatible endpoint, as long as it is in the EU. ----
     llm_settings = OpenAILLMService.Settings(
@@ -320,7 +328,7 @@ async def run_pipecat_call(
     # prompt can open knowing who the line belongs to instead of spending the
     # first minute of the call asking.
     caller = await session.resolve_caller_line()
-    messages = initial_messages(ctx.now, caller=caller)
+    messages = initial_messages(ctx.now, caller=caller, handoff=session.handoff)
     # Tono/Amabilidad are not TTS fields: they arrive as one extra line on the
     # system prompt. Empty at neutral, so an untouched card changes nothing.
     if directive := voice_config.style_directive(voice_cfg):
@@ -375,10 +383,12 @@ async def run_pipecat_call(
     session.usage.metered = True
     hangup.bind(task)
 
+    greeting = handoff_greeting_for(language_state.language) if session.handoff else GREETING
+
     @transport.event_handler("on_client_connected")
     async def _on_connected(transport: Any, client: Any) -> None:
-        ctx.log.assistant_turn(GREETING)
-        await task.queue_frames([TTSSpeakFrame(GREETING)])
+        ctx.log.assistant_turn(greeting)
+        await task.queue_frames([TTSSpeakFrame(greeting)])
 
     @transport.event_handler("on_client_disconnected")
     async def _on_disconnected(transport: Any, client: Any) -> None:
@@ -451,6 +461,7 @@ def _user_aggregator_params(turns: TurnSettings) -> Any:
             )
         ),
         user_idle_timeout=turns.user_idle_secs,
+        user_turn_stop_timeout=turns.user_turn_stop_secs,
         user_turn_strategies=user_turn_strategies(turns),
     )
 
@@ -550,7 +561,8 @@ def _make_tts(
     never changes with the provider.
     """
     name = provider or settings.tts_provider
-    voice, language = tts_voice_for(DEFAULT_LANGUAGE, settings, name)
+    start_language = state.language if state is not None else DEFAULT_LANGUAGE
+    voice, language = tts_voice_for(start_language, settings, name)
     if vcfg:
         voice = voice_config.apply_gender(voice, vcfg.voice)
     if not voice:
@@ -821,6 +833,9 @@ def _LanguageWatcher(  # noqa: N802 - factory that returns a processor
                 if vcfg:
                     voice = voice_config.apply_gender(voice, vcfg.voice)
                 previous, self._state.language = self._state.language, language
+                # The session carries it too: the day-before confirmation call
+                # is dialled in the language this caller actually spoke.
+                session.language = language
                 session.ctx.log.event(
                     "voice.language_switch",
                     was=previous,
@@ -847,10 +862,13 @@ def _make_idle_speaker(
     """The handler the user aggregator fires when the caller goes quiet.
 
     The line comes from ``conversation.turns.IdlePolicy``: the short nudge
-    first, a "take your time" line second, then silence. The platform cuts a
-    call that goes quiet, so the first silence has to answer — but answering
-    every silence is what put 147 nudges into the 20 calls of 2026-09-18, each
-    one restarting a sentence the caller was already saying.
+    first. The platform cuts a call that goes quiet, so the first silence has
+    to answer — but answering every silence is what put 147 nudges into the
+    20 calls of 2026-09-18, each one restarting a sentence the caller was
+    already saying. So the second silence does not nudge again: it speaks
+    ``prompt.idle_submit_line_for`` and submits the best known action (a
+    prepared booking counts as confirmed by the second silence; anything else
+    sends the same refusal ``close()`` would). Further idles are silent.
 
     The language is read at fire time, so a mid-call switch moves the line, and
     the TTS router reads the same state, so it comes out on the right voice.
@@ -870,10 +888,43 @@ def _make_idle_speaker(
             spoke=decision.speaks,
             suppressed=decision.suppressed,
         )
+        if decision.level == 2:
+            # Second silence: no more nudging. Say we are noting what the call
+            # has and send it - a quiet call still counts on the platform.
+            await task.queue_frames([TTSSpeakFrame(idle_submit_line_for(state.language))])
+            await _submit_best_known_on_idle(session)
+            return
         if decision.text is not None:
             await task.queue_frames([TTSSpeakFrame(decision.text)])
 
     return _on_user_idle
+
+
+async def _submit_best_known_on_idle(session: CallSession) -> None:
+    """Second idle: send prepared work, or the fallback refusal, once."""
+    if session.has_accepted_submission:
+        return
+    memory = session.memory
+    if memory.prepared is not None:
+        memory.mark_confirmed()
+        branch, action, why = (
+            "prepared_on_idle",
+            memory.prepared,
+            f"{memory.prepared_tool} prepared; second idle confirms",
+        )
+    else:
+        branch, action, why = session.fallback_action()
+    repeat = action in session.sent_actions
+    session.ctx.log.event(
+        "submit.idle",
+        branch=branch,
+        why=why,
+        route=action_route(action),
+        skipped=repeat,
+    )
+    if repeat:
+        return
+    await session.submit(action)
 
 
 def _make_tool_filler_speaker(

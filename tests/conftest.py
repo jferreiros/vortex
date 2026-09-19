@@ -41,6 +41,12 @@ def offline_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> setting
         "VORTEX_SMS_REMINDER_LEAD_HOURS",
         "VORTEX_SMS_REMINDER_POLL_SECS",
         "VORTEX_SMS_REMINDERS_PATH",
+        "VORTEX_CONFIRMATION_CALLS",
+        "VORTEX_PUBLIC_BASE_URL",
+        "VORTEX_CONFIRMATION_LEAD_HOURS",
+        "VORTEX_CONFIRMATION_CALLS_PATH",
+        "VORTEX_CONFIRMATION_POLL_SECS",
+        "VORTEX_CONFIRMATION_FORCE_TO",
     ):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("VORTEX_VOICE_MODE", "stub")
@@ -83,6 +89,12 @@ def _unset_dotenv_keys() -> None:
         "VORTEX_SMS_REMINDER_LEAD_HOURS",
         "VORTEX_SMS_REMINDER_POLL_SECS",
         "VORTEX_SMS_REMINDERS_PATH",
+        "VORTEX_CONFIRMATION_CALLS",
+        "VORTEX_PUBLIC_BASE_URL",
+        "VORTEX_CONFIRMATION_LEAD_HOURS",
+        "VORTEX_CONFIRMATION_CALLS_PATH",
+        "VORTEX_CONFIRMATION_POLL_SECS",
+        "VORTEX_CONFIRMATION_FORCE_TO",
     ):
         os.environ.pop(key, None)
 

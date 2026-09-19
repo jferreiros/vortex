@@ -226,17 +226,13 @@ def assign_provider(catalogue: Catalogue, booking: Booking) -> Booking:
     """
     if booking.provider_id:
         return booking
-    provider_id = _provider_for_slot(
-        catalogue, booking.location_id, booking.appointment_type_id
-    )
+    provider_id = _provider_for_slot(catalogue, booking.location_id, booking.appointment_type_id)
     if not provider_id:
         return booking
     return replace(booking, provider_id=provider_id)
 
 
-def _provider_for_slot(
-    catalogue: Catalogue, location_id: str, appointment_type_id: str
-) -> str:
+def _provider_for_slot(catalogue: Catalogue, location_id: str, appointment_type_id: str) -> str:
     type_specialty = next(
         (
             row.specialty_id
@@ -252,8 +248,7 @@ def _provider_for_slot(
     ranked = [
         provider
         for provider in catalogue.providers
-        if at_site(provider)
-        and (not type_specialty or provider.specialty_id == type_specialty)
+        if at_site(provider) and (not type_specialty or provider.specialty_id == type_specialty)
     ]
     if not ranked:
         ranked = [provider for provider in catalogue.providers if at_site(provider)]
@@ -272,9 +267,7 @@ def load_agenda_bookings(catalogue: Catalogue) -> dict[BookingKey, Booking]:
     from vortex.clinic import fixtures
     from vortex.clinic.client import _adapt_appointment
 
-    extra = [
-        Appointment.model_validate(_adapt_appointment(row)) for row in fixtures.APPOINTMENTS
-    ]
+    extra = [Appointment.model_validate(_adapt_appointment(row)) for row in fixtures.APPOINTMENTS]
     bookings = bookings_from_appointments(extra)
     for booking in appointment_index().values():
         placed = assign_provider(catalogue, booking)
@@ -955,8 +948,7 @@ def suggest_doctors(
     return {
         "ok": True,
         "doctors": [
-            {"name": calendar.name, "specialty": calendar.specialty}
-            for calendar in found[:limit]
+            {"name": calendar.name, "specialty": calendar.specialty} for calendar in found[:limit]
         ],
     }
 
@@ -973,9 +965,7 @@ def agenda_options(catalogue: Catalogue) -> dict[str, Any]:
         for provider in sorted(catalogue.providers, key=lambda row: row.name.casefold())
     ]
     sites = [{"id": loc.location_id, "name": loc.name} for loc in catalogue.locations]
-    specialties = [
-        {"id": row.specialty_id, "name": row.name} for row in catalogue.specialties
-    ]
+    specialties = [{"id": row.specialty_id, "name": row.name} for row in catalogue.specialties]
     if not specialties:
         seen: dict[str, str] = {}
         for provider in catalogue.providers:
@@ -983,8 +973,7 @@ def agenda_options(catalogue: Catalogue) -> dict[str, Any]:
                 seen[provider.specialty_id] = provider.specialty_name or provider.specialty_id
         specialties = [{"id": key, "name": label} for key, label in seen.items()]
     types = [
-        {"id": row.appointment_type_id, "name": row.name}
-        for row in catalogue.appointment_types
+        {"id": row.appointment_type_id, "name": row.name} for row in catalogue.appointment_types
     ]
     return {
         "ok": True,

@@ -26,6 +26,11 @@ from vortex.settings import Settings
 
 log = logging.getLogger("vortex.line.sms_reminders")
 
+#: Product rule (Cristina, 2026-09-19): an appointment booked less than 24 h
+#: before its slot gets no reminder SMS - the patient just booked it.
+#: Hard-coded, not the lead: the lead is a demo knob, this rule is not.
+MIN_BOOKING_GAP = timedelta(hours=24)
+
 ReminderStatus = Literal["pending", "sent", "cancelled", "skipped"]
 
 
@@ -60,10 +65,7 @@ def reminder_text(
 ) -> str:
     stamp = format_slot_es(when)
     if provider_name and location_name:
-        head = (
-            f"Recordatorio: mañana tienes cita con {provider_name} "
-            f"en {location_name}: {stamp}."
-        )
+        head = f"Recordatorio: mañana tienes cita con {provider_name} en {location_name}: {stamp}."
     elif provider_name:
         head = f"Recordatorio: mañana tienes cita con {provider_name}: {stamp}."
     elif location_name:
@@ -182,9 +184,7 @@ class ReminderStore:
                 self._write(rows)
             return due
 
-    async def update_detail(
-        self, reminder_id: str, *, detail: str, status: ReminderStatus
-    ) -> None:
+    async def update_detail(self, reminder_id: str, *, detail: str, status: ReminderStatus) -> None:
         async with self._lock:
             rows = self._read()
             for row in rows:
@@ -213,6 +213,8 @@ def build_book_reminder(
     clock = now or datetime.now(tz=MADRID)
     if clock.tzinfo is None:
         clock = clock.replace(tzinfo=MADRID)
+    if when - clock < MIN_BOOKING_GAP:
+        return None
     gap = lead if lead is not None else timedelta(days=1)
     send_at = when - gap
     if send_at <= clock:
@@ -299,9 +301,7 @@ class ReminderWorker:
         self.store = store or reminder_store_from_settings(settings)
         self.sms = sms or make_sms_client(settings)
         self.poll_secs = (
-            poll_secs
-            if poll_secs is not None
-            else float(settings.sms_reminder_poll_secs or 30.0)
+            poll_secs if poll_secs is not None else float(settings.sms_reminder_poll_secs or 30.0)
         )
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()

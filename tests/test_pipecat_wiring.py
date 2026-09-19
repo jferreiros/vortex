@@ -717,51 +717,93 @@ async def test_a_short_ambiguous_turn_keeps_the_call_language(voice_settings) ->
     assert pushed[0].delta.voice == settings.google_tts_voice_ca
 
 
-async def test_the_idle_handler_speaks_the_prompt_in_the_call_language(voice_settings) -> None:
-    """A silent caller hears the nudge in the language of the call.
+async def test_the_idle_handler_reprompts_once_then_submits(offline_settings) -> None:
+    """First idle asks if they are there; second idle summarises and submits.
 
-    The platform cuts a call that goes quiet, so the first silence has to
-    answer. The line is read at fire time, so a mid-call language switch moves
-    it — the second nudge below comes out in Catalan because the call did.
+    The difficult caller goes quiet for about eight seconds. One nudge, then a
+    submit on the next idle, so the three-minute call does not end empty. The
+    line is read at fire time, so a mid-call language switch moves it — the
+    submit line below comes out in Catalan because the call did.
     """
     pytest.importorskip("pipecat")
 
-    from vortex.conversation.prompt import idle_patience_for, idle_prompt_for
+    from datetime import datetime
+
+    from vortex.contract import MADRID, BookAction
+    from vortex.conversation.prompt import idle_prompt_for, idle_submit_line_for
     from vortex.conversation.turns import IdlePolicy, default_turn_settings
     from vortex.line.pipecat_voice import _LanguageState, _make_idle_speaker
+    from vortex.line.session import CallSession
+    from vortex.line.twilio import StartPayload
 
-    settings = voice_settings()
     events: list[tuple[str, dict]] = []
-    queued: list[object] = []
 
     class Task:
+        def __init__(self) -> None:
+            self.queued: list[object] = []
+
         async def queue_frames(self, frames: list[object]) -> None:
-            queued.extend(frames)
+            self.queued.extend(frames)
+
+    start = StartPayload(streamSid="MZ-idle", callSid="CA-idle", customParameters={})
+    session = CallSession.open(start, settings=offline_settings)
+    original_event = session.ctx.log.event
+
+    def _event(kind: str, **kwargs: object) -> None:
+        events.append((kind, kwargs))
+        original_event(kind, **kwargs)
+
+    session.ctx.log.event = _event  # type: ignore[method-assign]
+
+    booking = BookAction(
+        patient_id="P00042",
+        provider_id="PR05",
+        location_id="sur",
+        appointment_type_id="review",
+        slot=datetime(2026, 9, 24, 16, 30, tzinfo=MADRID),
+        policy_id="sanitas",
+    )
+    session.memory.remember_prepared("prepare_booking", booking)
 
     now = [0.0]
     policy = IdlePolicy(default_turn_settings(), clock=lambda: now[0])
     state = _LanguageState("es")
-    handler = _make_idle_speaker(_session(settings, events), state, Task(), policy)
+    task = Task()
+    handler = _make_idle_speaker(session, state, task, policy)
 
     await handler(None)
-    assert [kind for kind, _ in events] == ["voice.user_idle"]
-    assert [frame.text for frame in queued] == [idle_prompt_for("es")]
-    assert events[-1][1]["count"] == 1
-    assert events[-1][1]["level"] == 1
+    assert events[-1] == (
+        "voice.user_idle",
+        {"count": 1, "level": 1, "spoke": True, "suppressed": None},
+    )
+    assert [frame.text for frame in task.queued] == [idle_prompt_for("es")]
+    assert session.submitted == []
 
+    # Second silence, after the caller switched the call to Catalan: no more
+    # nudging. The prepared booking counts as confirmed by the second silence.
     now[0] = 12.0
     state.language = "ca"
     await handler(None)
-    assert queued[-1].text == idle_patience_for("ca")
-    assert [kind for kind, _ in events] == ["voice.user_idle"] * 2
-    assert events[-1][1]["level"] == 2
+    idle_events = [kwargs for kind, kwargs in events if kind == "voice.user_idle"]
+    assert idle_events[-1]["count"] == 2
+    assert idle_events[-1]["level"] == 2
+    idle_submit = next(kwargs for kind, kwargs in events if kind == "submit.idle")
+    assert idle_submit["branch"] == "prepared_on_idle"
+    assert task.queued[-1].text == idle_submit_line_for("ca")
+    assert len(session.submitted) == 1
+    assert session.sent_actions[0] == booking
+    assert session.memory.confirmed is True
 
-    # Third event inside the mute window: logged, but nothing is spoken.
+    # A third event inside the mute window is logged but speaks nothing and
+    # never submits twice.
     now[0] = 20.0
     await handler(None)
-    assert len(queued) == 2
-    assert events[-1][1]["spoke"] is False
-    assert events[-1][1]["suppressed"] == "muted"
+    idle_events = [kwargs for kind, kwargs in events if kind == "voice.user_idle"]
+    assert idle_events[-1]["spoke"] is False
+    assert idle_events[-1]["suppressed"] == "muted"
+    assert len(task.queued) == 2
+    assert len(session.submitted) == 1
+    await session.close(reason="test")
 
 
 async def test_the_idle_escalation_is_per_socket(voice_settings) -> None:
@@ -905,6 +947,18 @@ async def test_the_filler_guard_speaks_one_filler_per_interaction(voice_settings
     await handler(None, [{"name": "find_patient"}])
     assert len(queued) == 3
     assert isinstance(queued[-1], TTSSpeakFrame)
+
+
+def test_user_aggregator_params_carry_idle_and_stop_timeouts() -> None:
+    """Acceptance: the idle timeout follows settings; the stop safety net is 6 s."""
+    pytest.importorskip("pipecat")
+    from vortex.conversation.turns import TurnSettings
+    from vortex.line.pipecat_voice import _user_aggregator_params
+
+    turns = TurnSettings()
+    params = _user_aggregator_params(turns)
+    assert params.user_idle_timeout == turns.user_idle_secs
+    assert params.user_turn_stop_timeout == 6.0
 
 
 def test_vad_mode_wires_our_turn_strategies() -> None:

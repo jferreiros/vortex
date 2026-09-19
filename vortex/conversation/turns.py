@@ -50,8 +50,11 @@ On the 2026-09-18 scored run the handler spoke the same "are you still there?"
 every time the timer expired: 147 nudges over 20 calls, up to 13 in one, each
 one making the caller restart the sentence they were already halfway through.
 The timer re-arms on ``BotStoppedSpeakingFrame``, so every nudge bought itself
-the next one. The policy now says the short nudge once, then a "take your
-time" line, then nothing for ``idle_mute_secs``.
+the next one. The policy now says the short nudge once, then — on the second
+silence — ``prompt.idle_submit_line_for`` and a submission of what the call
+already knows (see ``_submit_best_known_on_idle`` in the line lane), so eight
+seconds of quiet does not burn the three-minute cap with nothing sent.
+Further idles say nothing for ``idle_mute_secs``.
 
 **What pipecat's idle timer already guarantees** (``turns/user_idle_controller``
 in 1.11): the timer is armed on ``BotStoppedSpeakingFrame`` and cancelled on
@@ -76,9 +79,27 @@ import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from vortex.settings import get_settings
+
+# First ``on_user_turn_idle`` re-prompts; the next one submits. Further idles
+# are no-ops (the call already sent what it had).
+MAX_IDLE_REPROMPTS = 1
+
+IdlePhase = Literal["reprompt", "submit", "done"]
+
+
+def idle_phase(count: int, *, max_reprompts: int = MAX_IDLE_REPROMPTS) -> IdlePhase:
+    """What to do on the Nth ``on_user_turn_idle`` (1-based) for this call."""
+    if count < 1:
+        raise ValueError(f"idle count must be >= 1, got {count}")
+    if count <= max_reprompts:
+        return "reprompt"
+    if count == max_reprompts + 1:
+        return "submit"
+    return "done"
+
 
 # Every tool in vortex/tools.py plus submit_action. The model sees all of
 # them at once: the flow is short and staging would cost a round trip per
@@ -146,6 +167,8 @@ class TurnSettings:
     idle_mute_secs: float = IDLE_MUTE_SECS
     # A floor between the agent's own last line and the next nudge.
     idle_bot_grace_secs: float = IDLE_BOT_GRACE_SECS
+    # Safety net: if no stop strategy ends the user turn, force it after this.
+    user_turn_stop_secs: float = 6.0
     exposed_tools: list[str] = field(default_factory=lambda: list(DEFAULT_EXPOSED_TOOLS))
 
     # --- Soniox STT ---------------------------------------------------------

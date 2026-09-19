@@ -17,7 +17,7 @@ from vortex.line.sms_reminders import (
     reminder_text,
     schedule_book_reminder,
 )
-from vortex.settings import Settings, get_settings, reset_settings
+from vortex.settings import get_settings, reset_settings
 
 WHEN = datetime(2026, 9, 24, 16, 30, tzinfo=MADRID)
 NOW = datetime(2026, 9, 20, 10, 0, tzinfo=MADRID)
@@ -39,6 +39,21 @@ def test_build_skips_when_inside_lead_window() -> None:
         lead=timedelta(hours=24),
     )
     assert reminder is None
+
+
+def test_no_reminder_when_booked_within_24h() -> None:
+    # Product rule: booked less than 24 h before the slot -> no reminder SMS,
+    # even with a tiny demo lead that would otherwise fire immediately.
+    booked_just_now = WHEN - timedelta(hours=23, minutes=59)
+    assert (
+        build_book_reminder(
+            to="+34600000000",
+            when=WHEN,
+            now=booked_just_now,
+            lead=timedelta(seconds=36),
+        )
+        is None
+    )
 
 
 def test_build_schedules_one_day_before() -> None:
