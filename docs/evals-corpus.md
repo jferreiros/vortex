@@ -10,6 +10,7 @@ make evals-corpus      # roster integrity + the probes, no keys, ~40 ms
 make evals-corpus LOG=logs/calls.jsonl   # score real practice calls
 make evals-fetch       # refresh the roster (each morning of the event)
 make evals-snapshot    # freeze the real clinic; needs PLATFORM_API_KEY
+make evals-hydrate     # rebuild synthetic-data/ from the roster (LIVE=1 hits the API)
 ```
 
 `make evals` runs layers 1, 2 and 4 and is still the CI entry point.
@@ -90,6 +91,18 @@ reported as skipped, with that reason, rather than left out.
 Twenty more situations the docs state and no public case exercises are listed
 as skipped with the reason, including the nine refusal reasons the roster never
 reaches. A board that omits what it could not test is a board that lies.
+
+## The isolated pack (`synthetic-data/`)
+
+`make evals-hydrate` writes patients, already-booked appointments and one
+CallLog JSONL per problem into `synthetic-data/` at the repo root — same payload
+shape as `vortex/clinic/fixtures.py`, different folder. It does not touch the
+fixtures, `logs/calls.jsonl`, or the gitignored `evals/corpus/world/` snapshot.
+
+`FakeClinicClient()` still reads the small invented fixtures. Pass
+`data_dir=Path("synthetic-data")` to look up the published ids (`P00001`,
+`A001101`, …) offline. `LIVE=1` enriches charts and diaries from the clinic API
+when a key is set.
 
 ## What is still blocked
 

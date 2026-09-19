@@ -12,6 +12,11 @@ Ids and people here are invented. They mirror the traps the docs describe
 (near-miss surnames, a provider on leave, a same-name pair) so the lanes can
 rehearse against them. Keep the set small.
 
+The published Problems-page cases live in ``synthetic-data/`` (same keys,
+separate folder). ``FakeClinicClient()`` keeps this small set;
+``FakeClinicClient(data_dir=...)`` reads the pack. Regenerate with
+``make evals-hydrate``.
+
 Owner: clinic/. Add fixtures here when a lane needs a new shape to test against.
 """
 
