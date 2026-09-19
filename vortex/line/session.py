@@ -205,6 +205,7 @@ class CallSession:
             log=log,
             submitter=submitter,
         )
+        ctx.settings = settings  # type: ignore[attr-defined]
         CallMemory.of(ctx)  # attach it before any tool runs
         session = cls(settings=settings, start=start, ctx=ctx, submitter=submitter)
         log.event(
