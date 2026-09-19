@@ -175,8 +175,9 @@ def test_a_gap_with_no_patient_of_its_kind_is_unverified_not_impossible() -> Non
 
 def test_a_shut_window_never_produces_a_rule_offline() -> None:
     """The property that makes location_hours unreportable: a window the site
-    is shut for the whole of answers with empty availability, empty blocked —
-    the engine names no rule for it, so the refusal is the agent's to derive."""
+    is shut for the whole of answers with zero slots and never names the site's
+    hours — whatever standing restriction the engine reports for the provider
+    asked about, the refusal for the closed day is the agent's to derive."""
     catalogue = _catalogue()
     samples: dict[str, list[dict]] = {}
 
@@ -186,10 +187,30 @@ def test_a_shut_window_never_produces_a_rule_offline() -> None:
     stats = asyncio.run(
         probe_unreportable(FakeClinicClient(), asyncio.Semaphore(4), catalogue, [], record)
     )
-    assert samples == {}
+    assert "location_hours" not in samples
     assert stats["location_hours"]["windows"] > 0
-    assert stats["location_hours"]["blocked"] == 0
+    assert stats["location_hours"]["unprobed"] == 0
     assert stats["type_not_offered"]["gaps"] == 0
+
+
+def test_the_shut_window_probe_asks_about_a_provider_who_sits_there() -> None:
+    """A specialty the site does not serve answers empty on an open day too,
+    so the empty answer would prove nothing about the site's hours. Every
+    shut-window query names a (provider, specialty, site) triple the
+    catalogue publishes."""
+    catalogue = _catalogue()
+    client = _RecordingClinic()
+    asyncio.run(probe_unreportable(client, asyncio.Semaphore(4), catalogue, [], _discard))
+    served = {
+        (provider.provider_id, provider.specialty_id, location_id)
+        for provider in catalogue.providers
+        for location_id in provider.location_ids
+    }
+    windows = [q for q in client.queries if q.get("location_id") and q.get("specialty_id")]
+    assert windows
+    for query in windows:
+        assert (query["provider_id"], query["specialty_id"], query["location_id"]) in served
+    assert {q["location_id"] for q in windows} == {loc.location_id for loc in catalogue.locations}
 
 
 # ---- probes that never answered ------------------------------------------------
