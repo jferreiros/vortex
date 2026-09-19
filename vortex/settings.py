@@ -167,6 +167,20 @@ class Settings:
     llm_reasoning_effort: str = field(
         default_factory=lambda: _env("LLM_REASONING_EFFORT", "none").lower()
     )
+    # How long one completion may go without producing its *first* token before
+    # the line gives up on it and re-issues it. On 2026-09-18 two scored calls
+    # sat mute for 36 s on a request the provider accepted and never streamed,
+    # and the harness cut them. Only the first token is on the clock: once the
+    # answer is flowing it is allowed to take as long as it takes. 0 disables
+    # the guard. See vortex/line/llm_timeout.py.
+    llm_first_token_timeout_secs: float = field(
+        default_factory=lambda: float(_env("LLM_FIRST_TOKEN_TIMEOUT_SECS", "8.0"))
+    )
+    # How many times a request that produced no first token is re-issued. One
+    # retry costs at most another LLM_FIRST_TOKEN_TIMEOUT_SECS of the call's
+    # three minutes; after the last one the agent speaks a short holding line
+    # rather than saying nothing.
+    llm_retries: int = field(default_factory=lambda: int(_env("LLM_RETRIES", "1")))
 
     # --- Arbiter: the post-hangup submission judge ----------------------------
     # Nothing consumes this yet. It is here so the key and the model id can be
@@ -413,6 +427,8 @@ class Settings:
             "llm_provider": self.llm_provider,
             "llm_model": self.llm_model,
             "llm_base_url": self.llm_base_url,
+            "llm_first_token_timeout_secs": self.llm_first_token_timeout_secs,
+            "llm_retries": self.llm_retries,
             "arbiter_provider": self.arbiter_provider,
             "arbiter_model": self.arbiter_model,
             "arbiter_base_url": self.arbiter_base_url,
