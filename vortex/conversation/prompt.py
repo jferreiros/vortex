@@ -72,6 +72,18 @@ CLINIC_NAME = "Clínica Arenal"
 # the catalogue; the prompt tells the model to ask it, every time.
 SITES_BRIEF = "Sites: Centro = centro, Norte = norte, Sur = sur."
 
+# The six specialty ids, so the model never invents one. "general_medicine"
+# cost problem 1 on the 2026-09-18 replay: find_slots answers nothing for an
+# id the catalogue does not hold, and the call died as no_availability with
+# bookable slots on the wall. Where the id comes from is still rule 8 - triage,
+# or the named doctor's specialty; this line only closes the vocabulary, the
+# same job SITES_BRIEF does for locations. Six is all of them: the catalogue
+# holds no other.
+SPECIALTIES_BRIEF = (
+    "Specialty ids: general_practice, paediatrics, dermatology, "
+    "orthopaedics, gynaecology, physiotherapy."
+)
+
 # One line per tool: when to call it, and what to trust in the answer. The
 # tool's own ``description`` (vortex/tools.py) already says what it does and
 # is sent with the schema, so these lines carry only what a schema cannot:
@@ -187,8 +199,8 @@ then goodbye.
 TROUBLE. Garbled: ask them to repeat it; never guess. \
 Silence: "Are you still there?", then your last question. Rude caller: stay calm.
 
-FACTS. {sites_brief} Hours, days, doctors, towns: ask clinic_facts and say only \
-its answer, never memory. The caller books on what you say.
+FACTS. {sites_brief} {specialties_brief} Hours, days, doctors, towns: ask clinic_facts \
+and say only its answer, never memory. The caller books on what you say.
 
 {tool_guide}
 """
@@ -253,6 +265,7 @@ def build_system_prompt(
         tomorrow=(local + timedelta(days=1)).strftime("%A %d %B %Y"),
         language=language_name(language or DEFAULT_LANGUAGE),
         sites_brief=SITES_BRIEF,
+        specialties_brief=SPECIALTIES_BRIEF,
         caller_note=caller_note_for(caller),
         tool_guide=TOOL_GUIDE,
     )
