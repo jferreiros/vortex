@@ -15,7 +15,7 @@ const DEFAULTS = {
     canInfo: true,
     canEscalate: true,
   },
-  minimumBookingLeadDays: 1,
+  minimumBookingLeadHours: 24,
   patientIdentificationFieldsRequired: 1,
   callTimeCapMinutes: 3,
   personalization: {
@@ -35,7 +35,13 @@ const PERMISSIONS_CONFIG = [
   { key: "canEscalate", label: "Escalar urgencias", desc: "Derivar a un humano." },
 ];
 
-const LEAD_DAYS_HELP = "Días mínimos entre la llamada y la cita.";
+const LEAD_OPTIONS_HOURS = [2, 3, 4, 5, 6, 7, 8, 12, 24, 48, 72, 96];
+
+function leadLabel(hours) {
+  return hours < 24 ? `${hours} h` : `${hours / 24} ${hours === 24 ? "día" : "días"}`;
+}
+
+const LEAD_HELP = "Tiempo mínimo entre la llamada y la cita.";
 
 const ID_FIELDS_HELP =
   "Cuántos datos debe confirmar un paciente existente antes de confiar su identidad: nombre, DNI/NIE, teléfono o fecha de nacimiento.";
@@ -115,9 +121,10 @@ export default function Settings() {
     updateSetting(`permissions.${key}`, checked);
   };
 
-  const handleLeadDaysChange = (value) => {
-    const clamped = Math.max(1, Math.min(2, value));
-    updateSetting("minimumBookingLeadDays", clamped);
+  const handleLeadHoursChange = (delta) => {
+    const i = LEAD_OPTIONS_HOURS.indexOf(settings.minimumBookingLeadHours);
+    const next = Math.max(0, Math.min(LEAD_OPTIONS_HOURS.length - 1, i + delta));
+    updateSetting("minimumBookingLeadHours", LEAD_OPTIONS_HOURS[next]);
   };
 
   const handleIdFieldsChange = (value) => {
@@ -238,35 +245,31 @@ export default function Settings() {
             <div className="settings-row settings-row-stepper">
               <div>
                 <span className="settings-row-label">Antelación mínima</span>
-                <span className="settings-row-desc">{LEAD_DAYS_HELP}</span>
+                <span className="settings-row-desc">{LEAD_HELP}</span>
               </div>
               <div className="settings-stepper">
                 <button
                   className="ui-stepper-btn"
-                  onClick={() => handleLeadDaysChange(settings.minimumBookingLeadDays - 1)}
-                  disabled={settings.minimumBookingLeadDays <= 1}
+                  onClick={() => handleLeadHoursChange(-1)}
+                  disabled={settings.minimumBookingLeadHours <= LEAD_OPTIONS_HOURS[0]}
                   aria-label="Decrementar"
                 >
                   −
                 </button>
                 <input
-                  type="number"
+                  type="text"
                   className="ui-stepper-input"
-                  value={settings.minimumBookingLeadDays}
-                  onChange={(e) => handleLeadDaysChange(parseInt(e.target.value) || 1)}
-                  min={1}
-                  max={2}
+                  value={leadLabel(settings.minimumBookingLeadHours)}
                   readOnly
                 />
                 <button
                   className="ui-stepper-btn"
-                  onClick={() => handleLeadDaysChange(settings.minimumBookingLeadDays + 1)}
-                  disabled={settings.minimumBookingLeadDays >= 2}
+                  onClick={() => handleLeadHoursChange(1)}
+                  disabled={settings.minimumBookingLeadHours >= LEAD_OPTIONS_HOURS[LEAD_OPTIONS_HOURS.length - 1]}
                   aria-label="Incrementar"
                 >
                   +
                 </button>
-                <span className="settings-stepper-unit">días</span>
               </div>
             </div>
             <div className="settings-row settings-row-cap">
