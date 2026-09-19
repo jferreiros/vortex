@@ -38,7 +38,7 @@ submit client. Build your lane against that first.
 | `OPENAI_API_KEY` | LLM and TTS | Stub voice pipeline |
 | `OPENAI_LLM_MODEL`, `OPENAI_TTS_MODEL`, `OPENAI_TTS_VOICE`, `DEEPGRAM_STT_MODEL` | Model overrides | Defaults from `.env.example` |
 | `VORTEX_HOST`, `VORTEX_PORT`, `VORTEX_WS_PATH` | Bind address, port, socket path | `0.0.0.0`, `7860`, `/ws` |
-| `VORTEX_VOICE_MODE` | `auto`, `stub`, `pipecat`, `gemini-live` | `auto`: pipecat only if both voice keys exist; `gemini-live` is jury demo only |
+| `VORTEX_VOICE_MODE` | `auto`, `stub`, `pipecat` | `auto`: pipecat only if both voice keys exist |
 | `VORTEX_CLINIC_MODE` | `auto`, `fake`, `live` | `auto`: live only if the platform key exists |
 | `VORTEX_CALLS_LOG` | JSONL event log path | `logs/calls.jsonl` |
 
