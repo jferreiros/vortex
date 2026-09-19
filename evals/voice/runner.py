@@ -7,7 +7,8 @@ For each stack in ``pricing.yaml`` and each utterance in ``utterances.yaml``:
    voice otherwise), passed through the 8 kHz telephone round trip, cached
    under ``results/voice/audio``. A noisy twin is mixed at 5 dB SNR (problem 12).
 2. **STT.** The stack's transcriber hears clean and noisy. WER against the
-   reference. ``final_ms`` is the wait after the audio ends.
+   reference, plus entity CER (name, DNI, phone, email) when the utterance
+   annotates them. ``final_ms`` is the wait after the audio ends.
 3. **LLM.** One short receptionist reply; TTFT is what matters.
 4. **TTS.** The reply is spoken; TTFB is what the caller hears first.
 
@@ -214,6 +215,8 @@ async def run_all(
         llm_ms: list[float] = []
         tts_ms: list[float] = []
         wer_by: dict[str, list[float]] = {}
+        entity_cer_by: dict[str, list[float]] = {k: [] for k in audio.ENTITY_KINDS}
+        entity_cer_noisy: dict[str, list[float]] = {k: [] for k in audio.ENTITY_KINDS}
         stack_ok = True
         for u in utterances:
             if u["id"] not in caller:
@@ -244,6 +247,12 @@ async def run_all(
                 wer = audio.word_error_rate(u["text"], t.text)
                 wer_by.setdefault(u["language"], []).append(wer)
                 wer_by.setdefault(variant, []).append(wer)
+                entities = u.get("entities") or {}
+                entity_scores = audio.entity_cers(entities, t.text) if entities else {}
+                for kind, cer in entity_scores.items():
+                    entity_cer_by[kind].append(cer)
+                    if variant == "noisy":
+                        entity_cer_noisy[kind].append(cer)
                 reply = await llm.reply(system, doc["agent_prompt"])
                 s = await tts.synthesize(reply.text or doc["agent_reply_reference"], "es")
                 if reply.error or s.error:
@@ -257,14 +266,21 @@ async def run_all(
                 llm_ms.append(reply.ttft_ms)
                 tts_ms.append(s.ttfb_ms)
                 case.status = "pass" if wer <= 0.35 else "fail"
-                case.details.append(
+                detail = (
                     f"WER {wer * 100:.0f}% · STT {t.final_ms:.0f} ms · TTFT {reply.ttft_ms:.0f} ms "
                     f"· TTFB {s.ttfb_ms:.0f} ms · perceived {perceived:.0f} ms"
                 )
+                if entity_scores:
+                    cer_bits = " · ".join(
+                        f"CER {kind} {cer * 100:.0f}%" for kind, cer in entity_scores.items()
+                    )
+                    detail += f" · {cer_bits}"
+                case.details.append(detail)
                 if wer > 0.35:
                     case.details.append(f"heard: {t.text!r}")
                 case.extra = {
                     "wer": wer,
+                    "entity_cer": entity_scores,
                     "heard": t.text,
                     "stt_ms": t.final_ms,
                     "ttft_ms": reply.ttft_ms,
@@ -301,6 +317,10 @@ async def run_all(
             vals = by.get(key)
             return round(sum(vals) / len(vals), 3) if vals else None
 
+        def cer_avg(by: dict[str, list[float]], kind: str) -> float | None:
+            vals = by.get(kind) or []
+            return round(sum(vals) / len(vals), 3) if vals else None
+
         table.append(
             {
                 "name": stack["name"],
@@ -315,6 +335,8 @@ async def run_all(
                 "llm_ttft_p50_ms": _p(llm_ms, 0.5),
                 "tts_ttfb_p50_ms": _p(tts_ms, 0.5),
                 "wer": {k: wer_avg(k) for k in ("es", "ca", "gl", "eu", "clean", "noisy")},
+                "entity_cer": {k: cer_avg(entity_cer_by, k) for k in audio.ENTITY_KINDS},
+                "entity_cer_noisy": {k: cer_avg(entity_cer_noisy, k) for k in audio.ENTITY_KINDS},
                 "cost_per_call_eur": per_call["total_eur"],
                 "cost_breakdown_eur": per_call,
                 "cost_68_calls_eur": per_call["total_eur"] * prof["calls_per_run_all"],
