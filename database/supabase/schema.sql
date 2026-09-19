@@ -170,7 +170,10 @@ as $$
         from started s
         where p_since is null or s.started_at >= p_since
         order by s.started_at desc
-        limit coalesce(p_max_calls, 100000)
+        -- Never unbounded. jsonb_agg over the whole table exceeds the
+        -- statement timeout once the log passes a few hundred calls, and a
+        -- timeout here reads as "Supabase is empty" to every caller.
+        limit coalesce(p_max_calls, 1000)
     )
     select coalesce(jsonb_agg(e.event order by e.ts), '[]'::jsonb)
     from public.call_events e

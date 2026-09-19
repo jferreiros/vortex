@@ -1,0 +1,514 @@
+/* Analytics — the engineering read of the line.
+
+   Same grammar as Home and Statistics: white cards on the app background,
+   one hairline, generous padding, Manrope for display and the mono stack
+   for anything a person might compare down a column. Every value here
+   comes from src/theme/tokens.css; there is no hex in this file. */
+
+.analytics-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  padding-bottom: var(--space-9);
+}
+
+/* --- KPI strip ----------------------------------------------------------- */
+
+.analytics-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.analytics-kpi {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.analytics-kpi-label {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--color-mute);
+}
+
+.analytics-kpi-value {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  font-weight: var(--weight-bold);
+  color: var(--color-ink);
+  letter-spacing: -0.01em;
+  line-height: var(--leading-tight);
+}
+
+.analytics-kpi-caption {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--color-faint);
+}
+
+/* --- Panels -------------------------------------------------------------- */
+
+.analytics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-5);
+  align-items: start;
+}
+
+.analytics-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.analytics-panel-head h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  color: var(--color-ink);
+}
+
+.analytics-panel-head p {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-sm);
+  color: var(--color-mute);
+}
+
+.analytics-empty {
+  margin: 0;
+  padding: var(--space-6) 0;
+  text-align: center;
+  font-size: var(--text-sm);
+  color: var(--color-faint);
+}
+
+.analytics-note {
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+  color: var(--color-faint);
+}
+
+.analytics-foot {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--color-faint);
+}
+
+/* --- Sankey -------------------------------------------------------------- */
+
+.analytics-funnel {
+  gap: var(--space-4);
+}
+
+.sankey {
+  position: relative;
+}
+
+.sankey-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  overflow: visible;
+}
+
+.sankey-node {
+  fill: var(--color-primary);
+  transition: opacity var(--duration-fast) var(--ease-standard);
+}
+
+.sankey-node.tone-ink {
+  fill: var(--color-ink);
+}
+.sankey-node.tone-primary {
+  fill: var(--color-primary);
+}
+.sankey-node.tone-warn {
+  fill: var(--color-warn);
+}
+.sankey-node.tone-urgent {
+  fill: var(--color-urgent);
+}
+.sankey-node.tone-faint {
+  fill: var(--color-faint);
+}
+
+.sankey-ribbon {
+  fill: var(--color-primary);
+  opacity: 0.22;
+  transition: opacity var(--duration-fast) var(--ease-standard);
+  cursor: default;
+}
+
+.sankey-ribbon.tone-warn {
+  fill: var(--color-warn);
+}
+.sankey-ribbon.tone-urgent {
+  fill: var(--color-urgent);
+}
+.sankey-ribbon.tone-faint {
+  fill: var(--color-faint);
+}
+
+.sankey-ribbon:hover {
+  opacity: 0.45;
+}
+
+.sankey-ribbon.is-dim {
+  opacity: 0.06;
+}
+
+.sankey-nodes g.is-dim {
+  opacity: 0.3;
+}
+
+.sankey-label {
+  font-family: var(--font-body);
+  font-size: 13px;
+  fill: var(--color-mute);
+  /* The labels sit over the ribbons, so they carry a halo of the panel's
+     own background. Without it a label on a dense band is unreadable. */
+  paint-order: stroke;
+  stroke: var(--color-panel);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+}
+
+.sankey-label-value {
+  font-weight: var(--weight-bold);
+  fill: var(--color-ink);
+}
+
+.sankey-legend {
+  position: relative;
+  height: var(--space-5);
+  margin-top: var(--space-2);
+}
+
+.sankey-legend-item {
+  position: absolute;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-faint);
+}
+
+/* --- Stats row ----------------------------------------------------------- */
+
+.analytics-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.analytics-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+}
+
+.analytics-stat-label {
+  font-size: var(--text-xs);
+  color: var(--color-mute);
+}
+
+.analytics-stat-value {
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-bold);
+  color: var(--color-ink);
+}
+
+.analytics-stat-sub {
+  font-size: var(--text-xs);
+  color: var(--color-faint);
+}
+
+/* --- Bars ---------------------------------------------------------------- */
+
+.analytics-bars {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.analytics-bars li {
+  display: grid;
+  grid-template-columns: 96px 1fr 88px;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.analytics-bars-label {
+  font-size: var(--text-xs);
+  color: var(--color-mute);
+}
+
+.analytics-bars-track {
+  height: 8px;
+  border-radius: var(--radius-full);
+  background: var(--color-bg);
+  overflow: hidden;
+}
+
+.analytics-bars-fill {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-full);
+  background: var(--color-primary);
+}
+
+.analytics-bars-fill.tone-ink {
+  background: var(--color-ink);
+}
+
+.analytics-bars-value {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-ink);
+  text-align: right;
+}
+
+.analytics-bars-value em {
+  margin-left: var(--space-2);
+  font-style: normal;
+  color: var(--color-faint);
+}
+
+/* --- Talk split ---------------------------------------------------------- */
+
+.analytics-split {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.analytics-split-bar {
+  display: flex;
+  height: 34px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.analytics-split-bar span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+}
+
+.analytics-split-bar em {
+  font-style: normal;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+}
+
+.analytics-split-agent {
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+.analytics-split-caller {
+  background: var(--color-primary-soft);
+  color: var(--color-primary-deep);
+}
+
+.analytics-split-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  font-size: var(--text-xs);
+  color: var(--color-mute);
+}
+
+.analytics-split-keys i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: var(--radius-full);
+  vertical-align: baseline;
+}
+
+.analytics-split-keys .dot-agent {
+  background: var(--color-primary);
+}
+
+.analytics-split-keys .dot-caller {
+  background: var(--color-primary-soft);
+  border: 1px solid var(--color-border-strong);
+}
+
+/* --- Tables -------------------------------------------------------------- */
+
+.analytics-scroll {
+  max-height: 460px;
+  overflow: auto;
+}
+
+.analytics-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-xs);
+}
+
+.analytics-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: var(--space-2) var(--space-2);
+  text-align: left;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-faint);
+  background: var(--color-panel);
+  border-bottom: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+
+.analytics-table td {
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-ink);
+  white-space: nowrap;
+}
+
+.analytics-table tbody tr:hover td {
+  background: var(--color-bg);
+}
+
+.analytics-table .num {
+  text-align: right;
+}
+
+.analytics-table .mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.analytics-id {
+  color: var(--color-mute);
+}
+
+.analytics-reason {
+  color: var(--color-mute);
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.analytics-fail {
+  margin-left: 4px;
+  font-style: normal;
+  color: var(--color-warn);
+}
+
+.analytics-pill {
+  display: inline-block;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  background: var(--color-bg);
+  color: var(--color-mute);
+  white-space: nowrap;
+}
+
+.analytics-pill.tone-resolved {
+  background: var(--color-primary-soft);
+  color: var(--color-primary-deep);
+}
+
+.analytics-pill.tone-refused {
+  background: var(--color-warn-soft);
+  color: var(--color-warn);
+}
+
+.analytics-pill.tone-escalated {
+  background: var(--color-urgent-soft);
+  color: var(--color-urgent);
+}
+
+/* --- Model list ---------------------------------------------------------- */
+
+.analytics-models {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.analytics-models > div {
+  display: grid;
+  grid-template-columns: 56px 1fr;
+  gap: var(--space-3);
+  align-items: baseline;
+}
+
+.analytics-models dt {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-faint);
+}
+
+.analytics-models dd {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.analytics-model {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+}
+
+.analytics-model code {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-ink);
+}
+
+.analytics-model em {
+  font-style: normal;
+  font-size: var(--text-xs);
+  color: var(--color-faint);
+}
+
+/* --- Narrow ------------------------------------------------------------- */
+
+@media (max-width: 1180px) {
+  .analytics-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .analytics-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 720px) {
+  .analytics-kpis,
+  .analytics-stats {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .analytics-bars li {
+    grid-template-columns: 76px 1fr 72px;
+  }
+}

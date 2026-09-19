@@ -15,6 +15,7 @@ import logging
 import os
 import subprocess
 import sys
+import threading
 import time
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -28,7 +29,8 @@ from nicegui import app, ui
 
 from vortex.clinic.client import FakeClinicClient
 from vortex.line import personalities, voice_config
-from vortex.observability import auth, callfeed, explain, insights, pricing
+from vortex.observability import analytics as analytics_pack_module
+from vortex.observability import auth, callfeed, explain, insights, langfuse_metrics, pricing
 from vortex.observability import calendar as cal
 from vortex.observability.business_insights import business_insights, is_real_call
 from vortex.observability.demo import replay_cancellation_demo, write_scripted_call
@@ -1000,6 +1002,58 @@ def wall_business_insights_api(days: int = 30) -> JSONResponse:
     payload["range_days"] = days
     payload["source"] = source
     return JSONResponse(payload)
+
+
+#: The Analytics pack is the most expensive read on the board: it needs every
+#: event in the window, and the hosted log serves those in pages of a
+#: thousand. callfeed's own 4-second TTL is tuned for the live cards, where a
+#: read is one request — here it expires before the read finishes, so every
+#: poll starts another full fetch and they queue. Two minutes is well inside
+#: how fast these aggregates move.
+ANALYTICS_CACHE_TTL_S = 120.0
+_analytics_cache: dict[int, tuple[float, dict[str, Any]]] = {}
+_analytics_lock = threading.Lock()
+
+
+@app.get("/api/wall/analytics")
+def wall_analytics_api(days: int = 30) -> JSONResponse:
+    """The Analytics page: the call funnel, latency, conversation shape,
+    tool and model usage, and the call table under them.
+
+    Same window pills and the same date-bounded read as
+    ``/api/wall/business-insights``, so both pages describe the same calls.
+    Langfuse is asked separately and is allowed to be absent — it is the
+    only source here we do not own, and the page drops its two panels
+    rather than block on it.
+    """
+    days = min((7, 30, 90), key=lambda d: abs(d - days))
+    # One builder at a time per window. Without the lock a page opened in
+    # three tabs starts three full log reads against the same window.
+    with _analytics_lock:
+        hit = _analytics_cache.get(days)
+        if hit and time.monotonic() - hit[0] < ANALYTICS_CACHE_TTL_S:
+            return JSONResponse(hit[1])
+        payload = _build_analytics(days)
+        _analytics_cache[days] = (time.monotonic(), payload)
+    return JSONResponse(payload)
+
+
+def _build_analytics(days: int) -> dict[str, Any]:
+    now = datetime.now(UTC)
+    cutoff = now - timedelta(days=days)
+    events, _health, source = _load_events(
+        f"analytics:{days}", since=cutoff, cache_ttl=ANALYTICS_CACHE_TTL_S
+    )
+    cards = build_calls(events)
+    in_range = [c for c in cards if (started := _card_started(c)) and started >= cutoff]
+    payload = analytics_pack_module.analytics_pack(
+        in_range,
+        days=days,
+        now=now,
+        langfuse=langfuse_metrics.metrics(days),
+    )
+    payload["source"] = source
+    return payload
 
 
 def _sync_clinic(coro: Any) -> Any:
