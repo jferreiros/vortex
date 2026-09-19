@@ -7,6 +7,7 @@ against a seeded call log.
 from __future__ import annotations
 
 import asyncio
+import threading
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -127,6 +128,41 @@ async def test_console_routes_render(seeded: Path, user: User) -> None:
 async def test_public_pages_mask_the_phone(seeded: Path, user: User) -> None:
     await user.open("/wall/classic")
     await user.should_not_see("+34612345678")
+
+
+async def test_the_wall_reads_its_cards_off_the_event_loop(
+    seeded: Path, user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A redraw runs on the event loop twice a second. The HTTP calls behind it
+    must not, or a line that does not answer freezes every open tab."""
+    threads: list[int] = []
+
+    def _offline_get(*_args: object, **_kwargs: object) -> object:
+        threads.append(threading.get_ident())
+        raise OSError("offline")
+
+    monkeypatch.setattr("httpx.get", _offline_get)
+    await user.open("/wall/classic")
+    assert threads
+    assert threading.get_ident() not in threads
+
+
+async def test_a_second_tab_reuses_the_first_load(
+    seeded: Path, user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One load for the whole board: three tabs on the wall are not three loads."""
+    calls: list[object] = []
+
+    def _offline_get(url: object = "", *_args: object, **_kwargs: object) -> object:
+        calls.append(url)
+        raise OSError("offline")
+
+    monkeypatch.setattr("httpx.get", _offline_get)
+    await user.open("/wall/classic")
+    first = len(calls)
+    assert first
+    await user.open("/wall/classic")
+    assert len(calls) == first
 
 
 async def test_unsigned_root_is_sign_in_not_the_wall(
