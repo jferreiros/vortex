@@ -81,7 +81,7 @@ ConfirmationStatus = Literal[
     "calling",  # claimed by the worker / Twilio accepted the call
     "confirmed",  # patient said yes
     "not_coming",  # patient said no
-    "reschedule_requested",  # patient wants to move it (future: in-call reschedule)
+    "reschedule_requested",  # patient wants to move it; the call hands off to the agent
     "no_answer",  # terminal Twilio status: no-answer / busy
     "unclear",  # answered but no usable reply (silence, hangup, unintelligible)
     "failed",  # Twilio rejected or the call failed
@@ -352,6 +352,71 @@ def _gather(action_url: str, locale: str, say: str, *, timeout: int = 10) -> str
         f'<Say language="{locale}">{escape(say)}</Say>'
         f"</Gather>"
     )
+
+
+# --- In-call reschedule handoff -------------------------------------------
+# When the patient asks to move the appointment, the call transfers into the
+# existing voice-agent line (``/ws``) so the rebooking happens in the same
+# call, in the caller's language, instead of promising a callback. These
+# parameters travel on the Twilio ``<Stream>`` start message and land on
+# ``CallSession.handoff``.
+HANDOFF_PARAM = "vortex_handoff"
+HANDOFF_RESCHEDULE = "reschedule"
+
+_HANDOFF_BRIDGE: dict[str, tuple[str, str]] = {
+    "es": ("es-ES", "Perfecto, le paso con nuestro agente para mover la cita. Un momento."),
+    "ca": ("es-ES", "Perfecte, li passo amb el nostre agent per moure la cita. Un moment."),
+    "gl": ("es-ES", "Perfecto, pásolle co noso axente para mover a cita. Un momento."),
+    "eu": (
+        "es-ES",
+        "Primerik, gure agentearekin pasatzen zaitut hitzordua mugitzeko. Itxaron pixka bat.",
+    ),
+    "en": (
+        "en-US",
+        "Of course, I'll connect you with our agent to move the appointment. One moment.",
+    ),
+}
+
+
+def twiml_handoff_to_agent(call: ConfirmationCall, ws_url: str) -> str:
+    """TwiML that bridges into the voice-agent websocket carrying the handoff."""
+    voice, text = _HANDOFF_BRIDGE.get(call.language, _HANDOFF_BRIDGE["en"])
+    params = {
+        HANDOFF_PARAM: HANDOFF_RESCHEDULE,
+        "appointment_id": call.appointment_id,
+        "patient_id": call.patient_id,
+        "language": call.language,
+    }
+    rendered = "".join(
+        f'<Parameter name="{escape(k)}" value="{escape(v)}"/>' for k, v in params.items()
+    )
+    inner = (
+        f'<Say language="{voice}">{escape(text)}</Say>'
+        f'<Connect><Stream url="{escape(ws_url)}">{rendered}</Stream></Connect>'
+    )
+    return twiml_response(inner)
+
+
+def handoff_ws_url(public_base_url: str) -> str:
+    """The ``/ws`` voice-agent URL behind the public base, as a websocket URL."""
+    base = public_base_url.rstrip("/")
+    if base.startswith("https://"):
+        base = "wss://" + base[len("https://"):]
+    elif base.startswith("http://"):
+        base = "ws://" + base[len("http://"):]
+    return base + "/ws"
+
+
+def handoff_from_parameters(params: dict[str, str]) -> dict[str, str] | None:
+    """The reschedule handoff carried on a ``<Stream>`` start message, if any."""
+    if params.get(HANDOFF_PARAM) != HANDOFF_RESCHEDULE:
+        return None
+    return {
+        "kind": HANDOFF_RESCHEDULE,
+        "appointment_id": str(params.get("appointment_id") or ""),
+        "patient_id": str(params.get("patient_id") or ""),
+        "language": str(params.get("language") or ""),
+    }
 
 
 def twiml_response(inner: str) -> str:

@@ -56,6 +56,7 @@ from vortex.identity.tools import PATIENT_PREFERENCES_KEY, resolve_caller_line
 from vortex.line.confirmation_calls import (
     cancel_confirmation_calls,
     confirmation_store_from_settings,
+    handoff_from_parameters,
     schedule_confirmation_call,
 )
 from vortex.line.sms import (
@@ -459,6 +460,10 @@ class CallSession:
     # it when the caller switches; the confirmation-call scheduling reads it so
     # tomorrow's outbound call speaks the language this caller actually used.
     language: str = DEFAULT_LANGUAGE
+    # Set when the call arrives through an outbound-call handoff (a patient
+    # who asked to move their appointment mid-confirmation-call): the
+    # pipeline opens with the rebooking loop instead of the plain greeting.
+    handoff: dict[str, str] | None = None
 
     @property
     def call_id(self) -> str:
@@ -506,6 +511,17 @@ class CallSession:
             submitter=submitter,
             sms=make_sms_client(settings),
         )
+        handoff = handoff_from_parameters(start.custom_parameters)
+        if handoff is not None:
+            session.handoff = handoff
+            if handoff.get("language"):
+                session.language = handoff["language"]
+            log.event(
+                "call.handoff",
+                appointment_id=handoff["appointment_id"],
+                patient_id=handoff["patient_id"],
+                language=handoff["language"],
+            )
         log.event(
             "call.started",
             stream_sid=start.stream_sid,
