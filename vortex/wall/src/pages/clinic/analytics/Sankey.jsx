@@ -13,7 +13,10 @@ import { useMemo, useState } from "react";
    to a design token. */
 
 const WIDTH = 1000;
-const HEIGHT = 440;
+// 360, not 440: the viewBox's aspect ratio sets the rendered height (width
+// stays 100% via CSS), so this is what shrinks the diagram on a laptop
+// screen without touching a single coordinate below.
+const HEIGHT = 360;
 const NODE_W = 13;
 const GAP = 9;
 const PAD_TOP = 8;
@@ -160,17 +163,18 @@ export default function Sankey({ nodes = [], links = [], columns = [] }) {
       </svg>
       {columns.length > 0 && (
         <div className="sankey-legend">
-          {columns.map((label, index) => (
-            <span
-              key={label}
-              className="sankey-legend-item"
-              style={{
-                left: `${((index / lastColumn) * (WIDTH - NODE_W - 300) * 100) / WIDTH}%`,
-              }}
-            >
-              {label}
-            </span>
-          ))}
+          {columns.map((label, index) => {
+            // Line up each caption with where that column's own node labels
+            // start (node edge + LABEL_GAP), not with the invisible node
+            // stub — the stub sits well left of anything a reader can see.
+            const columnX = (index / lastColumn) * (WIDTH - NODE_W - 300);
+            const left = ((columnX + NODE_W + LABEL_GAP) * 100) / WIDTH;
+            return (
+              <span key={label} className="sankey-legend-item" style={{ left: `${left}%` }}>
+                {label}
+              </span>
+            );
+          })}
         </div>
       )}
     </div>
