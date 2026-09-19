@@ -64,6 +64,17 @@ def test_handle_times_and_hours() -> None:
     assert hours[10].value == 2  # 08:00 UTC is 10:00 in Madrid in September
 
 
+def test_calls_by_hour_skips_naive_timestamps() -> None:
+    """Naive started_at must not be treated as UTC — skip it instead."""
+    cards = [
+        _card("aware", "book", started_at="2026-09-19T08:05:00+00:00"),
+        _card("naive", "book", started_at="2026-09-19T08:05:00"),
+    ]
+    hours = insights.calls_by_hour(cards)
+    assert hours[10].value == 1
+    assert sum(h.value for h in hours) == 1
+
+
 def test_patients_merge_by_patient_id_and_mask_phone() -> None:
     a = _card(
         "a",

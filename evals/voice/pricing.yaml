@@ -51,6 +51,13 @@ stt:
     languages: [es, ca, gl, eu]
     free_credit_note: "20k credits/month free (about 5.5 h)"
     source: https://docs.cartesia.ai/pricing
+  soniox_stt_rt_v5:
+    label: "Soniox stt-rt-v5 (streaming)"
+    usd_per_min: 0.002           # $0.12/hr real-time; language ID and formatting bundled
+    bills: speech
+    languages: [es, ca, gl, eu, en]
+    latency_claim: "~260 ms TTFS"
+    source: https://soniox.com/pricing
 
 tts:
   openai_gpt4o_mini_tts:
@@ -135,3 +142,8 @@ stacks:
     llm: gpt-4.1-mini
     tts: cartesia_sonic
     describe: "Cartesia in and out; STT covers gl and eu, TTS does not"
+  - name: soniox-41mini-oai
+    stt: soniox_stt_rt_v5
+    llm: gpt-4.1-mini
+    tts: openai_gpt4o_mini_tts
+    describe: "production STT (stt-rt-v5); entity CER on 5 dB is the noise yardstick"
