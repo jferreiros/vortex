@@ -1200,8 +1200,19 @@ async def wall_personalities() -> JSONResponse:
             "items": personalities.DEFAULTS,
             "active": personalities.DEFAULTS[0]["slug"],
             "offline": True,
+            **personalities.catalog(),
         }
     )
+
+
+@app.post("/api/wall/personalities")
+async def wall_personality_create(request: Request) -> JSONResponse:
+    payload = await request.json()
+    try:
+        r = httpx.post(f"{callfeed.LINE_URL}/personalities", json=payload, timeout=5)
+        return JSONResponse(r.json(), status_code=r.status_code)
+    except Exception as exc:
+        return JSONResponse({"error": f"line unreachable: {exc}"}, status_code=502)
 
 
 @app.get("/api/wall/personalities/{slug}")
@@ -1273,6 +1284,22 @@ def wall_vorty_face() -> FileResponse:
     chat avatar — e.g. the Live Call transcript.
     """
     return FileResponse(WALL_MEDIA_DIR / "vorty-face.svg", media_type="image/svg+xml")
+
+
+@app.get("/wall/vorty-face-no-headphones")
+def wall_vorty_face_bare() -> FileResponse:
+    """The same head without the headset, so an accessory overlay can sit on top."""
+    return FileResponse(WALL_MEDIA_DIR / "vorty-face-no-headphones.svg", media_type="image/svg+xml")
+
+
+@app.get("/wall/accessories/{filename}")
+def wall_vorty_accessory(filename: str) -> Response:
+    """One Vorty accessory SVG, stacked over the bare face on a persona card."""
+    folder = (WALL_MEDIA_DIR / "accessories" / "animated").resolve()
+    path = (folder / filename).resolve()
+    if path.suffix.lower() != ".svg" or not path.is_relative_to(folder) or not path.is_file():
+        return JSONResponse({"error": "no such accessory"}, status_code=404)
+    return FileResponse(path, media_type="image/svg+xml")
 
 
 @app.get("/wall", response_model=None)

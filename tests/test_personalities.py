@@ -127,6 +127,8 @@ def test_get_lists_the_personas_and_names_the_active_one(client: TestClient) -> 
     assert [p["slug"] for p in body["items"]] == ["lucia", "mateo", "carla"]
     assert body["active"] == "lucia"
     assert body["items"][0]["greetings"]["es"].startswith("Clínica Arenal")
+    assert {row["id"] for row in body["styles"]} == {"warm", "brisk", "calm"}
+    assert "headset" in body["looks"]
 
 
 def test_get_one_and_an_unknown_one(client: TestClient) -> None:
@@ -162,6 +164,29 @@ def test_activate_changes_who_answers(client: TestClient) -> None:
     assert client.post("/personalities/nope/activate").status_code == 404
 
 
+def test_create_from_the_simple_form(offline_settings) -> None:
+    person = personalities.create(
+        offline_settings, {"name": "Nora", "style": "calm", "look": "halo"}
+    )
+    assert person.slug == "nora"
+    assert person.avatar == "halo.svg"
+    assert person.tone.startswith("Calm")
+    assert personalities.get(offline_settings, "nora").name == "Nora"
+
+
+def test_create_avoids_a_taken_slug(offline_settings) -> None:
+    extra = personalities.create(offline_settings, {"name": "Lucía"})
+    assert extra.slug == "lucia-2"
+
+
+def test_post_creates_a_persona(client: TestClient) -> None:
+    r = client.post("/personalities", json={"name": "Nora", "look": "sunglasses"})
+    assert r.status_code == 201
+    assert r.json()["slug"] == "nora"
+    assert r.json()["avatar"] == "sunglasses.svg"
+    assert client.post("/personalities", json={"name": ""}).status_code == 422
+
+
 # --- the board's proxy and the art route --------------------------------------
 # Same arrangement as tests/test_call_ingestion.py: the NiceGUI `user` fixture
 # runs the board app, and patching ``httpx.get`` through callfeed (a leaf
@@ -182,12 +207,15 @@ async def test_the_board_falls_back_to_the_seeds_when_the_line_is_down(
     assert body["offline"] is True
     assert body["active"] == "lucia"
     assert [p["slug"] for p in body["items"]] == ["lucia", "mateo", "carla"]
+    assert "headset" in body["looks"]
 
 
-async def test_the_board_serves_a_persona_portrait(user: User) -> None:
-    resp = await user.http_client.get("/wall/personalities/lucia.svg")
-    assert resp.status_code == 200
-    assert resp.headers["content-type"].startswith("image/svg+xml")
+async def test_the_board_serves_a_vorty_head_and_an_accessory(user: User) -> None:
+    face = await user.http_client.get("/wall/vorty-face-no-headphones")
+    assert face.status_code == 200
+    hat = await user.http_client.get("/wall/accessories/headset.svg")
+    assert hat.status_code == 200
+    assert hat.headers["content-type"].startswith("image/svg+xml")
 
 
 async def test_the_art_route_refuses_a_climb_and_a_stranger(user: User) -> None:

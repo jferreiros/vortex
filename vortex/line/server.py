@@ -161,7 +161,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {
             "items": [person.to_dict() for person in people],
             "active": next((p.slug for p in people if p.active), None),
+            **personalities.catalog(),
         }
+
+    @app.post("/personalities")
+    async def post_personality(
+        payload: Annotated[dict | None, Body()] = None,
+    ) -> Response:
+        try:
+            return JSONResponse(personalities.create(settings, payload).to_dict(), status_code=201)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=422)
+        except ValidationError as exc:
+            return JSONResponse({"error": _first_error(exc)}, status_code=422)
 
     @app.get("/personalities/{slug}")
     async def get_personality(slug: str) -> Response:
@@ -179,6 +191,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return JSONResponse(personalities.update(settings, slug, payload).to_dict())
         except KeyError:
             return _no_such_personality(slug)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=422)
         except ValidationError as exc:
             # One sentence the form can show, not pydantic's whole report.
             return JSONResponse({"error": _first_error(exc)}, status_code=422)
