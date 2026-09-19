@@ -292,27 +292,32 @@ def test_load_events_treats_a_bad_response_as_a_failure(
     assert source["kind"] == "jsonl_fallback"
 
 
-def test_cancellation_demo_fills_every_status(tmp_path: Path) -> None:
-    """The scripted batch writes five frees: two rebooked (relocated), two
-    past their appointment day (lost) and one still open (pending) — plus
-    enough volume for the per-day chart."""
+def test_cancellation_pack_replays_to_a_full_insights_block(tmp_path: Path) -> None:
+    """Generate the pack file, replay it into a live log the way the console
+    button does, and the panel shows every status: two rebooked (relocated),
+    two past their appointment day (lost), one still open (pending)."""
     import asyncio
 
     from vortex.observability.business_insights import cancellation_slots
-    from vortex.observability.demo import write_cancellation_demo
+    from vortex.observability.demo import replay_cancellation_demo, write_cancellation_pack
     from vortex.observability.view import build_calls, flatten_grouped
 
-    path = tmp_path / "calls.jsonl"
-    written = asyncio.run(write_cancellation_demo(path, delay_s=0))
-    assert len(written) == 7
+    pack = tmp_path / "cancellation_demo.jsonl"
+    asyncio.run(write_cancellation_pack(pack, delay_s=0))
 
-    grouped, meta = read_calls(path)
-    assert meta["calls"] == 7
+    log_path = tmp_path / "calls.jsonl"
+    written = asyncio.run(replay_cancellation_demo(log_path, pack_path=pack, run_tag="t"))
+    assert len(written) == 7
+    # Replay re-ids every call, so a second run must not merge into the first.
+    asyncio.run(replay_cancellation_demo(log_path, pack_path=pack, run_tag="t2"))
+    grouped, meta = read_calls(log_path)
+    assert meta["calls"] == 14
+
     out = cancellation_slots(build_calls(flatten_grouped(grouped)))
-    assert out["freed_total"] == 5
-    assert out["relocated"] == 2
-    assert out["lost"] == 2
-    assert out["pending"] == 1
+    assert out["freed_total"] == 10
+    assert out["relocated"] == 4
+    assert out["lost"] == 4
+    assert out["pending"] == 2
     assert out["recovery_rate_pct"] == 50.0
     assert out["daily"] is not None
     assert out["suggested_action"]
