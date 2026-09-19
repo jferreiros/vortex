@@ -16,7 +16,7 @@ import "./vorty-dock.css";
 export default function VortyDock() {
   const [open, setOpen] = useState(false);
   const calls = useLiveCalls();
-  const live = calls.filter((call) => call.status === "live");
+  const live = (calls.calls || []).filter((call) => call.status === "live");
   const count = live.length;
 
   return (
@@ -49,7 +49,7 @@ export default function VortyDock() {
             </ul>
           )}
           <div className="vorty-bubble-links">
-            <NavLink to="/clinic/live-calls" onClick={() => setOpen(false)}>
+            <NavLink to="/clinic/home" onClick={() => setOpen(false)}>
               Ver llamadas
             </NavLink>
             <NavLink to="/clinic/analytics" onClick={() => setOpen(false)}>
