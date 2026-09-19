@@ -163,7 +163,7 @@ class CallSession:
     media_frames_out: int = 0
     submitted: list[SubmitResult] = field(default_factory=list)
     # Every action this call sent, in order, whatever the platform answered.
-    # The fallback reads it so it never repeats an action already on its way.
+    # The fallback reads it to log whether a silent-call retry is a re-send.
     sent_actions: list[Action] = field(default_factory=list)
     end_reason: str = ""
     _closed: bool = False
@@ -302,21 +302,21 @@ class CallSession:
             await self._send_fallback(branch, action, why, span)
 
     async def _send_fallback(self, branch: str, action: Action, why: str, span: Any = None) -> None:
-        # The call already sent this exact action (a dry run, or a send the
-        # platform never acknowledged). Repeating it buys a 409 at best.
-        repeat = action in self.sent_actions
+        # An earlier send of this action may have returned error / dry_run /
+        # rejected: the platform holds nothing. Retry so an ambiguous first
+        # request can still land as accepted or duplicate (409).
+        retrying = action in self.sent_actions
         self.ctx.log.event(
             "submit.fallback",
             branch=branch,
             why=why,
             route=action_route(action),
-            skipped=repeat,
+            skipped=False,
+            retrying=retrying,
             sent_so_far=len(self.submitted),
         )
         if span is not None:
-            span.update(output={"skipped": repeat, "branch": branch})
-        if repeat:
-            return
+            span.update(output={"skipped": False, "retrying": retrying, "branch": branch})
         await self.submit(action)
 
     def fallback_action(self) -> tuple[str, Action, str]:
