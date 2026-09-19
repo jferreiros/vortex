@@ -199,11 +199,19 @@ async def _play_line() -> None:
 
 
 async def _replay(scenario: str) -> None:
-    await write_scripted_call(_log_path(), scenario=scenario, delay_s=0.28)
+    try:
+        await write_scripted_call(_log_path(), scenario=scenario, delay_s=0.28)
+    except OSError:
+        # In production the board mounts the line's log read-only — scripted
+        # calls are a local demo tool, not something to mix into live metrics.
+        ui.notify("The call log is read-only here — replay demos locally.", type="warning")
 
 
 async def _replay_cancellations() -> None:
-    await write_cancellation_demo(_log_path(), delay_s=0.05)
+    try:
+        await write_cancellation_demo(_log_path(), delay_s=0.05)
+    except OSError:
+        ui.notify("The call log is read-only here — replay demos locally.", type="warning")
 
 
 def _client_ip() -> str:
