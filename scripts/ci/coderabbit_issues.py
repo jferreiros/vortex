@@ -125,6 +125,15 @@ def issue_body(f: dict[str, str], pr: str) -> str:
     )
 
 
+def read_review(path: Path) -> str:
+    """Strict UTF-8. A replaced byte hides a finding and files nothing."""
+    try:
+        return path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as broken:
+        print(f"{path} is not valid UTF-8: {broken}", file=sys.stderr)
+        raise SystemExit(1) from broken
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("review", type=Path, help="the CLI output, as saved by the workflow")
@@ -133,7 +142,7 @@ def main() -> None:
     ap.add_argument("--dry-run", action="store_true", help="print, create nothing")
     args = ap.parse_args()
 
-    findings = parse(args.review.read_text(encoding="utf-8", errors="replace"))
+    findings = parse(read_review(args.review))
     if not findings:
         print("No major findings. Nothing to file.")
         return
