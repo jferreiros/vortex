@@ -1,0 +1,171 @@
+.landing-hero {
+  position: relative;
+  height: 100vh;
+  min-height: 640px;
+  display: flex;
+  overflow: hidden;
+  background: #ffffff;
+  color: var(--color-primary-deep);
+}
+
+.landing-hero-content {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  will-change: opacity;
+}
+
+/* The centered row: avatar + headline, sharing one vertical center ---------------*/
+
+.landing-hero-row {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: center;
+  gap: var(--space-8);
+  width: 100%;
+  max-width: 1680px;
+  margin: 0 auto;
+  padding: 0 var(--space-8);
+  will-change: transform;
+}
+
+.landing-hero-avatar-col {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.landing-hero-avatar {
+  width: min(40vw, 620px);
+  height: min(40vw, 620px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform: translateY(28px);
+}
+
+.landing-hero-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  filter: drop-shadow(0 26px 40px rgba(31, 92, 67, 0.18));
+}
+
+/* Headline + copy, vertically centered against the avatar -------------------------*/
+
+.landing-hero-text-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  text-align: left;
+}
+
+.landing-hero-text-col h1 {
+  font-family: "Space Grotesk", var(--font-display), sans-serif;
+  font-weight: 700;
+  line-height: 0.98;
+  letter-spacing: -0.02em;
+  color: var(--color-primary-deep);
+}
+
+.landing-hero-hi {
+  font-size: clamp(88px, 12.5vw, 196px);
+}
+
+.landing-hero-imvorty {
+  font-size: clamp(40px, 5.6vw, 80px);
+}
+
+.landing-hero-text-col p {
+  max-width: 30ch;
+  font-size: clamp(18px, 1.8vw, 26px);
+  line-height: var(--leading-relaxed);
+  color: rgba(31, 92, 67, 0.75);
+}
+
+.landing-hero-text-col p strong {
+  font-weight: var(--weight-bold);
+  color: var(--color-primary-deep);
+}
+
+/* CTA, pinned to the very bottom of the section, independent of the row -----------*/
+
+.landing-hero-cta-wrap {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: center;
+  padding: var(--space-6) 0 var(--space-7);
+}
+
+.landing-hero-cta {
+  appearance: none;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-primary-deep);
+}
+
+.landing-hero-cta span {
+  font-family: "Space Grotesk", var(--font-display), sans-serif;
+  font-weight: 700;
+  font-size: var(--text-lg);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-bottom: 2px solid transparent;
+  transition: border-color var(--duration-fast) var(--ease-standard);
+}
+
+.landing-hero-cta:hover span {
+  border-color: var(--color-primary-deep);
+}
+
+.landing-hero-cta svg {
+  animation: landing-bob 2s ease-in-out infinite;
+}
+
+@keyframes landing-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(5px); }
+}
+
+/* Responsive -----------------------------------------------------------------------*/
+
+@media (max-width: 900px) {
+  .landing-hero-row {
+    grid-template-columns: 1fr;
+    text-align: center;
+    gap: var(--space-5);
+    padding: var(--space-6) var(--space-5) 0;
+  }
+  .landing-hero-text-col {
+    align-items: center;
+    text-align: center;
+  }
+  .landing-hero-text-col p {
+    max-width: 40ch;
+  }
+  .landing-hero-avatar {
+    width: 54vw;
+    height: 54vw;
+  }
+}
+
+@media (max-width: 480px) {
+  .landing-hero-avatar {
+    width: 66vw;
+    height: 66vw;
+  }
+  .landing-hero-hi {
+    font-size: clamp(64px, 22vw, 110px);
+  }
+  .landing-hero-imvorty {
+    font-size: clamp(30px, 9vw, 46px);
+  }
+}

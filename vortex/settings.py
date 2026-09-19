@@ -392,6 +392,12 @@ class Settings:
     # worth less than the silence it costs, and the model just asks as before.
     caller_id_lookup_timeout_secs: float = 2.0
 
+    # How long the last-resort booking may spend asking for a slot once the line
+    # is dead. It has to stay well inside the submit window above: the refusal it
+    # would replace is already decided, and a booking that misses the window is
+    # worth less than a refusal that makes it.
+    cold_booking_timeout_secs: float = 6.0
+
     @property
     def clinic_is_live(self) -> bool:
         if self.clinic_mode == "live":

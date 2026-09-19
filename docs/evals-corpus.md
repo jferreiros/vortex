@@ -10,6 +10,7 @@ make evals-corpus      # roster integrity + the probes, no keys, ~40 ms
 make evals-corpus LOG=logs/calls.jsonl   # score real practice calls
 make evals-fetch       # refresh the roster (each morning of the event)
 make evals-snapshot    # freeze the real clinic; needs PLATFORM_API_KEY
+make evals-hydrate     # rebuild synthetic-data/ from the roster (LIVE=1 hits the API)
 ```
 
 `make evals` runs layers 1, 2 and 4 and is still the CI entry point.
@@ -91,6 +92,18 @@ Twenty more situations the docs state and no public case exercises are listed
 as skipped with the reason, including the nine refusal reasons the roster never
 reaches. A board that omits what it could not test is a board that lies.
 
+## The isolated pack (`synthetic-data/`)
+
+`make evals-hydrate` writes patients, already-booked appointments and one
+CallLog JSONL per problem into `synthetic-data/` at the repo root — same payload
+shape as `vortex/clinic/fixtures.py`, different folder. It does not touch the
+fixtures, `logs/calls.jsonl`, or the gitignored `evals/corpus/world/` snapshot.
+
+`FakeClinicClient()` still reads the small invented fixtures. Pass
+`data_dir=Path("synthetic-data")` to look up the published ids (`P00001`,
+`A001101`, …) offline. `LIVE=1` enriches charts and diaries from the clinic API
+when a key is set.
+
 ## What is still blocked
 
 The roster's answers name real ids — `P00001`, `PR01`, `centro`, `review`, a
@@ -108,3 +121,53 @@ shapes become buildable cases.
 **Run the snapshot the moment the key lands.** It is the difference between an
 eval suite that checks we produce a well-formed answer and one that checks we
 produce the right one.
+
+## Judging real calls
+
+A practice call is free, repeatable every 30 seconds, and the organisers play
+real audio through real speech recognition at our socket. It is the highest
+fidelity voice eval available and it costs nothing:
+
+```bash
+make evals-corpus LOG=logs/calls.jsonl CASE=simple_booking-14a8720daa02
+```
+
+Nothing names the case for us. `start.customParameters` carries `call_id` and
+`from_number` and nothing else, and the submissions readback carries `call_id`,
+`record` and `received_at`. So the join is ours: `from_number` names the
+persona, but the organisers reuse a persona across problems, so it identifies
+only **26 of the 73** cases on its own. The joiner uses the number when it is
+unambiguous, refuses to guess when it is not, and `CASE=` says which.
+
+**Watch the anchor.** The roster file is the export at Friday's anchor. "The
+earliest appointment" means the earliest from the day after the call, so from
+Saturday onward every "earliest" answer in the file has moved while the problem
+page shows today's. The runner compares the roster's anchor with today and says
+so; a slot mismatch on such a case is the anchor, not the agent.
+
+## Finding a caller for a rule nobody publishes
+
+`make evals-discover` sweeps the live API by plan, by patient and by provider,
+and records in `world/blocked-samples.json` a real query that triggers each
+decline reason. The published roster reaches two of the eleven rule reasons.
+The sweep reaches seven, including `provider_on_leave`, `not_eligible_age` and
+`insurer_referral_required`, each as a concrete patient and specialty a lane can
+build a caller around.
+
+**The window decides whether a rule is visible at all.** `blocked` reports a
+rule only when it stops the whole window asked for:
+
+| Query | Result |
+| --- | --- |
+| `provider_id=PR02`, 21–30 September (inside his leave) | 0 slots, `blocked: provider_on_leave` |
+| `provider_id=PR02`, 21 September – 4 October | 50 slots in October, `blocked: []` |
+
+One day past the end of the leave and the rule disappears — Dr. Requena simply
+looks available. An agent that widens its search until it finds something never
+learns why the caller cannot have what they asked for, and problem 3 turns on
+exactly that.
+
+Four reasons the sweep does not reach — `allowance_exhausted`, `location_hours`,
+`type_not_offered` and `patient_history` — need a patient outside the roster's
+own 24, a site's closing time, or a specialty that does not offer a type. They
+are listed as unreached rather than quietly dropped.

@@ -14,16 +14,17 @@ import json
 import os
 import sys
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
 import httpx
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from nicegui import app, ui
 
 from vortex.observability import auth, explain, insights
+from vortex.observability.business_insights import business_insights
 from vortex.observability.calllog import read_recent
 from vortex.observability.demo import write_scripted_call
 from vortex.observability.icons import icon
@@ -39,10 +40,15 @@ _HERE = Path(__file__).parent
 DESIGN_CSS = (_HERE / "design.css").read_text(encoding="utf-8")
 BOARD_CSS = (_HERE / "board.css").read_text(encoding="utf-8")
 EVALS_SUMMARY = REPO_ROOT / "evals" / "results" / "summary.json"
-#: The react-spring per-call "zoom" page (vortex/observability/wall-app/),
-#: built by `npm run build`. /call/{id} above is the NiceGUI page; this is
-#: an animated alternative at /call/{id}/zoom, additive and never required.
-WALL_APP_DIST = _HERE / "wall-app" / "dist"
+#: The React app (vortex/wall/) — landing page, Clinic View and the
+#: react-spring per-call "zoom" page — built by `npm run build`. /call/{id}
+#: above is the NiceGUI page; /call/{id}/zoom below serves this app's
+#: index.html and it takes over routing client-side from there. Additive,
+#: never required: /call/{id} keeps working with no build present.
+WALL_APP_DIST = REPO_ROOT / "vortex" / "wall" / "dist"
+#: Source art for the app — not part of the Vite build, served straight off
+#: disk. vortex/wall/media/avatar2d.png -> GET /wall/avatar2d.
+WALL_MEDIA_DIR = REPO_ROOT / "vortex" / "wall" / "media"
 
 MADRID = ZoneInfo("Europe/Madrid")
 
@@ -95,13 +101,58 @@ def _is_live(card: CallCard) -> bool:
     return (datetime.now(UTC) - last).total_seconds() < STALE_AFTER_S
 
 
-def _load_cards() -> tuple[list[CallCard], dict[str, Any] | None]:
+def _build_cards() -> tuple[list[CallCard], dict[str, Any] | None]:
     events, health = _load_events()
     cards = build_calls(events)
     for card in cards:
         if card.live and not _is_live(card):
             card.ended = True
             card.reason = card.reason or "stale"
+    return cards, health
+
+
+#: (log path, monotonic stamp, cards, health). One load feeds every open tab.
+_cards_cache: tuple[str, float, list[CallCard], dict[str, Any] | None] | None = None
+_cards_task: asyncio.Task[tuple[list[CallCard], dict[str, Any] | None]] | None = None
+#: A redraw ticks about twice a second, so a load older than this is worth
+#: repeating and anything newer is what the previous tick already read.
+CARDS_TTL_S = 0.5
+
+
+def _fresh_cards(key: str) -> tuple[list[CallCard], dict[str, Any] | None] | None:
+    cached = _cards_cache
+    if cached is None or cached[0] != key or time.monotonic() - cached[1] > CARDS_TTL_S:
+        return None
+    return cached[2], cached[3]
+
+
+def _load_cards() -> tuple[list[CallCard], dict[str, Any] | None]:
+    """The cards, for a page being built. Blocks; call it once per render."""
+    global _cards_cache
+    key = str(_log_path())
+    fresh = _fresh_cards(key)
+    if fresh is not None:
+        return fresh
+    cards, health = _build_cards()
+    _cards_cache = (key, time.monotonic(), cards, health)
+    return cards, health
+
+
+async def _load_cards_async() -> tuple[list[CallCard], dict[str, Any] | None]:
+    """The same cards for a redraw: one load per TTL for the whole board, in a
+    worker thread. ``_build_cards`` makes two HTTP calls and reads the log, and
+    a redraw runs on the event loop with every other client's redraw."""
+    global _cards_cache, _cards_task
+    key = str(_log_path())
+    fresh = _fresh_cards(key)
+    if fresh is not None:
+        return fresh
+    task = _cards_task
+    if task is None or task.done() or task.get_loop() is not asyncio.get_running_loop():
+        task = asyncio.create_task(asyncio.to_thread(_build_cards))
+        _cards_task = task
+    cards, health = await task
+    _cards_cache = (key, time.monotonic(), cards, health)
     return cards, health
 
 
@@ -196,7 +247,7 @@ def _turn_time(card: CallCard, ts: str | None) -> str:
     stamp = _parse_ts(ts)
     if stamp is None:
         return ""
-    label = stamp.astimezone().strftime("%H:%M:%S")
+    label = stamp.astimezone(MADRID).strftime("%H:%M:%S")
     start = _parse_ts(card.started_at)
     if start is not None:
         delta = (stamp - start).total_seconds()
@@ -715,15 +766,20 @@ def _facts(health: dict[str, Any] | None) -> None:
 # ---------------------------------------------------------------------------
 
 
-@ui.page("/wall")
-def wall_page() -> None:
+@ui.page("/wall/classic")
+async def wall_page() -> None:
+    """The original NiceGUI projector view: three columns, ten-second read
+    from across the room. Superseded as the public entry by the React app
+    (vortex/wall/) now mounted at /wall itself, kept here as a fallback/
+    reference — nothing about it changed, only its address.
+    """
     _apply_chrome()
     ui.page_title("Vortex · Live")
     stage = ui.element("div").classes("shell")
     rendered: dict[str, Any] = {"sig": None}
 
-    def redraw() -> None:
-        cards, health = _load_cards()
+    async def redraw() -> None:
+        cards, health = await _load_cards_async()
         sig = _signature(cards, health)
         if sig == rendered["sig"]:
             return
@@ -732,7 +788,7 @@ def wall_page() -> None:
         live_count = sum(1 for c in cards if c.live)
         stage.clear()
         with stage:
-            slot = _nav("/wall", team=False)
+            slot = _nav("/wall/classic", team=False)
             with slot:
                 _line_pill(health)
             with ui.element("main").classes("page"):
@@ -757,20 +813,20 @@ def wall_page() -> None:
                 _facts(health)
             _footer()
 
-    redraw()
+    await redraw()
     ui.timer(0.5, redraw)
 
 
 @ui.page("/call/{call_id}")
-def call_page(call_id: str) -> None:
+async def call_page(call_id: str) -> None:
     """One call, by id. Public. The same panel as Live, plus every request."""
     _apply_chrome()
     ui.page_title(f"Vortex · {call_id}")
     stage = ui.element("div").classes("shell")
     rendered: dict[str, Any] = {"sig": None}
 
-    def redraw() -> None:
-        cards, health = _load_cards()
+    async def redraw() -> None:
+        cards, health = await _load_cards_async()
         card = next((c for c in cards if c.call_id == call_id), None)
         sig = _signature(cards, health, call_id)
         if sig == rendered["sig"]:
@@ -805,7 +861,7 @@ def call_page(call_id: str) -> None:
                     _call_panel(card, verbose=team, public=not team)
             _footer()
 
-    redraw()
+    await redraw()
     ui.timer(0.6, redraw)
 
 
@@ -828,17 +884,78 @@ def wall_timeline_api(call_id: str) -> JSONResponse:
     )
 
 
+def _card_started(card: CallCard) -> datetime | None:
+    if not card.started_at:
+        return None
+    try:
+        stamp = datetime.fromisoformat(card.started_at)
+    except ValueError:
+        return None
+    return stamp if stamp.tzinfo else stamp.replace(tzinfo=UTC)
+
+
+@app.get("/api/wall/business-insights")
+def wall_business_insights_api(days: int = 30) -> JSONResponse:
+    """Unavailability reasons, doctor ranking, the demand/supply heatmap and
+    cancellation recovery for the Insights page's "7 / 30 / 90 días" pills.
+    ``days`` is one of those three; anything else is clamped to the nearest.
+    """
+    days = min((7, 30, 90), key=lambda d: abs(d - days))
+    now = datetime.now(UTC)
+    events, _health = _load_events()
+    cards = build_calls(events)
+    cutoff = now - timedelta(days=days)
+    in_range = [c for c in cards if (started := _card_started(c)) and started >= cutoff]
+    payload = business_insights(in_range, now=now)
+    payload["range_days"] = days
+    return JSONResponse(payload)
+
+
+@app.get("/wall/avatar2d")
+def wall_avatar2d() -> FileResponse:
+    """The 2D avatar art, served as a plain image — not wrapped in a page —
+    so it can be linked or embedded directly. Source: vortex/wall/media/.
+    """
+    return FileResponse(WALL_MEDIA_DIR / "avatar2d.png", media_type="image/png")
+
+
+@app.get("/wall/avatar2d-animated")
+def wall_avatar2d_animated() -> FileResponse:
+    """The animated version: a self-contained SVG (transparent background,
+    CSS keyframes baked in — float, head bob, blink, clipboard sway) used
+    as the landing page's hero avatar.
+    """
+    return FileResponse(WALL_MEDIA_DIR / "avatar2d_animated.svg", media_type="image/svg+xml")
+
+
+@app.get("/wall", response_model=None)
+def wall_entry() -> Response:
+    """The public URL (see README's production table): the React app
+    (vortex/wall/) — landing page, then client-side into the Clinic View —
+    if it has been built. Falls back to the classic NiceGUI projector view
+    so this address never 404s for the jury just because a deploy skipped
+    ``npm run build``.
+    """
+    index = WALL_APP_DIST / "index.html"
+    if index.exists():
+        return HTMLResponse(index.read_text(encoding="utf-8"))
+    return RedirectResponse("/wall/classic")
+
+
 if WALL_APP_DIST.exists():
     app.add_static_files("/wall-assets", str(WALL_APP_DIST))
     _WALL_INDEX_HTML = (WALL_APP_DIST / "index.html").read_text(encoding="utf-8")
 
     @app.get("/call/{call_id}/zoom")
     def call_zoom_page(call_id: str) -> HTMLResponse:
-        """The react-spring zoom page: voice orb, live tool demo, extracted
-        info with the rule behind each, final action.
+        """The React app's per-call view: voice orb, live tool demo, extracted
+        info with the rule behind each, final action. Also the app's SPA
+        entry point — with no call_id of interest (e.g. /call/demo/zoom) it
+        opens on the landing page instead, then routes client-side from there
+        into the Clinic View.
 
-        Built by ``npm run build`` in ``vortex/observability/wall-app/``. It
-        reads its data from ``/api/wall/timeline/{call_id}`` above, client-side.
+        Built by ``npm run build`` in ``vortex/wall/``. It reads its data
+        from ``/api/wall/timeline/{call_id}`` above, client-side.
         Additive: ``/call/{call_id}`` (no ``/zoom``) stays the NiceGUI page.
         """
         del call_id  # the SPA reads the id itself from window.location
@@ -906,7 +1023,7 @@ def _passes(card: CallCard, key: str) -> bool:
 
 
 @ui.page("/calls")
-def ops_page() -> None:
+async def ops_page() -> None:
     _apply_chrome()
     ui.page_title("Vortex · Calls")
     if not _ops_ok():
@@ -954,17 +1071,17 @@ def ops_page() -> None:
 
     rendered: dict[str, Any] = {"sig": None}
 
-    def pick(call_id: str) -> None:
+    async def pick(call_id: str) -> None:
         state["id"] = call_id
-        redraw()
+        await redraw()
 
-    def set_filter(key: str) -> None:
+    async def set_filter(key: str) -> None:
         state["filter"] = key
-        redraw()
+        await redraw()
 
-    def redraw() -> None:
+    async def redraw() -> None:
         _beat(name.value or "joaquin")
-        cards, health = _load_cards()
+        cards, health = await _load_cards_async()
         shown = [c for c in cards if _passes(c, state["filter"])]
         if state["id"] is None and shown:
             featured = explain.featured_call(shown)
@@ -1016,7 +1133,7 @@ def ops_page() -> None:
                 ui.element("div").style("height: 16px")
                 _transcript(card)
 
-    redraw()
+    await redraw()
     ui.timer(0.6, redraw)
 
 

@@ -26,14 +26,15 @@ cases:
   - id: identity.dni.one_edit_repair_unique
     problem: 4
     tool: validate_national_id
-    # Heard 6 for 3 (seis/tres); letter Z fits only 12345678.
+    # Heard 6 for 3 (seis/tres); letter Z fits 12345678, but only the caller
+    # confirms it: the id stays invalid and the digit is asked again.
     args: {value: "12645678Z"}
     expect:
-      normalized: "12345678Z"
+      normalized: "12645678Z"
       kind: dni
-      valid: true
-      repaired_from: "12645678Z"
-      ask_digit_positions: {$len: 0}
+      valid: false
+      repaired_from: {$absent: true}
+      ask_digit_positions: [2]
 
   - id: identity.dni.one_edit_repair_ambiguous
     problem: 4
@@ -51,10 +52,11 @@ cases:
     tool: validate_national_id
     args: {value: "X1264567L"}
     expect:
-      normalized: "X1234567L"
+      normalized: "X1264567L"
       kind: nie
-      valid: true
-      repaired_from: "X1264567L"
+      valid: false
+      repaired_from: {$absent: true}
+      ask_digit_positions: [2]
 
   - id: identity.nie.x_prefix_valid
     problem: 4

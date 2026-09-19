@@ -532,14 +532,15 @@ class ValidateNationalIdInput(BaseModel):
 
 
 class NationalIdCheck(BaseModel):
-    normalized: str  # uppercase, no spaces or dashes; repaired id when uniquely corrected
+    normalized: str  # uppercase, no spaces or dashes; always the id as heard
     kind: Literal["dni", "nie", "invalid"]
     valid: bool  # the check letter matches the digits (of normalized)
     expected_letter: str | None = None
-    # Heard form before a unique 1-edit digit repair. None when not repaired.
+    # Heard form before a 1-edit digit repair. Always None: a repair is a
+    # candidate the caller has to confirm, never an id this lane adopts.
     repaired_from: str | None = None
-    # 0-based indexes into the digit body to re-ask when several 1-edit
-    # candidates fit the heard check letter. Empty otherwise.
+    # 0-based indexes into the digit body to ask again when a 1-edit candidate
+    # fits the heard check letter. Empty otherwise.
     ask_digit_positions: list[int] = Field(default_factory=list)
 
 
@@ -549,7 +550,11 @@ class BuildRegistrationInput(BaseModel):
     second_surname: str
     national_id: str
     date_of_birth: date
-    phone: str
+    #: Empty or absent means the line they are calling from. A new patient
+    #: registers themselves, so the number they would dictate is the number
+    #: Twilio already handed us, and a registration has eight fields to collect
+    #: inside three minutes. ``build_registration`` fills it.
+    phone: str = ""
     email: str
     insurer: str
 
@@ -664,19 +669,34 @@ class CheckEligibilityInput(BaseModel):
     insurer: str | None = None
 
 
+#: Patient-record rules ``check_eligibility`` can stand down when the directory
+#: record is not in hand. Allowance is never in this list: only ``/availability``
+#: names it, with or without a record.
+SkippedEligibilityCheck = Literal["age", "referral"]
+
+
 class EligibilityVerdict(BaseModel):
     allowed: bool
     rejection: Rejection | None = None
     # Providers that can serve the same request when the named one cannot.
     redirect_to: list[ProviderRecord] = Field(default_factory=list)
-    # What the verdict could not be sure of. Set when the directory record was
-    # not in hand, so the rules read off it (age, referral, allowance) stood
-    # down and only /availability answered. Never a refusal on its own.
+    # Spoken-plan resolution hint (insurer id to reuse). Never a refusal.
     note: str = ""
+    # Patient-record rules that stood down because the directory record was not
+    # in hand, so only /availability answered them. Empty when the record was
+    # available. Never a refusal on its own.
+    skipped_checks: list[SkippedEligibilityCheck] = Field(default_factory=list)
 
 
 class TriageInput(BaseModel):
-    complaint: str = Field(description="The symptom, in the caller's words")
+    complaint: str = Field(
+        description=(
+            "Why they are calling, in the caller's own words, verbatim and never "
+            "a summary: the symptom and any specialty they named. Dropping "
+            "'gynaecology' from 'a gynaecology appointment for contraception "
+            "questions' routes them to a GP."
+        )
+    )
     provider_name: str | None = Field(
         default=None,
         description="The doctor the caller named, as said. Their specialty is the one to book.",

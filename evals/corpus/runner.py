@@ -25,6 +25,7 @@ uncapped; this turns them into the feedback ``Run All`` refuses to give.
 from __future__ import annotations
 
 import asyncio
+import datetime
 import json
 import time
 import traceback
@@ -35,8 +36,17 @@ from typing import Any
 from evals.common.context import make_context
 from evals.common.results import RESULTS_DIR, CaseResult, RunResult, git_info
 from evals.common.stubs import is_stub
-from evals.corpus import judge, probes
-from evals.corpus.catalogue import PROBLEMS, REASONS, VERBS, Roster, load, max_points
+from evals.corpus import judge, probes, world
+from evals.corpus import normalize as N
+from evals.corpus.catalogue import (
+    PROBLEMS,
+    REASONS,
+    VERBS,
+    Case,
+    Roster,
+    load,
+    max_points,
+)
 from vortex import tools as registry
 
 LAYER = "corpus"
@@ -238,7 +248,14 @@ def _skipped_families(roster: Roster) -> list[CaseResult]:
 
 
 def _read_call_log(path: Path) -> dict[str, dict[str, Any]]:
-    """Group a JSONL call log by ``call_id``, keeping what the judge needs."""
+    """Group a JSONL call log by ``call_id``, keeping what the judge needs.
+
+    The log's event field is ``kind``, not ``event``, and a submitted action is
+    logged twice: ``submit.sent`` carries the payload before the POST,
+    ``submit.result`` carries it with the platform's answer. Read the result and
+    fall back to what was sent, so a call whose POST never came back is judged
+    on what it tried to submit rather than counted as silence.
+    """
     calls: dict[str, dict[str, Any]] = {}
     for line in path.read_text().splitlines():
         line = line.strip()
@@ -251,34 +268,94 @@ def _read_call_log(path: Path) -> dict[str, dict[str, Any]]:
         call_id = event.get("call_id")
         if not call_id:
             continue
-        call = calls.setdefault(call_id, {"actions": [], "our_turns": [], "case_id": None})
-        name = event.get("event")
-        if name == "submit.sent":
-            action = event.get("action") or event.get("payload") or {}
-            if action:
-                call["actions"].append(action)
-        elif name == "turn.assistant":
-            text = event.get("text") or event.get("content")
-            if text:
-                call["our_turns"].append(str(text))
-        elif name == "call.started":
-            call["case_id"] = event.get("case_id") or event.get("public_case_id")
+        call = calls.setdefault(
+            call_id,
+            {"actions": [], "attempted": [], "our_turns": [], "from_number": None},
+        )
+        kind = event.get("kind") or event.get("event")
+        payload = event.get("payload") or {}
+        if kind == "submit.result" and payload:
+            call["actions"].append(_action_from(event.get("route", ""), payload))
+        elif kind == "submit.sent" and payload:
+            call["attempted"].append(_action_from(event.get("route", ""), payload))
+        elif kind == "turn.assistant" and event.get("text"):
+            call["our_turns"].append(str(event["text"]))
+        elif kind == "call.started":
+            params = event.get("custom_parameters") or {}
+            call["from_number"] = event.get("from_number") or params.get("from_number")
+    for call in calls.values():
+        if not call["actions"]:
+            call["actions"] = call["attempted"]
     return calls
 
 
-def _judge_cases(roster: Roster, log_path: Path) -> tuple[list[CaseResult], list[str]]:
+def _action_from(route: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Turn a submit route plus its body into the record shape the judge reads."""
+    verb = route.rstrip("/").rsplit("/", 1)[-1].replace("-", "_").upper()
+    body = {k: v for k, v in payload.items() if k != "call_id"}
+    if verb == "REGISTER":
+        return {"action": verb, "new_patient": body}
+    return {"action": verb, **body}
+
+
+def _phone_index(roster: Roster) -> dict[str, list[Case]]:
+    """Public cases by the persona's phone, which is the only join we get.
+
+    Nothing tells us which case was dialled. ``start.customParameters`` carries
+    ``call_id`` and ``from_number`` and nothing else, and the submissions
+    readback carries ``call_id``, ``record`` and ``received_at``. ``from_number``
+    is the number the clinic holds for the caller, so it names the persona —
+    uniquely for most of the roster, ambiguously for a handful who share one.
+    """
+    index: dict[str, list[Case]] = {}
+    for case in roster.cases:
+        phone = case.persona.get("phone") or (case.persona.get("data") or {}).get("phone")
+        if phone:
+            index.setdefault(N.phone(str(phone)), []).append(case)
+    return index
+
+
+def _judge_cases(
+    roster: Roster, log_path: Path, case_id: str | None = None
+) -> tuple[list[CaseResult], list[str]]:
     notes: list[str] = []
     if not log_path.exists():
         return [], [f"{log_path} does not exist: no calls to judge"]
     calls = _read_call_log(log_path)
     if not calls:
         return [], [f"{log_path} holds no call events"]
+    anchor = roster.cases[0].now.date() if roster.cases else None
+    today = datetime.datetime.now(probes.MADRID).date()
+    if anchor and anchor != today:
+        notes.append(
+            f"the roster is the export anchored to {anchor}, and today is {today}. "
+            "'The earliest appointment' means the earliest from the day after the "
+            "call, so every BOOK answer that asked for the earliest has moved. "
+            "A slot mismatch on such a case is the anchor, not the agent — "
+            "the problem page shows today's answer, the exported file does not."
+        )
+    forced = roster.get(case_id) if case_id else None
+    if case_id and forced is None:
+        return [], [f"no public case matches {case_id!r}"]
+    index = _phone_index(roster)
     out: list[CaseResult] = []
-    unmatched = 0
+    unmatched: list[str] = []
+    ambiguous: list[str] = []
     for call_id, call in calls.items():
-        case = roster.get(call["case_id"]) if call["case_id"] else None
+        case = forced
         if case is None:
-            unmatched += 1
+            number = call.get("from_number")
+            candidates = index.get(N.phone(str(number)), []) if number else []
+            if len(candidates) == 1:
+                case = candidates[0]
+            elif len(candidates) > 1:
+                ambiguous.append(
+                    f"{call_id[:12]} -> {number} is shared by {len(candidates)} cases "
+                    f"({', '.join(sorted({c.problem_id for c in candidates}))})"
+                )
+                continue
+        if case is None:
+            unmatched.append(f"{call_id[:12]} (from_number {call.get('from_number') or 'absent'})")
             continue
         verdict = judge.score(case, call["actions"], our_turns=call["our_turns"] or None)
         out.append(
@@ -295,8 +372,22 @@ def _judge_cases(roster: Roster, log_path: Path) -> tuple[list[CaseResult], list
         )
     if unmatched:
         notes.append(
-            f"{unmatched} call(s) in the log carry no case id and were not judged; "
-            "log the public case id on call.started to judge them"
+            f"{len(unmatched)} call(s) could not be matched to a public case by caller "
+            "number and were not judged: " + "; ".join(unmatched[:4])
+        )
+        notes.append(
+            "nothing names the case on the wire, so a withheld number — which is what "
+            "problem 4's callers look like — can only be judged with --case <id>"
+        )
+    if ambiguous:
+        notes.append(
+            f"{len(ambiguous)} call(s) were not guessed because the caller number is "
+            "shared: " + "; ".join(ambiguous[:3]) + ". Re-run with --case <id>"
+        )
+        notes.append(
+            "the organisers reuse a persona across problems, so a number identifies "
+            "only 26 of the 73 cases on its own. A practice call is dialled one case "
+            "at a time, so --case is the reliable way to say which"
         )
     return out, notes
 
@@ -304,10 +395,50 @@ def _judge_cases(roster: Roster, log_path: Path) -> tuple[list[CaseResult], list
 # ---- the run ----------------------------------------------------------------
 
 
+def _roster_reproduction_cases(roster: Roster, run_result: RunResult) -> list[CaseResult]:
+    """Does the API actually offer each published answer? Needs a snapshot."""
+    if not world.exists():
+        run_result.notes.append(
+            "--verify-roster needs a clinic snapshot: make evals-snapshot (needs PLATFORM_API_KEY)"
+        )
+        return [
+            CaseResult(
+                id="world.snapshot",
+                name="the clinic snapshot is missing",
+                status="skipped",
+                group="world",
+                details=["run: make evals-snapshot"],
+                tags=["world"],
+            )
+        ]
+    snapshot = world.read()
+    run_result.mode["snapshot_taken_at"] = snapshot.manifest.get("taken_at")
+    if snapshot.manifest.get("roster_sha256") != roster.sha256:
+        run_result.notes.append(
+            "the snapshot was taken for a different roster; re-take it after make evals-fetch"
+        )
+    out = []
+    for check in world.verify_roster(snapshot, roster):
+        out.append(
+            CaseResult(
+                id=f"world.{check.case_id}",
+                name=check.detail,
+                status="pass" if check.reproduced else "fail",
+                problem=PROBLEMS[check.problem_id][0],
+                group="world",
+                details=[] if check.reproduced else [check.detail],
+                tags=["world", check.problem_id],
+            )
+        )
+    return out
+
+
 async def run(
     *,
     only: str | None = None,
     judge_log: Path | None = None,
+    case_id: str | None = None,
+    verify_roster: bool = False,
     results_dir: Path = RESULTS_DIR,
 ) -> RunResult:
     started = time.perf_counter()
@@ -332,8 +463,11 @@ async def run(
     cases += list(results)
     cases += [c for c in _skipped_families(roster) if not only or only in c.id]
 
+    if verify_roster:
+        cases += _roster_reproduction_cases(roster, run_result)
+
     if judge_log is not None:
-        judged, notes = _judge_cases(roster, judge_log)
+        judged, notes = _judge_cases(roster, judge_log, case_id)
         cases += judged
         run_result.notes += notes
 

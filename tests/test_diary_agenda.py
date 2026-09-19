@@ -17,6 +17,8 @@ import pytest
 from vortex.clinic.client import FakeClinicClient
 from vortex.contract import (
     MADRID,
+    AvailabilityResponse,
+    BlockedProvider,
     FindSlotsInput,
     ListAppointmentsInput,
     PrepareCancelInput,
@@ -308,6 +310,61 @@ async def test_widen_days_is_never_reached_for_a_real_rule_or_a_closure(
     assert answer.widened is False
     assert answer.rejection is not None
     assert answer.rejection.reason == "clinic_closed"
+
+
+class BlockedFurtherOutClinic(FakeClinicClient):
+    """A fake whose answer past ``blocked_from`` is a rule rather than a slot."""
+
+    def __init__(self, blocked_from: date) -> None:
+        super().__init__()
+        self._blocked_from = blocked_from
+
+    async def availability(self, **kwargs) -> AvailabilityResponse:
+        answer = await super().availability(**kwargs)
+        if kwargs["date_from"] < self._blocked_from:
+            return answer.model_copy(update={"slots": [], "blocked": []})
+        return answer.model_copy(
+            update={
+                "slots": [],
+                "blocked": [
+                    BlockedProvider(
+                        provider_id="PR07",
+                        reason="provider_on_leave",
+                        restriction="provider_on_leave",
+                    )
+                ],
+            }
+        )
+
+
+async def test_widen_days_keeps_the_rule_the_wider_window_names(tmp_path: Path) -> None:
+    """The wider window is blocked by a rule: that reason is what we submit.
+
+    Overwriting it with ``no_availability`` would tell the caller the diary was
+    full when a standing rule is what stopped the only provider left.
+    """
+    ctx = ToolContext(
+        call_id="CA-diary-widen",
+        now=NOW,
+        from_number="+34612345678",
+        clinic=BlockedFurtherOutClinic(date(2026, 9, 26)),
+        log=CallLog("CA-diary-widen", tmp_path / "calls.jsonl"),
+        submitter=DryRunSubmitClient(),
+    )
+    answer = await find_slots(
+        ctx,
+        FindSlotsInput(
+            specialty_id="general_practice",
+            date_from=date(2026, 9, 21),
+            date_to=date(2026, 9, 25),
+            widen_days=7,
+        ),
+    )
+    assert answer.widened is True
+    assert answer.slots == []
+    assert [b.provider_id for b in answer.blocked] == ["PR07"]
+    assert answer.blocked[0].reason == "provider_on_leave"
+    assert answer.rejection is None  # a named rule is not a no_availability
 
 
 # ---- language filter: problem 11 -------------------------------------------

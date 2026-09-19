@@ -16,6 +16,7 @@ dependencies = [
     "langfuse>=4.15.4",
     "email-validator>=2.3.0",
     "phonenumbers>=9.0.39",
+    "tzdata>=2026.4",
 ]
 
 
@@ -49,3 +50,14 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# Fixture and docstring text mirrors the real platform's literal wire format,
+# en dash included ("09:00–20:00") - not a typo.
+"vortex/clinic/fixtures.py" = ["RUF001"]
+"vortex/contract.py" = ["RUF002"]
+# Word lists read better as prose than as quoted list literals; the curly
+# apostrophe is normalized STT input, not a typo.
+"vortex/conversation/language.py" = ["RUF001", "SIM905"]
+# Lazy-singleton-with-test-reset: `global` is the standard shape for this.
+"vortex/settings.py" = ["PLW0603"]

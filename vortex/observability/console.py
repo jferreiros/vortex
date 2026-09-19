@@ -301,7 +301,7 @@ def agent_page(slug: str) -> None:
 
 
 @ui.page("/calls/live")
-def calls_live_page() -> None:
+async def calls_live_page() -> None:
     if not _guard():
         return
     ui.page_title("Vortex · Live")
@@ -318,8 +318,8 @@ def calls_live_page() -> None:
         stage = body
         rendered: dict[str, Any] = {"sig": None}
 
-        def redraw() -> None:
-            cards, health = live._load_cards()
+        async def redraw() -> None:
+            cards, health = await live._load_cards_async()
             sig = live._signature(cards, health)
             if sig == rendered["sig"]:
                 return
@@ -330,7 +330,7 @@ def calls_live_page() -> None:
                 live._live_strip(cards, featured)
                 live._workflow_panel(featured)
 
-        redraw()
+        await redraw()
         ui.timer(0.6, redraw)
         live._footer()
 

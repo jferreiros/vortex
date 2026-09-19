@@ -7,6 +7,8 @@ against a seeded call log.
 from __future__ import annotations
 
 import asyncio
+import threading
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -17,7 +19,7 @@ from vortex.observability.demo import write_scripted_call
 
 
 @pytest.fixture
-def seeded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def seeded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     log = tmp_path / "calls.jsonl"
     asyncio.run(write_scripted_call(log, scenario="refuse", delay_s=0))
     asyncio.run(write_scripted_call(log, scenario="book", delay_s=0))
@@ -30,16 +32,31 @@ def seeded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         raise OSError("offline")
 
     monkeypatch.setattr("httpx.get", _offline_get)
-    return log
+    yield log
+    settings.reset_settings()
 
 
 async def test_wall_shows_the_last_call_and_why(seeded: Path, user: User) -> None:
-    await user.open("/wall")
+    await user.open("/wall/classic")
     await user.should_see("Live")
     await user.should_see("Booked")
     await user.should_see("Marta Ruiz López")
     await user.should_see("Recent calls")
     await user.should_see("insurance does not cover")
+
+
+def test_the_seeded_log_does_not_outlive_the_fixture(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    """The regression: the wall above cached its temp log path past teardown.
+
+    Reads the settings the previous test left behind, so it has to stay right
+    after a page test that resolves the call log.
+    """
+    from vortex import settings
+
+    cached_log = settings.get_settings().calls_log_path
+    assert tmp_path_factory.getbasetemp() not in cached_log.parents
 
 
 async def test_call_page_explains_a_refusal(
@@ -109,8 +126,43 @@ async def test_console_routes_render(seeded: Path, user: User) -> None:
 
 
 async def test_public_pages_mask_the_phone(seeded: Path, user: User) -> None:
-    await user.open("/wall")
+    await user.open("/wall/classic")
     await user.should_not_see("+34612345678")
+
+
+async def test_the_wall_reads_its_cards_off_the_event_loop(
+    seeded: Path, user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A redraw runs on the event loop twice a second. The HTTP calls behind it
+    must not, or a line that does not answer freezes every open tab."""
+    threads: list[int] = []
+
+    def _offline_get(*_args: object, **_kwargs: object) -> object:
+        threads.append(threading.get_ident())
+        raise OSError("offline")
+
+    monkeypatch.setattr("httpx.get", _offline_get)
+    await user.open("/wall/classic")
+    assert threads
+    assert threading.get_ident() not in threads
+
+
+async def test_a_second_tab_reuses_the_first_load(
+    seeded: Path, user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One load for the whole board: three tabs on the wall are not three loads."""
+    calls: list[object] = []
+
+    def _offline_get(url: object = "", *_args: object, **_kwargs: object) -> object:
+        calls.append(url)
+        raise OSError("offline")
+
+    monkeypatch.setattr("httpx.get", _offline_get)
+    await user.open("/wall/classic")
+    first = len(calls)
+    assert first
+    await user.open("/wall/classic")
+    assert len(calls) == first
 
 
 async def test_unsigned_root_is_sign_in_not_the_wall(

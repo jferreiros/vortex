@@ -103,6 +103,8 @@ def cmd_corpus(args: argparse.Namespace) -> int:
     run = run_sync(
         only=args.only,
         judge_log=args.judge_log,
+        case_id=args.case,
+        verify_roster=args.verify_roster,
         results_dir=args.results_dir,
     )
     return _finish(run, args.results_dir)
@@ -244,7 +246,17 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--only", help="substring filter on case or probe ids")
     p.add_argument("--judge-log", type=Path, default=None, help="score the calls in this JSONL log")
     p.add_argument(
+        "--case",
+        default=None,
+        help="the public case every call in the log dialled, when the number cannot say",
+    )
+    p.add_argument(
         "--coverage", action="store_true", help="print the points-at-stake table and exit"
+    )
+    p.add_argument(
+        "--verify-roster",
+        action="store_true",
+        help="check every published answer against the clinic snapshot",
     )
     p.set_defaults(fn=cmd_corpus)
 

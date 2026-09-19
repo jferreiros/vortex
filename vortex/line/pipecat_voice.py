@@ -51,6 +51,7 @@ TODO(line):
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from typing import Any
 
 from fastapi import WebSocket
@@ -120,10 +121,59 @@ def _language_hints(codes: tuple[str, ...]) -> list[Any]:
     return hints
 
 
+def register_call_tools(
+    llm: Any,
+    exposed_tools: list[str],
+    make_handler: Callable[[str], Any],
+    inline_defs: bool = False,
+) -> list[Any]:
+    """Advertise every exposed registry tool on ``llm`` and bind its handler.
+
+    Returns the ``FunctionSchema`` list the LLM context is built with.
+
+    Every tool is registered with ``cancel_on_interruption=False``. Pipecat's
+    default is ``True``: an in-flight tool call is cancelled the moment an
+    ``InterruptionFrame`` reaches the LLM service, which on a phone line is any
+    caller who keeps talking. Our tools are short read-only clinic lookups plus
+    ``submit_action``, and none of them is worth abandoning half-way.
+
+    With the flag off the call is asynchronous in pipecat's sense: the handler
+    runs to completion and its result still reaches the model. When nothing
+    moved on in the meantime the result settles in place, exactly like a
+    synchronous call; when the caller did speak, it arrives as a developer
+    message and the model answers the new turn with the result in scope.
+    """
+    from pipecat.adapters.schemas.function_schema import FunctionSchema
+
+    schemas: list[Any] = []
+    for fn in registry.function_schemas(exposed_tools):
+        params_schema = fn["parameters"]
+        properties = dict(params_schema["properties"])
+        if params_schema.get("$defs"):
+            # Nested models (Slot, Action ...) need their definitions inline.
+            properties["$defs"] = params_schema["$defs"]
+        schemas.append(
+            FunctionSchema(
+                name=fn["name"],
+                description=fn["description"],
+                properties=properties,
+                required=params_schema["required"],
+            )
+        )
+        llm.register_function(
+            fn["name"],
+            make_handler(fn["name"]),
+            # Barge-in must never kill a tool: a cancelled find_patient makes the
+            # model deny a patient who exists, a cancelled submit_action loses
+            # the case with nothing posted.
+            cancel_on_interruption=False,
+        )
+    return schemas
+
+
 async def run_pipecat_call(
     ws: WebSocket, session: CallSession, turn_settings: TurnSettings | None = None
 ) -> str:
-    from pipecat.adapters.schemas.function_schema import FunctionSchema
     from pipecat.adapters.schemas.tools_schema import ToolsSchema
     from pipecat.frames.frames import TTSSpeakFrame
     from pipecat.pipeline.pipeline import Pipeline
@@ -210,18 +260,9 @@ async def run_pipecat_call(
 
         return handler
 
-    schemas: list[Any] = []
-    for fn in registry.function_schemas(turns.exposed_tools):
-        params_schema = fn["parameters"]
-        schemas.append(
-            FunctionSchema(
-                name=fn["name"],
-                description=fn["description"],
-                properties=_tool_properties(params_schema, inline_defs=settings.llm_is_vertex),
-                required=params_schema["required"],
-            )
-        )
-        llm.register_function(fn["name"], make_handler(fn["name"]))
+    schemas = register_call_tools(
+        llm, turns.exposed_tools, make_handler, inline_defs=settings.llm_is_vertex
+    )
 
     # Before the greeting: the caller id is an exact directory query, so the
     # prompt can open knowing who the line belongs to instead of spending the
@@ -722,8 +763,22 @@ def _PrivacyGuard(  # noqa: N802 - factory that returns a processor
     national ids and phones this call has already seen (directory records on
     the session, plus ``from_number``). A match replaces the phrase with a
     safe refusal and logs ``voice.privacy_block``. The call stays open.
+
+    The LLM streams its answer in chunks, and a phone split over "612 ",
+    "345 " and "678" matches nothing chunk by chunk while the TTS glues the
+    chunks back into one spoken sentence. So the chunks of one response are
+    held here and scanned as a single text when ``LLMFullResponseEndFrame``
+    closes it; an interruption drops what is still held. The prompt asks for
+    one or two short sentences, so what is held is one turn of speech.
     """
-    from pipecat.frames.frames import Frame, TextFrame, TTSSpeakFrame
+    from pipecat.frames.frames import (
+        Frame,
+        InterruptionFrame,
+        LLMFullResponseEndFrame,
+        LLMTextFrame,
+        TextFrame,
+        TTSSpeakFrame,
+    )
     from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
     from vortex.conversation.prompt import refusal_line_for
@@ -732,13 +787,32 @@ def _PrivacyGuard(  # noqa: N802 - factory that returns a processor
     language_state = state if state is not None else _LanguageState()
 
     class PrivacyGuard(FrameProcessor):
+        def __init__(self) -> None:
+            super().__init__()
+            self._held: list[LLMTextFrame] = []
+
         async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
             await super().process_frame(frame, direction)
-            if direction == FrameDirection.DOWNSTREAM and isinstance(
-                frame, (TextFrame, TTSSpeakFrame)
-            ):
-                await self._scrub(frame)
+            if direction == FrameDirection.DOWNSTREAM:
+                if isinstance(frame, LLMTextFrame):
+                    self._held.append(frame)
+                    return
+                if isinstance(frame, InterruptionFrame):
+                    self._held.clear()
+                elif isinstance(frame, LLMFullResponseEndFrame):
+                    await self._release(direction)
+                elif isinstance(frame, (TextFrame, TTSSpeakFrame)):
+                    await self._scrub(frame)
             await self.push_frame(frame, direction)
+
+        async def _release(self, direction: FrameDirection) -> None:
+            held, self._held = self._held, []
+            if not held:
+                return
+            response = held[0]
+            response.text = "".join(chunk.text or "" for chunk in held)
+            await self._scrub(response)
+            await self.push_frame(response, direction)
 
         async def _scrub(self, frame: TextFrame | TTSSpeakFrame) -> None:
             text = frame.text or ""

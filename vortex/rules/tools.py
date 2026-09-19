@@ -58,6 +58,7 @@ from vortex.contract import (
     PatientRecord,
     ProviderMatch,
     Rejection,
+    SkippedEligibilityCheck,
     ToolContext,
     TriageInput,
     TriageResult,
@@ -67,6 +68,7 @@ from vortex.contract import (
 from vortex.identity import tools as identity
 from vortex.rules import eligibility, facts, geo
 from vortex.rules import triage as triage_table
+from vortex.settings import Settings
 
 _TITLES = {"dr", "dra", "d", "doctor", "doctora"}
 _TYPO_MATCH_CUTOFF = 0.8
@@ -91,6 +93,14 @@ INSURANCE_REASONS: frozenset[str] = frozenset(
 #: them on whichever provider it was asked about, but no other provider in the
 #: specialty escapes them, so there is nobody to redirect to.
 _PLAN_WIDE_REASONS: frozenset[str] = frozenset({"insurer_referral_required", "allowance_exhausted"})
+
+
+def _settings_of(ctx: ToolContext) -> Settings:
+    """The socket's Settings. ``CallSession.open`` attaches them; bare tests stay offline."""
+    settings = getattr(ctx, "settings", None)
+    if isinstance(settings, Settings):
+        return settings
+    return Settings(geocoder="", geocoder_url="")
 
 
 def _name_tokens(name: str) -> set[str]:
@@ -132,13 +142,11 @@ def _providers_named(catalogue: Catalogue, spoken_name: str, specialty_id: str |
 #: not one per rule. Per call, like everything on ``ToolContext``.
 PATIENT_MISSES_KEY = "rules.patient_misses"
 
-#: What rides on the verdict when the record never turned up. The refusal, if
-#: there is one, still comes from ``/availability``; this says which rules did
-#: not get a chance to speak.
-NO_RECORD_NOTE = (
-    "no directory record for this patient on this call: age and referral "
-    "rules stood down and /availability answered alone"
-)
+#: Patient-record rules that stand down when the directory record is missing.
+#: The refusal, if there is one, still comes from ``/availability``; this says
+#: which local checks did not get a chance to speak. A tuple, so no importer can
+#: edit what every later call then copies into its verdict.
+NO_RECORD_SKIPPED: tuple[SkippedEligibilityCheck, ...] = ("age", "referral")
 
 
 async def _patient(ctx: ToolContext, patient_id: str) -> PatientRecord | None:
@@ -158,7 +166,7 @@ async def _patient(ctx: ToolContext, patient_id: str) -> PatientRecord | None:
     ``None`` is safe, never fatal: the rules read off the record stand down and
     ``/availability?patient_id=`` answers on its own — it applies the same age
     and referral rules server-side and names them in ``blocked``. It is logged
-    and noted on the verdict so a stood-down rule is visible, not silent.
+    and listed on ``skipped_checks`` so a stood-down rule is visible, not silent.
     """
     record = recall_patient(ctx, patient_id)
     if record is not None:
@@ -169,7 +177,7 @@ async def _patient(ctx: ToolContext, patient_id: str) -> PatientRecord | None:
         try:
             for match in await ctx.clinic.directory(phone=ctx.from_number):
                 remember_patient(ctx, match)
-        except Exception as exc:  # noqa: BLE001 - a directory hiccup must not lose the call
+        except Exception as exc:  # a directory hiccup must not lose the call
             ctx.log.event("rules.patient_lookup_failed", patient_id=patient_id, error=str(exc))
         record = recall_patient(ctx, patient_id)
 
@@ -242,9 +250,18 @@ def _refuse(reason: DeclineReason, detail: str, redirect_to=None) -> Eligibility
     )
 
 
-def _noted(verdict: EligibilityVerdict, note: str) -> EligibilityVerdict:
-    """Carry what the verdict could not check out to the caller."""
-    return verdict.model_copy(update={"note": note}) if note else verdict
+def _noted(
+    verdict: EligibilityVerdict,
+    note: str = "",
+    skipped_checks: list[SkippedEligibilityCheck] | None = None,
+) -> EligibilityVerdict:
+    """Carry resolution hints and stood-down checks out to the caller."""
+    updates: dict = {}
+    if note:
+        updates["note"] = note
+    if skipped_checks:
+        updates["skipped_checks"] = list(skipped_checks)
+    return verdict.model_copy(update=updates) if updates else verdict
 
 
 async def check_eligibility(ctx: ToolContext, args: CheckEligibilityInput) -> EligibilityVerdict:
@@ -274,9 +291,10 @@ async def check_eligibility(ctx: ToolContext, args: CheckEligibilityInput) -> El
     today = ctx.now.astimezone(MADRID).date()
     catalogue = await ctx.clinic.catalogue()
     patient = await _patient(ctx, args.patient_id)
-    # A missing record is not a refusal — it is a verdict with a hole in it, and
-    # every answer below says so rather than passing quietly.
-    note = "" if patient else NO_RECORD_NOTE
+    # A missing record is not a refusal — it is a verdict with stood-down checks,
+    # and every answer below carries them rather than passing quietly.
+    skipped: list[SkippedEligibilityCheck] = [] if patient else list(NO_RECORD_SKIPPED)
+    note = ""
     # The second policy of problem 17 arrives as whatever the caller said aloud
     # ("Mapfre Salud", "Nueva Mutua Sanitaria"), never as the bare id the
     # platform submits against. Resolve it the same way registration does, so
@@ -290,8 +308,7 @@ async def check_eligibility(ctx: ToolContext, args: CheckEligibilityInput) -> El
         and args.insurer
         and plan.insurer_id.lower() != args.insurer.strip().lower()
     ):
-        hint = f"'{args.insurer}' is {plan.name}; use insurer/policy_id {plan.insurer_id!r} onward"
-        note = f"{note}; {hint}" if note else hint
+        note = f"'{args.insurer}' is {plan.name}; use insurer/policy_id {plan.insurer_id!r} onward"
 
     verdict = eligibility.check_patient_rules(
         catalogue,
@@ -302,7 +319,11 @@ async def check_eligibility(ctx: ToolContext, args: CheckEligibilityInput) -> El
         today=today,
     )
     if verdict:
-        return _noted(_refuse(verdict.reason, verdict.detail, verdict.redirect_to), note)
+        return _noted(
+            _refuse(verdict.reason, verdict.detail, verdict.redirect_to),
+            note,
+            skipped,
+        )
 
     availability = await ctx.clinic.availability(
         date_from=today + timedelta(days=1),
@@ -323,6 +344,7 @@ async def check_eligibility(ctx: ToolContext, args: CheckEligibilityInput) -> El
                 _redirect(catalogue, args, availability, blocked, plan),
             ),
             note,
+            skipped,
         )
 
     provider = next((p for p in catalogue.providers if p.provider_id == args.provider_id), None)
@@ -335,11 +357,32 @@ async def check_eligibility(ctx: ToolContext, args: CheckEligibilityInput) -> El
         today=today,
     )
     if verdict:
-        return _noted(_refuse(verdict.reason, verdict.detail, verdict.redirect_to), note)
+        return _noted(
+            _refuse(verdict.reason, verdict.detail, verdict.redirect_to),
+            note,
+            skipped,
+        )
 
     if availability.slots:
-        return _noted(EligibilityVerdict(allowed=True), note)
-    return _noted(_refuse("no_availability", "nothing free in the window the clinic offers"), note)
+        return _noted(EligibilityVerdict(allowed=True), note, skipped)
+    return _noted(
+        _refuse("no_availability", "nothing free in the window the clinic offers"),
+        note,
+        skipped,
+    )
+
+
+#: Caller turns an earlier ``triage`` in this call already answered. The
+#: transcript fallback below reads only what was said after them. Per call,
+#: like everything on ``ToolContext``.
+TRIAGE_TURN_MARK_KEY = "rules.triage_turn_mark"
+
+
+def _turns_behind_request(ctx: ToolContext, mark: int) -> str:
+    """The caller's turns taken after ``mark``, oldest first, as one string."""
+    said = list(ctx.log.said)
+    fresh = min(len(said), max(0, ctx.log.user_turns - mark))
+    return " ".join(said[len(said) - fresh :]) if fresh else ""
 
 
 async def triage(ctx: ToolContext, args: TriageInput) -> TriageResult:
@@ -356,7 +399,28 @@ async def triage(ctx: ToolContext, args: TriageInput) -> TriageResult:
     that doctor actually consults in — the only specialty they can be booked
     for. The complaint answers alone when the name resolves to nobody, or to
     people in more than one specialty (Sáez/Sáenz), which the table can split.
+
+    A specialty the caller named outranks the table for the same reason. The
+    table holds symptoms, so it scores nothing for the word "gynaecology" and
+    sends a caller who asked for it to the residue — which is the wrong agenda,
+    the wrong ``appointment_type_id`` and a lost case. A child marker still wins
+    over a named specialty: nothing published sends a child anywhere but
+    paediatrics, and the age rule agrees.
+
+    Where the table recognises nothing in ``complaint``, the caller's own turns
+    are read for that name instead. The model paraphrases the complaint down to
+    the symptom — "I need a dermatology appointment, about a mole on my back"
+    arrives as the mole alone in every one of the six live calls that said it —
+    and the residue it lands on is a guess made from no evidence at all. A
+    complaint the table *did* recognise is answered by the table, so a specialty
+    the caller only mentioned in passing never outranks a symptom that scored.
+    Only the turns behind *this* request are read: each triage closes the window
+    it was given, so the specialty of a request already answered never decides
+    the next, unrelated one.
     """
+    triaged_through = ctx.state.get(TRIAGE_TURN_MARK_KEY, 0)
+    ctx.state[TRIAGE_TURN_MARK_KEY] = ctx.log.user_turns
+
     flag = triage_table.red_flag(args.complaint)
     if flag:
         ctx.log.event("triage.red_flag", flag=flag, complaint=args.complaint)
@@ -393,6 +457,33 @@ async def triage(ctx: ToolContext, args: TriageInput) -> TriageResult:
             specialty_id=routed,
         )
 
+    said = args.complaint
+    asked_for = triage_table.named_specialty(said)
+    if asked_for is None and not triage_table.score(said):
+        # The table matched nothing at all, so general practice here is a guess
+        # made from no evidence. The caller's own turns are better evidence than
+        # a summary of them: "I need a dermatology appointment, about a mole on
+        # my back" reaches this tool as the mole alone, six times out of six in
+        # the live log. Only read them in this branch - a complaint the table
+        # did recognise is answered by the table, and a specialty mentioned in
+        # passing must never outrank a symptom that scored. The child guard
+        # below then reads the same words the specialty came out of. The whole
+        # retained transcript is not evidence for this request: a caller who
+        # asked for dermatology and was triaged for it would send their next,
+        # unrecognised complaint to dermatology too.
+        said = _turns_behind_request(ctx, triaged_through)
+        asked_for = triage_table.named_specialty(said)
+
+    if asked_for and asked_for != routed and not triage_table.mentions_child(said):
+        ctx.log.event(
+            "triage.specialty_named_by_caller",
+            complaint=args.complaint,
+            specialty_id=asked_for,
+            table_said=routed,
+            from_transcript=said is not args.complaint,
+        )
+        return TriageResult(specialty_id=asked_for, emergency=False)
+
     return TriageResult(specialty_id=routed, emergency=False)
 
 
@@ -414,7 +505,10 @@ async def nearest_location(ctx: ToolContext, args: NearestLocationInput) -> Near
             )
         )
 
-    point = await geo.locate(args.address)
+    # The geocode cache lives in this call's state, so an address never outlives
+    # the socket that spoke it.
+    cache = ctx.state.setdefault(geo.GEOCODE_CACHE_KEY, {})
+    point = await geo.locate(args.address, _settings_of(ctx), cache)
     if point is not None:
         found = geo.nearest(point, sites)
         if found is not None:

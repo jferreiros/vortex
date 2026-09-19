@@ -96,6 +96,12 @@ def with_verdict_reason(ctx: ToolContext, action: Action) -> Action:
     verdict from the rules - an eligibility refusal or a blocked provider from
     ``find_slots`` - it wins.
 
+    Failing one of those, any other tool's typed ``Rejection`` wins: its reason
+    is drawn from the same closed vocabulary, so it is a rule the call heard and
+    the model is paraphrasing it just the same. The rules' verdict still comes
+    first, because a later refusal is often the consequence of it rather than
+    the rule that bit.
+
     Only NO_ACTION and ESCALATE carry a reason; every other action is returned
     untouched. The verb is the model's: a stored verdict never turns a refusal
     into an escalation or back. The swap is pure, so the session can ask what
@@ -105,7 +111,8 @@ def with_verdict_reason(ctx: ToolContext, action: Action) -> Action:
         return action
     from vortex.line.session import CallMemory  # late: session imports this module
 
-    verdict = CallMemory.of(ctx).last_verdict
+    memory = CallMemory.of(ctx)
+    verdict = memory.last_verdict or memory.last_rejection
     if verdict is None or verdict.reason == action.reason:
         return action
     forced = action.model_copy(update={"reason": verdict.reason})

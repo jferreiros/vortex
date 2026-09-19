@@ -305,7 +305,7 @@ EVENT_TEXT: dict[str, str] = {
 def is_lifecycle(event: dict[str, Any]) -> bool:
     """True for the socket, submission and summary lines; false for turns and tools."""
     kind = str(event.get("kind") or "")
-    return not (kind.startswith("turn.") or kind.startswith("tool."))
+    return not kind.startswith(("turn.", "tool."))
 
 
 def event_text(event: dict[str, Any]) -> str:
@@ -452,6 +452,16 @@ class Beat:
     ms: float | None = None
 
 
+#: Submission statuses the platform counts as a hand-off it accepted.
+SUBMIT_OK_STATUS = frozenset({"submitted", "accepted"})
+
+
+def submit_beat_dot(event: dict[str, Any]) -> str:
+    """A ``submit.result`` line is only green when the platform took the action."""
+    result = event.get("result") if isinstance(event.get("result"), dict) else {}
+    return "ok" if result.get("status") in SUBMIT_OK_STATUS else "warn"
+
+
 def _beat_dot_for_status(status: str) -> str:
     if status == "live":
         return "live"
@@ -463,7 +473,7 @@ def _beat_dot_for_status(status: str) -> str:
 
 
 def _finish_tool_beat(
-    card: CallCard, name: str, ts: str | None, ms: float | None, *, fail: str = ""
+    name: str, result: Any, ts: str | None, ms: float | None, *, fail: str = ""
 ) -> Beat:
     if fail:
         return Beat(
@@ -475,16 +485,14 @@ def _finish_tool_beat(
             dot="bad",
             ms=ms,
         )
-    step = next((item for item in reversed(card.tools) if item.name == name), None)
-    said = step_text(step) if step is not None else "Done."
     return Beat(
         kind="tool",
         title=tool_description(name),
-        text=said,
+        text=step_text(ToolStep(name=name, result=result, ms=ms, status="ok")),
         tool=name,
         ts=ts,
-        dot="ok" if step is None or step.status != "fail" else "bad",
-        ms=ms if ms is not None else (step.ms if step is not None else None),
+        dot="ok",
+        ms=ms,
     )
 
 
@@ -578,7 +586,10 @@ def workflow_beats(card: CallCard | None) -> list[Beat]:
                 name = str(event.get("tool") or "")
                 ms = event.get("ms")
                 beat = _finish_tool_beat(
-                    card, name, ts, float(ms) if isinstance(ms, (int, float)) else None
+                    name,
+                    event.get("result"),
+                    ts,
+                    float(ms) if isinstance(ms, (int, float)) else None,
                 )
                 index = pending.pop(name, None)
                 if index is not None:
@@ -588,7 +599,7 @@ def workflow_beats(card: CallCard | None) -> list[Beat]:
             elif kind == "tool.failed":
                 name = str(event.get("tool") or "")
                 error = str(event.get("error") or "unknown error")
-                beat = _finish_tool_beat(card, name, ts, None, fail=error)
+                beat = _finish_tool_beat(name, None, ts, None, fail=error)
                 index = pending.pop(name, None)
                 if index is not None:
                     beats[index] = beat
@@ -601,7 +612,7 @@ def workflow_beats(card: CallCard | None) -> list[Beat]:
                         title="Submitted to the platform",
                         text=event_detail(event) or event_text(event),
                         ts=ts,
-                        dot="ok",
+                        dot=submit_beat_dot(event),
                     )
                 )
         flush_speech_until(None)

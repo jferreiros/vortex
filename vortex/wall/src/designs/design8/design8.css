@@ -1,0 +1,455 @@
+/* Design 8 — Dark luxury / glass. Same 3-column skeleton, dressed as a
+   private concierge service: near-black canvas, champagne gold, frosted
+   glass panels, Cormorant Garamond italics for anything that matters. */
+
+.design8-root {
+  --d8-bg: #0d0b08;
+  --d8-bg-2: #17130d;
+  --d8-ink: #f5efe2;
+  --d8-mute: rgba(245, 239, 226, 0.56);
+  --d8-gold: #cda759;
+  --d8-gold-soft: rgba(205, 167, 89, 0.28);
+  --d8-glass: rgba(255, 255, 255, 0.045);
+  --d8-border: rgba(205, 167, 89, 0.28);
+  --d8-warn: #e28a74;
+
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background: radial-gradient(1100px 700px at 50% 0%, var(--d8-bg-2), var(--d8-bg) 65%);
+  color: var(--d8-ink);
+  font-family: "Manrope", ui-sans-serif, sans-serif;
+}
+
+.design8-root .mono {
+  font-family: ui-monospace, monospace;
+}
+
+.design8-root .d8-vignette {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(900px 600px at 50% 45%, transparent 55%, rgba(0, 0, 0, 0.5) 100%);
+}
+
+.design8-root .d8-shell {
+  position: relative;
+  z-index: 1;
+  height: 100%;
+  display: flex;
+}
+
+.design8-root .d8-kicker {
+  display: block;
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-style: italic;
+  font-size: 15px;
+  color: var(--d8-gold);
+  margin-bottom: 6px;
+}
+
+/* Left --------------------------------------------------------------------*/
+
+.design8-root .d8-left {
+  flex: 0 0 28%;
+  max-width: 420px;
+  height: 100%;
+  padding: 26px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  overflow: hidden;
+}
+
+.design8-root .d8-duration-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.design8-root .d8-duration-value {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.design8-root .d8-duration-value span {
+  font-weight: 400;
+  color: var(--d8-mute);
+  font-size: 11px;
+}
+
+.design8-root .d8-duration-track {
+  height: 2px;
+  background: rgba(255, 255, 255, 0.1);
+  margin-top: 8px;
+}
+
+.design8-root .d8-duration-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--d8-gold), #e9cf9a);
+}
+
+.design8-root .d8-duration-chips {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.design8-root .d8-chip {
+  font-size: 11px;
+  padding: 4px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--d8-border);
+  color: var(--d8-mute);
+}
+
+.design8-root .d8-chip.warn {
+  color: var(--d8-warn);
+  border-color: rgba(226, 138, 116, 0.4);
+}
+
+.design8-root .d8-orb-wrap {
+  position: relative;
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 0 6px;
+}
+
+.design8-root .d8-orb-halo {
+  position: absolute;
+  top: 4px;
+  width: 180px;
+  height: 180px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(205, 167, 89, 0.35), transparent 70%);
+}
+
+.design8-root .d8-orb {
+  position: relative;
+  width: 136px;
+  height: 136px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--d8-glass);
+  border: 1px solid var(--d8-border);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 0 60px rgba(205, 167, 89, 0.12);
+}
+
+.design8-root .d8-orb-ring {
+  position: absolute;
+  inset: -1px;
+  border-radius: 50%;
+  border: 1px solid var(--d8-gold-soft);
+}
+
+.design8-root .d8-orb-label {
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-style: italic;
+  font-size: 18px;
+}
+
+.design8-root .d8-tool-card {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px;
+  border-radius: 16px;
+  background: var(--d8-glass);
+  border: 1px solid var(--d8-border);
+  backdrop-filter: blur(14px);
+}
+
+.design8-root .d8-tool-card-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+}
+
+.design8-root .stage-head,
+.design8-root .tool-live-label,
+.design8-root .recent-tools-title {
+  display: none;
+}
+
+.design8-root .stage,
+.design8-root .tool-live,
+.design8-root .recent-tools {
+  width: 100%;
+}
+
+.design8-root .stage-ring {
+  border-color: var(--d8-gold);
+}
+
+.design8-root .stage-icon,
+.design8-root .tool-live-icon svg,
+.design8-root .recent-tool-name svg {
+  color: var(--d8-gold);
+}
+
+.design8-root .stage-label,
+.design8-root .stage-record-name,
+.design8-root .recent-tool-name {
+  color: var(--d8-ink);
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-size: 15px;
+}
+
+.design8-root .stage-section h4 {
+  color: var(--d8-mute);
+}
+
+.design8-root .chip,
+.design8-root .stage-record,
+.design8-root .stage-cal-day,
+.design8-root .recent-tool-row {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--d8-border);
+  color: var(--d8-ink);
+}
+
+.design8-root .stage-cal-day.has-slots {
+  border-color: var(--d8-gold);
+  background: rgba(205, 167, 89, 0.14);
+}
+
+.design8-root .recent-tool-ms {
+  color: var(--d8-gold);
+}
+
+.design8-root .stage-empty,
+.design8-root .stage-empty-inline {
+  color: var(--d8-mute);
+}
+
+/* Middle --------------------------------------------------------------------*/
+
+.design8-root .d8-main {
+  flex: 1 1 44%;
+  min-width: 0;
+  height: 100%;
+  padding: 26px 8px;
+  display: flex;
+}
+
+.design8-root .d8-chat {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.design8-root .d8-chat-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 24px 18px;
+}
+
+.design8-root .d8-dot-live {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--d8-gold);
+  box-shadow: 0 0 0 5px rgba(205, 167, 89, 0.18);
+}
+
+.design8-root .d8-chat-title {
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-size: 24px;
+  font-style: italic;
+}
+
+.design8-root .d8-chat-stream {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 14px;
+  padding: 0 24px 70px;
+}
+
+.design8-root .d8-empty {
+  margin: auto;
+  color: var(--d8-mute);
+  font-size: 13px;
+}
+
+.design8-root .d8-row {
+  display: flex;
+}
+
+.design8-root .d8-row.user {
+  justify-content: flex-end;
+}
+
+.design8-root .d8-bubble {
+  max-width: 64%;
+  padding: 14px 18px;
+  border-radius: 4px;
+  font-size: 14.5px;
+  line-height: 1.55;
+}
+
+.design8-root .d8-bubble.user {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.design8-root .d8-bubble.assistant {
+  background: var(--d8-glass);
+  border: 1px solid var(--d8-border);
+  border-left: 2px solid var(--d8-gold);
+}
+
+.design8-root .d8-who {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--d8-mute);
+  margin-bottom: 5px;
+}
+
+.design8-root .d8-bubble p {
+  margin: 0;
+}
+
+/* Right --------------------------------------------------------------------*/
+
+.design8-root .d8-right {
+  flex: 0 0 28%;
+  max-width: 420px;
+  height: 100%;
+  padding: 26px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow: hidden;
+}
+
+.design8-root .d8-insight-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.design8-root .d8-insight-card {
+  padding: 16px 18px;
+  border-radius: 14px;
+  background: var(--d8-glass);
+  border: 1px solid var(--d8-border);
+  backdrop-filter: blur(10px);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.design8-root .d8-insight-title {
+  font-size: 10.5px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--d8-mute);
+}
+
+.design8-root .d8-insight-value {
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-size: 20px;
+}
+
+.design8-root .d8-insight-rule {
+  font-size: 11.5px;
+  color: var(--d8-mute);
+  line-height: 1.4;
+}
+
+.design8-root .d8-final {
+  flex: 0 0 auto;
+  border-radius: 16px;
+  padding: 20px;
+  background: linear-gradient(155deg, rgba(205, 167, 89, 0.14), rgba(255, 255, 255, 0.03));
+  border: 1px solid var(--d8-border);
+  backdrop-filter: blur(14px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.design8-root .d8-final-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.design8-root .d8-final-value {
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-size: 25px;
+  font-style: italic;
+  display: block;
+}
+
+.design8-root .d8-final-note {
+  font-size: 12px;
+  color: var(--d8-mute);
+}
+
+.design8-root .d8-final-note.warn {
+  color: var(--d8-warn);
+}
+
+.design8-root .d8-final.done {
+  box-shadow: 0 0 0 1px var(--d8-gold) inset;
+}
+
+.design8-root .countdown-ring-track {
+  stroke: rgba(255, 255, 255, 0.15);
+}
+
+.design8-root .countdown-ring-fill {
+  stroke: var(--d8-gold);
+}
+
+.design8-root .countdown-ring {
+  position: relative;
+}
+
+.design8-root .countdown-ring-content {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10.5px;
+}
+
+/* Responsive -----------------------------------------------------------------*/
+
+@media (max-width: 1024px) {
+  .design8-root .d8-shell {
+    flex-direction: column;
+    overflow-y: auto;
+  }
+  .design8-root .d8-left,
+  .design8-root .d8-right {
+    max-width: none;
+    flex: 0 0 auto;
+  }
+  .design8-root .d8-main {
+    flex: 0 0 auto;
+    height: 420px;
+  }
+}

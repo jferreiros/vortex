@@ -1,4 +1,4 @@
-.PHONY: install run smoke test call try-api tunnel tail lint fmt board design-sync rehearse evals evals-logic evals-conversation evals-voice evals-report evals-accept evals-selftest evals-discord
+.PHONY: install run smoke test call replay try-api tunnel tail lint fmt board design-sync rehearse evals evals-logic evals-conversation evals-voice evals-report evals-accept evals-selftest evals-discord
 
 PORT ?= 7860
 BOARD_PORT ?= 8080
@@ -25,6 +25,9 @@ test:
 call:
 	uv run python scripts/fake_caller.py --url ws://localhost:$(PORT)/ws --calls $(N)
 
+replay:           ## drip synthetic-data calls into logs/calls.jsonl for the live board; ARGS="--speed 2 --concurrency 6"
+	uv run python scripts/replay_synthetic.py $(ARGS)
+
 try-api:
 	uv run python scripts/api/try_api.py
 
@@ -48,7 +51,7 @@ fmt:
 	uv run ruff format . && uv run ruff check --fix .
 
 # ---- evals (see docs/evals.md) ---------------------------------------------
-.PHONY: evals evals-logic evals-conversation evals-voice evals-report evals-accept evals-selftest evals-discord
+.PHONY: evals evals-logic evals-conversation evals-voice evals-report evals-accept evals-selftest evals-discord evals-hydrate evals-snapshot evals-fetch evals-coverage
 
 evals:            ## layers 1 + 2 + 4, no keys needed; the CI entry point (exit 1 on failure)
 	uv run python -m evals ci
@@ -68,11 +71,20 @@ evals-corpus:     ## layer 4: the organisers' 73 published cases and the surface
 evals-coverage:   ## where the 196 points are, and what the public cases never show
 	uv run python -m evals corpus --coverage
 
+evals-verify:     ## do the published answers exist in the API we snapshotted?
+	uv run python -m evals corpus --verify-roster --only world
+
+evals-discover:   ## find a real caller for each decline reason; needs PLATFORM_API_KEY
+	uv run python -m evals.corpus.discover
+
 evals-fetch:      ## refresh evals/corpus/cases/public-cases.json (run it each morning)
 	uv run python -m evals.corpus.fetch
 
 evals-snapshot:   ## freeze the real clinic for offline judging; needs PLATFORM_API_KEY
 	uv run python -m evals.corpus.snapshot
+
+evals-hydrate:    ## rebuild synthetic-data/ from public-cases.json (LIVE=1 hits the API)
+	uv run python -m evals.corpus.hydrate $(if $(LIVE),--live,)
 
 evals-report:     ## rebuild evals/results/summary.md and report.html
 	uv run python -m evals report
