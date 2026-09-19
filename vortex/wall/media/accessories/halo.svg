@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="500" height="500" viewBox="59.87 13.32 125.3 125.3" fill="none">
+  <!-- Vorty accessory: halo ring floating above the crown -->
+  <g id="accessory-halo">
+    <ellipse cx="123" cy="23" rx="21" ry="5" fill="none" stroke="url(#ha-ring)" stroke-width="3.5"/>
+    <ellipse cx="123" cy="23" rx="21" ry="5" fill="none" stroke="#FFF3C4" stroke-width="1" opacity=".6"/>
+  </g>
+  <defs>
+    <linearGradient id="ha-ring" x1="102" x2="144" y1="17" y2="17" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F2C94C" offset="0"/>
+      <stop stop-color="#D9A62E" offset=".5"/>
+      <stop stop-color="#F2C94C" offset="1"/>
+    </linearGradient>
+  </defs>
+</svg>

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="500" height="500" viewBox="59.87 13.32 125.3 125.3" fill="none">
+  <!-- Vorty accessory: Rudolph-style red nose, centered low on the visor -->
+  <g id="accessory-red-nose">
+    <circle cx="123" cy="98" r="9" fill="url(#rn-nose)"/>
+    <circle cx="120" cy="94.5" r="2.5" fill="#FFD3D3" opacity=".8"/>
+  </g>
+  <defs>
+    <radialGradient id="rn-nose" cx=".35" cy=".3" r=".8">
+      <stop stop-color="#FF5A4E" offset="0"/>
+      <stop stop-color="#B0201A" offset="1"/>
+    </radialGradient>
+  </defs>
+</svg>

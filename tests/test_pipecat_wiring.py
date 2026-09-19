@@ -6,6 +6,7 @@ pipecat releases, without a key and without a network.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime
 
@@ -806,6 +807,7 @@ async def test_tool_filler_speaks_one_short_phrase_per_language(voice_settings) 
         TOOL_FILLERS,
         _LanguageState,
         _make_tool_filler_speaker,
+        _ToolFillerGuard,
         tool_filler_for,
     )
 
@@ -827,7 +829,8 @@ async def test_tool_filler_speaks_one_short_phrase_per_language(voice_settings) 
             queued.extend(frames)
 
     state = _LanguageState("es")
-    handler = _make_tool_filler_speaker(_session(settings, events), state, Task())
+    guard = _ToolFillerGuard()
+    handler = _make_tool_filler_speaker(_session(settings, events), state, Task(), guard=guard)
 
     await handler(None, [{"name": "find_patient"}])
     assert [kind for kind, _ in events] == ["voice.tool_filler"]
@@ -840,10 +843,68 @@ async def test_tool_filler_speaks_one_short_phrase_per_language(voice_settings) 
     assert queued[0].append_to_context is True
 
     state.language = "ca"
+    guard.on_caller_turn()  # the caller answered: a new interaction may mask
     await handler(None, [{}, {}])
     assert queued[-1].text == TOOL_FILLERS["ca"]
     assert events[-1][1]["tools"] == 2
     assert [kind for kind, _ in events] == ["voice.tool_filler"] * 2
+
+
+async def test_the_filler_guard_speaks_one_filler_per_interaction(voice_settings) -> None:
+    """A tool chain that fires batch after batch speaks the phrase once.
+
+    Evidence CA-voicetest-1789811447: five completions in seven seconds, each
+    starting a tool batch, each re-speaking "Un momento.". The caller heard
+    the filler flood instead of an answer. The guard speaks the first batch,
+    suppresses the ones inside the cooldown, and speaks again once the caller
+    has said anything - the mark of a new interaction.
+    """
+    pytest.importorskip("pipecat")
+    from pipecat.frames.frames import TTSSpeakFrame
+
+    from vortex.line.pipecat_voice import (
+        _LanguageState,
+        _make_tool_filler_speaker,
+        _ToolFillerGuard,
+    )
+
+    settings = voice_settings()
+    events: list[tuple[str, dict]] = []
+    queued: list[object] = []
+
+    class Task:
+        async def queue_frames(self, frames: list[object]) -> None:
+            queued.extend(frames)
+
+    now = [0.0]
+    guard = _ToolFillerGuard(cooldown_secs=4.0, clock=lambda: now[0])
+    handler = _make_tool_filler_speaker(
+        _session(settings, events), _LanguageState("es"), Task(), guard=guard
+    )
+
+    # First batch speaks.
+    await handler(None, [{"name": "find_patient"}])
+    assert len(queued) == 1
+
+    # The next hops of the same chain stay quiet, whatever the language.
+    now[0] = 1.4
+    await handler(None, [{"name": "resolve_date"}])
+    now[0] = 2.9
+    await handler(None, [{"name": "triage"}])
+    assert len(queued) == 1
+    assert events[-1][1]["suppressed"] == "cooldown"
+
+    # Past the cooldown the chain may re-mask: the caller has heard silence.
+    now[0] = 5.0
+    await handler(None, [{"name": "find_slots"}])
+    assert len(queued) == 2
+
+    # A caller turn re-arms the slot even inside the cooldown.
+    now[0] = 5.5
+    guard.on_caller_turn()
+    await handler(None, [{"name": "find_patient"}])
+    assert len(queued) == 3
+    assert isinstance(queued[-1], TTSSpeakFrame)
 
 
 def test_vad_mode_wires_our_turn_strategies() -> None:
@@ -933,6 +994,227 @@ def test_smart_turn_is_built_only_where_the_vad_mode_asks_for_it() -> None:
     assert count(TurnSettings()) == 0, "Soniox mode loaded a model it never uses"
     assert count(TurnSettings(soniox_turn_detection=False, use_smart_turn=False)) == 0
     assert count(TurnSettings(soniox_turn_detection=False)) == 1, "VAD mode wants it"
+
+
+def test_soniox_endpoint_knobs_are_the_conservative_pair(voice_settings) -> None:
+    """The pipeline's Soniox settings endpoint conservatively, not eagerly.
+
+    Evidence CA-voicetest-1789811447: sensitivity 0.3 with latency adjustment 2
+    endpointed the caller after every breath group, the agent answered the
+    fragments and talked over the rest of the sentence. The builder pins the
+    knobs to the conservative pair regardless of the turn settings' tuning.
+    """
+    pytest.importorskip("pipecat")
+    from pipecat.services.soniox.stt import SonioxSTTService
+    from pipecat.transcriptions.language import Language
+
+    from vortex.line.pipecat_voice import _soniox_stt_settings
+
+    class Ctx:
+        from vortex.clinic.client import FakeClinicClient
+
+        clinic = FakeClinicClient()
+
+    built = _soniox_stt_settings(voice_settings(), default_turn_settings(), Ctx())
+    assert isinstance(built, SonioxSTTService.Settings)
+    assert built.endpoint_sensitivity == 0.0
+    assert built.endpoint_latency_adjustment_level == 0
+    # The acoustic fallback keeps its ceiling: a true stall cannot hold the
+    # line longer than this, even with the semantic endpointer set loose.
+    assert built.max_endpoint_delay_ms == default_turn_settings().stt_max_endpoint_delay_ms
+    assert built.language_hints == [Language.EN, Language.ES, Language.CA]
+
+
+async def test_the_stall_guard_finalizes_a_starved_turn() -> None:
+    """No inbound audio with a turn open: the guard asks Soniox to flush.
+
+    Soniox emits ``<end>`` only while audio flows, so a caller that stops
+    streaming mid-turn holds the transcript open forever (evidence
+    CA-voicetest-1789811079: every turn was lost this way). After half a
+    second of starvation the guard sends the same finalize message the service
+    sends on a VAD stop, and logs that it did.
+    """
+    pytest.importorskip("pipecat")
+    from vortex.line.soniox_stall import make_stall_guarded_soniox_stt
+
+    events: list[tuple[str, dict]] = []
+    sent: list[str] = []
+
+    class FakeWS:
+        state = None  # not OPEN is checked; any object passes
+
+        async def send(self, data: str) -> None:
+            sent.append(data)
+
+    from websockets.protocol import State
+
+    now = [0.0]
+    stt_cls = make_stall_guarded_soniox_stt(
+        on_event=lambda kind, **kw: events.append((kind, kw)), clock=lambda: now[0]
+    )
+    svc = stt_cls(api_key="test", vad_force_turn_endpoint=False)
+    svc._websocket = FakeWS()
+    FakeWS.state = State.OPEN
+
+    # Audio flows at t=4.0 with no turn open: however long the silence, there
+    # is nothing to finalize.
+    now[0] = 4.0
+    svc.note_audio()
+    now[0] = 4.6
+    assert svc.stall_due() is False
+
+    # The turn opens; audio is still fresh, so not due yet.
+    await svc._user_turn_started()
+    now[0] = 4.1
+    assert svc.stall_due() is False
+
+    # Half a second of starvation with the turn open: due.
+    now[0] = 4.6
+    assert svc.stall_due() is True
+    finalize = asyncio.create_task(svc.request_finalize())
+    await asyncio.sleep(0.01)  # the finalize goes out; the wait loop spins
+    assert sent == ['{"type": "finalize"}']
+    assert events[0][0] == "voice.stt_stall_finalize"
+    assert events[0][1]["silence_secs"] == 0.6
+    now[0] = 10.0  # Soniox answered, the turn closed, the window runs out
+    await finalize
+
+    # One episode per starvation: no second finalize without new audio.
+    assert svc.stall_due() is False
+
+
+async def test_the_stall_guard_promotes_the_last_interim_when_soniox_is_dead() -> None:
+    """A finalize Soniox never answers: the last interim becomes the final.
+
+    The words the caller said must reach the model even when the STT socket
+    died mid-turn. After the fallback window the guard pushes the interim text
+    as a final transcript plus the turn-stop proposal, so the strategies close
+    the turn with the text in hand.
+    """
+    pytest.importorskip("pipecat")
+    from pipecat.frames.frames import ProposedUserStoppedSpeakingFrame, TranscriptionFrame
+
+    from vortex.line.soniox_stall import make_stall_guarded_soniox_stt
+
+    events: list[tuple[str, dict]] = []
+    pushed: list[object] = []
+    sent: list[str] = []
+
+    class FakeWS:
+        from websockets.protocol import State
+
+        state = State.OPEN
+
+        async def send(self, data: str) -> None:
+            sent.append(data)
+
+    now = [0.0]
+    stt_cls = make_stall_guarded_soniox_stt(
+        on_event=lambda kind, **kw: events.append((kind, kw)), clock=lambda: now[0]
+    )
+    svc = stt_cls(api_key="test")
+    svc._websocket = FakeWS()
+    svc._user_turn_open = True
+    svc.note_audio()
+    svc.note_interim("Hola, buenos días.")
+    now[0] = 1.0
+
+    async def capture(frame: object, direction: object = None) -> None:
+        pushed.append(frame)
+
+    svc.push_frame = capture  # type: ignore[method-assign]
+
+    finalize = asyncio.create_task(svc.request_finalize())
+    await asyncio.sleep(0.01)  # the finalize goes out, then the wait loop spins
+    now[0] = 10.0  # past the fallback window: Soniox never answered
+    await finalize
+
+    assert sent == ['{"type": "finalize"}']
+    assert [kind for kind, _ in events] == ["voice.stt_stall_finalize", "voice.stt_stall_fallback"]
+    assert isinstance(pushed[0], TranscriptionFrame)
+    assert pushed[0].text == "Hola, buenos días."
+    assert isinstance(pushed[1], ProposedUserStoppedSpeakingFrame)
+
+
+async def test_the_stall_guard_stays_quiet_when_a_final_arrives() -> None:
+    """A real final consumes the interim: no synthesized duplicate can fire."""
+    pytest.importorskip("pipecat")
+    from vortex.line.soniox_stall import make_stall_guarded_soniox_stt
+
+    events: list[tuple[str, dict]] = []
+    now = [0.0]
+    stt_cls = make_stall_guarded_soniox_stt(
+        on_event=lambda kind, **kw: events.append((kind, kw)), clock=lambda: now[0]
+    )
+    svc = stt_cls(api_key="test", vad_force_turn_endpoint=False)
+    svc._user_turn_open = True
+    svc.note_audio()
+    svc.note_interim("Hola.")
+    svc.note_final()
+    await svc._user_turn_stopped()  # the <end> closed the turn, as the real path does
+    now[0] = 5.0
+    assert svc.stall_due() is False  # the turn closed; nothing to do
+    await svc.request_finalize()
+    assert [kind for kind, _ in events] == ["voice.stt_stall_finalize"]
+    assert not any(kind == "voice.stt_stall_fallback" for kind, _ in events)
+
+
+async def test_the_reply_latency_probe_reports_the_wait(voice_settings) -> None:
+    """End of speech -> turn closed -> first audio, logged once per turn.
+
+    Both legs land on ``voice.reply_latency``: detection (endpointing) and
+    total (end of speech to first agent audio), so the post-mortem can see
+    where a slow answer spent its time.
+    """
+    pytest.importorskip("pipecat")
+    from pipecat.frames.frames import (
+        OutputAudioRawFrame,
+        UserStoppedSpeakingFrame,
+        VADUserStoppedSpeakingFrame,
+    )
+    from pipecat.observers.base_observer import FramePushed
+    from pipecat.processors.frame_processor import FrameDirection
+
+    from vortex.line.pipecat_voice import _CallLogObserver
+
+    settings = voice_settings()
+    events: list[tuple[str, dict]] = []
+    fake = _session(settings, events)
+    fake.memory = type("Memory", (), {"prepared": None})()
+    fake.confirm_prepared = lambda why: None
+    fake.media_frames_in = 0
+    fake.media_frames_out = 0
+
+    now = [0.0]
+    observer = _CallLogObserver(fake, clock=lambda: now[0])
+
+    async def push(frame: object) -> None:
+        await observer.on_push_frame(
+            FramePushed(
+                source=None,
+                destination=None,
+                frame=frame,
+                direction=FrameDirection.DOWNSTREAM,
+                timestamp=0,
+            )
+        )
+
+    # The caller stops speaking at t=1.0; detection closes the turn at 1.6;
+    # the first agent audio leaves at 2.9.
+    now[0] = 1.0
+    await push(VADUserStoppedSpeakingFrame(stop_secs=0.4))
+    now[0] = 1.6
+    await push(UserStoppedSpeakingFrame())
+    now[0] = 2.9
+    await push(OutputAudioRawFrame(audio=b"", sample_rate=8000, num_channels=1))
+    assert [kind for kind, _ in events] == ["voice.reply_latency"]
+    assert events[-1][1]["detection_secs"] == 0.6
+    assert events[-1][1]["total_secs"] == 1.9
+
+    # Further audio of the same reply does not re-report the turn.
+    now[0] = 3.5
+    await push(OutputAudioRawFrame(audio=b"", sample_rate=8000, num_channels=1))
+    assert [kind for kind, _ in events] == ["voice.reply_latency"]
 
 
 def _noop_handler(tool_name: str):
