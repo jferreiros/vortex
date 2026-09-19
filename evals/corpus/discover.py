@@ -25,10 +25,14 @@ The sweep runs the live API five ways and records what it finds in
    `type_not_offered`, `patient_history`. Every query the endpoint accepts was
    probed against the live clinic on 19 Sep 2026 and none of the three ever
    came back: the engine implements seven of the eleven rules and no query
-   names the others. Each still gets a one-line note — under ``impossible``
-   in the JSON, and printed with the report — so the board says *why*, not
-   just what. If the clinic ever starts reporting one, the same probe records
-   it as a sample instead.
+   names the others. That run asked each site about one fixed specialty, which
+   a site need not serve; the probe now names a provider who sits there, so the
+   verdict is the next live run's to confirm. Each still gets a one-line note
+   — under ``impossible`` in the JSON, and printed with the report — so the
+   board says *why*, not just what. A shape whose probes did not all come back is held under
+   ``unverified`` instead: a lost query is not a clinic that reports nothing.
+   If the clinic ever starts reporting one, the same probe records it as a
+   sample instead.
 
 Each sample is a concrete, reproducible query, so a lane can build a caller
 around it.
@@ -178,6 +182,26 @@ def _shut_windows(catalogue: Catalogue) -> list[dict[str, Any]]:
     return windows
 
 
+def _site_specialists(catalogue: Catalogue) -> dict[str, list[tuple[str, str]]]:
+    """One provider per specialty each site actually serves, by the API's own ids.
+
+    ``/availability`` answers a specialty no provider serves at the site with
+    zero slots and an empty ``blocked`` — the same answer a shut window gives.
+    Asking about a provider who sits there is what makes the window the only
+    thing the empty answer can be about.
+    """
+    by_site: dict[str, dict[str, str]] = defaultdict(dict)
+    for provider in sorted(catalogue.providers, key=lambda p: p.provider_id):
+        for location_id in provider.location_ids:
+            by_site[location_id].setdefault(provider.specialty_id, provider.provider_id)
+    return {
+        location_id: sorted(
+            (provider_id, specialty_id) for specialty_id, provider_id in specialists.items()
+        )
+        for location_id, specialists in by_site.items()
+    }
+
+
 def _specialty_type(catalogue: Catalogue, specialty_id: str, visited: bool) -> str | None:
     """The type /availability resolves for this record: the specialty's own
     pair wins over the universal one, matching the patient's visited-ness."""
@@ -249,23 +273,28 @@ async def sweep_harvested_patients(
     specialties: list[str],
     found: dict[str, list[dict[str, Any]]],
     record: Any,
-) -> None:
+) -> dict[str, int]:
     """Patient x specialty on the record plan, over harvested patients.
 
     The only sweep that reaches `allowance_exhausted`, which is scoped per
     (patient, specialty): a plan out of visits stops the providers of the
     specialty the visits were spent on, and no roster patient's plan is spent.
     Stops once the reason has its samples — the remaining patients buy no
-    reason the earlier sweeps have not already found.
+    reason the earlier sweeps have not already found. Returns how many queries
+    it ran and how many of them got no answer, because a sweep that lost
+    queries to the API has not proved the reason absent.
     """
     total = len(patients) * len(specialties)
     done = 0
+    failed = 0
 
     async def one(patient: PatientRecord, specialty: str) -> None:
+        nonlocal failed
         response = await _probe_availability(
             client, sem, specialty_id=specialty, patient_id=patient.patient_id
         )
         if response is None:
+            failed += 1
             return
         for blocked in response.blocked or []:
             record(
@@ -286,6 +315,7 @@ async def sweep_harvested_patients(
         )
         done += len(chunk) * len(specialties)
         print(f"  {min(done, total)}/{total} patient x specialty queries")
+    return {"queries": done, "failed": failed}
 
 
 async def probe_unreportable(
@@ -299,65 +329,92 @@ async def probe_unreportable(
     `patient_history`, probed so the report's impossibility notes are earned.
 
     - location_hours: a single-day window a site is shut for the whole of,
-      with and without a patient;
+      asked about a provider who sits there and their own specialty, with and
+      without a patient;
     - type_not_offered: any catalogue gap where a provider lacks the type a
-      record resolves to, queried live if one exists;
+      record resolves to, put to that provider with a harvested patient whose
+      visited-ness resolves to the missing type — another provider of the
+      specialty offers it, and the wrong patient resolves to another type, so
+      either substitution answers a question the gap did not ask;
     - patient_history: harvested patients past every provider and site.
 
     Anything one of these returns lands in ``record`` as a sample, so a clinic
     that starts reporting the rule is caught by the same run that says so.
+
+    Every shape also counts the probes that got no answer. A timeout or an API
+    error is not a clinic that reports nothing, so a shape that lost a probe is
+    reported as unverified rather than impossible.
     """
     stats: dict[str, dict[str, int]] = {
-        "location_hours": {"windows": 0, "blocked": 0},
-        "patient_history": {"queries": 0},
+        "location_hours": {"windows": 0, "blocked": 0, "failed": 0, "unprobed": 0},
+        "patient_history": {"queries": 0, "failed": 0},
     }
 
     windows = _shut_windows(live)
+    specialists = _site_specialists(live)
     roster_ids = _roster_patients()
     roster_patient = roster_ids[0] if roster_ids else (pool[0].patient_id if pool else None)
     for window in windows:
-        for patient_id in (None, roster_patient):
-            params: dict[str, Any] = {
-                "specialty_id": "general_practice",
-                "location_id": window["location_id"],
-            }
-            if patient_id:
-                params["patient_id"] = patient_id
-            response = await _probe_availability(client, sem, day=window["day"], **params)
-            stats["location_hours"]["windows"] += 1
-            if response is None:
-                continue
-            for blocked in response.blocked or []:
-                stats["location_hours"]["blocked"] += 1
-                record(
-                    blocked.reason,
-                    location_id=window["location_id"],
-                    day=str(window["day"]),
-                    why=window["why"],
-                    patient_id=patient_id,
-                    via="shut-window",
-                )
+        serving = specialists.get(window["location_id"], [])
+        if not serving:
+            stats["location_hours"]["unprobed"] += 1
+            continue
+        for provider_id, specialty_id in serving:
+            for patient_id in (None, roster_patient):
+                params: dict[str, Any] = {
+                    "provider_id": provider_id,
+                    "specialty_id": specialty_id,
+                    "location_id": window["location_id"],
+                }
+                if patient_id:
+                    params["patient_id"] = patient_id
+                response = await _probe_availability(client, sem, day=window["day"], **params)
+                stats["location_hours"]["windows"] += 1
+                if response is None:
+                    stats["location_hours"]["failed"] += 1
+                    continue
+                for blocked in response.blocked or []:
+                    stats["location_hours"]["blocked"] += 1
+                    record(
+                        blocked.reason,
+                        location_id=window["location_id"],
+                        day=str(window["day"]),
+                        why=window["why"],
+                        provider_id=provider_id,
+                        specialty_id=specialty_id,
+                        patient_id=patient_id,
+                        via="shut-window",
+                    )
 
     gaps = _type_gaps(live)
-    stats["type_not_offered"] = {"gaps": len(gaps)}
+    stats["type_not_offered"] = {"gaps": len(gaps), "probed": 0, "failed": 0, "unprobed": 0}
     by_visited: dict[bool, list[PatientRecord]] = {False: [], True: []}
     for patient in pool:
         by_visited[patient.has_visited_before].append(patient)
     for gap in gaps:
         visited = gap["patient"] == "returning"
-        candidates = by_visited[visited] or pool
-        if not candidates:
+        candidates = by_visited[visited]
+        if not candidates or not gap["provider_id"]:
+            stats["type_not_offered"]["unprobed"] += 1
             continue
+        patient_id = candidates[0].patient_id
         response = await _probe_availability(
-            client, sem, specialty_id=gap["specialty_id"], patient_id=candidates[0].patient_id
+            client,
+            sem,
+            provider_id=gap["provider_id"],
+            specialty_id=gap["specialty_id"],
+            patient_id=patient_id,
         )
+        stats["type_not_offered"]["probed"] += 1
         if response is None:
+            stats["type_not_offered"]["failed"] += 1
             continue
         for blocked in response.blocked or []:
             record(
                 blocked.reason,
                 specialty_id=gap["specialty_id"],
                 provider_id=blocked.provider_id,
+                patient_id=patient_id,
                 via="type-gap",
             )
 
@@ -380,6 +437,7 @@ async def probe_unreportable(
                 patient_id=patient_id,
             )
             if response is None:
+                stats["patient_history"]["failed"] += 1
                 return
             for blocked in response.blocked or []:
                 record(
@@ -401,29 +459,81 @@ async def probe_unreportable(
     return stats
 
 
+def _unverified_notes(
+    found: dict[str, list[dict[str, Any]]], stats: dict[str, dict[str, int]]
+) -> dict[str, str]:
+    """One line per rule whose probes never came back, so the run cannot speak for it.
+
+    A probe that timed out or hit an API error returns nothing, and nothing
+    looks exactly like a clinic that reports no rule. These reasons are held
+    back from ``impossible``: the shape is undecided until every probe answers.
+    """
+    notes: dict[str, str] = {}
+    allowance = stats.get("allowance_exhausted", {})
+    if "allowance_exhausted" not in found and allowance.get("failed"):
+        notes["allowance_exhausted"] = (
+            f"{allowance['failed']} of {allowance.get('queries', 0)} patient x specialty "
+            "queries got no answer from the API — the plans behind them were never read; "
+            "re-run before calling the reason unreachable"
+        )
+    location = stats.get("location_hours", {})
+    if "location_hours" not in found and (
+        location.get("failed") or location.get("unprobed") or not location.get("windows")
+    ):
+        notes["location_hours"] = (
+            f"{location.get('failed', 0)} of {location.get('windows', 0)} shut-window "
+            f"queries got no answer from the API and {location.get('unprobed', 0)} windows "
+            "had no provider sitting at the site to ask about — a lost probe is not a "
+            "clinic that reports no rule; re-run"
+        )
+    gaps = stats.get("type_not_offered", {})
+    if "type_not_offered" not in found and (gaps.get("failed") or gaps.get("unprobed")):
+        notes["type_not_offered"] = (
+            f"{gaps.get('failed', 0)} of {gaps.get('probed', 0)} catalogue-gap queries got "
+            f"no answer from the API and {gaps.get('unprobed', 0)} gaps had no provider or "
+            "no harvested patient of their own kind to ask with — the gaps were never put "
+            "to the clinic; re-run"
+        )
+    history = stats.get("patient_history", {})
+    if "patient_history" not in found and (history.get("failed") or not history.get("queries")):
+        notes["patient_history"] = (
+            f"{history.get('failed', 0)} of {history.get('queries', 0)} patient x provider "
+            "x site queries got no answer from the API — the history shape was never "
+            "fully probed; re-run"
+        )
+    return notes
+
+
 def _impossible_notes(
     found: dict[str, list[dict[str, Any]]],
     stats: dict[str, dict[str, int]],
     harvested: int,
     specialties: int,
+    unverified: dict[str, str],
 ) -> dict[str, str]:
-    """One line per rule the sweep could not reach, saying why against this clinic."""
+    """One line per rule the sweep could not reach, saying why against this clinic.
+
+    A rule in ``unverified`` gets no line: the sweep lost a probe it needed, so
+    it has not earned the verdict.
+    """
     notes: dict[str, str] = {}
-    if "allowance_exhausted" not in found:
+    if "allowance_exhausted" not in found and "allowance_exhausted" not in unverified:
         notes["allowance_exhausted"] = (
             f"no harvested patient's record plan is spent for any of the {specialties} "
             f"specialties probed ({harvested} patients) — the cap is per patient and "
             "specialty; widen --max-patients and re-run"
         )
-    if "location_hours" not in found:
+    if "location_hours" not in found and "location_hours" not in unverified:
         notes["location_hours"] = (
-            f"the engine reports no rule: {stats['location_hours']['windows']} windows "
-            "shut for the whole site (each site's last closed Sunday and Saturday, the "
-            "published closure day; with and without a patient) all returned zero slots "
-            "with blocked: [] — site hours live only in the catalogue, so this refusal "
-            "is the agent's to derive"
+            f"the engine names no rule for a shut site: {stats['location_hours']['windows']} "
+            "queries over windows shut for the whole of it (each site's last closed Sunday "
+            "and Saturday, the published closure day; one provider per specialty the site "
+            "serves, with and without a patient) returned zero slots, and the "
+            f"{stats['location_hours']['blocked']} blocked entries they did return named "
+            "other rules — site hours live only in the catalogue, so this refusal is the "
+            "agent's to derive"
         )
-    if "type_not_offered" not in found:
+    if "type_not_offered" not in found and "type_not_offered" not in unverified:
         gaps = stats["type_not_offered"]["gaps"]
         notes["type_not_offered"] = (
             "the endpoint takes no appointment_type filter — the type is resolved from "
@@ -435,7 +545,7 @@ def _impossible_notes(
                 else f"{gaps} catalogue gaps were probed live and none came back as a rule"
             )
         )
-    if "patient_history" not in found:
+    if "patient_history" not in found and "patient_history" not in unverified:
         notes["patient_history"] = (
             "history enters the API only as has_visited_before, which picks the type, "
             "and referrals, which satisfy referral_required: "
@@ -527,20 +637,31 @@ async def sweep(
         harvested = len(fresh)
         print(f"  {harvested} patients outside the roster's own {len(roster_ids)}")
         if len(found.get("allowance_exhausted", [])) < MAX_SAMPLES:
-            await sweep_harvested_patients(client, sem, fresh, specialties, found, record)
+            stats["allowance_exhausted"] = await sweep_harvested_patients(
+                client, sem, fresh, specialties, found, record
+            )
 
         print("the shapes that should name the last three rules")
-        stats = await probe_unreportable(client, sem, live, pool, record)
+        stats.update(await probe_unreportable(client, sem, live, pool, record))
     finally:
         await client.aclose()
 
+    unverified = _unverified_notes(dict(found), stats)
     return {
         "samples": dict(found),
-        "impossible": _impossible_notes(dict(found), stats, harvested, len(specialties)),
+        "impossible": _impossible_notes(
+            dict(found), stats, harvested, len(specialties), unverified
+        ),
+        "unverified": unverified,
     }
 
 
-def report(samples: dict[str, list[dict[str, Any]]], impossible: dict[str, str]) -> None:
+def report(
+    samples: dict[str, list[dict[str, Any]]],
+    impossible: dict[str, str],
+    unverified: dict[str, str] | None = None,
+) -> None:
+    unverified = unverified or {}
     print(f"\n{len(samples)} of the {len(RULE_REASONS)} rule reasons have a real trigger:\n")
     for reason in RULE_REASONS:
         sample = samples.get(reason)
@@ -548,6 +669,8 @@ def report(samples: dict[str, list[dict[str, Any]]], impossible: dict[str, str])
             print(f"  {reason:28} {json.dumps(sample[0], ensure_ascii=False)}")
         elif reason in impossible:
             print(f"  {reason:28} — impossible from the API: {impossible[reason]}")
+        elif reason in unverified:
+            print(f"  {reason:28} — unverified, probes lost: {unverified[reason]}")
         else:
             print(f"  {reason:28} — not reached by this sweep")
 
@@ -571,7 +694,7 @@ def main(argv: list[str] | None = None) -> int:
     target = args.out / "blocked-samples.json"
     target.write_text(json.dumps(discovery, ensure_ascii=False, indent=1))
 
-    report(discovery["samples"], discovery["impossible"])
+    report(discovery["samples"], discovery["impossible"], discovery["unverified"])
     print(f"\nwrote {target}")
     print("each sample is a query a lane can build a caller around; the lines marked")
     print("impossible name the shape no query the endpoint accepts can produce.")
