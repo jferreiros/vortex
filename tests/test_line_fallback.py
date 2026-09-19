@@ -11,7 +11,7 @@ import asyncio
 import dataclasses
 import json
 import time
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +28,8 @@ from vortex.contract import (
     EligibilityVerdict,
     FindPatientResult,
     NoAction,
+    RegisterAction,
+    RegistrationResult,
     Rejection,
     Slot,
     SubmitResult,
@@ -110,6 +112,19 @@ def a_booking() -> BookAction:
         appointment_type_id="review",
         slot=SLOT,
         policy_id="sanitas",
+    )
+
+
+def a_registration() -> RegisterAction:
+    return RegisterAction(
+        given_name="Amelia",
+        first_surname="Hughes",
+        second_surname="Ferrer",
+        national_id="12345678Z",
+        date_of_birth=date(1990, 4, 2),
+        phone="+34600111222",
+        email="amelia@example.com",
+        insurer="mapfre",
     )
 
 
@@ -295,17 +310,35 @@ async def test_free_slots_drop_an_earlier_rejection(offline_settings) -> None:
 # --- branch (a): an action prepared and never sent ----------------------------
 
 
-async def test_an_unconfirmed_prepared_action_is_not_sent(offline_settings) -> None:
-    """We do not book a slot the caller never agreed to."""
+async def test_an_unconfirmed_prepared_action_is_still_sent(offline_settings) -> None:
+    """A plan nobody got to agree to beats a refusal no case accepts."""
     session = make_session(offline_settings, "CA-unconfirmed")
     session.ctx.log.user_turn("el jueves por la tarde")
     session.memory.observe("prepare_booking", BookingResult(action=a_booking()))
     await session.close()
 
     route, payload = sent(session)[0]
-    assert route == "/api/v1/submit/no-action"
-    assert payload["reason"] == "out_of_scope"
-    assert events(offline_settings, "CA-unconfirmed", "submit.fallback")[0]["branch"] == "default"
+    assert route == "/api/v1/submit/book"
+    assert payload["patient_id"] == "P00042"
+    assert payload["slot"].startswith("2026-09-24T16:30")
+    event = events(offline_settings, "CA-unconfirmed", "submit.fallback")[0]
+    assert event["branch"] == "prepared_unconfirmed"
+
+
+async def test_an_unconfirmed_registration_is_still_sent(offline_settings) -> None:
+    """the_new_patient ends on REGISTER, and those calls die at the wall clock."""
+    session = make_session(offline_settings, "CA-unconfirmed-register")
+    session.ctx.log.user_turn("no soy paciente, me quiero dar de alta")
+    session.memory.observe("build_registration", RegistrationResult(action=a_registration()))
+    await session.close()
+
+    route, payload = sent(session)[0]
+    assert route == "/api/v1/submit/register"
+    assert payload["national_id"] == "12345678Z"
+    assert (
+        events(offline_settings, "CA-unconfirmed-register", "submit.fallback")[0]["branch"]
+        == "prepared_unconfirmed"
+    )
 
 
 async def test_a_confirmed_prepared_action_is_sent(offline_settings) -> None:
@@ -364,7 +397,103 @@ def test_repreparing_the_same_action_keeps_confirmation() -> None:
     assert memory.prepared == a_booking()
 
 
-# --- branch (e): the line died with the lookup still open ----------------------
+# --- branch (e): both halves of a booking, drawn up by nobody -----------------
+
+
+async def test_a_patient_and_a_free_slot_are_booked(offline_settings) -> None:
+    """The wall clock cut the call between the search and the read-back."""
+    session = make_session(offline_settings, "CA-draft")
+    session.ctx.log.user_turn("el jueves a las cuatro y media")
+    session.memory.observe("find_patient", FindPatientResult(status="found", patient=FAKE_PATIENT))
+    session.memory.observe("find_slots", AvailabilityResult(slots=[a_slot()]))
+    await session.close()
+
+    route, payload = sent(session)[0]
+    assert route == "/api/v1/submit/book"
+    assert payload["patient_id"] == FAKE_PATIENT.patient_id
+    assert payload["provider_id"] == "PR05"
+    assert payload["location_id"] == "sur"
+    assert payload["appointment_type_id"] == "review"
+    assert payload["policy_id"] == FAKE_PATIENT.insurer
+    assert payload["slot"].startswith("2026-09-24T16:30")
+    assert events(offline_settings, "CA-draft", "submit.fallback")[0]["branch"] == "draft_booking"
+
+
+async def test_the_draft_books_the_latest_search(offline_settings) -> None:
+    """The caller narrowed the window; the last search is the one being read back."""
+    session = make_session(offline_settings, "CA-draft-latest")
+    session.ctx.log.user_turn("mejor por la manana")
+    session.memory.observe("find_patient", FindPatientResult(status="found", patient=FAKE_PATIENT))
+    session.memory.observe("find_slots", AvailabilityResult(slots=[a_slot()]))
+    later = a_slot().model_copy(update={"start": SLOT.replace(hour=9, minute=15)})
+    session.memory.observe("find_slots", AvailabilityResult(slots=[later]))
+    await session.close()
+
+    assert sent(session)[0][1]["slot"].startswith("2026-09-24T09:15")
+
+
+async def test_the_draft_bills_the_slot_when_the_record_names_no_plan(offline_settings) -> None:
+    session = make_session(offline_settings, "CA-draft-policy")
+    session.ctx.log.user_turn("pues ese mismo")
+    uninsured = FAKE_PATIENT.model_copy(update={"insurer": ""})
+    session.memory.observe("find_patient", FindPatientResult(status="found", patient=uninsured))
+    session.memory.observe(
+        "find_slots",
+        AvailabilityResult(slots=[a_slot().model_copy(update={"payable_with": ["adeslas"]})]),
+    )
+    await session.close()
+
+    assert sent(session)[0][1]["policy_id"] == "adeslas"
+
+
+async def test_the_draft_falls_back_to_self_pay(offline_settings) -> None:
+    session = make_session(offline_settings, "CA-draft-self-pay")
+    session.ctx.log.user_turn("no tengo seguro")
+    uninsured = FAKE_PATIENT.model_copy(update={"insurer": ""})
+    session.memory.observe("find_patient", FindPatientResult(status="found", patient=uninsured))
+    session.memory.observe("find_slots", AvailabilityResult(slots=[a_slot()]))
+    await session.close()
+
+    assert sent(session)[0][1]["policy_id"] == "privado"
+
+
+def test_no_draft_without_both_halves() -> None:
+    """A booking is only ever drafted off ids the API gave us."""
+    memory = CallMemory()
+    assert memory.draft_booking() is None
+
+    memory.observe("find_patient", FindPatientResult(status="found", patient=FAKE_PATIENT))
+    assert memory.draft_booking() is None
+
+    memory.observe("find_slots", AvailabilityResult(slots=[a_slot()]))
+    assert memory.draft_booking() is not None
+
+
+def test_no_draft_while_the_lookup_is_still_open() -> None:
+    """Two namesakes and no second field: we do not know whose slot this is."""
+    memory = CallMemory()
+    memory.observe("find_patient", FindPatientResult(status="found", patient=FAKE_PATIENT))
+    memory.observe("find_slots", AvailabilityResult(slots=[a_slot()]))
+    memory.observe("find_patient", FindPatientResult(status="ambiguous", ask_for="date_of_birth"))
+
+    assert memory.draft_booking() is None
+
+
+async def test_a_named_rule_outranks_a_drafted_booking(offline_settings) -> None:
+    session = make_session(offline_settings, "CA-draft-vs-rule")
+    session.ctx.log.user_turn("con la doctora Cid")
+    session.memory.observe("find_patient", FindPatientResult(status="found", patient=FAKE_PATIENT))
+    session.memory.observe("find_slots", AvailabilityResult(slots=[a_slot()]))
+    session.memory.observe(
+        "check_eligibility",
+        EligibilityVerdict(allowed=False, rejection=Rejection(reason="referral_required")),
+    )
+    await session.close()
+
+    assert sent(session)[0][1]["reason"] == "referral_required"
+
+
+# --- branch (g): the line died with the lookup still open ----------------------
 
 
 async def test_an_unfinished_lookup_ends_on_patient_not_found(offline_settings) -> None:
