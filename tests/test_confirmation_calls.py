@@ -19,8 +19,12 @@ from vortex.line.confirmation_calls import (
     call_language,
     cancel_confirmation_calls,
     classify_reply,
+    classify_slot_pick,
     handoff_from_parameters,
     handoff_ws_url,
+    offered_slots_payload,
+    parse_offered_slots,
+    reschedule_offer_text,
     schedule_confirmation_call,
     twilio_locale,
     twiml_ask,
@@ -579,3 +583,142 @@ def test_session_open_picks_up_the_handoff(tmp_path: Path, offline_settings) -> 
         now=WHEN,
     )
     assert plain.handoff is None
+
+
+# ---- Twilio-only in-call rebooking ------------------------------------------
+
+
+def _starts() -> list[datetime]:
+    return [
+        datetime(2026, 9, 21, 9, 30, tzinfo=MADRID),
+        datetime(2026, 9, 22, 10, 15, tzinfo=MADRID),
+        datetime(2026, 9, 23, 11, 0, tzinfo=MADRID),
+    ]
+
+
+def test_reschedule_offer_text_lists_the_openings() -> None:
+    text = reschedule_offer_text("es", _starts())
+    assert "lunes 21 de septiembre" in text
+    assert "Diga uno, dos o tres" in text
+    assert reschedule_offer_text("en", _starts()).startswith("Of course, let's move it right now")
+
+
+def test_classify_slot_pick_digits_ordinals_weekdays() -> None:
+    starts = _starts()
+    assert classify_slot_pick("", "2", starts, "es") == 1
+    assert classify_slot_pick("la primera", "", starts, "es") == 0
+    assert classify_slot_pick("three", "", starts, "en") == 2
+    assert classify_slot_pick("el martes", "", starts, "es") == 1  # only one Tuesday on offer
+    assert classify_slot_pick("ninguna me viene bien", "", starts, "es") == "none"
+    assert classify_slot_pick("pues no sé", "", starts, "es") is None
+    assert classify_slot_pick("", "9", starts, "es") is None
+
+
+def test_offered_slots_payload_roundtrip() -> None:
+    from vortex.contract import Slot
+
+    slots = [
+        Slot(
+            start=start,
+            provider_id="PR01",
+            location_id="centro",
+            appointment_type_id="first_visit",
+        )
+        for start in _starts()
+    ]
+    starts = parse_offered_slots(offered_slots_payload(slots))
+    assert starts == _starts()
+    assert parse_offered_slots("") == []
+    assert parse_offered_slots("not json") == []
+
+
+def test_result_endpoint_stub_voice_offers_slots_in_call(confirmation_client) -> None:
+    client, settings = confirmation_client
+    call = _seed_with_provider(Path(settings.confirmation_calls_path))
+    response = client.post(
+        f"/confirmation/result?cid={call.confirmation_id}&attempt=1",
+        content="SpeechResult=Quiero+cambiarla&Confidence=0.9",
+        headers={"content-type": "application/x-www-form-urlencoded"},
+    )
+    assert response.status_code == 200
+    assert "la movemos ahora mismo" in response.text
+    assert "reschedule-pick" in response.text
+
+    import asyncio
+
+    store = ConfirmationStore(Path(settings.confirmation_calls_path))
+    row = asyncio.run(store.get(call.confirmation_id))
+    assert row is not None
+    assert row.status == "reschedule_requested"
+    assert row.detail == "rebooking_offered_in_call"
+    assert len(parse_offered_slots(row.offered_slots)) == 3
+
+
+def _seed_with_provider(store_path: Path) -> ConfirmationCall:
+    import asyncio
+
+    store = ConfirmationStore(store_path)
+    call = _pending(provider_id="PR01", patient_id="P00042")
+    asyncio.run(store.add(call))
+    asyncio.run(store.claim_due(WHEN - timedelta(hours=23)))
+    return call
+
+
+def test_reschedule_pick_moves_the_appointment(confirmation_client) -> None:
+    client, settings = confirmation_client
+    call = _seed_with_provider(Path(settings.confirmation_calls_path))
+    client.post(
+        f"/confirmation/result?cid={call.confirmation_id}&attempt=1",
+        content="SpeechResult=Quiero+cambiarla&Confidence=0.9",
+        headers={"content-type": "application/x-www-form-urlencoded"},
+    )
+    response = client.post(
+        f"/confirmation/reschedule-pick?cid={call.confirmation_id}&attempt=1",
+        content="Digits=2",
+        headers={"content-type": "application/x-www-form-urlencoded"},
+    )
+    assert response.status_code == 200
+    assert "queda movida" in response.text
+
+    import asyncio
+
+    row = asyncio.run(ConfirmationStore(Path(settings.confirmation_calls_path)).get(
+        call.confirmation_id
+    ))
+    assert row is not None
+    assert row.detail == "rescheduled_in_call"
+    assert row.rescheduled_to  # the picked start, ISO
+
+    picked = parse_offered_slots(row.offered_slots)[1]
+    assert row.rescheduled_to == picked.isoformat()
+
+
+def test_reschedule_pick_reprompts_once_then_falls_back(confirmation_client) -> None:
+    client, settings = confirmation_client
+    call = _seed_with_provider(Path(settings.confirmation_calls_path))
+    client.post(
+        f"/confirmation/result?cid={call.confirmation_id}&attempt=1",
+        content="SpeechResult=Quiero+cambiarla&Confidence=0.9",
+        headers={"content-type": "application/x-www-form-urlencoded"},
+    )
+    first = client.post(
+        f"/confirmation/reschedule-pick?cid={call.confirmation_id}&attempt=1",
+        content="SpeechResult=mmm+no+se",
+        headers={"content-type": "application/x-www-form-urlencoded"},
+    )
+    assert "no le he entendido" in first.text  # reprompt, same call
+    second = client.post(
+        f"/confirmation/reschedule-pick?cid={call.confirmation_id}&attempt=2",
+        content="SpeechResult=mmm+no+se",
+        headers={"content-type": "application/x-www-form-urlencoded"},
+    )
+    assert "para mover la cita" in second.text  # the callback promise, unchanged
+
+    import asyncio
+
+    row = asyncio.run(ConfirmationStore(Path(settings.confirmation_calls_path)).get(
+        call.confirmation_id
+    ))
+    assert row is not None
+    assert row.detail == "rebooking_unpicked"
+    assert row.rescheduled_to == ""
