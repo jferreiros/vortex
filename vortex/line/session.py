@@ -159,7 +159,7 @@ def _last_intent(words: str) -> str | None:
     best: tuple[int, str] | None = None
     for kind, pattern in (("cancel", _CANCEL_INTENT), ("move", _MOVE_INTENT)):
         for match in pattern.finditer(words):
-            segment = re.split(r"[.!?;,—–]", words[: match.start()])[-1]
+            segment = re.split(r"[.!?;,\u2014\u2013]", words[: match.start()])[-1]
             if _NEGATION.search(segment):
                 continue
             if best is None or match.start() > best[0]:
