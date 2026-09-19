@@ -52,3 +52,8 @@ The page is self-contained, so the image is one HTML file inside nginx: no
 stylesheet, no font, no asset to get out of sync. Rebuild after the page changes;
 there is nothing else to deploy. To take it down:
 `docker compose -f deploy/compose.docs.yaml down`.
+
+Recreating the container replaces it, so Traefik answers **503 for about twenty
+seconds** while it re-registers the new one. Harmless here, and the reason this
+page has its own container: the same twenty seconds on the line would be a failed
+run. Do not publish a docs change while someone is showing the page to the jury.
