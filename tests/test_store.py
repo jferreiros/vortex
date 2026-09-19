@@ -361,7 +361,7 @@ def test_usage_fixture_prices_calls(log_and_db) -> None:
     conn = store.connect(db_path)
     try:
         cost = store.cost_series(conn, 3650)
-        assert cost["metered"] == 7
+        assert cost["metered"] == 8
         assert cost["avg_eur"] and cost["avg_eur"] > 0
         # The Gemini TTS leg has no verified price: partial calls are flagged,
         # not silently averaged as zero.

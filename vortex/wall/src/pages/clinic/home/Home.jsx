@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { useMemo, useState } from "react";
 import SectionHeader from "../../../components/ui/SectionHeader";
 import Card from "../../../components/ui/Card";
@@ -93,6 +94,9 @@ function OccupancyCard({ sites, specialties }) {
             <span className="occupancy-month-value">{occ.monthPct}%</span>
             <span className="occupancy-month-label">ocupación media prevista</span>
           </div>
+          <Link to="/clinic/doctor" className="occupancy-diary-link">
+            Horarios
+          </Link>
         </div>
       )}
     </Card>

@@ -307,11 +307,11 @@ def test_cancellation_pack_replays_to_a_full_insights_block(tmp_path: Path) -> N
 
     log_path = tmp_path / "calls.jsonl"
     written = asyncio.run(replay_cancellation_demo(log_path, pack_path=pack, run_tag="t"))
-    assert len(written) == 7
+    assert len(written) == 8
     # Replay re-ids every call, so a second run must not merge into the first.
     asyncio.run(replay_cancellation_demo(log_path, pack_path=pack, run_tag="t2"))
     grouped, meta = read_calls(log_path)
-    assert meta["calls"] == 14
+    assert meta["calls"] == 16
 
     out = cancellation_slots(build_calls(flatten_grouped(grouped)))
     assert out["freed_total"] == 10

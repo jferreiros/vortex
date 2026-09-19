@@ -39,6 +39,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 COPY pyproject.toml uv.lock README.md ./
 COPY vortex ./vortex
 COPY scripts ./scripts
+COPY database ./database
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev
@@ -60,7 +61,8 @@ ENV PATH=/app/.venv/bin:$PATH \
     VORTEX_HOST=0.0.0.0 \
     VORTEX_PORT=7860 \
     VORTEX_WS_PATH=/ws \
-    VORTEX_CALLS_LOG=/app/logs/calls.jsonl
+    VORTEX_CALLS_LOG=/app/logs/calls.jsonl \
+    VORTEX_PRODUCT_DB=/app/logs/vortex_product.db
 
 WORKDIR /app
 COPY --from=builder --chown=vortex:vortex /app /app
