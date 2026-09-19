@@ -47,6 +47,8 @@ def test_index_nav_links_reuse_chip() -> None:
     text = (REPO / "docs" / "index.html").read_text(encoding="utf-8")
     assert ".nav a{" not in text and ".nav a {" not in text
     assert text.count('class="chip"') >= 7
+
+
 def test_evals_report_uses_shared_pill_not_a_24px_override() -> None:
     """report.py inlines design.css; its own _CSS must stay layout-only."""
     from evals.common.report import _CSS, _pill
