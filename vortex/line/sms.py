@@ -12,6 +12,7 @@ Two clients share one interface:
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal, Protocol
@@ -30,6 +31,15 @@ from vortex.contract import (
 from vortex.settings import Settings
 
 TWILIO_MESSAGES_URL = "https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Messages.json"
+
+# One budget for a whole confirmation: the catalogue lookup that fills the body
+# and the POST that sends it. ``CallSession`` drains for exactly this long, so a
+# hangup never cancels a Twilio response that is still inside its own timeout.
+SMS_BUDGET_SECS = 8.0
+# The lookup's share of the budget. Whatever is left over is the POST's.
+SMS_DETAILS_BUDGET_SECS = 2.0
+SMS_SEND_TIMEOUT_SECS = SMS_BUDGET_SECS - SMS_DETAILS_BUDGET_SECS
+assert SMS_SEND_TIMEOUT_SECS > 0, "the lookup must not eat the whole SMS budget"
 
 WEEKDAYS_ES = (
     "lunes",
@@ -97,7 +107,7 @@ class TwilioSmsClient:
         *,
         messaging_service_sid: str = "",
         from_number: str = "",
-        timeout: float = 8.0,
+        timeout: float = SMS_SEND_TIMEOUT_SECS,
     ):
         if not messaging_service_sid and not from_number:
             raise ValueError("Twilio SMS needs TWILIO_MESSAGING_SERVICE_SID or TWILIO_FROM_NUMBER")
@@ -276,7 +286,7 @@ async def resolve_details(ctx: ToolContext, action: Action) -> AppointmentDetail
         return details
 
     try:
-        catalogue = await ctx.clinic.catalogue()
+        catalogue = await asyncio.wait_for(ctx.clinic.catalogue(), SMS_DETAILS_BUDGET_SECS)
     except Exception as exc:  # noqa: BLE001 - SMS must not break the call
         details.missing.append(f"catalogue:{type(exc).__name__}")
         return details

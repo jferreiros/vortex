@@ -6,6 +6,7 @@ an accepted book/cancel texts the calling number; everything else stays quiet.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Iterator
 from datetime import date, datetime
@@ -31,8 +32,11 @@ from vortex.contract import (
     action_route,
 )
 from vortex.line import session as session_module
+from vortex.line import sms as sms_module
 from vortex.line.session import CallSession
 from vortex.line.sms import (
+    SMS_DETAILS_BUDGET_SECS,
+    SMS_SEND_TIMEOUT_SECS,
     DryRunSmsClient,
     SmsResult,
     TwilioSmsClient,
@@ -44,7 +48,7 @@ from vortex.line.sms import (
     resolve_details,
     twilio_is_configured,
 )
-from vortex.line.submit import SUBMITTED_ACTION_KEY
+from vortex.line.submit import remember_submitted_action, submitted_action
 from vortex.line.twilio import StartPayload
 from vortex.observability.tracing import mask_phone
 from vortex.settings import Settings, get_settings, reset_settings
@@ -83,6 +87,22 @@ class DryRunSubmitter(AcceptingSubmitter):
 class RejectingSubmitter(AcceptingSubmitter):
     async def submit(self, call_id: str, action: Action) -> SubmitResult:
         return SubmitResult(status="rejected", http_status=422, detail="nope")
+
+
+class OverlappingSubmitter(AcceptingSubmitter):
+    """Holds the first POST open until a second one has been sent."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.overtaken = asyncio.Event()
+
+    async def submit(self, call_id: str, action: Action) -> SubmitResult:
+        self.sent.append((action_route(action), action_payload(action, call_id)))
+        if len(self.sent) == 1:
+            await self.overtaken.wait()
+        else:
+            self.overtaken.set()
+        return SubmitResult(status="accepted", http_status=200)
 
 
 class RecordingSmsClient(DryRunSmsClient):
@@ -257,6 +277,16 @@ async def test_twilio_client_reports_http_errors() -> None:
     await client.aclose()
 
 
+@pytest.mark.asyncio
+async def test_the_drain_outlasts_the_whole_send_budget() -> None:
+    """close() must not cancel a POST that is still inside the client's own timeout."""
+    client = TwilioSmsClient("ACxxx", "token", from_number="+34600999888")
+
+    assert client._http.timeout.read == SMS_SEND_TIMEOUT_SECS
+    assert SMS_DETAILS_BUDGET_SECS + SMS_SEND_TIMEOUT_SECS <= session_module.SMS_DRAIN_TIMEOUT_SECS
+    await client.aclose()
+
+
 # ---- session hook -----------------------------------------------------------
 
 
@@ -364,6 +394,27 @@ async def test_resolve_details_drops_a_naive_remembered_start(
 
 
 @pytest.mark.asyncio
+async def test_a_hung_catalogue_cannot_spend_the_whole_budget(
+    offline_settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The lookup has its own share, so what is left of the budget stays the POST's."""
+    session = make_session(offline_settings, "CA-slow-catalogue")
+    monkeypatch.setattr(sms_module, "SMS_DETAILS_BUDGET_SECS", 0.01)
+
+    async def never_answers() -> Any:
+        await asyncio.sleep(SMS_SEND_TIMEOUT_SECS)
+        raise AssertionError("the detail budget should have cut the lookup")
+
+    monkeypatch.setattr(session.ctx.clinic, "catalogue", never_answers)
+
+    details = await resolve_details(session.ctx, a_booking())
+    await session.close()
+
+    assert details.when == SLOT
+    assert details.missing == ["catalogue:TimeoutError"]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "action",
     [
@@ -443,6 +494,26 @@ async def test_duplicate_status_does_not_double_text(sms_settings: Settings) -> 
 
 
 @pytest.mark.asyncio
+async def test_overlapping_submissions_text_their_own_action(
+    sms_settings: Settings,
+) -> None:
+    """A booking whose POST is overtaken must not text the other action."""
+    submitter = OverlappingSubmitter()
+    session = make_session(sms_settings, "CA-overlap", submitter=submitter)
+    remember_appointment(session)
+    sms = session.sms
+    assert isinstance(sms, DryRunSmsClient)
+
+    await asyncio.gather(session.submit(a_booking()), session.submit(a_cancel()))
+    await session.close()
+
+    bodies = [body for _, body in sms.sent]
+    assert len(bodies) == 2
+    assert sum("Cita confirmada" in body for body in bodies) == 1
+    assert sum("Cita cancelada" in body for body in bodies) == 1
+
+
+@pytest.mark.asyncio
 async def test_submit_action_tool_path_also_sends_sms(sms_settings: Settings) -> None:
     session = make_session(sms_settings, "CA-tool-sms")
     sms = session.sms
@@ -493,7 +564,7 @@ async def test_submit_records_the_action_the_arbiter_decided(
 
     routes = [route for route, _ in session.submitter.sent]  # type: ignore[attr-defined]
     assert routes == [action_route(escalation)]
-    assert session.ctx.state[SUBMITTED_ACTION_KEY] == escalation
+    assert submitted_action(session.ctx, NoAction(reason="patient_not_found")) == escalation
     reset_settings()
 
 
@@ -507,7 +578,7 @@ async def test_a_booking_the_submission_replaced_sends_no_sms(
     assert isinstance(sms, DryRunSmsClient)
 
     async def submit_an_escalation(ctx: Any, args: Any) -> SubmitResult:
-        ctx.state[SUBMITTED_ACTION_KEY] = EscalateAction(reason="medical_emergency")
+        remember_submitted_action(ctx, EscalateAction(reason="medical_emergency"))
         return SubmitResult(status="accepted", http_status=200)
 
     monkeypatch.setattr(session_module, "submit_action", submit_an_escalation)
