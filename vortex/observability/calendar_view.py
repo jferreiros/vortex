@@ -77,6 +77,31 @@ def _cell_key(cell: cal.CalendarCell) -> str:
     return f"{cell.start.isoformat()}|{cell.location_id}|{cell.patient_id}"
 
 
+def _cancel_key(provider_id: str, cell: cal.CalendarCell) -> str:
+    """A stable key for a booked slot, independent of who is booked into it.
+
+    Local-only bookkeeping for the demo "cancel" actions on this board: no
+    submit is sent, the slot is just marked free the next time the grid is
+    built from the log.
+    """
+    return f"{provider_id}|{cell.start.isoformat()}|{cell.location_id}"
+
+
+def _apply_cancellations(calendars: list[cal.DoctorCalendar], cancelled: set[str]) -> None:
+    if not cancelled:
+        return
+    for calendar in calendars:
+        for day in calendar.days:
+            for cell in day.cells:
+                if cell.status != "booked":
+                    continue
+                if _cancel_key(calendar.provider_id, cell) in cancelled:
+                    cell.status = "free"
+                    cell.patient_id = ""
+                    cell.appointment_type_id = ""
+                    cell.call_id = ""
+
+
 def _named(calendars: list[cal.DoctorCalendar], query: str) -> list[cal.DoctorCalendar]:
     needle = query.strip().casefold()
     if not needle:
@@ -154,7 +179,88 @@ def _login(query: str, error: str, submit: Any, set_query: Any) -> None:
         name.on("keydown.enter", go)
 
 
-def _briefing_card(brief: cal.VisitBrief, summary: str) -> None:
+def _confirm(title: str, message: str, confirm_label: str, on_confirm: Any) -> None:
+    """A small yes/no dialog: state what is about to happen, then act on confirm."""
+    dialog = ui.dialog()
+    with dialog, ui.element("div").classes("card"):
+        ui.label(title).classes("heading-lg")
+        ui.label(message).classes("body-sm")
+        ui.element("div").style("height: 16px")
+        with ui.element("div").classes("row"):
+            ui.element("div").classes("grow")
+            ui.button("Keep it", on_click=dialog.close).props("flat no-caps").classes(
+                "button-quiet"
+            )
+
+            def confirm() -> None:
+                dialog.close()
+                on_confirm()
+
+            ui.button(confirm_label, on_click=confirm).props("unelevated no-caps").classes(
+                "button-primary"
+            )
+    dialog.open()
+
+
+def _cancel_range_dialog(names: list[str], apply_range: Any) -> None:
+    """Pick a doctor and a date range, then free every booked slot inside it."""
+    dialog = ui.dialog()
+    with dialog, ui.element("div").classes("card"):
+        ui.label("Cancel appointments").classes("heading-lg")
+        ui.label(
+            "Pick a doctor and a date range. Every booked slot inside it is cancelled."
+        ).classes("body-sm")
+        ui.element("div").style("height: 16px")
+        doctor = ui.select(names, label="Doctor").props("dense outlined").classes("w-full")
+        ui.element("div").style("height: 12px")
+        with ui.element("div").classes("row"):
+            date_from = (
+                ui.input("From", value=date.today().isoformat())
+                .props("dense outlined type=date")
+                .classes("w-full")
+            )
+            date_to = (
+                ui.input("To", value=date.today().isoformat())
+                .props("dense outlined type=date")
+                .classes("w-full")
+            )
+        error = ui.label("").classes("error")
+
+        def confirm() -> None:
+            name = str(doctor.value or "")
+            if not name:
+                error.set_text("Pick a doctor.")
+                return
+            try:
+                start = date.fromisoformat(str(date_from.value))
+                end = date.fromisoformat(str(date_to.value))
+            except ValueError:
+                error.set_text("Pick both dates.")
+                return
+            if end < start:
+                start, end = end, start
+            dialog.close()
+            apply_range(name, start, end)
+
+        ui.element("div").style("height: 16px")
+        with ui.element("div").classes("row"):
+            ui.element("div").classes("grow")
+            ui.button("Close", on_click=dialog.close).props("flat no-caps").classes(
+                "button-quiet"
+            )
+            ui.button("Cancel appointments", on_click=confirm).props(
+                "unelevated no-caps"
+            ).classes("button-primary")
+    dialog.open()
+
+
+def _briefing_card(
+    provider_id: str,
+    cell: cal.CalendarCell,
+    brief: cal.VisitBrief,
+    summary: str,
+    cancel_one: Any,
+) -> None:
     with ui.element("div").classes("card cal-brief"):
         with ui.element("div").classes("section-title"):
             ui.label(brief.start.strftime("%H:%M")).classes("t")
@@ -177,6 +283,18 @@ def _briefing_card(brief: cal.VisitBrief, summary: str) -> None:
         if note:
             ui.label("For the consult").classes("kicker")
             ui.label(note).classes("body-sm cal-note")
+        with ui.element("div").classes("row"):
+            ui.element("div").classes("grow")
+            ui.button(
+                "Cancel appointment",
+                on_click=lambda: _confirm(
+                    "Cancel this appointment",
+                    f"This cancels {brief.full_name}'s "
+                    f"{brief.start.strftime('%a %d/%m · %H:%M')} visit.",
+                    "Cancel appointment",
+                    lambda: cancel_one(provider_id, cell),
+                ),
+            ).props("outline no-caps").classes("button-secondary")
 
 
 def _booked_on(calendar: cal.DoctorCalendar, day: date) -> list[cal.CalendarCell]:
@@ -216,7 +334,14 @@ def _week_bar(
             nxt.props("disable")
 
 
-def _today_visits(visits: list[cal.VisitBrief], summaries: dict[str, str]) -> None:
+def _today_visits(
+    provider_id: str,
+    cells: list[cal.CalendarCell],
+    visits: list[cal.VisitBrief],
+    summaries: dict[str, str],
+    cancel_one: Any,
+    cancel_all: Any,
+) -> None:
     with ui.element("div").classes("section-title"):
         ui.label("Today").classes("t")
         ui.label(f"{len(visits)} visit" if len(visits) == 1 else f"{len(visits)} visits").classes(
@@ -227,10 +352,21 @@ def _today_visits(visits: list[cal.VisitBrief], summaries: dict[str, str]) -> No
             ui.label("No visits today").classes("t")
             ui.label("Booked slots for this doctor land here on the day.").classes("d")
         return
+    with ui.element("div").classes("row"):
+        ui.element("div").classes("grow")
+        ui.button(
+            "Cancel all today",
+            on_click=lambda: _confirm(
+                "Cancel all today's appointments",
+                f"This cancels all {len(visits)} appointment(s) booked today for this doctor.",
+                "Cancel all",
+                lambda: cancel_all(provider_id, cells),
+            ),
+        ).props("outline no-caps").classes("button-secondary")
     with ui.element("div").classes("cal-today-list"):
-        for brief in visits:
+        for cell, brief in zip(cells, visits, strict=True):
             key = brief.start.isoformat()
-            _briefing_card(brief, summaries.get(key, ""))
+            _briefing_card(provider_id, cell, brief, summaries.get(key, ""), cancel_one)
 
 
 def _grid(
@@ -299,6 +435,7 @@ def calendar_page() -> None:
         "cell": "",
         "error": "",
         "week": None,
+        "cancelled": set(),
     }
     rendered: dict[str, Any] = {"sig": None}
 
@@ -339,10 +476,44 @@ def calendar_page() -> None:
         state["week"] = current + timedelta(days=delta)
         redraw()
 
+    def cancel_cell(provider_id: str, cell: cal.CalendarCell) -> None:
+        state["cancelled"].add(_cancel_key(provider_id, cell))
+        redraw()
+
+    def cancel_cells(provider_id: str, cells: list[cal.CalendarCell]) -> None:
+        for cell in cells:
+            state["cancelled"].add(_cancel_key(provider_id, cell))
+        redraw()
+
+    def cancel_range(name: str, start: date, end: date) -> None:
+        events = cal.load_source_events()
+        bookings = cal.bookings_from_events(events, cal.appointment_index())
+        calendars = cal.build_calendars(_CATALOGUE, bookings, days_window=DAYS_WINDOW)
+        _apply_cancellations(calendars, state["cancelled"])
+        target = _named(calendars, name)
+        if len(target) != 1:
+            return
+        calendar = target[0]
+        for day in calendar.days:
+            if not (start <= day.day <= end):
+                continue
+            for cell in day.cells:
+                if cell.status == "booked":
+                    state["cancelled"].add(_cancel_key(calendar.provider_id, cell))
+        redraw()
+
+    def open_cancel_range() -> None:
+        events = cal.load_source_events()
+        bookings = cal.bookings_from_events(events, cal.appointment_index())
+        calendars = cal.build_calendars(_CATALOGUE, bookings, days_window=DAYS_WINDOW)
+        names = sorted({c.name for c in calendars if c.name})
+        _cancel_range_dialog(names, cancel_range)
+
     def redraw() -> None:
         events = cal.load_source_events()
         bookings = cal.bookings_from_events(events, cal.appointment_index())
         calendars = cal.build_calendars(_CATALOGUE, bookings, days_window=DAYS_WINDOW)
+        _apply_cancellations(calendars, state["cancelled"])
         total_booked = sum(c.booked for c in calendars)
         today = _today()
         sig = (
@@ -373,7 +544,7 @@ def calendar_page() -> None:
 
         today_cells = _booked_on(selected, today) if selected else []
         today_briefs = [_brief(cell) for cell in today_cells]
-        token = get_settings().hf_token
+        token = getattr(get_settings(), "hf_token", None)
         summaries = {
             brief.start.isoformat(): cal.summarize_note(brief.note, token=token)
             for brief in today_briefs
@@ -393,6 +564,9 @@ def calendar_page() -> None:
                             ui.label(
                                 "Each doctor's diary, filling as calls book, move and cancel."
                             ).classes("sub")
+                        ui.button(
+                            "Cancel appointments", on_click=open_cancel_range
+                        ).props("outline no-caps").classes("button-secondary")
                     _login(state["query"], state["error"], submit, set_query)
                 else:
                     with ui.element("div").classes("page-head"):
@@ -401,11 +575,22 @@ def calendar_page() -> None:
                             ui.label(
                                 "One week at a time. Today's visits sit under the grid."
                             ).classes("sub")
-                        ui.button("Change doctor", on_click=sign_out).props("flat no-caps").classes(
-                            "button-quiet"
-                        )
+                        with ui.element("div").classes("row"):
+                            ui.button(
+                                "Cancel appointments", on_click=open_cancel_range
+                            ).props("outline no-caps").classes("button-secondary")
+                            ui.button("Change doctor", on_click=sign_out).props(
+                                "flat no-caps"
+                            ).classes("button-quiet")
                     _grid(selected, monday, today, state["cell"], open_cell, shift_week)
-                    _today_visits(today_briefs, summaries)
+                    _today_visits(
+                        selected.provider_id,
+                        today_cells,
+                        today_briefs,
+                        summaries,
+                        cancel_cell,
+                        cancel_cells,
+                    )
             live._footer()
 
     redraw()

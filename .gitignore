@@ -43,3 +43,7 @@ scripts/video/output/*
 .coverage.*
 coverage.xml
 htmlcov/
+
+# Local browser profile dumps used for screenshotting/profiling: contain
+# real cookies/session data, never commit these.
+tmp_shots/
