@@ -91,9 +91,7 @@ def analyze_call(events: Sequence[dict[str, Any]]) -> RebookingRequest | None:
     policy_id = _policy_id(events, patient_id, args)
     intent: RebookingIntent = "reschedule" if _looks_like_reschedule(events) else "book"
     appointment_id = (
-        _appointment_id_for_search(events, args, patient_id)
-        if intent == "reschedule"
-        else None
+        _appointment_id_for_search(events, args, patient_id) if intent == "reschedule" else None
     )
     if intent == "reschedule" and not appointment_id:
         intent = "book"
