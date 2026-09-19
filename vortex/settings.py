@@ -249,9 +249,12 @@ class Settings:
         default_factory=lambda: _env("LANGFUSE_TRACING_ENVIRONMENT") or _env("VORTEX_ENV")
     )
 
-    # Optional Nominatim-compatible endpoint for problem 15's address lookup
-    # (vortex/rules/geo.py). Empty means the offline Madrid gazetteer only, so
-    # evals and offline work never depend on a network call by default.
+    # Live geocoder for problem 15 (vortex/rules/geo.py). Empty = gazetteer only.
+    # VORTEX_GEOCODER: cartociudad | nominatim | "" (off).
+    # cartociudad = IGN free candidates API, no key. nominatim needs a URL.
+    geocoder: str = field(default_factory=lambda: _env("VORTEX_GEOCODER"))
+    # Nominatim-compatible search URL when geocoder is nominatim (or when this
+    # is set alone, for older .env files that never set VORTEX_GEOCODER).
     geocoder_url: str = field(default_factory=lambda: _env("VORTEX_GEOCODER_URL"))
 
     # Submission window: the platform closes it 30 s after the socket closes.
@@ -428,6 +431,7 @@ class Settings:
             "has_langfuse_keys": bool(self.langfuse_public_key and self.langfuse_secret_key),
             "langfuse_base_url": self.langfuse_base_url,
             "langfuse_environment": self.langfuse_environment,
+            "geocoder": self.geocoder or ("nominatim" if self.geocoder_url else ""),
         }
 
 
