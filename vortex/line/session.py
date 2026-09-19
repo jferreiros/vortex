@@ -103,6 +103,12 @@ PREPARE_TOOLS: tuple[str, ...] = ("prepare_booking", "prepare_reschedule", "prep
 # included - see ``CallSession.has_accepted_submission``.
 ACCEPTED_STATUSES: tuple[str, ...] = ("accepted", "duplicate")
 
+# SMS and the day-before confirmation call fire when we would have booked, not
+# only when the platform holds the record. ``dry_run`` (no PLATFORM_API_KEY)
+# still queues them so a local inbound demo can confirm the slot; hangup and
+# ``has_accepted_submission`` stay on ``ACCEPTED_STATUSES`` alone.
+QUEUE_FOLLOWUP_STATUSES: tuple[str, ...] = (*ACCEPTED_STATUSES, "dry_run")
+
 # The tools that answer with the rule the clinic applied, named in the closed
 # vocabulary the platform scores. Their reason is the call's verdict: a refusal
 # has to carry it verbatim, whatever the model remembered. See
@@ -582,9 +588,10 @@ class CallSession:
                 self.sent_actions.append(with_verdict_reason(self.ctx, sent))
             if result.status in ACCEPTED_STATUSES:
                 self.arm_hangup("submit_accepted")
-                if sent is not None:
-                    self._queue_sms(submitted_action(self.ctx, sent))
-                    self._queue_confirmation_call(submitted_action(self.ctx, sent))
+            if result.status in QUEUE_FOLLOWUP_STATUSES and sent is not None:
+                follow_up = submitted_action(self.ctx, sent)
+                self._queue_sms(follow_up)
+                self._queue_confirmation_call(follow_up)
         else:
             self.memory.observe(name, result)
             if self.memory.superseded_slot:
@@ -736,9 +743,10 @@ class CallSession:
         result = await submit_action(self.ctx, SubmitInput(action=action))
         self.submitted.append(result)
         self.sent_actions.append(with_verdict_reason(self.ctx, action))
-        if result.status in ACCEPTED_STATUSES:
-            self._queue_sms(submitted_action(self.ctx, action))
-            self._queue_confirmation_call(submitted_action(self.ctx, action))
+        if result.status in QUEUE_FOLLOWUP_STATUSES:
+            follow_up = submitted_action(self.ctx, action)
+            self._queue_sms(follow_up)
+            self._queue_confirmation_call(follow_up)
         return result
 
     @property
