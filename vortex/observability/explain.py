@@ -397,6 +397,17 @@ def stats_for(cards: list[CallCard]) -> Stats:
     return stats
 
 
+KPI_LABEL: dict[str, str] = {
+    "calls": "calls",
+    "live": "on a call",
+    "booked": "booked",
+    "refused": "no action",
+    "escalated": "escalated",
+    "submitted": "submitted",
+    "handle": "handle",
+    "tool": "tool ms",
+}
+
 LIVE_SUB = "The call as it happens. Each card is a turn or a tool. The one that is speaking pulses."
 
 
