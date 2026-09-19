@@ -157,10 +157,17 @@ prints the anchor of every file it sees and warns when it is behind.
 
 `make evals-discover` sweeps the live API by plan, by patient and by provider,
 and records in `world/blocked-samples.json` a real query that triggers each
-decline reason. The published roster reaches two of the eleven rule reasons.
-The sweep reaches seven, including `provider_on_leave`, `not_eligible_age` and
+decline reason, plus a one-line note for each the API cannot report. The
+published roster reaches two of the eleven rule reasons. The sweep reaches
+eight, including `provider_on_leave`, `not_eligible_age` and
 `insurer_referral_required`, each as a concrete patient and specialty a lane can
-build a caller around.
+build a caller around. The eighth, `allowance_exhausted`, needed a wider net:
+the cap is per patient **and specialty** on the record plan, and none of the
+roster's own 24 patients has a spent plan. So the sweep asks `/directory` for
+each persona's name — ten fuzzy matches a query, hundreds of patients outside
+the roster — and walks the harvested patients past every specialty until a
+spent plan turns up (`P00016`, an axa holder whose dermatology visits for the
+year are gone, was the first).
 
 **The window decides whether a rule is visible at all.** `blocked` reports a
 rule only when it stops the whole window asked for:
@@ -175,7 +182,21 @@ looks available. An agent that widens its search until it finds something never
 learns why the caller cannot have what they asked for, and problem 3 turns on
 exactly that.
 
-Four reasons the sweep does not reach — `allowance_exhausted`, `location_hours`,
-`type_not_offered` and `patient_history` — need a patient outside the roster's
-own 24, a site's closing time, or a specialty that does not offer a type. They
-are listed as unreached rather than quietly dropped.
+Three reasons no query reaches — `location_hours`, `type_not_offered` and
+`patient_history`. The endpoint has no lever that expresses them:
+
+- A window a site is shut for the whole of returns zero slots with
+  `blocked: []` — the same signature as a full calendar. Site hours live only
+  in the catalogue, so this refusal is the agent's to derive.
+- `/availability` takes no `appointment_type` filter; the type is resolved
+  from the specialty and the patient's record, and every provider offers both
+  the new and the returning type of their specialty, so no query can ask for
+  one a provider lacks.
+- History enters the API only as `has_visited_before`, which picks the type,
+  and referrals, which satisfy `referral_required` — never as a block.
+
+The sweep still probes all three shapes on every run — shut windows with and
+without a patient, any catalogue type gap, harvested patients past every
+provider and site — and prints one line per reason it cannot reach. If the
+clinic ever starts reporting one, the same probe records it as a sample
+instead. They are never quietly dropped.
