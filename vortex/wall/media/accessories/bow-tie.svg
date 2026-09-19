@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="500" height="500" viewBox="59.87 13.32 125.3 125.3" fill="none">
+  <!-- Vorty accessory: bow tie at the base of the chin -->
+  <g id="accessory-bow-tie">
+    <path d="m99 110 24 8-24 8z" fill="url(#bt-wing)"/>
+    <path d="m147 110-24 8 24 8z" fill="url(#bt-wing)"/>
+    <rect x="119" y="113.5" width="8" height="9" rx="2.5" fill="url(#bt-knot)"/>
+  </g>
+  <defs>
+    <linearGradient id="bt-wing" x1="123" x2="123" y1="110" y2="126" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#D63C4A" offset="0"/>
+      <stop stop-color="#8E1F2A" offset="1"/>
+    </linearGradient>
+    <linearGradient id="bt-knot" x1="123" x2="123" y1="113.5" y2="122.5" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#8E1F2A" offset="0"/>
+      <stop stop-color="#5C1119" offset="1"/>
+    </linearGradient>
+  </defs>
+</svg>

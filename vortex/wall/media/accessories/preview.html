@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Vorty accessory preview (dev only)</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 40px;
+    padding: 40px;
+    background: #14181a;
+    font-family: -apple-system, "Segoe UI", sans-serif;
+    color: #eaeaea;
+    box-sizing: border-box;
+    flex-wrap: wrap;
+  }
+  h1 { font-size: 16px; font-weight: 600; margin: 0 0 4px; }
+  p.hint { margin: 0 0 16px; font-size: 12px; color: #9aa0a6; }
+  .stage {
+    position: relative;
+    width: 420px;
+    height: 420px;
+    background:
+      linear-gradient(45deg, #1f2426 25%, transparent 25%) -20px 0/40px 40px,
+      linear-gradient(-45deg, #1f2426 25%, transparent 25%) -20px 0/40px 40px,
+      linear-gradient(45deg, transparent 75%, #1f2426 75%) -20px 0/40px 40px,
+      linear-gradient(-45deg, transparent 75%, #1f2426 75%) -20px 0/40px 40px,
+      #262b2d;
+    border-radius: 16px;
+    flex-shrink: 0;
+  }
+  .stage img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+  }
+  .panel { width: 260px; }
+  fieldset {
+    border: 1px solid #333;
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin: 0 0 16px;
+  }
+  legend { padding: 0 6px; font-size: 12px; color: #9aa0a6; }
+  label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 0;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  input[type="checkbox"] { accent-color: #2b693d; width: 16px; height: 16px; }
+  input[type="radio"] { accent-color: #2b693d; width: 16px; height: 16px; }
+  button {
+    width: 100%;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid #333;
+    background: #1e2224;
+    color: #eaeaea;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  button:hover { background: #262b2d; }
+</style>
+</head>
+<body>
+  <div>
+    <h1>Vorty accessory preview</h1>
+    <p class="hint">Standalone dev tool. Not part of the app UI.</p>
+    <div class="stage" id="stage">
+      <img src="../vorty-face-no-headphones.svg" alt="Vorty base face">
+    </div>
+  </div>
+
+  <div class="panel">
+    <fieldset>
+      <legend>Base face</legend>
+      <label><input type="radio" name="base" value="../vorty-face-no-headphones.svg" checked> No headphones (bare)</label>
+      <label><input type="radio" name="base" value="../vorty-face.svg"> Original (with headphones)</label>
+    </fieldset>
+    <fieldset id="accessory-list">
+      <legend>Accessories (multi-select, overlay order = list order)</legend>
+    </fieldset>
+    <button id="clear-btn" type="button">Clear all accessories</button>
+  </div>
+
+<script>
+  const ACCESSORIES = [
+    ["sunglasses.svg", "Sunglasses"],
+    ["headset.svg", "Headset"],
+    ["red-nose.svg", "Red nose"],
+    ["graduation-cap.svg", "Graduation cap"],
+    ["party-hat.svg", "Party hat"],
+    ["baseball-cap.svg", "Baseball cap"],
+    ["bow-tie.svg", "Bow tie"],
+    ["halo.svg", "Halo"],
+    ["beanie.svg", "Beanie"],
+    ["antenna.svg", "Antenna"],
+  ];
+
+  const stage = document.getElementById("stage");
+  const baseImg = stage.querySelector("img");
+  const list = document.getElementById("accessory-list");
+
+  for (const [file, label] of ACCESSORIES) {
+    const id = "acc-" + file.replace(".svg", "");
+    const wrap = document.createElement("label");
+    wrap.innerHTML = `<input type="checkbox" id="${id}" data-file="${file}"> ${label}`;
+    list.appendChild(wrap);
+    wrap.querySelector("input").addEventListener("change", (e) => {
+      toggleAccessory(file, e.target.checked);
+    });
+  }
+
+  function toggleAccessory(file, on) {
+    const existing = stage.querySelector(`img[data-file="${file}"]`);
+    if (on && !existing) {
+      const img = document.createElement("img");
+      img.src = file;
+      img.dataset.file = file;
+      stage.appendChild(img);
+    } else if (!on && existing) {
+      existing.remove();
+    }
+  }
+
+  document.querySelectorAll('input[name="base"]').forEach((radio) => {
+    radio.addEventListener("change", (e) => {
+      baseImg.src = e.target.value;
+    });
+  });
+
+  document.getElementById("clear-btn").addEventListener("click", () => {
+    document.querySelectorAll('#accessory-list input[type="checkbox"]').forEach((cb) => {
+      cb.checked = false;
+    });
+    stage.querySelectorAll("img[data-file]").forEach((img) => img.remove());
+  });
+</script>
+</body>
+</html>

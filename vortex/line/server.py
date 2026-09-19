@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
@@ -25,6 +26,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, Response
 
 from vortex.line import twilio, voice_config
 from vortex.line.session import CallSession
+from vortex.line.sms_reminders import ReminderWorker, reminder_worker_status
 from vortex.observability.calllog import group_by_call, read_calls, read_recent
 from vortex.observability.discord_calls import enabled as discord_calls_on
 from vortex.observability.discord_calls import notify_session
@@ -52,6 +54,22 @@ async def read_handshake(ws: WebSocket, *, max_messages: int = 5) -> twilio.Star
     raise HandshakeError("no start message in the first frames")
 
 
+@asynccontextmanager
+async def _app_lifespan(app: FastAPI):
+    """Start the day-before SMS worker while the server is up."""
+    cfg: Settings = app.state.settings
+    worker: ReminderWorker | None = None
+    if cfg.sms_confirmations and cfg.sms_day_before_reminders:
+        worker = ReminderWorker(cfg)
+        worker.start()
+    app.state.sms_reminder_worker = worker
+    try:
+        yield
+    finally:
+        if worker is not None:
+            await worker.stop()
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     log.info(
@@ -59,11 +77,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         "on" if settings.langfuse_public_key and settings.langfuse_secret_key else "off",
         "on" if discord_calls_on() else "off",
     )
-    app = FastAPI(title="Vortex", version="0.1.0")
+    app = FastAPI(title="Vortex", version="0.1.0", lifespan=_app_lifespan)
+    app.state.settings = settings
 
     @app.get("/health")
     async def health() -> dict[str, object]:
-        return {"status": "ok", **settings.describe()}
+        worker = getattr(app.state, "sms_reminder_worker", None)
+        return {
+            "status": "ok",
+            **settings.describe(),
+            **reminder_worker_status(worker),
+        }
 
     @app.get("/calls")
     async def calls(limit: int = 500, calls: int = 0, since: str = "") -> dict[str, object]:
