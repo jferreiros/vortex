@@ -224,9 +224,7 @@ async def test_cancellation_of_unknown_appointment_with_no_identified_patient_is
 
 
 @pytest.mark.asyncio
-async def test_appointment_and_call_are_navigable_both_ways(
-    tmp_path: Path, db_path: Path
-) -> None:
+async def test_appointment_and_call_are_navigable_both_ways(tmp_path: Path, db_path: Path) -> None:
     await _book(tmp_path, db_path)
 
     with db.connection(db_path) as conn:
@@ -338,9 +336,7 @@ async def test_confirmation_call_cancel_and_no_answer_branches(
 
 
 @pytest.mark.asyncio
-async def test_confirmation_job_is_idempotent_within_a_day(
-    tmp_path: Path, db_path: Path
-) -> None:
+async def test_confirmation_job_is_idempotent_within_a_day(tmp_path: Path, db_path: Path) -> None:
     await _book(tmp_path, db_path, call_id="CALL-IDEMPOTENT")
     caller = confirmations.SimulatedConfirmationCaller(log_path=tmp_path / "calls.jsonl")
     today = datetime(2026, 9, 24).date()

@@ -77,9 +77,7 @@ async def _provider_site_type(
     typically already warm in the clinic client's own cache by submit time
     since the same lookup happened earlier in the call."""
     catalogue = await ctx.clinic.catalogue()
-    provider = next(
-        (p for p in catalogue.providers if p.provider_id == provider_id), None
-    )
+    provider = next((p for p in catalogue.providers if p.provider_id == provider_id), None)
     site = next((s for s in catalogue.locations if s.location_id == location_id), None)
     appt_type = next(
         (t for t in catalogue.appointment_types if t.appointment_type_id == appointment_type_id),
@@ -300,6 +298,4 @@ async def persist_submission(
         elif isinstance(action, RescheduleAction):
             await _record_reschedule(ctx, action, db_path)
     except Exception:
-        log.exception(
-            "could not persist %s submission for call %s", action.kind, ctx.call_id
-        )
+        log.exception("could not persist %s submission for call %s", action.kind, ctx.call_id)
