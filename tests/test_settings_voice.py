@@ -18,6 +18,7 @@ VOICE_KEYS = (
     "LLM_BASE_URL",
     "LLM_MODEL",
     "LLM_MAX_TOKENS",
+    "LLM_ALT_MODEL",
     "HELMCODE_BASE_URL",
     "HELMCODE_API_KEY",
     "CLOUDFLARE_ACCOUNT_ID",
@@ -30,6 +31,12 @@ VOICE_KEYS = (
     "GOOGLE_APPLICATION_CREDENTIALS",
     "GOOGLE_TTS_CREDENTIALS_JSON",
     "GOOGLE_TTS_VOICE_EN",
+    "GOOGLE_TTS_VOICE_ES",
+    "GOOGLE_TTS_VOICE_CA",
+    "GOOGLE_TTS_VOICE_GL",
+    "GOOGLE_TTS_VOICE_EU",
+    "GOOGLE_TTS_GEMINI_MODEL",
+    "GOOGLE_TTS_STANDARD_FALLBACK",
     "ELEVENLABS_API_KEY",
     "ELEVENLABS_VOICE_ID_ES",
     "ELEVENLABS_MODEL",
@@ -37,7 +44,19 @@ VOICE_KEYS = (
     "VORTEX_TTS_PROVIDER",
     "VORTEX_TTS_PROVIDER_ALT",
     "VORTEX_VOICE_MODE",
+    "VORTEX_AIC_FILTER",
+    "AIC_SDK_LICENSE",
+    "VORTEX_AIC_MODEL",
+    "VORTEX_GEOCODER",
     "VORTEX_GEOCODER_URL",
+    "LANGFUSE_PUBLIC_KEY",
+    "LANGFUSE_SECRET_KEY",
+    "LANGFUSE_BASE_URL",
+    "LANGFUSE_TRACING_ENVIRONMENT",
+    "VORTEX_ENV",
+    "GOOGLE_API_KEY",
+    "GEMINI_LIVE_MODEL",
+    "GEMINI_LIVE_VOICE",
 )
 
 
@@ -159,9 +178,40 @@ def test_llm_max_tokens_defaults_to_320(clean_env) -> None:
     """
     s = _settings(clean_env)
     assert s.llm_max_tokens == 320
+    assert s.llm_alt_model == ""
+    assert s.describe()["llm_max_tokens"] == 320
+    assert s.describe()["llm_alt_model"] == ""
 
     s = _settings(clean_env, LLM_MAX_TOKENS="500")
     assert s.llm_max_tokens == 500
+    assert s.describe()["llm_max_tokens"] == 500
+
+
+def test_llm_max_tokens_below_the_booking_floor_is_raised_to_320(clean_env) -> None:
+    """A leftover ``LLM_MAX_TOKENS=120`` in .env must not ship again.
+
+    120 is enough for a spoken turn and too little for a nested-slot tool
+    call. The floor is 256; anything under it becomes the 320 default so
+    ``/health`` reports the value the line actually uses.
+    """
+    s = _settings(clean_env, LLM_MAX_TOKENS="120")
+    assert s.llm_max_tokens == 320
+    assert s.describe()["llm_max_tokens"] == 320
+
+    s = _settings(clean_env, LLM_MAX_TOKENS="255")
+    assert s.llm_max_tokens == 320
+
+    s = _settings(clean_env, LLM_MAX_TOKENS="256")
+    assert s.llm_max_tokens == 256
+
+
+def test_llm_alt_model_can_be_cleared(clean_env) -> None:
+    s = _settings(clean_env, LLM_ALT_MODEL="")
+    assert s.llm_alt_model == ""
+    assert s.describe()["llm_alt_model"] == ""
+
+    s = _settings(clean_env, LLM_ALT_MODEL="glm5.3-flash")
+    assert s.llm_alt_model == "glm5.3-flash"
 
 
 def test_the_arbiter_overrides_win_too(clean_env) -> None:
@@ -301,16 +351,41 @@ def test_voice_mode_overrides_the_keys(clean_env) -> None:
         ).voice_is_pipecat
         is False
     )
+    gemini = _settings(clean_env, VORTEX_VOICE_MODE="gemini-live", GOOGLE_API_KEY="g-x")
+    assert gemini.voice_is_gemini_live is True
+    assert gemini.voice_is_pipecat is False
+    # A GOOGLE_API_KEY alone must not flip auto onto the demo path.
+    assert (
+        _settings(clean_env, VORTEX_VOICE_MODE="auto", GOOGLE_API_KEY="g-x").voice_is_gemini_live
+        is False
+    )
 
 
 def test_google_voice_defaults_cover_the_five_languages(clean_env) -> None:
     s = _settings(clean_env)
     assert s.google_tts_voice_en == "en-GB-Chirp3-HD-Aoede"
     assert s.google_tts_voice_es == "es-ES-Chirp3-HD-Aoede"
+    # Gemini-TTS short names for ca/gl/eu (same identity as Spanish Chirp Aoede).
+    assert s.google_tts_voice_ca == "Aoede"
+    assert s.google_tts_voice_gl == "Aoede"
+    assert s.google_tts_voice_eu == "Aoede"
+    assert s.google_tts_uses_gemini is True
+    assert s.google_tts_gemini_model == "gemini-2.5-flash-tts"
+    assert s.tts_voice == s.google_tts_voice_es
+    assert s.describe()["google_tts_gemini"] is True
+    assert s.describe()["google_tts_gemini_model"] == "gemini-2.5-flash-tts"
+
+
+def test_google_standard_fallback_restores_standard_voices(clean_env) -> None:
+    """GOOGLE_TTS_STANDARD_FALLBACK keeps the old Standard-* path for ca/gl/eu."""
+    s = _settings(clean_env, GOOGLE_TTS_STANDARD_FALLBACK="true")
+    assert s.google_tts_standard_fallback is True
+    assert s.google_tts_uses_gemini is False
     assert s.google_tts_voice_ca == "ca-ES-Standard-B"
     assert s.google_tts_voice_gl == "gl-ES-Standard-A"
     assert s.google_tts_voice_eu == "eu-ES-Standard-A"
-    assert s.tts_voice == s.google_tts_voice_es
+    assert s.describe()["google_tts_gemini"] is False
+    assert s.describe()["google_tts_gemini_model"] == ""
 
 
 def test_google_speaks_english_and_it_can_be_overridden(clean_env) -> None:
@@ -338,10 +413,23 @@ def test_elevenlabs_has_no_default_voice(clean_env) -> None:
 # --- geocoder ----------------------------------------------------------------
 
 
-def test_geocoder_url_is_off_by_default(clean_env) -> None:
+def test_geocoder_is_off_by_default(clean_env) -> None:
     """Off by default: evals and offline work never depend on a network call."""
     s = _settings(clean_env)
+    assert s.geocoder == ""
     assert s.geocoder_url == ""
+
+
+def test_geocoder_reads_cartociudad_and_nominatim_url(clean_env) -> None:
+    s = _settings(clean_env, VORTEX_GEOCODER="cartociudad")
+    assert s.geocoder == "cartociudad"
+    s = _settings(
+        clean_env,
+        VORTEX_GEOCODER="nominatim",
+        VORTEX_GEOCODER_URL="https://nominatim.example.invalid/search",
+    )
+    assert s.geocoder == "nominatim"
+    assert s.geocoder_url == "https://nominatim.example.invalid/search"
 
 
 def test_geocoder_url_reads_the_env_var(clean_env) -> None:
@@ -359,6 +447,10 @@ def test_describe_never_leaks_a_key(clean_env) -> None:
         "HELMCODE_API_KEY": "helmcode-secret",
         "ELEVENLABS_API_KEY": "elevenlabs-secret",
         "ARBITER_API_KEY": "arbiter-secret",
+        "TYPESAFE_API_KEY": "typesafe-secret",
+        "LANGFUSE_PUBLIC_KEY": "pk-lf-secret",
+        "LANGFUSE_SECRET_KEY": "sk-lf-secret",
+        "GOOGLE_API_KEY": "google-api-secret",
     }
     s = _settings(clean_env, VORTEX_TTS_PROVIDER="elevenlabs", **secrets)
     described = s.describe()
@@ -369,6 +461,10 @@ def test_describe_never_leaks_a_key(clean_env) -> None:
     assert described["has_llm_key"] is True
     assert described["has_elevenlabs_key"] is True
     assert described["has_arbiter_key"] is True
+    assert described["has_typesafe_key"] is True
+    assert described["jev_arbiter"] is False
+    assert described["has_langfuse_keys"] is True
+    assert described["has_google_api_key"] is True
     assert described["llm_provider"] == "helmcode"
     assert described["tts_provider"] == "elevenlabs"
     assert described["tts_provider_alt"] == "google"

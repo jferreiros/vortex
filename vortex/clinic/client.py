@@ -6,7 +6,9 @@ Two implementations share one interface:
 - ``FakeClinicClient`` - in-memory fixtures, no network. Used when no key is set.
 
 The catalogue never changes during the event. ``ClinicClient`` fetches it once
-and keeps it for the life of the process. Patient lookups are never cached.
+and keeps it for the life of the process. Availability snapshots and a bounded
+patient lookup cache are also kept in process; accepted diary writes invalidate
+availability, and final booking checks bypass the snapshot.
 
 Every path, query parameter and field name below is taken from
 ``docs/platform/openapi.json`` and was checked against live responses from all
@@ -20,7 +22,10 @@ Everything above them speaks ``vortex.contract``.
 from __future__ import annotations
 
 import asyncio
+import json
+from collections import OrderedDict
 from datetime import date, datetime, time, timedelta
+from pathlib import Path
 from typing import Any, Literal, Protocol
 
 import httpx
@@ -62,6 +67,42 @@ _NEW_PATIENT_REQUIREMENT = {
     "any": None,
     "": None,
 }
+
+_PATIENT_CACHE_SIZE = 128
+
+
+def _directory_key(
+    name: str | None,
+    national_id: str | None,
+    phone: str | None,
+    date_of_birth: date | None,
+) -> tuple[str | None, str | None, str | None, date | None]:
+    return (
+        name,
+        national_id.replace(" ", "").upper() if national_id else None,
+        _digits9(phone) if phone else None,
+        date_of_birth,
+    )
+
+
+def _availability_key(
+    date_from: date,
+    date_to: date,
+    provider_id: str | None,
+    specialty_id: str | None,
+    location_id: str | None,
+    patient_id: str | None,
+    insurer: list[str] | None,
+) -> tuple[date, date, str | None, str | None, str | None, str | None, tuple[str, ...]]:
+    return (
+        date_from,
+        date_to,
+        provider_id,
+        specialty_id,
+        location_id,
+        patient_id,
+        tuple(insurer or ()),
+    )
 
 
 def _adapt_slot(raw: dict[str, Any]) -> dict[str, Any]:
@@ -394,16 +435,33 @@ def check_when(when: str) -> None:
 
 
 class ClinicClient:
-    """Live client. Every request carries the team key."""
+    """Live client. Every request carries the team key.
 
-    def __init__(self, base_url: str, api_key: str, *, timeout: float = 10.0):
+    ``transport`` replaces the network layer and nothing else: the same routes,
+    headers and JSON, answered in process. Offline tests pass one in so they
+    can exercise this client without binding a socket.
+    """
+
+    def __init__(
+        self,
+        base_url: str,
+        api_key: str,
+        *,
+        timeout: float = 10.0,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ):
         self._http = httpx.AsyncClient(
             base_url=base_url.rstrip("/"),
             headers={"X-Api-Key": api_key},
             timeout=timeout,
+            transport=transport,
         )
         self._catalogue: Catalogue | None = None
         self._catalogue_lock = asyncio.Lock()
+        self._availability_cache: dict[tuple[Any, ...], AvailabilityResponse] = {}
+        self._availability_lock = asyncio.Lock()
+        self._directory_cache: OrderedDict[tuple[Any, ...], list[PatientRecord]] = OrderedDict()
+        self._directory_lock = asyncio.Lock()
 
     async def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
         clean = {k: v for k, v in (params or {}).items() if v not in (None, "", [])}
@@ -435,6 +493,26 @@ class ClinicClient:
         date_of_birth: date | None = None,
     ) -> list[PatientRecord]:
         check_directory_query(name, national_id, phone, date_of_birth)
+        key = _directory_key(name, national_id, phone, date_of_birth)
+        async with self._directory_lock:
+            cached = self._directory_cache.get(key)
+            if cached is not None:
+                self._directory_cache.move_to_end(key)
+                return [record.model_copy(deep=True) for record in cached]
+            found = await self._fetch_directory(name, national_id, phone, date_of_birth)
+            self._directory_cache[key] = found
+            self._directory_cache.move_to_end(key)
+            while len(self._directory_cache) > _PATIENT_CACHE_SIZE:
+                self._directory_cache.popitem(last=False)
+            return [record.model_copy(deep=True) for record in found]
+
+    async def _fetch_directory(
+        self,
+        name: str | None,
+        national_id: str | None,
+        phone: str | None,
+        date_of_birth: date | None,
+    ) -> list[PatientRecord]:
         params = {
             "name": name,
             "national_id": national_id,
@@ -459,6 +537,35 @@ class ClinicClient:
         insurer: list[str] | None = None,
     ) -> AvailabilityResponse:
         check_availability_query(date_from, date_to, provider_id, specialty_id)
+        key = _availability_key(
+            date_from, date_to, provider_id, specialty_id, location_id, patient_id, insurer
+        )
+        async with self._availability_lock:
+            cached = self._availability_cache.get(key)
+            if cached is not None:
+                return cached.model_copy(deep=True)
+            answer = await self._fetch_availability(
+                date_from=date_from,
+                date_to=date_to,
+                provider_id=provider_id,
+                specialty_id=specialty_id,
+                location_id=location_id,
+                patient_id=patient_id,
+                insurer=insurer,
+            )
+            self._availability_cache[key] = answer
+            return answer.model_copy(deep=True)
+
+    async def _fetch_availability(
+        self,
+        date_from: date,
+        date_to: date,
+        provider_id: str | None,
+        specialty_id: str | None,
+        location_id: str | None,
+        patient_id: str | None,
+        insurer: list[str] | None,
+    ) -> AvailabilityResponse:
         params: dict[str, Any] = {
             "date_from": date_from.isoformat(),
             "date_to": date_to.isoformat(),
@@ -482,6 +589,36 @@ class ClinicClient:
         }
         return AvailabilityResponse.model_validate(adapted)
 
+    async def fresh_availability(self, **query: Any) -> AvailabilityResponse:
+        """Fetch availability outside the snapshot for a final safety check."""
+        check_availability_query(
+            query["date_from"],
+            query["date_to"],
+            query.get("provider_id"),
+            query.get("specialty_id"),
+        )
+        answer = await self._fetch_availability(
+            query["date_from"],
+            query["date_to"],
+            query.get("provider_id"),
+            query.get("specialty_id"),
+            query.get("location_id"),
+            query.get("patient_id"),
+            query.get("insurer"),
+        )
+        key = _availability_key(
+            query["date_from"], query["date_to"], query.get("provider_id"),
+            query.get("specialty_id"), query.get("location_id"), query.get("patient_id"),
+            query.get("insurer"),
+        )
+        async with self._availability_lock:
+            self._availability_cache[key] = answer
+        return answer.model_copy(deep=True)
+
+    def invalidate_availability(self) -> None:
+        """Drop availability derived before one of our writes was accepted."""
+        self._availability_cache.clear()
+
     async def appointments(
         self, patient_id: str, *, when: AppointmentWindow = "upcoming"
     ) -> list[Appointment]:
@@ -500,6 +637,21 @@ def _digits9(phone: str) -> str:
     return digits[-9:]
 
 
+def _load_json_list(path: Path) -> list[dict[str, Any]]:
+    """A ``patients.json`` / ``appointments.json`` list, or empty if missing."""
+    if not path.exists():
+        return []
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if isinstance(payload, list):
+        return payload
+    if isinstance(payload, dict):
+        for key in ("patients", "appointments", "items"):
+            items = payload.get(key)
+            if isinstance(items, list):
+                return items
+    return []
+
+
 class FakeClinicClient:
     """Offline client over ``fixtures``. Deterministic; no network.
 
@@ -507,13 +659,30 @@ class FakeClinicClient:
     ``_adapt_*`` functions as a live response. That is the point: offline runs
     exercise the adapters, and a field name that only the platform knows about
     breaks a test here instead of a call there.
+
+    Pass ``data_dir`` to read ``patients.json`` and ``appointments.json`` from
+    the isolated ``synthetic-data/`` pack instead. Catalogue and slot generation
+    still come from fixtures. Default (no ``data_dir``) is unchanged.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, data_dir: Path | None = None) -> None:
         self._catalogue = Catalogue.model_validate(_adapt_catalogue(fixtures.CLINIC))
-        self._patients = [PatientRecord.model_validate(p) for p in fixtures.PATIENTS]
+        self._availability_cache: dict[tuple[Any, ...], AvailabilityResponse] = {}
+        self._directory_cache: OrderedDict[tuple[Any, ...], list[PatientRecord]] = OrderedDict()
+        if data_dir is None:
+            patient_rows = list(fixtures.PATIENTS)
+            appointment_rows = list(fixtures.APPOINTMENTS)
+        else:
+            root = Path(data_dir)
+            patient_rows = _load_json_list(root / "patients.json")
+            appointment_rows = [
+                row
+                for row in _load_json_list(root / "appointments.json")
+                if row.get("appointment_id") and row.get("start_time")
+            ]
+        self._patients = [PatientRecord.model_validate(p) for p in patient_rows]
         self._appointments = [
-            Appointment.model_validate(_adapt_appointment(a)) for a in fixtures.APPOINTMENTS
+            Appointment.model_validate(_adapt_appointment(a)) for a in appointment_rows
         ]
 
     async def health(self) -> bool:
@@ -529,6 +698,25 @@ class FakeClinicClient:
         national_id: str | None = None,
         phone: str | None = None,
         date_of_birth: date | None = None,
+    ) -> list[PatientRecord]:
+        key = _directory_key(name, national_id, phone, date_of_birth)
+        cached = self._directory_cache.get(key)
+        if cached is not None:
+            self._directory_cache.move_to_end(key)
+            return [record.model_copy(deep=True) for record in cached]
+        found = await self._fetch_directory(name, national_id, phone, date_of_birth)
+        self._directory_cache[key] = found
+        self._directory_cache.move_to_end(key)
+        while len(self._directory_cache) > _PATIENT_CACHE_SIZE:
+            self._directory_cache.popitem(last=False)
+        return [record.model_copy(deep=True) for record in found]
+
+    async def _fetch_directory(
+        self,
+        name: str | None,
+        national_id: str | None,
+        phone: str | None,
+        date_of_birth: date | None,
     ) -> list[PatientRecord]:
         # NOT enforcing ``check_directory_query`` here is deliberate, and it is
         # the one place this client is more permissive than the platform: a
@@ -571,6 +759,36 @@ class FakeClinicClient:
         insurer: list[str] | None = None,
     ) -> AvailabilityResponse:
         check_availability_query(date_from, date_to, provider_id, specialty_id)
+        key = _availability_key(
+            date_from, date_to, provider_id, specialty_id, location_id, patient_id, insurer
+        )
+        cached = self._availability_cache.get(key)
+        if cached is not None:
+            return cached.model_copy(deep=True)
+        answer = await self._fetch_availability(
+            date_from=date_from,
+            date_to=date_to,
+            provider_id=provider_id,
+            specialty_id=specialty_id,
+            location_id=location_id,
+            patient_id=patient_id,
+            insurer=insurer,
+        )
+        self._availability_cache[key] = answer
+        return answer.model_copy(deep=True)
+
+    async def _fetch_availability(
+        self,
+        *,
+        date_from: date,
+        date_to: date,
+        provider_id: str | None = None,
+        specialty_id: str | None = None,
+        location_id: str | None = None,
+        patient_id: str | None = None,
+        insurer: list[str] | None = None,
+    ) -> AvailabilityResponse:
+        check_availability_query(date_from, date_to, provider_id, specialty_id)
         cat = self._catalogue
         if (date_to - date_from).days > cat.max_span_days:
             raise ClinicApiError(422, "date range cannot exceed 14 days")
@@ -593,6 +811,21 @@ class FakeClinicClient:
         asked = list(insurer or []) or ([patient.insurer] if patient and patient.insurer else [])
         slots: list[Slot] = []
         blocked: list[BlockedProvider] = []
+        # The plan rules the catalogue never publishes. Like the platform, a
+        # provider they stop is named in ``blocked`` and offers no slot.
+        for p in providers:
+            restriction = _standing_restriction(p, patient, asked)
+            if restriction:
+                blocked.append(
+                    BlockedProvider(
+                        provider_id=p.provider_id,
+                        reason=restriction_reason(restriction),
+                        restriction=restriction,
+                    )
+                )
+        providers = [
+            p for p in providers if not any(b.provider_id == p.provider_id for b in blocked)
+        ]
         day = date_from
         while day <= date_to:
             for p in providers:
@@ -644,6 +877,35 @@ class FakeClinicClient:
             appointment_type=appt_type,
         )
 
+    async def fresh_availability(self, **query: Any) -> AvailabilityResponse:
+        """Fetch availability outside the snapshot for a final safety check."""
+        check_availability_query(
+            query["date_from"],
+            query["date_to"],
+            query.get("provider_id"),
+            query.get("specialty_id"),
+        )
+        answer = await self._fetch_availability(
+            date_from=query["date_from"],
+            date_to=query["date_to"],
+            provider_id=query.get("provider_id"),
+            specialty_id=query.get("specialty_id"),
+            location_id=query.get("location_id"),
+            patient_id=query.get("patient_id"),
+            insurer=query.get("insurer"),
+        )
+        key = _availability_key(
+            query["date_from"], query["date_to"], query.get("provider_id"),
+            query.get("specialty_id"), query.get("location_id"), query.get("patient_id"),
+            query.get("insurer"),
+        )
+        self._availability_cache[key] = answer
+        return answer.model_copy(deep=True)
+
+    def invalidate_availability(self) -> None:
+        """Drop availability derived before one of our writes was accepted."""
+        self._availability_cache.clear()
+
     async def appointments(
         self, patient_id: str, *, when: AppointmentWindow = "upcoming"
     ) -> list[Appointment]:
@@ -658,6 +920,46 @@ class FakeClinicClient:
 
     async def aclose(self) -> None:
         return None
+
+
+def _standing_restriction(
+    provider: Any, patient: PatientRecord | None, asked: list[str]
+) -> str | None:
+    """The restriction id ``blocked`` would carry for this provider, if any.
+
+    Reads ``fixtures.PLAN_REFERRALS`` and ``fixtures.EXHAUSTED_ALLOWANCES``,
+    the two rules ``/clinic`` has no field for. A provider is stopped only when
+    every plan the query is priced against stops them: a slot payable with
+    another named plan is still a slot.
+    """
+    if not asked:
+        return None
+    held = {r.lower() for r in patient.referrals} if patient else set()
+    found: list[str] = []
+    for insurer in asked:
+        hit = next(
+            (
+                r["restriction"]
+                for r in fixtures.PLAN_REFERRALS
+                if r["insurer"] == insurer
+                and r["specialty_id"] == provider.specialty_id
+                and provider.specialty_id not in held
+            ),
+            None,
+        )
+        if hit is None and patient is not None:
+            hit = next(
+                (
+                    r["restriction"]
+                    for r in fixtures.EXHAUSTED_ALLOWANCES
+                    if r["insurer"] == insurer and r["patient_id"] == patient.patient_id
+                ),
+                None,
+            )
+        if hit is None:
+            return None
+        found.append(hit)
+    return found[0]
 
 
 def _name_matches(spoken: str, patient: PatientRecord) -> bool:

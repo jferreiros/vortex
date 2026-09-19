@@ -17,7 +17,7 @@ from vortex.contract import MADRID, CheckEligibilityInput, FindPatientInput, Too
 from vortex.identity.tools import find_patient
 from vortex.observability.calllog import CallLog
 from vortex.rules import eligibility
-from vortex.rules.tools import NO_RECORD_NOTE, check_eligibility
+from vortex.rules.tools import NO_RECORD_SKIPPED, check_eligibility
 
 
 @pytest.fixture
@@ -159,6 +159,127 @@ def test_a_provider_refusing_a_plan_redirects_to_one_who_takes_it(catalogue):
 
 
 # ---------------------------------------------------------------------------
+# The two plan rules the catalogue cannot express (problem 6, shapes four and
+# five). ``ClinicPlanResponse`` has no referral flag and no allowance, so they
+# reach us only as ``/availability``'s ``blocked[].restriction``. The tests
+# below pin three things: the fake answers the way the platform does, the
+# reason submitted is that restriction id verbatim, and nothing in the rules
+# lane derives either of them from anything else.
+# ---------------------------------------------------------------------------
+
+
+def test_the_two_plan_rules_are_never_derived_from_the_catalogue(catalogue):
+    """Even a plan record carrying the two contract fields yields no verdict.
+
+    ``InsurancePlanRecord.referral_required`` and ``yearly_allowance`` exist in
+    the contract but the platform never fills them. Reading a reason off them
+    would be a guess, so the patient rules say nothing and leave the answer to
+    ``/availability``.
+    """
+    patient = next(p for p in FakeClinicClient()._patients if p.patient_id == "P00300")
+    mapfre = next(p for p in catalogue.insurance_plans if p.insurer_id == "mapfre")
+    strict = mapfre.model_copy(update={"referral_required": True, "yearly_allowance": 0})
+    verdict = eligibility.check_patient_rules(
+        catalogue,
+        patient,
+        specialty_id="orthopaedics",
+        location_id=None,
+        plan=strict,
+        today=date(2026, 9, 18),
+    )
+    assert verdict is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("patient_id", "specialty_id", "restriction"),
+    [
+        ("P00300", "orthopaedics", "insurer_referral_required"),
+        ("P00301", "general_practice", "allowance_exhausted"),
+    ],
+)
+async def test_the_fake_availability_names_the_plan_rule_in_blocked(
+    patient_id, specialty_id, restriction
+):
+    """Like the platform: every provider the rule stops is in ``blocked`` with
+    the restriction id, and none of their slots are offered."""
+    avail = await FakeClinicClient().availability(
+        date_from=date(2026, 9, 21),
+        date_to=date(2026, 9, 25),
+        specialty_id=specialty_id,
+        patient_id=patient_id,
+    )
+    assert avail.blocked, "the plan rule has to be named"
+    assert {b.restriction for b in avail.blocked} == {restriction}
+    assert {b.reason for b in avail.blocked} == {restriction}
+    assert avail.slots == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("from_number", "patient_id", "specialty_id", "restriction"),
+    [
+        ("+34611222333", "P00300", "orthopaedics", "insurer_referral_required"),
+        ("+34622333444", "P00301", "general_practice", "allowance_exhausted"),
+    ],
+)
+async def test_the_reason_submitted_is_the_restriction_id_verbatim(
+    tmp_path, from_number, patient_id, specialty_id, restriction
+):
+    clinic = RecordingClinic()
+    ctx = make_ctx(tmp_path, clinic, from_number=from_number)
+    avail = await clinic.availability(
+        date_from=date(2026, 9, 19),
+        date_to=date(2026, 10, 1),
+        specialty_id=specialty_id,
+        patient_id=patient_id,
+    )
+
+    verdict = await check_eligibility(
+        ctx, CheckEligibilityInput(patient_id=patient_id, specialty_id=specialty_id)
+    )
+
+    assert verdict.allowed is False
+    assert verdict.rejection is not None
+    assert verdict.rejection.reason == restriction
+    assert verdict.rejection.reason == avail.blocked[0].restriction
+    assert verdict.note == ""
+    assert verdict.skipped_checks == []
+
+
+@pytest.mark.asyncio
+async def test_a_plan_wide_rule_offers_nobody_to_redirect_to(tmp_path):
+    """Rafael asks for Dra. Ortiz by name. Dr. Sáez is on the same exhausted
+    plan, so offering him would be the same refusal one call later."""
+    ctx = make_ctx(tmp_path, RecordingClinic(), from_number="+34622333444")
+
+    verdict = await check_eligibility(
+        ctx,
+        CheckEligibilityInput(
+            patient_id="P00301", specialty_id="general_practice", provider_id="PR01"
+        ),
+    )
+
+    assert verdict.rejection is not None
+    assert verdict.rejection.reason == "allowance_exhausted"
+    assert verdict.redirect_to == []
+
+
+@pytest.mark.asyncio
+async def test_a_second_policy_is_the_way_past_a_plan_rule(tmp_path):
+    """Problem 17 on top of problem 6: name Sanitas and the same request books."""
+    ctx = make_ctx(tmp_path, RecordingClinic(), from_number="+34611222333")
+
+    verdict = await check_eligibility(
+        ctx,
+        CheckEligibilityInput(patient_id="P00300", specialty_id="orthopaedics", insurer="sanitas"),
+    )
+
+    assert verdict.allowed is True
+    assert verdict.rejection is None
+
+
+# ---------------------------------------------------------------------------
 # The lookup behind those rules: where the directory record comes from.
 #
 # ``GET /api/v1/directory`` searches on name, national_id, phone or
@@ -285,7 +406,8 @@ async def test_a_missing_record_is_logged_and_noted_rather_than_passed_over(tmp_
     assert clinic.directory_calls == [], "there is no legal query to make without a number"
     # Standing down is not a refusal: /availability is the authority when the
     # record is not in hand, and it applies the same rules server-side.
-    assert verdict.note == NO_RECORD_NOTE
+    assert verdict.skipped_checks == list(NO_RECORD_SKIPPED)
+    assert verdict.note == ""
     events = [e for e in logged(ctx) if e["kind"] == "rules.patient_missing"]
     assert events and events[0]["patient_id"] == "P00042"
     assert events[0]["searched_phone"] is False
@@ -302,6 +424,21 @@ async def test_an_id_that_cannot_be_placed_is_looked_up_once(tmp_path):
     calls_after_first = len(clinic.directory_calls)
     second = await check_eligibility(ctx, args)
 
-    assert first.note == NO_RECORD_NOTE
-    assert second.note == NO_RECORD_NOTE
+    assert first.skipped_checks == list(NO_RECORD_SKIPPED)
+    assert second.skipped_checks == list(NO_RECORD_SKIPPED)
     assert len(clinic.directory_calls) == calls_after_first == 1
+
+
+@pytest.mark.asyncio
+async def test_a_verdict_that_is_edited_never_changes_the_next_one(tmp_path):
+    """The stood-down checks are module state, so they are immutable and copied."""
+    clinic = RecordingClinic()
+    ctx = make_ctx(tmp_path, clinic, from_number=None)
+    args = CheckEligibilityInput(patient_id="P00042", specialty_id="dermatology")
+
+    first = await check_eligibility(ctx, args)
+    first.skipped_checks.append("age")
+    second = await check_eligibility(ctx, args)
+
+    assert isinstance(NO_RECORD_SKIPPED, tuple)
+    assert second.skipped_checks == list(NO_RECORD_SKIPPED)

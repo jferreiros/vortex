@@ -1,8 +1,8 @@
 """Problem 16: the catalogue answers the caller asks for before they commit.
 
-These are unit tests rather than ``evals/logic`` cases because the fact sheet
-is not a contract tool — the conversation lane reads it into the system prompt.
-See the lane report: a ``clinic_facts`` tool would need a contract change.
+The helpers are unit-tested here; the ``clinic_facts`` tool built on them has
+its cases in ``evals/logic/cases/rules.yaml`` and the booking that follows an
+answer in ``evals/conversation/scenarios/questions.yaml``.
 
 Each test is a question from a published case, and the failure mode is the one
 the problem names: an answer the caller then books on, that cannot be booked.
@@ -10,9 +10,12 @@ the problem names: an answer the caller then books on, that cannot be booked.
 
 from __future__ import annotations
 
+from datetime import date
+
 import pytest
 
 from vortex.clinic.client import FakeClinicClient
+from vortex.contract import ClinicFactsInput
 from vortex.rules import facts
 
 
@@ -24,6 +27,23 @@ def catalogue():
 def test_only_centro_opens_on_a_saturday(catalogue):
     """ "Which of your clinics is open on a Saturday?" Naming Norte loses the case."""
     assert [s.location_id for s in facts.saturday_sites(catalogue)] == ["centro"]
+
+
+def test_pr01_schedule_includes_saturday_like_centro(catalogue):
+    """Published cases book PR01 on Saturday 19 Sep; her schedule must allow it.
+
+    FakeClinicClient opens slots from location hours, so a weekday-only
+    ``CENTRO_HOURS`` would pass offline while disagreeing with the catalogue.
+    """
+    from datetime import time
+
+    from vortex.contract import OpeningHours
+
+    pr01 = next(p for p in catalogue.providers if p.provider_id == "PR01")
+    saturday = [
+        hours for schedule in pr01.schedules for hours in schedule.hours if hours.weekday == 5
+    ]
+    assert saturday == [OpeningHours(weekday=5, opens=time(9, 0), closes=time(14, 0))]
 
 
 def test_no_site_opens_on_a_sunday(catalogue):
@@ -48,6 +68,74 @@ def test_which_clinics_see_children(catalogue):
     ]
 
 
+@pytest.mark.asyncio
+async def test_saturday_sites_agree_with_what_find_slots_actually_books(catalogue, tmp_path):
+    """Problem 16's own failure mode: an answer the caller books on and can't have.
+
+    If the fact sheet ever named a site ``find_slots`` disagrees with, telling
+    the caller "Centro" and then failing to book it there is exactly the case
+    this problem is scored on.
+    """
+    from datetime import date, datetime
+
+    from vortex.clinic.client import FakeClinicClient
+    from vortex.contract import MADRID, FindSlotsInput, ToolContext
+    from vortex.diary.tools import find_slots
+    from vortex.line.submit import DryRunSubmitClient
+    from vortex.observability.calllog import CallLog
+
+    ctx = ToolContext(
+        call_id="CA-facts",
+        now=datetime(2026, 9, 18, 9, 0, tzinfo=MADRID),
+        from_number="+34612345678",
+        clinic=FakeClinicClient(),
+        log=CallLog("CA-facts", tmp_path / "calls.jsonl"),
+        submitter=DryRunSubmitClient(),
+    )
+    answer = await find_slots(
+        ctx,
+        FindSlotsInput(
+            specialty_id="general_practice",
+            date_from=date(2026, 9, 19),
+            date_to=date(2026, 9, 19),
+        ),
+    )
+    bookable_saturday_sites = {s.location_id for s in answer.slots}
+    fact_sheet_saturday_sites = {s.location_id for s in facts.saturday_sites(catalogue)}
+    assert bookable_saturday_sites <= fact_sheet_saturday_sites
+
+
+@pytest.mark.asyncio
+async def test_sites_for_specialty_agree_with_what_find_slots_actually_books(catalogue, tmp_path):
+    from datetime import date, datetime
+
+    from vortex.clinic.client import FakeClinicClient
+    from vortex.contract import MADRID, FindSlotsInput, ToolContext
+    from vortex.diary.tools import find_slots
+    from vortex.line.submit import DryRunSubmitClient
+    from vortex.observability.calllog import CallLog
+
+    ctx = ToolContext(
+        call_id="CA-facts-2",
+        now=datetime(2026, 9, 18, 9, 0, tzinfo=MADRID),
+        from_number="+34612345678",
+        clinic=FakeClinicClient(),
+        log=CallLog("CA-facts-2", tmp_path / "calls.jsonl"),
+        submitter=DryRunSubmitClient(),
+    )
+    answer = await find_slots(
+        ctx,
+        FindSlotsInput(
+            specialty_id="paediatrics",
+            date_from=date(2026, 9, 21),
+            date_to=date(2026, 10, 2),
+        ),
+    )
+    bookable_sites = {s.location_id for s in answer.slots}
+    fact_sheet_sites = {s.location_id for s in facts.sites_for_specialty(catalogue, "paediatrics")}
+    assert bookable_sites <= fact_sheet_sites
+
+
 def test_which_dermatologist_consults_at_centro(catalogue):
     found = facts.providers_at(catalogue, "centro", "dermatology")
     assert [p.name for p in found] == ["Dra. Iglesias"]
@@ -57,6 +145,64 @@ def test_how_many_orthopaedic_surgeons_and_where(catalogue):
     surgeons = facts.providers_in_specialty(catalogue, "orthopaedics")
     assert len(surgeons) == 1
     assert surgeons[0].location_ids == ["sur"]
+
+
+TODAY = date(2026, 9, 18)
+
+
+def test_answer_names_only_centro_for_a_saturday(catalogue):
+    """The tool's answer is what the model reads back. Norte in it loses the case."""
+    out = facts.answer(catalogue, ClinicFactsInput(weekday="saturday"), TODAY)
+    assert [s.location_id for s in out.sites] == ["centro"]
+    assert out.rejection is None
+    assert "saturday" in out.sites[0].open_days
+
+
+def test_answer_for_a_sunday_is_empty_and_carries_the_closure_reason(catalogue):
+    out = facts.answer(catalogue, ClinicFactsInput(weekday="sunday"), TODAY)
+    assert out.sites == []
+    assert out.rejection is not None and out.rejection.reason == "clinic_closed"
+
+
+def test_answer_lists_who_sits_at_a_site_and_flags_leave(catalogue):
+    """ "Which doctors are at Norte?" — both, with Requena's leave on the record."""
+    out = facts.answer(catalogue, ClinicFactsInput(location_id="norte"), TODAY)
+    assert [s.location_id for s in out.sites] == ["norte"]
+    by_id = {p.provider_id: p for p in out.sites[0].providers}
+    assert set(by_id) == {"PR02", "PR07"}
+    assert by_id["PR02"].on_leave_until is None
+    assert by_id["PR07"].on_leave_until == date(2026, 9, 30)
+
+
+def test_answer_narrows_a_site_to_the_specialty_asked(catalogue):
+    out = facts.answer(
+        catalogue, ClinicFactsInput(location_id="centro", specialty_id="dermatology"), TODAY
+    )
+    assert [p.name for p in out.sites[0].providers] == ["Dra. Iglesias"]
+
+
+def test_answer_finds_the_site_in_a_town_and_says_when_it_shuts(catalogue):
+    out = facts.answer(catalogue, ClinicFactsInput(town="Getafe"), TODAY)
+    assert [s.location_id for s in out.sites] == ["sur"]
+    friday = [h for h in out.sites[0].hours if h.weekday == 4]
+    assert [f"{h.closes:%H:%M}" for h in friday] == ["14:00"]
+
+
+def test_answer_for_an_unknown_town_is_empty_without_a_rule(catalogue):
+    out = facts.answer(catalogue, ClinicFactsInput(town="Cuenca"), TODAY)
+    assert out.sites == [] and out.rejection is None
+
+
+def test_answer_for_a_specialty_nobody_offers_names_the_rule(catalogue):
+    out = facts.answer(catalogue, ClinicFactsInput(specialty_id="cardiology"), TODAY)
+    assert out.sites == []
+    assert out.rejection is not None and out.rejection.reason == "type_not_offered"
+
+
+def test_answer_carries_the_network_closure(catalogue):
+    out = facts.answer(catalogue, ClinicFactsInput(), TODAY)
+    assert date(2026, 10, 12) in out.closure_days
+    assert len(out.sites) == 3
 
 
 def test_the_fact_sheet_states_the_saturday_rule_and_the_closure(catalogue):

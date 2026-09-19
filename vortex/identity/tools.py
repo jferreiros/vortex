@@ -13,7 +13,10 @@ What the docs say this lane must get right (clinic docs, "Six things worth knowi
 - A caller the directory does not know cannot be booked. Register first.
 - DNI: 8 digits + letter. NIE: X/Y/Z + 7 digits + letter. The letter is
   ``"TRWAGMYFPDXBNJZSQVHLCKE"[number % 23]`` where a NIE's leading X/Y/Z
-  counts as 0/1/2. A wrong letter is a 422 at submit time.
+  counts as 0/1/2. A wrong letter is a 422 at submit time. When the letter
+  does not match, the 1-edit digit readings (spoken confusions) that fit it
+  say which digit positions were misheard; the id stays invalid until the
+  caller repeats them.
 
 How the conversation should read what comes back:
 
@@ -39,6 +42,7 @@ from typing import Any
 from vortex.contract import (
     Appointment,
     BuildRegistrationInput,
+    CallerLineMatch,
     Catalogue,
     FindPatientInput,
     FindPatientResult,
@@ -51,6 +55,7 @@ from vortex.contract import (
     ValidateNationalIdInput,
     remember_patient,
 )
+from vortex.identity.dictation import check_email, check_phone, spoken_email
 
 _CHECK_LETTERS = "TRWAGMYFPDXBNJZSQVHLCKE"
 _NIE_PREFIX_DIGIT = {"X": "0", "Y": "1", "Z": "2"}
@@ -59,6 +64,19 @@ _NIE_RE = re.compile(r"[XYZ]\d{7}[A-Z]")
 _ID_SEPARATORS = re.compile(r"[\s.\-]+")
 _NON_DIGIT = re.compile(r"\D")
 _WS = re.compile(r"\s+")
+
+#: Spoken digit confusions (STT under noise): seis/siete, ocho/cero, uno/siete,
+#: cinco/seis, seis/tres. One substitution only — two edits produce false
+#: positives (docs/research/05-structured-data.md).
+_DIGIT_CONFUSIONS: dict[str, tuple[str, ...]] = {
+    "0": ("8",),
+    "1": ("7",),
+    "3": ("6",),
+    "5": ("6",),
+    "6": ("7", "3"),
+    "7": ("6",),
+    "8": ("0",),
+}
 
 #: The ``insurer`` enum the register route accepts (docs/api/openapi.json). The
 #: live catalogue lists the same plans; the offline fixtures list only five, so
@@ -98,27 +116,13 @@ _INSURER_ALIASES: dict[str, str] = {
     "privat": "privado",
 }
 
-#: Spoken email punctuation, longest phrase first so "guion bajo" beats "guion".
-_EMAIL_SPOKEN: tuple[tuple[str, str], ...] = (
-    ("guion bajo", "_"),
-    ("guio baix", "_"),
-    ("underscore", "_"),
-    ("arroba", "@"),
-    ("at sign", "@"),
-    ("at", "@"),
-    ("dot", "."),
-    ("punto", "."),
-    ("punt", "."),
-    ("hyphen", "-"),
-    ("dash", "-"),
-    ("minus", "-"),
-    ("guion", "-"),
-    ("guio", "-"),
-)
-
 PATIENT_POSTPROCESS_KEY = "patient_postprocess"
 PATIENT_PREFERENCES_KEY = "patient_preferences"
 IDENTITY_KEY = "identity"
+#: The first patient identified this call. Unlike IDENTITY_KEY, never
+#: overwritten by a later lookup, so a third-party booking (problem 9) can
+#: still tell who was on the line to begin with.
+CALLER_IDENTITY_KEY = "identity_caller"
 _MIN_SUPPORT = 2  # occurrences needed before a pattern is worth suggesting
 _MAX_NEAR_MISSES = 3  # more than this and a near-miss list is noise, not a hint
 
@@ -138,24 +142,72 @@ def normalize_national_id(value: str) -> str:
     return _ID_SEPARATORS.sub("", value.strip()).upper()
 
 
+def _check_letter(digits8: str) -> str:
+    return _CHECK_LETTERS[int(digits8) % 23]
+
+
+def _one_edit_bodies(body: str) -> list[str]:
+    """Every 1-substitution of ``body`` under the spoken-digit confusion map."""
+    out: list[str] = []
+    for index, digit in enumerate(body):
+        for alt in _DIGIT_CONFUSIONS.get(digit, ()):
+            out.append(body[:index] + alt + body[index + 1 :])
+    return out
+
+
+def _ambiguous_positions(bodies: list[str]) -> list[int]:
+    """Digit indexes that are not unanimous across the heard body and its 1-edit fits."""
+    if not bodies:
+        return []
+    length = len(bodies[0])
+    return [i for i in range(length) if len({body[i] for body in bodies}) > 1]
+
+
 def check_national_id(value: str) -> NationalIdCheck:
-    """Pure version of ``validate_national_id``: normalise, classify, re-derive the letter."""
+    """Normalise, classify, re-derive the letter; name the digits to ask again.
+
+    When the heard letter does not match the digits, try every single-digit
+    confusion (seis/tres, seis/siete, …) and keep the readings whose check
+    letter matches. None of them is adopted: the letter proves the id as heard
+    is inconsistent, it does not say which digits the caller meant, and an
+    inferred id registers or identifies the wrong person. The id stays invalid
+    and ``ask_digit_positions`` names the digits for the caller to repeat.
+    """
     normalized = normalize_national_id(value)
     if _DNI_RE.fullmatch(normalized):
-        digits, letter, kind = normalized[:8], normalized[8], "dni"
+        body, letter, kind = normalized[:8], normalized[8], "dni"
+        prefix: str | None = None
     elif _NIE_RE.fullmatch(normalized):
-        digits = _NIE_PREFIX_DIGIT[normalized[0]] + normalized[1:8]
-        letter, kind = normalized[8], "nie"
+        prefix, body, letter = normalized[0], normalized[1:8], normalized[8]
+        kind = "nie"
     else:
         return NationalIdCheck(normalized=normalized, kind="invalid", valid=False)
-    expected = _CHECK_LETTERS[int(digits) % 23]
+
+    digits8 = body if prefix is None else _NIE_PREFIX_DIGIT[prefix] + body
+    expected = _check_letter(digits8)
+    if letter == expected:
+        return NationalIdCheck(
+            normalized=normalized, kind=kind, valid=True, expected_letter=expected
+        )
+
+    matching_bodies: list[str] = []
+    for edited in _one_edit_bodies(body):
+        candidate_digits = edited if prefix is None else _NIE_PREFIX_DIGIT[prefix] + edited
+        if _check_letter(candidate_digits) == letter:
+            matching_bodies.append(edited)
+    unique_bodies = list(dict.fromkeys(matching_bodies))
+
     return NationalIdCheck(
-        normalized=normalized, kind=kind, valid=letter == expected, expected_letter=expected
+        normalized=normalized,
+        kind=kind,
+        valid=False,
+        expected_letter=expected,
+        ask_digit_positions=_ambiguous_positions([body, *unique_bodies]),
     )
 
 
 async def validate_national_id(ctx: ToolContext, args: ValidateNationalIdInput) -> NationalIdCheck:
-    """Normalise a spoken DNI/NIE and check its letter (mod-23)."""
+    """Normalise a spoken DNI/NIE and check its letter (mod-23); never repair it silently."""
     return check_national_id(args.value)
 
 
@@ -172,31 +224,18 @@ def _fold(text: str) -> str:
 
 
 def normalize_phone(phone: str) -> str:
-    """As dictated -> E.164. A bare 9-digit Spanish number gets the +34 prefix."""
-    digits = _NON_DIGIT.sub("", phone)
-    if phone.strip().startswith("+") and len(digits) > 9:
-        return f"+{digits}"
-    if digits.startswith("0034") and len(digits) == 13:
-        return f"+{digits[2:]}"
-    if digits.startswith("34") and len(digits) == 11:
-        return f"+{digits}"
-    if len(digits) == 9:
-        return f"+34{digits}"
-    return digits
+    """As dictated -> E.164 via ``phonenumbers`` (region ES). Digits and spoken
+    forms both work; a bare nine-digit Spanish number gets ``+34``.
+    """
+    return check_phone(phone).normalized
 
 
 def normalize_email(email: str) -> str:
-    """As dictated -> an address. ``ana dot garcia at gmail dot com`` -> ``ana.garcia@gmail.com``.
-
-    Spoken punctuation is only translated when the text carries no ``@`` yet; an
-    address that is already an address just loses its spaces and its case, which
-    is exactly what the scorer does to it.
+    """As dictated -> an address. ``ana punto garcia arroba gmail punto com`` ->
+    ``ana.garcia@gmail.com``. Uses the spoken mapper in ``dictation``; syntax is
+    checked separately by ``check_email`` / ``build_registration``.
     """
-    text = _fold(email)
-    if "@" not in text:
-        for spoken, symbol in _EMAIL_SPOKEN:
-            text = re.sub(rf"(?<![a-z0-9]){re.escape(spoken)}(?![a-z0-9])", symbol, text)
-    return _WS.sub("", text)
+    return spoken_email(email)
 
 
 def resolve_insurer(spoken: str, catalogue: Catalogue | None = None) -> str | None:
@@ -237,6 +276,15 @@ async def build_registration(ctx: ToolContext, args: BuildRegistrationInput) -> 
     at submit time and a mismatch is a 422: better to ask the caller to repeat
     the id than to post a record that cannot be accepted. The insurer is folded
     to the plan id the register route's enum accepts.
+
+    An empty ``phone`` means the line they are calling from, which Twilio hands
+    us before the greeting. A new patient registers themselves, so the number
+    they would dictate is the number they dialled from - it was identical on
+    every registration the platform has accepted from us - and a registration
+    has eight fields to collect inside a three-minute call. Asking for the one
+    field we already hold is a round trip that costs the whole case. With no
+    caller id there is nothing to fall back on and the refusal below still names
+    ``phone`` for the caller to dictate.
     """
 
     def ask_again(field_name: str, why: str) -> RegistrationResult:
@@ -251,11 +299,20 @@ async def build_registration(ctx: ToolContext, args: BuildRegistrationInput) -> 
         )
         return RegistrationResult(rejection=rejection)
     if not check.valid:
-        rejection = ask_again(
-            "national_id",
-            f"check letter of {check.normalized} does not match its digits "
-            f"(they give {check.expected_letter}); a digit was misheard, ask again",
-        )
+        if check.ask_digit_positions:
+            positions = ", ".join(str(i + 1) for i in check.ask_digit_positions)
+            rejection = ask_again(
+                "national_id",
+                f"check letter of {check.normalized} fits a 1-edit reading of the "
+                f"digits but not the digits as heard; ask the caller to repeat digit "
+                f"positions {positions} (1-based in the digit body) before registering",
+            )
+        else:
+            rejection = ask_again(
+                "national_id",
+                f"check letter of {check.normalized} does not match its digits "
+                f"(they give {check.expected_letter}); a digit was misheard, ask again",
+            )
         return RegistrationResult(rejection=rejection)
 
     try:
@@ -285,16 +342,26 @@ async def build_registration(ctx: ToolContext, args: BuildRegistrationInput) -> 
                 rejection=ask_again(field_name, "is empty; the record needs two surnames")
             )
 
-    email = normalize_email(args.email)
-    if "@" not in email or "." not in email.split("@")[-1]:
+    email_check = check_email(args.email)
+    if not email_check.valid:
         return RegistrationResult(
-            rejection=ask_again("email", f"{email!r} is not an address; read it back and ask again")
+            rejection=ask_again(
+                "email",
+                f"{email_check.normalized!r} is not an address"
+                + (f" ({email_check.detail})" if email_check.detail else "")
+                + "; read it back and ask again",
+            )
         )
 
-    phone = normalize_phone(args.phone)
-    if len(_NON_DIGIT.sub("", phone)) < 9:
+    phone_check = check_phone(args.phone or ctx.from_number)
+    if not phone_check.possible:
         return RegistrationResult(
-            rejection=ask_again("phone", f"{args.phone!r} has fewer than nine digits")
+            rejection=ask_again(
+                "phone",
+                f"{args.phone!r} is not a Spanish number"
+                + (f" ({phone_check.detail})" if phone_check.detail else "")
+                + "; ask the caller to repeat it",
+            )
         )
 
     return RegistrationResult(
@@ -304,8 +371,8 @@ async def build_registration(ctx: ToolContext, args: BuildRegistrationInput) -> 
             second_surname=second,
             national_id=check.normalized,
             date_of_birth=args.date_of_birth,
-            phone=phone,
-            email=email,
+            phone=phone_check.normalized,
+            email=email_check.normalized,
             insurer=insurer,
         )
     )
@@ -477,10 +544,12 @@ async def find_patient(ctx: ToolContext, args: FindPatientInput) -> FindPatientR
 
     if len(candidates) == 1:
         patient = candidates[0]
-        ctx.state[IDENTITY_KEY] = {
+        entry = {
             "patient_id": patient.patient_id,
             "matched_on": given or ["from_number"],
         }
+        ctx.state.setdefault(CALLER_IDENTITY_KEY, entry)
+        ctx.state[IDENTITY_KEY] = entry
         # Mine their visit history while the conversation carries on, so a
         # preference is already there by the time it is needed.
         _start_postprocess(ctx, patient)
@@ -518,3 +587,69 @@ async def find_patient(ctx: ToolContext, args: FindPatientInput) -> FindPatientR
         )
         return FindPatientResult(status="not_found", candidates=_line_owner_first(ctx, near))
     return FindPatientResult(status="not_found")
+
+
+async def resolve_caller_line(ctx: ToolContext) -> CallerLineMatch:
+    """Who the dialling line belongs to, asked before the caller has spoken.
+
+    The scored runs lose calls to the clock, and the largest single block of it
+    is the opening exchange: the name, then a second identifier, one field per
+    turn, against a caller who hesitates. Twilio hands us the number on the
+    ``start`` message and ``/directory`` accepts a phone on its own, so that
+    exchange is answerable for free before the greeting is spoken.
+
+    One match is the line's owner. No match means the line is on no record,
+    which is the new-patient signal. Several means a shared line and names
+    nobody, though the records still go back so ``find_patient`` can order them.
+
+    Never raises: a call that cannot look its line up is a call that asks the
+    caller instead, exactly as before.
+    """
+    from_number = ctx.from_number or ""
+    if not from_number:
+        return CallerLineMatch()
+    try:
+        candidates = await _lookup(
+            ctx, name=None, national_id=None, phone=from_number, date_of_birth=None
+        )
+    except Exception as exc:
+        ctx.log.event("identity.caller_line_failed", detail=f"{type(exc).__name__}: {exc}")
+        return CallerLineMatch()
+
+    match = CallerLineMatch(
+        looked_up=True,
+        from_number=from_number,
+        patient=candidates[0] if len(candidates) == 1 else None,
+        candidates=candidates,
+    )
+    if match.patient is not None:
+        # The same bookkeeping ``find_patient`` does for a single match, so a
+        # later third-party booking still knows who was on the line, and the
+        # visit history is mined while the greeting plays.
+        entry = {"patient_id": match.patient.patient_id, "matched_on": ["from_number"]}
+        ctx.state.setdefault(CALLER_IDENTITY_KEY, entry)
+        _start_postprocess(ctx, match.patient)
+    ctx.log.event(
+        "identity.caller_line",
+        matches=len(candidates),
+        patient_id=match.patient.patient_id if match.patient else "",
+    )
+    return match
+
+
+def note_target_patient(ctx: ToolContext, target_patient_id: str) -> None:
+    """Log when a booking or cancellation names someone other than whoever this
+    call first identified (problem 9: the third party).
+
+    Not a guard: a parent booking for a child, or a carer for someone they look
+    after, is the correct outcome, never a failure to prevent. This only leaves
+    a trace on divergence, so the case is visible in the call log rather than
+    silent either way.
+    """
+    caller = ctx.state.get(CALLER_IDENTITY_KEY)
+    if caller and caller["patient_id"] != target_patient_id:
+        ctx.log.event(
+            "identity.third_party",
+            caller_patient_id=caller["patient_id"],
+            target_patient_id=target_patient_id,
+        )

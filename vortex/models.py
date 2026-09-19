@@ -48,7 +48,7 @@ class ModelSpec:
     base_url: str  # empty means the SDK default (api.openai.com)
     api_key: str
     temperature: float = 0.2
-    max_tokens: int = 120
+    max_tokens: int = 320
     # Request keyword arguments beyond the message list: ``reasoning_effort``,
     # ``extra_body``. Same shape pipecat spreads into ``chat.completions.create``.
     extra: dict[str, Any] = field(default_factory=dict)
@@ -85,9 +85,9 @@ class ModelSpec:
         Six retries with the SDK's backoff: a bench saturates a tokens-per-
         minute limit within seconds, and a 429 is a wait, not a verdict.
         """
-        from openai import AsyncOpenAI
+        from vortex.observability.tracing import async_openai_client
 
-        return AsyncOpenAI(
+        return async_openai_client(
             api_key=self.api_key or "missing",
             base_url=self.base_url or None,
             timeout=timeout,

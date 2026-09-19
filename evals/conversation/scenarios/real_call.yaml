@@ -1,0 +1,115 @@
+# Problem 18: the real call. Each scenario here mirrors one of the three
+# published cases for `the_real_call` (evals/corpus/cases/public-cases.json),
+# adapted onto the local fixture world: a caller with two things to sort out
+# in one call -- someone else's appointment, and then their own -- with a
+# mind changed halfway through the second request. The list of actions
+# submitted for the call must contain both, in order.
+group: real_call
+problem: 18
+now: "2026-09-18T09:00:00+02:00"
+
+scenarios:
+  # Published shape: "the_real_call-291bfe4b3a7c" -- a caller reschedules a
+  # grandchild's appointment to the next slot with the same doctor at the
+  # same site, no earlier than the one they already hold, then books
+  # themselves the earliest slot in a specialty on a day of the week they
+  # correct mid-call.
+  - id: p18.grandmother_reschedules_grandson_then_books_herself_thursday
+    tags: [multi-action]
+    from_number: "+34612345678"
+    caller:
+      - says: "Hello, it's Marta Ruiz López, born the twelfth of March nineteen eighty-five. I'm calling about my grandson, Lucas Ruiz López — he was born the twentieth of June two thousand and eighteen. He can't make his appointment on the second of October, and I need it moved to the next time the same doctor is free at that same clinic. Nothing earlier than the second, please."
+        means:
+          identify: {name: "Marta Ruiz López", date_of_birth: "1985-03-12"}
+          patient: {name: "Lucas Ruiz López", date_of_birth: "2018-06-20", relation: grandson}
+          request: {intent: reschedule, appointment_ref: "2026-10-02"}
+      - says: "Yes, that one is fine, thank you."
+        means: {accept: true}
+      - says: "While I have you, could I also get myself the earliest General Practice appointment on a Tuesday? There are some blood test results I need to go over."
+        means: {request: {intent: book, specialty_id: general_practice, when: "this coming Tuesday", complaint: "blood test results to go over"}}
+      - says: "Sorry, actually — scratch that, I meant Thursday. The earliest General Practice appointment on a Thursday."
+        means: {request: {when: "this coming Thursday"}}
+      - says: "Yes, that one. Thank you, that's everything."
+        means: {accept: true, end: true}
+    expect:
+      actions:
+        - kind: reschedule
+          appointment_id: A0002
+          provider_id: PR03
+          location_id: centro
+          slot: {$earliest_slot: {provider_id: PR03, location_id: centro, from: "2026-10-02", days: 14, not_before: "2026-10-02T17:15:00+02:00"}}
+        - kind: book
+          patient_id: P00042
+          appointment_type_id: review
+          policy_id: sanitas
+          slot: {$earliest_slot: {specialty_id: general_practice, "on": "2026-09-24", patient_id: P00042}}
+      trajectory_contains: [find_patient, list_appointments, prepare_reschedule, submit_action, find_slots, prepare_booking, submit_action]
+      privacy_of: [P00042, P00107]
+
+  # Published shape: "the_real_call-bde9bd494e55" -- a caller cancels a
+  # dependant's appointment outright, then books themselves the earliest
+  # slot in a different specialty on a day of the week they correct mid-call.
+  - id: p18.father_cancels_daughters_appointment_then_books_himself_friday
+    tags: [multi-action]
+    from_number: "+34655555555"
+    caller:
+      - says: "Hello, this is Antonio Pérez Martín. My NIE is X, one two three four five six seven, L. I'm calling about my daughter, Sofía Pérez Ruiz — she was born the fourteenth of May two thousand and twelve. She can't make her appointment on the twenty-second of September, and she'd like it cancelled."
+        means:
+          identify: {name: "Antonio Pérez Martín", national_id: "X1234567L"}
+          patient: {name: "Sofía Pérez Ruiz", date_of_birth: "2012-05-14", relation: daughter}
+          request: {intent: cancel, appointment_ref: "2026-09-22"}
+      - says: "Yes, please cancel it."
+        means: {accept: true}
+      - says: "And while I'm on the line, could I get myself the earliest Orthopaedics appointment on a Wednesday? My shoulder has been stiff since a fall a few months ago."
+        means: {request: {intent: book, specialty_id: orthopaedics, when: "this coming Wednesday", complaint: "shoulder stiff since a fall a few months ago"}}
+      - says: "Actually, hold on — make that a Friday instead. The earliest Orthopaedics appointment on a Friday."
+        means: {request: {when: "this coming Friday"}}
+      - says: "Yes, that one works. Thank you, that's all."
+        means: {accept: true, end: true}
+    expect:
+      actions:
+        - kind: cancel
+          appointment_id: A0003
+        - kind: book
+          patient_id: P00200
+          provider_id: PR05
+          appointment_type_id: review
+          slot: {$earliest_slot: {specialty_id: orthopaedics, "on": "2026-09-25", patient_id: P00200}}
+      trajectory_contains: [find_patient, list_appointments, prepare_cancel, submit_action, find_slots, prepare_booking, submit_action]
+      privacy_of: [P00200, P00204]
+
+  # Published shape: "the_real_call-32c1fbeb4a22" -- a caller reschedules a
+  # parent's appointment to the next slot with the same doctor at the same
+  # site, no earlier than the one they already hold, then books themselves
+  # the earliest slot in the same specialty on a day of the week they
+  # correct mid-call.
+  - id: p18.daughter_reschedules_mothers_appointment_then_books_herself_monday
+    tags: [multi-action]
+    caller:
+      - says: "Hi, it's Marta Ruiz García, born the second of November nineteen ninety-two. I'm calling about my mother, Marta Ruiz López — she was born the twelfth of March nineteen eighty-five. She can't make her appointment on the thirtieth of September, and I need it moved to the next time the same doctor is free at that same clinic. Nothing earlier than the thirtieth, please."
+        means:
+          identify: {name: "Marta Ruiz García", date_of_birth: "1992-11-02"}
+          patient: {name: "Marta Ruiz López", date_of_birth: "1985-03-12", relation: mother}
+          request: {intent: reschedule, appointment_ref: "2026-09-30"}
+      - says: "Yes, that one, thank you."
+        means: {accept: true}
+      - says: "And for myself, could I get the earliest General Practice appointment on a Wednesday? Nothing urgent, just a routine check-up."
+        means: {request: {intent: book, specialty_id: general_practice, when: "this coming Wednesday"}}
+      - says: "Sorry, one more change — make that a Monday instead. The earliest General Practice appointment on a Monday."
+        means: {request: {when: "this coming Monday"}}
+      - says: "Yes, that one. Thank you, that's everything."
+        means: {accept: true, end: true}
+    expect:
+      actions:
+        - kind: reschedule
+          appointment_id: A0001
+          provider_id: PR01
+          location_id: centro
+          slot: {$earliest_slot: {provider_id: PR01, location_id: centro, from: "2026-09-30", days: 14, not_before: "2026-09-30T10:00:00+02:00"}}
+        - kind: book
+          patient_id: P00043
+          appointment_type_id: first_visit
+          policy_id: adeslas
+          slot: {$earliest_slot: {specialty_id: general_practice, "on": "2026-09-21", patient_id: P00043}}
+      trajectory_contains: [find_patient, list_appointments, prepare_reschedule, submit_action, find_slots, prepare_booking, submit_action]
+      privacy_of: [P00042, P00043]
