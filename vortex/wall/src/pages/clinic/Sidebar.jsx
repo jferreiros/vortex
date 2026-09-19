@@ -52,7 +52,7 @@ const ICONS = {
 const CLINIC_ITEMS = [
   { to: "/clinic/home", label: "Home", icon: "home" },
   { to: "/clinic/settings", label: "Ajustes", icon: "settings" },
-  { to: "/clinic/ai", label: "IA", icon: "ai" },
+  { to: "/clinic/ai", label: "Personalizar agente", icon: "ai" },
   { to: "/clinic/insights", label: "Insights", icon: "insights" },
   { to: "/clinic/analytics", label: "Analytics", icon: "analytics" },
   { to: "/clinic/doctor", label: "Horarios", icon: "doctor" },
