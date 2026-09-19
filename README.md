@@ -43,7 +43,14 @@ le agenda las citas" - and `<Connect><Stream>` carries it back to `/ws` with the
 appointment, the already-identified patient and the language on the start
 message, so the booking agent's rebooking flow continues without re-asking any
 data and the patient moves the appointment in the same call. Without the live
-voice pipeline the stored callback promise stands. Every row lives in
+voice pipeline the stored callback promise stands. The Twilio-only segments
+sound in the wall's own voice: when Google TTS credentials are set each line
+(the question, the reprompt, the "le paso con mi compañero" bridge, the
+fallback acknowledgements) is synthesised with the configured Chirp 3 HD
+persona and rate from `voiceconfig.db`, cached under
+`logs/confirmation_audio/`, served by `GET /confirmation/audio/{name}` and
+played with `<Play>`; without credentials, or if synthesis fails, the TwiML
+keeps Twilio's standard `<Say>` voice for that line. Every row lives in
 `logs/confirmation_calls.json` — the hooks a waitlist filler or a retry/SMS
 fallback would subscribe to. Try it: `uv run python scripts/try_confirmation_call.py`
 (`--live --to <E.164> --base-url <tunnel>` to dial for real).
