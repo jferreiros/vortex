@@ -33,7 +33,7 @@ from vortex.contract import (
     action_payload,
     action_route,
 )
-from vortex.line.session import FALLBACK_SUBMIT_PREPARED_ENV, CallSession
+from vortex.line.session import FALLBACK_SUBMIT_PREPARED_ENV, CallMemory, CallSession
 from vortex.line.twilio import StartPayload
 
 NOW = datetime(2026, 9, 18, 10, 0, tzinfo=MADRID)
@@ -269,6 +269,29 @@ async def test_a_later_rejection_drops_the_prepared_action(offline_settings) -> 
     assert payload["reason"] == "allowance_exhausted"
     assert session.memory.prepared is None
     assert session.memory.confirmed is False
+
+
+def test_a_different_prepared_action_clears_confirmation() -> None:
+    """Confirming A must not let the fallback treat a later-prepared B as agreed."""
+    memory = CallMemory()
+    memory.remember_prepared("prepare_booking", a_booking())
+    memory.mark_confirmed()
+    other = a_booking().model_copy(update={"slot": SLOT.replace(hour=17)})
+    memory.remember_prepared("prepare_booking", other)
+
+    assert memory.confirmed is False
+    assert memory.prepared == other
+
+
+def test_repreparing_the_same_action_keeps_confirmation() -> None:
+    """The caller often says yes before the model draws the same plan up again."""
+    memory = CallMemory()
+    memory.remember_prepared("prepare_booking", a_booking())
+    memory.mark_confirmed()
+    memory.remember_prepared("prepare_booking", a_booking())
+
+    assert memory.confirmed is True
+    assert memory.prepared == a_booking()
 
 
 # --- what stops the fallback --------------------------------------------------
