@@ -13,7 +13,7 @@ no-action or escalate. Full brief: https://hackspain.app/tracks/prosper-ai
 uv sync --all-groups        # Python 3.12+, uv 0.9+
 cp .env.example .env        # every key is optional; see "Modes" below
 make run                    # http://localhost:7860  (ws://localhost:7860/ws)
-make board                  # http://localhost:8080  ops ·  http://localhost:8080/wall  jury
+make board                  # http://localhost:8080/wall  Live (jury) · /  Calls (team) · /call/<id>
 make smoke                  # in-process WebSocket test: connected/start/media/stop
 make call                   # dial the running server with 1 fake call
 make call N=10              # ... with 10 concurrent fake calls
@@ -78,6 +78,24 @@ the default alternate gives ElevenLabs Spanish and Google ca/gl/eu.
 
 STT is Soniox `stt-rt-v5` throughout: language identification on, clinic
 vocabulary boosted, `SONIOX_API_KEY` and `SONIOX_STT_MODEL`.
+## The console
+
+`make board` serves the clinic console. Team pages (`VORTEX_OPS_PASSWORD` in
+production) sit behind a sidebar:
+
+| Page | What it shows |
+| --- | --- |
+| `/` Overview | today's numbers, agents on duty, what needs a person, recent calls |
+| `/agents`, `/agents/<slug>` | the Scheduling agent (real) and four roadmap agents marked Preview |
+| `/calls`, `/calls/live` | every call with "why not booked", and the call in progress |
+| `/patients` | everyone who called, with their last outcome |
+| `/insights` | refusal reasons, handle times, tool latency, calls by hour |
+| `/settings`, `/settings/rules`, `/settings/integrations`, `/settings/engineering` | sites, doctors, rules and the insurance matrix from the clinic API; providers; evals |
+
+Public pages for the jury: `/wall` (the projector view) and `/call/<id>` (one
+call, shareable). Phone numbers are masked there. The board reads calls from
+the line at `VORTEX_LINE_URL`. Every screen follows `DESIGN.md`.
+
 ## Design
 
 Every screen (the jury wall, the ops board, the docs pages, `/mic`, the evals
@@ -94,6 +112,27 @@ make test                   # tests/test_design.py fails when the copy is stale
 ```
 
 Before you add a colour, a font or a shadow, read `DESIGN.md`. The answer is no.
+
+## Which model for which job — the bench
+
+Every candidate model plays the same scripted calls through the real prompt
+and the real tools; every run is kept; the page shows the routing the line
+runs today next to what the numbers say.
+
+**https://jferreiros.github.io/vortex/bench.html**
+
+```bash
+make bench                     # every default model with a key (evals/bench/models.yaml)
+make bench K=3 ONLY=p4.        # pass^3 on one problem
+make bench-publish             # keep it: push the run to the bench-results branch
+make bench-discord             # tell the team
+```
+
+The routing is one variable per role: `LLM_PROVIDER`/`LLM_MODEL` for the
+receptionist, `ARBITER_PROVIDER`/`ARBITER_MODEL` for the arbiter,
+`LLM_<ROLE>_PROVIDER`/`LLM_<ROLE>_MODEL` for anything new. `vortex/models.py`
+resolves them; the bench measures through the same resolver. Details in
+`docs/evals.md`, "Layer 5".
 
 ## The board — what to do next
 
@@ -118,6 +157,14 @@ make tasks                  # create what is missing, update what changed
 It matches issues by the `[T14]` prefix, so running it twice is safe. It never
 closes an issue and never touches an assignee: who took a task is decided in
 GitHub, not in a file.
+
+## Research
+
+`docs/research/` holds the September 2026 survey of the voice-agent market:
+noise filters, STT vendors, turn detection, industry launches, structured-data
+libraries and the Google/TTS stack. Start at
+[`docs/research/README.md`](docs/research/README.md): it ranks the moves by
+points per hour and says what the repo already has.
 
 ## Who touches what
 
@@ -175,9 +222,10 @@ and the transport can run a whole call tonight.
 - Offline: `FakeClinicClient` answers from `vortex/clinic/fixtures.py`. It
   mirrors the traps in the docs (near-miss surnames, a provider on leave, two
   patients with the same name). Add fixtures when your lane needs a new shape.
-- Live: set `PLATFORM_API_KEY` and `PLATFORM_API_BASE_URL`. `vortex/clinic/client.py`
-  has a `TODO(clinic)` to align field names with `/api/openapi.json` once a
-  key exists; the docs' prose is the only source today.
+- Live: set `PLATFORM_API_KEY` and `PLATFORM_API_BASE_URL`. `vortex/clinic/client.py`,
+  `vortex/contract.py` and the fixtures follow `docs/api/openapi.json`, the
+  platform's own spec. `make try-api` hits every read endpoint and saves each
+  raw response under `api_results/`, so a field-name drift shows up in minutes.
 
 ## Tunnel and endpoint
 

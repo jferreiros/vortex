@@ -1,4 +1,4 @@
-.PHONY: install run smoke test call try-api tunnel tail lint fmt board design-sync evals evals-logic evals-conversation evals-voice evals-report evals-accept evals-selftest evals-discord
+.PHONY: install run smoke test call try-api tunnel tail lint fmt board design-sync rehearse evals evals-logic evals-conversation evals-voice evals-report evals-accept evals-selftest evals-discord
 
 PORT ?= 7860
 BOARD_PORT ?= 8080
@@ -33,6 +33,10 @@ tunnel:
 
 tail:
 	tail -f logs/calls.jsonl
+
+rehearse:         ## text rehearsal of the prompt against the real LLM: ONLY=p1|p4|p6, ARGS=--verbose
+	VORTEX_CLINIC_MODE=fake uv run python scripts/rehearse_text.py \
+	  $(if $(ONLY),--only $(ONLY),) $(ARGS)
 
 lint:
 	uv run ruff check .
@@ -81,6 +85,18 @@ evals-selftest:   ## the harness tests itself
 
 evals-discord:    ## post the latest summary.json to #github (needs DISCORD_WEBHOOK_URL)
 	scripts/notify-discord.sh --evals
+
+# ---- bench (layer 5, see docs/evals.md) ------------------------------------
+.PHONY: bench bench-publish bench-discord
+
+bench:            ## every candidate model on the layer-2 scenarios; MODELS=a,b K=repeats ONLY= MAX_EUR= PAID=1
+	uv run python -m evals bench $(if $(MODELS),--models $(MODELS),) --repeat $(or $(K),1) $(if $(ONLY),--only $(ONLY),) --max-eur $(or $(MAX_EUR),1.00) $(if $(PAID),--include-paid,) $(if $(C),--concurrency $(C),)
+
+bench-publish:    ## push the latest run of every layer to the bench-results branch; ARGS=--dry-run
+	uv run python -m evals publish $(ARGS)
+
+bench-discord:    ## post the latest bench run to Discord (needs DISCORD_WEBHOOK_URL)
+	scripts/notify-discord.sh --bench
 
 # ---- task board (see docs/tasks.json) --------------------------------------
 .PHONY: tasks

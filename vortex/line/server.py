@@ -24,6 +24,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse
 from vortex.line import twilio
 from vortex.line.session import CallSession
 from vortex.observability.calllog import group_by_call, read_recent
+from vortex.observability.tracing import trace_call
 from vortex.settings import Settings, get_settings
 
 log = logging.getLogger("vortex.line")
@@ -83,26 +84,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         session = CallSession.open(start, settings=settings, now=connected_at)
         log.info("call %s started (stream %s)", session.call_id, session.stream_sid)
         reason = "error"
-        try:
-            if settings.voice_is_pipecat:
-                from vortex.line.pipecat_voice import run_pipecat_call
+        with trace_call(session):
+            try:
+                if settings.voice_is_pipecat:
+                    from vortex.line.pipecat_voice import run_pipecat_call
 
-                reason = await run_pipecat_call(ws, session)
-            else:
-                from vortex.line.stub_voice import run_stub_call
+                    reason = await run_pipecat_call(ws, session)
+                else:
+                    from vortex.line.stub_voice import run_stub_call
 
-                reason = await run_stub_call(ws, session)
-        except WebSocketDisconnect:
-            reason = "disconnect"
-        except Exception:
-            log.exception("call %s crashed", session.call_id)
-            session.ctx.log.event("call.crashed")
-            reason = "crashed"
-        finally:
-            # The submission window is still open for 30 s after the socket
-            # closes. close() submits the fallback if nothing went out.
-            await session.close(reason=reason)
-            log.info("call %s ended (%s)", session.call_id, reason)
+                    reason = await run_stub_call(ws, session)
+            except WebSocketDisconnect:
+                reason = "disconnect"
+            except Exception:
+                log.exception("call %s crashed", session.call_id)
+                session.ctx.log.event("call.crashed")
+                reason = "crashed"
+            finally:
+                # The submission window is still open for 30 s after the socket
+                # closes. close() submits the fallback if nothing went out.
+                await session.close(reason=reason)
+                log.info("call %s ended (%s)", session.call_id, reason)
 
     return app
 

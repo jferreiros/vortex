@@ -13,6 +13,7 @@ dependencies = [
     "python-dotenv>=1.0",
     "pipecat-ai[deepgram,google,websocket]>=1.11,<2",
     "nicegui>=2.22",
+    "langfuse>=4.15.4",
 ]
 
 [dependency-groups]
@@ -36,6 +37,8 @@ packages = ["vortex"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# nicegui.testing.User loads this file to register the console pages.
+main_file = "vortex/observability/live.py"
 
 [tool.ruff]
 line-length = 100

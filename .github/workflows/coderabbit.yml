@@ -20,6 +20,7 @@ concurrency:
 permissions:
   contents: read
   pull-requests: write   # the review comment
+  issues: write          # one issue per major finding
 
 jobs:
   review:
@@ -130,6 +131,14 @@ jobs:
             gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -F body=@comment.md > /dev/null
             echo "Posted a new comment"
           fi
+
+      - name: File every major finding as an issue
+        if: steps.key.outputs.present == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python scripts/ci/coderabbit_issues.py review.txt \
+            --pr "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Report the CLI result (advisory)
         if: steps.key.outputs.present == 'true' && steps.review.outputs.status != '0'

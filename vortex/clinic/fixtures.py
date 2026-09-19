@@ -412,9 +412,34 @@ RESTRICTIONS: list[dict[str, str]] = [
     },
 ]
 
+#: The two plan rules the catalogue cannot express. ``ClinicPlanResponse`` has
+#: no referral or allowance field, so on a live call these reach us only as
+#: ``/availability``'s ``blocked[].restriction``. The fake answers the same way:
+#: a provider these tables stop is listed in ``blocked`` with the restriction
+#: id, and none of their slots are offered.
+#:
+#: A plan that demands its own referral for a specialty, on top of anything the
+#: specialty itself asks. Orthopaedics needs none, so here the plan's rule is
+#: the only one that can bite. A referral on the record for that specialty
+#: satisfies it.
+PLAN_REFERRALS: list[dict[str, str]] = [
+    {
+        "insurer": "mapfre",
+        "specialty_id": "orthopaedics",
+        "restriction": "insurer_referral_required",
+    },
+]
+
+#: A plan a patient has used up for the year. The visits that spent it are not
+#: in ``APPOINTMENTS`` on purpose: the platform's history is older than this
+#: year, so nothing we can read disagrees with the plan's own count.
+EXHAUSTED_ALLOWANCES: list[dict[str, str]] = [
+    {"patient_id": "P00301", "insurer": "caser", "restriction": "allowance_exhausted"},
+]
+
 CLINIC: dict[str, Any] = {
     "clinic_name": "Clínica Arenal (fixtures)",
-    "patient_count": 4,
+    "patient_count": 6,
     "calendar": {
         "starts": "2026-09-07",
         "ends": "2026-10-16",
@@ -433,6 +458,74 @@ CLINIC: dict[str, Any] = {
 
 #: ``PatientMatchOut``. Note what is *not* here: the directory returns no email.
 PATIENTS: list[dict[str, Any]] = [
+    # The published problem 5 ("when exactly") personas, so a scenario can name
+    # them and the agent can look them up. Identity is incidental here; the day
+    # the caller says is the whole point of every one of these records.
+    {
+        "patient_id": "P00001",
+        "given_name": "Josefa",
+        "first_surname": "Domínguez",
+        "second_surname": "Navarro",
+        "national_id": "48064716Y",
+        "date_of_birth": "2001-09-19",
+        "phone": "711330529",
+        "sex": "F",
+        "has_visited_before": True,
+        "insurer": "mapfre",
+        "referrals": [],
+        "note": "Fake record. Published case: general practice tomorrow.",
+        "match_score": 1.0,
+        "matched_fields": ["name"],
+    },
+    {
+        "patient_id": "P00005",
+        "given_name": "Ignacio",
+        "first_surname": "Vázquez",
+        "second_surname": "Moreno",
+        "national_id": "65699248R",
+        "date_of_birth": "1939-12-09",
+        "phone": "731169716",
+        "sex": "M",
+        "has_visited_before": True,
+        "insurer": "cigna",
+        "referrals": [],
+        "note": "Fake record. Published cases: orthopaedics Thursday, general practice Saturday.",
+        "match_score": 1.0,
+        "matched_fields": ["name"],
+    },
+    {
+        "patient_id": "P00011",
+        "given_name": "Chloe",
+        "first_surname": "Roberts",
+        "second_surname": "Smith",
+        "national_id": "Z4237244M",
+        "date_of_birth": "1996-09-01",
+        "phone": "708729566",
+        "sex": "F",
+        "has_visited_before": True,
+        "insurer": "mapfre",
+        "referrals": [],
+        "note": "Fake record. Published case: general practice at Centro this coming Sunday.",
+        "match_score": 1.0,
+        "matched_fields": ["name"],
+    },
+    {
+        # Never seen: the published answer for her is a first_visit, not a review.
+        "patient_id": "P00012",
+        "given_name": "Amelia",
+        "first_surname": "Hughes",
+        "second_surname": "White",
+        "national_id": "13309713G",
+        "date_of_birth": "1981-04-08",
+        "phone": "712676131",
+        "sex": "F",
+        "has_visited_before": False,
+        "insurer": "sanitas",
+        "referrals": [],
+        "note": "Fake record. Published case: first thing Monday the twelfth of October.",
+        "match_score": 1.0,
+        "matched_fields": ["name"],
+    },
     {
         "patient_id": "P00042",
         "given_name": "Marta",
@@ -495,6 +588,59 @@ PATIENTS: list[dict[str, Any]] = [
         "insurer": "dkv",
         "referrals": ["dermatology"],
         "note": "Fake record. Hard of hearing; speak slowly. Holds a dermatology referral.",
+        "match_score": 1.0,
+        "matched_fields": ["name"],
+    },
+    {
+        # Her plan demands its own referral for orthopaedics (PLAN_REFERRALS).
+        "patient_id": "P00300",
+        "given_name": "Carmen",
+        "first_surname": "Delgado",
+        "second_surname": "Soto",
+        "national_id": "45678912S",
+        "date_of_birth": "1970-05-05",
+        "phone": "611222333",
+        "sex": "F",
+        "has_visited_before": True,
+        "insurer": "mapfre",
+        "referrals": [],
+        "note": "Fake record. Seen once by Dra. Ortiz at Arenal Norte.",
+        "match_score": 1.0,
+        "matched_fields": ["name"],
+    },
+    {
+        # His plan is out of visits for the year (EXHAUSTED_ALLOWANCES).
+        "patient_id": "P00301",
+        "given_name": "Rafael",
+        "first_surname": "Moreno",
+        "second_surname": "Vidal",
+        "national_id": "78912345N",
+        "date_of_birth": "1966-08-14",
+        "phone": "622333444",
+        "sex": "M",
+        "has_visited_before": True,
+        "insurer": "caser",
+        "referrals": [],
+        "note": "Fake record. Regular at Arenal Centro. Prefers mornings.",
+        "match_score": 1.0,
+        "matched_fields": ["name"],
+    },
+    {
+        # Problem 17 (second policy): ASISA never covers Sur, the physiotherapist's
+        # only site. The API carries one plan per patient; a second one exists only
+        # if the caller names it, which is what this fixture is here to exercise.
+        "patient_id": "P00250",
+        "given_name": "Elena",
+        "first_surname": "Molina",
+        "second_surname": "Torres",
+        "national_id": "23456789D",
+        "date_of_birth": "1979-05-04",
+        "phone": "677111222",
+        "sex": "F",
+        "has_visited_before": True,
+        "insurer": "asisa",
+        "referrals": [],
+        "note": "Fake record. On ASISA only on file; holds Sanitas too but never volunteers it.",
         "match_score": 1.0,
         "matched_fields": ["name"],
     },

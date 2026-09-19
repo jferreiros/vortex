@@ -12,15 +12,21 @@ restrictions one for one: whatever bit, there is a value for it.
 Where each answer comes from:
 
 - ``check_eligibility`` reads ``/availability``'s ``blocked`` for anything about
-  a particular doctor, and derives the rest from the catalogue records
-  themselves (see ``rules/eligibility.py``). It never guesses: every refusal is
-  a field on a published record.
+  a particular doctor and for the two plan rules ``/clinic`` never publishes
+  (its own referral, its yearly allowance), and derives the rest from the
+  catalogue records themselves (see ``rules/eligibility.py``). It never
+  guesses: every refusal is a field on a published record or a restriction id
+  the platform named.
 - ``triage`` is a lookup on the published symptom table (``rules/triage.py``).
   Red flags escalate and book nothing.
 - ``nearest_location`` measures straight-line distance to the published
   coordinates, among the sites that can serve the request (``rules/geo.py``).
 - ``find_provider`` matches a spoken name against the catalogue, and reports
   the near-miss pairs as ambiguous rather than picking one.
+- ``clinic_facts`` answers the caller's questions about the clinic itself -
+  which site opens on a Saturday, who sits at Norte, is there a site in Getafe
+  - off the catalogue (``rules/facts.py``). The caller books on the answer, so
+  it is never given from memory.
 
 A refusal carrying one of the five *insurance* reasons is the signal for
 problem 17: the plan on file will not cover this, and the caller may hold a
@@ -42,6 +48,8 @@ from vortex.contract import (
     BlockedProvider,
     Catalogue,
     CheckEligibilityInput,
+    ClinicFacts,
+    ClinicFactsInput,
     DeclineReason,
     EligibilityVerdict,
     FindProviderInput,
@@ -56,7 +64,7 @@ from vortex.contract import (
     recall_patient,
     remember_patient,
 )
-from vortex.rules import eligibility, geo
+from vortex.rules import eligibility, facts, geo
 from vortex.rules import triage as triage_table
 
 _TITLES = {"dr", "dra", "d", "doctor", "doctora"}
@@ -78,6 +86,11 @@ INSURANCE_REASONS: frozenset[str] = frozenset(
     }
 )
 
+#: The two of them that stop the plan, not a doctor. ``/availability`` names
+#: them on whichever provider it was asked about, but no other provider in the
+#: specialty escapes them, so there is nobody to redirect to.
+_PLAN_WIDE_REASONS: frozenset[str] = frozenset({"insurer_referral_required", "allowance_exhausted"})
+
 
 def _name_tokens(name: str) -> set[str]:
     """Lower-cased, accent-folded, title-stripped tokens — for surname matching."""
@@ -95,8 +108,8 @@ PATIENT_MISSES_KEY = "rules.patient_misses"
 #: there is one, still comes from ``/availability``; this says which rules did
 #: not get a chance to speak.
 NO_RECORD_NOTE = (
-    "no directory record for this patient on this call: age, referral and "
-    "allowance rules stood down and /availability answered alone"
+    "no directory record for this patient on this call: age and referral "
+    "rules stood down and /availability answered alone"
 )
 
 
@@ -143,16 +156,6 @@ async def _patient(ctx: ToolContext, patient_id: str) -> PatientRecord | None:
     return record
 
 
-async def _visits_this_year(ctx: ToolContext, patient_id: str) -> int | None:
-    """Visits billed this calendar year, for a plan with a yearly allowance."""
-    try:
-        appointments = await ctx.clinic.appointments(patient_id, when="all")
-    except Exception:  # noqa: BLE001
-        return None
-    year = ctx.now.astimezone(MADRID).year
-    return sum(1 for a in appointments if a.start.astimezone(MADRID).year == year)
-
-
 def _blocked_reason(
     availability: AvailabilityResponse, provider_id: str | None
 ) -> BlockedProvider | None:
@@ -173,11 +176,23 @@ def _blocked_reason(
 
 
 def _redirect(
-    catalogue: Catalogue, args: CheckEligibilityInput, blocked: BlockedProvider, plan
+    catalogue: Catalogue,
+    args: CheckEligibilityInput,
+    availability: AvailabilityResponse,
+    blocked: BlockedProvider,
+    plan,
 ) -> list:
-    """Who else could take the request the blocked provider cannot."""
+    """Who else could take the request the blocked provider cannot.
+
+    Everyone ``/availability`` stopped is out, not only the one reported: a
+    plan rule (its own referral, its allowance) stops every candidate at once,
+    and a redirect list naming them would send the caller to the same refusal.
+    """
+    if blocked.reason in _PLAN_WIDE_REASONS:
+        return []
     blocked_ids = {args.provider_id} if args.provider_id else set()
     blocked_ids.add(blocked.provider_id)
+    blocked_ids.update(b.provider_id for b in availability.blocked)
     specialty = args.specialty_id
     if not specialty:
         named = next((p for p in catalogue.providers if p.provider_id == blocked.provider_id), None)
@@ -217,6 +232,9 @@ async def check_eligibility(ctx: ToolContext, args: CheckEligibilityInput) -> El
        whatever their insurer says.
     2. **What /availability says** in ``blocked``. The live API is the authority
        on its own doctors, so its wording wins for anything provider-shaped.
+       It is also the *only* source for the two plan rules the catalogue has no
+       field for, ``insurer_referral_required`` and ``allowance_exhausted``:
+       the restriction id is submitted as-is, never derived.
     3. **The provider's own rules**, derived, for when the API did not answer —
        offline, or a request too vague for it to refuse.
     4. Slots, or ``no_availability`` when the calendar is simply full.
@@ -233,10 +251,6 @@ async def check_eligibility(ctx: ToolContext, args: CheckEligibilityInput) -> El
     note = "" if patient else NO_RECORD_NOTE
     plan = eligibility.resolve_plan(catalogue, patient, args.insurer)
 
-    visits = None
-    if plan is not None and plan.yearly_allowance is not None:
-        visits = await _visits_this_year(ctx, args.patient_id)
-
     verdict = eligibility.check_patient_rules(
         catalogue,
         patient,
@@ -244,7 +258,6 @@ async def check_eligibility(ctx: ToolContext, args: CheckEligibilityInput) -> El
         location_id=args.location_id,
         plan=plan,
         today=today,
-        visits_this_year=visits,
     )
     if verdict:
         return _noted(_refuse(verdict.reason, verdict.detail, verdict.redirect_to), note)
@@ -265,7 +278,7 @@ async def check_eligibility(ctx: ToolContext, args: CheckEligibilityInput) -> El
             _refuse(
                 blocked.reason,
                 blocked.detail or "the clinic's availability named this rule",
-                _redirect(catalogue, args, blocked, plan),
+                _redirect(catalogue, args, availability, blocked, plan),
             ),
             note,
         )
@@ -390,3 +403,16 @@ async def find_provider(ctx: ToolContext, args: FindProviderInput) -> ProviderMa
             rejection=Rejection(reason="provider_on_leave", detail=on_leave.reason),
         )
     return ProviderMatch(status="found", provider=provider)
+
+
+async def clinic_facts(ctx: ToolContext, args: ClinicFactsInput) -> ClinicFacts:
+    """Which sites, who sits where, when a site opens - from the catalogue.
+
+    Problem 16 is scored on the booking made after the answer: tell a caller
+    Norte opens on Saturday and they ask for Norte on Saturday, which no tool
+    can book. So the answer is the catalogue's, filtered to what they asked,
+    and the site ids in it are the ids ``find_slots`` then takes.
+    """
+    catalogue = await ctx.clinic.catalogue()
+    today = ctx.now.astimezone(MADRID).date()
+    return facts.answer(catalogue, args, today)
