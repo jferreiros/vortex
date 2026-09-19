@@ -499,6 +499,43 @@ class CallSession:
         if memory.prepared is not None:
             self._spawn(self.submit_confirmed_prepared("affirmation"))
 
+    def accept_refusal(self, why: str) -> None:
+        """The caller accepted a rule that already bit. Do not ask again.
+
+        Call ``6d537b3a``: eligibility refused, they said "Ah, I see", and the
+        model asked about another policy until they hung up. The refusal was
+        already the ending. A booking still on the table is not this path.
+        """
+        memory = self.memory
+        if self.has_accepted_submission:
+            return
+        if memory.prepared is not None or memory.last_rejection is None:
+            return
+        self.ctx.log.event(
+            "refusal.accepted",
+            why=why,
+            reason=memory.last_rejection.reason,
+            tool=memory.last_rejection_tool,
+        )
+        self._spawn(self.submit_accepted_refusal())
+
+    async def submit_accepted_refusal(self) -> SubmitResult | None:
+        """Send the stored refusal once, the moment the caller accepted it."""
+        memory = self.memory
+        if self.has_accepted_submission or memory.last_rejection is None:
+            return None
+        if memory.prepared is not None:
+            return None
+        action = with_verdict_reason(self.ctx, refusal_for(memory.last_rejection.reason))
+        if action in self.sent_actions:
+            return None
+        self.ctx.log.event(
+            "submit.on_refusal_accepted",
+            reason=memory.last_rejection.reason,
+            route=action_route(action),
+        )
+        return await self.submit(action)
+
     async def submit_confirmed_prepared(self, trigger: str) -> SubmitResult | None:
         """Send the prepared action the caller has agreed to, once.
 
