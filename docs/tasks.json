@@ -1115,14 +1115,6 @@
       "why": "El jurado nos llama en directo el domingo a las 11:00. Buscar una pestaña delante de ellos gasta la mitad del tiempo que tenemos."
     },
     {
-      "id": "T62", "wave": "w6", "lane": "linea", "kind": "voz",
-      "title": "Voz · Probar AICFilter (ai-coustics, 8 kHz nativo) detrás del bench",
-      "problems": [12, 18], "weight": 5, "size": "2 h", "blocked_by": ["T54"],
-      "files": ["vortex/line/pipecat_voice.py", "vortex/line/aic_filter.py", "pyproject.toml"],
-      "done": "`pipecat-ai[aic]` con `quail-ms-l-8khz` en `audio_in_filter`, tras una variable de entorno. Se activa solo si el CER por entidad de T54 baja con el filtro; si no, queda apagado y documentado.",
-      "why": "Los denoisers genéricos empeoran el WER (paper dic 2025, 40/40 configuraciones); los entrenados para ASR prometen 30-46 %. Solo la medida decide. Ver docs/research/01-noise-suppression.md."
-    },
-    {
       "id": "T55",
       "wave": "w6",
       "lane": "conv",
@@ -1185,7 +1177,25 @@
       "why": "El reto 4 falla con un carácter mal. Hoy no hay ningún mapeador de formas habladas en vortex/. Las librerías están probadas en docs/research/05-structured-data.md."
     },
     {
-<<<<<<< HEAD
+      "id": "T64",
+      "wave": "w6",
+      "lane": "linea",
+      "kind": "voz",
+      "title": "Voz · Gemini-TTS para catalán en lugar de ca-ES-Standard-B",
+      "problems": [
+        11
+      ],
+      "weight": 3,
+      "size": "1 h",
+      "blocked_by": [],
+      "files": [
+        "vortex/settings.py",
+        "vortex/line/pipecat_voice.py"
+      ],
+      "done": "GeminiTTSService con gemini-2.5-flash-tts habla ca/gl/eu; Standard-B queda tras GOOGLE_TTS_STANDARD_FALLBACK. Comparado a oído por Twilio con dos frases.",
+      "why": "Chirp 3 HD no tiene catalán. El scorer no nos oye, pero el jurado sí. Ver docs/research/06-google-and-tts.md."
+    },
+    {
       "id": "T65",
       "wave": "w6",
       "lane": "linea",
@@ -1204,25 +1214,38 @@
       ],
       "done": "Con soniox_turn_detection=False, LocalSmartTurnAnalyzerV3 (stop_secs=2.0, VAD stop_secs=0.2) frente al modo Soniox sobre los clips de id y corrección. Gana el que corte menos turnos a medias.",
       "why": "Smart Turn v3.2 viene con pipecat 1.11, soporta español, remuestrea 8 kHz solo y es más robusto al ruido. Espera a #128. Ver docs/research/03-turn-detection.md."
-=======
-      "id": "T64",
+    },
+    {
+      "id": "T66",
+      "wave": "w6",
+      "lane": "todos",
+      "kind": "voz",
+      "title": "Voz · Rama demo con Gemini 3.8 Live (speech-to-speech) y las mismas tools",
+      "problems": [],
+      "weight": 0,
+      "size": "medio día",
+      "blocked_by": [],
+      "files": [
+        "vortex/line/"
+      ],
+      "done": "Una rama enseña una llamada por GeminiLiveLLMService con las tools de vortex. Se enseña al jurado; no se puntúa con ella.",
+      "why": "GA el 15 sep 2026, 99 idiomas con ca/gl/eu, tool calling asíncrono. Los modelos S2S siguen por debajo del 52 % en tareas agénticas, así que la cascada se queda para puntuar. Ver docs/research/04-industry-2025-2026.md y 06-google-and-tts.md."
+    },
+    {
+      "id": "T61",
       "wave": "w6",
       "lane": "linea",
       "kind": "voz",
-      "title": "Voz · Gemini-TTS para catalán en lugar de ca-ES-Standard-B",
-      "problems": [
-        11
-      ],
-      "weight": 3,
-      "size": "1 h",
+      "title": "Voz · Una muletilla al empezar cada tool call",
+      "problems": [],
+      "weight": 0,
+      "size": "30 min",
       "blocked_by": [],
       "files": [
-        "vortex/settings.py",
         "vortex/line/pipecat_voice.py"
       ],
-      "done": "GeminiTTSService con gemini-2.5-flash-tts habla ca/gl/eu; Standard-B queda tras GOOGLE_TTS_STANDARD_FALLBACK. Comparado a oído por Twilio con dos frases.",
-      "why": "Chirp 3 HD no tiene catalán. El scorer no nos oye, pero el jurado sí. Ver docs/research/06-google-and-tts.md."
->>>>>>> origin/main
+      "done": "En on_function_calls_started se habla una frase corta por idioma vía TTSSpeakFrame, menos de 1 s de audio. No dispara la barrera de palabras ni el idle.",
+      "why": "deepseek-v4-flash tarda 1,3 s p50. Las muletillas suben la respuesta percibida sin bajar la latencia y pipecat las trata como habla del bot. Ver docs/research/03-turn-detection.md."
     }
   ]
 }
