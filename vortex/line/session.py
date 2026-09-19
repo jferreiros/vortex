@@ -187,6 +187,14 @@ class CallMemory:
     # survives a re-prepare of the same plan: the caller often says yes before
     # the model draws the action up again.
     confirmed: bool = False
+    # Every action the platform has taken for this call, with the lock that
+    # keeps checking it and sending one indivisible. Two paths reach the wire -
+    # the session's own send on the caller's yes and the model's
+    # ``submit_action``, which the prompt has it call in the same turn as
+    # ``prepare_*`` - and the platform must not be posted one action twice.
+    # Read and written in ``vortex/line/submit.py``.
+    accepted_actions: list[Action] = field(default_factory=list)
+    submit_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     @classmethod
     def of(cls, ctx: ToolContext) -> CallMemory:
@@ -502,9 +510,9 @@ class CallSession:
 
         This does not arm the hangup. The call may still have a second thing to
         do (a cancel and a booking are two actions), and the caller has not been
-        said goodbye to yet; the model's own ``submit_action`` - a duplicate of
-        this one, which the platform answers 409 - is what ends the call, as it
-        did before.
+        said goodbye to yet; the model's own ``submit_action`` - which finds
+        this action already held, is answered 409 without a second POST, and
+        arms the hangup on it - is what ends the call, as it did before.
         """
         memory = self.memory
         action = memory.prepared

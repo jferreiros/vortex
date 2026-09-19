@@ -121,7 +121,21 @@ def with_verdict_reason(ctx: ToolContext, action: Action) -> Action:
 
 
 async def submit_action(ctx: ToolContext, args: SubmitInput) -> SubmitResult:
-    """The ``submit_action`` tool. Sends through the call's own submit client."""
+    """The ``submit_action`` tool. Sends through the call's own submit client.
+
+    One action, one POST. Every submission of the call ends here - the
+    session's own send the moment the caller agrees, and the model's
+    ``submit_action``, which the prompt has it call in the same turn as
+    ``prepare_*`` - so an action the platform already holds is answered with
+    the 409 the platform itself would answer, and nothing leaves. A second POST
+    is a second record, and a record the case does not accept loses the case.
+
+    Only what the platform took counts as held: an earlier send that came back
+    error, rejected or dry_run left nothing there, and the end-of-call fallback
+    is entitled to retry it.
+    """
+    from vortex.line.session import ACCEPTED_STATUSES, CallMemory  # late: session imports this
+
     if ctx.submitter is None:
         return SubmitResult(status="error", detail="no submitter on this call context")
     action = with_verdict_reason(ctx, args.action)
@@ -134,7 +148,18 @@ async def submit_action(ctx: ToolContext, args: SubmitInput) -> SubmitResult:
         )
     route = action_route(action)
     payload = action_payload(action, ctx.call_id)
-    ctx.log.event("submit.sent", route=route, payload=payload)
-    result = await ctx.submitter.submit(ctx.call_id, action)
+    memory = CallMemory.of(ctx)
+    async with memory.submit_lock:
+        if action in memory.accepted_actions:
+            ctx.log.event("submit.already_accepted", route=route, payload=payload)
+            return SubmitResult(
+                status="duplicate",
+                http_status=409,
+                detail="the platform already holds this action for this call",
+            )
+        ctx.log.event("submit.sent", route=route, payload=payload)
+        result = await ctx.submitter.submit(ctx.call_id, action)
+        if result.status in ACCEPTED_STATUSES:
+            memory.accepted_actions.append(action)
     ctx.log.action_submitted(route, payload, result)
     return result

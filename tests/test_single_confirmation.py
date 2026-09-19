@@ -268,6 +268,53 @@ async def test_the_same_action_never_goes_twice(offline_settings) -> None:
     assert len(sent(session)) == 1
 
 
+# ---- the model's own submit sends the same action -----------------------------
+#
+# The prompt closes a booking with "prepare_booking+submit_action" in one turn,
+# and by then the caller's yes has already sent that exact booking. Posting it
+# again puts a second record on the call, and a record the case does not accept
+# loses the case.
+
+
+async def test_the_models_submit_after_the_yes_posts_nothing_new(offline_settings) -> None:
+    session = make_session(offline_settings, "CA-model-after-yes")
+    session.confirm_prepared("caller affirmed: dale")
+    slot = await an_offered_slot(session)
+    prepared = await session.call_tool(
+        "prepare_booking",
+        {"patient_id": PATIENT, "slot": slot.model_dump(mode="json"), "policy_id": "sanitas"},
+    )
+    assert len(sent(session)) == 1
+
+    result = await session.call_tool(
+        "submit_action",
+        {"action": {"kind": "book", **prepared.action.model_dump(mode="json")}},
+    )
+
+    assert result.status == "duplicate"
+    assert len(sent(session)) == 1, "the platform already holds that booking"
+    assert session.hangup_armed, "the action is held and the model is done: end the call"
+    await session.close()
+    assert len(sent(session)) == 1, "and the fallback sends nothing on top of it"
+
+
+async def test_a_second_action_of_its_own_still_goes_out(offline_settings) -> None:
+    """Only the identical action is held. A cancel plus a booking is two records."""
+    session = make_session(offline_settings, "CA-model-two-actions")
+    session.memory.observe("prepare_booking", BookingResult(action=a_booking()))
+    session.memory.mark_confirmed()
+    assert await session.submit_confirmed_prepared("affirmation") is not None
+
+    await session.call_tool(
+        "submit_action", {"action": {"kind": "cancel", "appointment_id": "AP0001"}}
+    )
+
+    assert [route for route, _ in sent(session)] == [
+        "/api/v1/submit/book",
+        "/api/v1/submit/cancel",
+    ]
+
+
 # ---- the model is told the same thing ---------------------------------------
 
 
