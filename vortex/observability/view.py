@@ -56,6 +56,10 @@ class CallCard:
     slot: str | None = None
     decline_reason: str | None = None
     last_ts: str | None = None
+    #: The ``call.usage`` payload: what the STT, LLM and TTS providers metered
+    #: for this call. None when the call was logged before metering existed or
+    #: ran on the stub lane; ``pricing`` keeps those out of every average.
+    usage: dict[str, Any] | None = None
     events: list[dict[str, Any]] = field(default_factory=list)
 
     @property
@@ -276,6 +280,8 @@ def build_call(call_id: str, events: list[dict[str, Any]]) -> CallCard:
                 card.submit_status = result
             if isinstance(payload, dict) and payload.get("reason"):
                 card.decline_reason = str(payload["reason"])
+        elif kind == "call.usage":
+            card.usage = {k: v for k, v in event.items() if k not in {"ts", "call_id", "kind"}}
         elif kind == "call.ended":
             card.ended = True
             card.reason = event.get("reason")
