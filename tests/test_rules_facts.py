@@ -26,6 +26,23 @@ def test_only_centro_opens_on_a_saturday(catalogue):
     assert [s.location_id for s in facts.saturday_sites(catalogue)] == ["centro"]
 
 
+def test_pr01_schedule_includes_saturday_like_centro(catalogue):
+    """Published cases book PR01 on Saturday 19 Sep; her schedule must allow it.
+
+    FakeClinicClient opens slots from location hours, so a weekday-only
+    ``CENTRO_HOURS`` would pass offline while disagreeing with the catalogue.
+    """
+    from datetime import time
+
+    from vortex.contract import OpeningHours
+
+    pr01 = next(p for p in catalogue.providers if p.provider_id == "PR01")
+    saturday = [
+        hours for schedule in pr01.schedules for hours in schedule.hours if hours.weekday == 5
+    ]
+    assert saturday == [OpeningHours(weekday=5, opens=time(9, 0), closes=time(14, 0))]
+
+
 def test_no_site_opens_on_a_sunday(catalogue):
     assert all(not facts.opens_on(site, 6) for site in catalogue.locations)
 
