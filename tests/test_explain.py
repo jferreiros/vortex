@@ -220,3 +220,26 @@ def test_workflow_beats_follow_the_line_and_pulse_the_speaker() -> None:
     assert ended[-1].kind == "outcome"
     assert ended[-1].title == "Booked"
     assert all(not beat.speaking for beat in ended)
+
+
+def test_workflow_beats_fold_repeated_turns() -> None:
+    card = CallCard(call_id="CA-dup", from_number="+34600")
+    card.events = [
+        {"kind": "call.started", "ts": "t0", "from_number": "+34600"},
+        {"kind": "turn.assistant", "ts": "t1", "text": "Hello."},
+        {"kind": "turn.assistant", "ts": "t2", "text": "Hello."},
+        {"kind": "turn.user", "ts": "t3", "text": "Hi."},
+        {"kind": "turn.user", "ts": "t4", "text": "Hi."},
+    ]
+    card.turns = [
+        Turn("assistant", "Hello.", "t1"),
+        Turn("assistant", "Hello.", "t2"),
+        Turn("user", "Hi.", "t3"),
+        Turn("user", "Hi.", "t4"),
+    ]
+    kinds_and_text = [(beat.kind, beat.text) for beat in workflow_beats(card)]
+    assert kinds_and_text == [
+        ("start", "+34600 · inbound scheduling"),
+        ("agent", "Hello."),
+        ("patient", "Hi."),
+    ]

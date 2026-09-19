@@ -12,7 +12,7 @@ from dataclasses import dataclass, replace
 from statistics import median
 from typing import Any
 
-from vortex.observability.view import CallCard, ToolStep
+from vortex.observability.view import CallCard, ToolStep, Turn, fold_turns
 
 # ---------------------------------------------------------------------------
 # Vocabulary
@@ -490,7 +490,7 @@ def _finish_tool_beat(
 
 def _beats_from_turns_and_tools(card: CallCard) -> list[Beat]:
     beats: list[Beat] = []
-    for turn in card.turns:
+    for turn in fold_turns(list(card.turns)):
         if turn.role == "user":
             beats.append(Beat("patient", "Patient", turn.text, ts=turn.ts))
         else:
@@ -525,15 +525,42 @@ def workflow_beats(card: CallCard | None) -> list[Beat]:
         )
     ]
     pending: dict[str, int] = {}
+    speech = fold_turns(list(card.turns))
+    if not speech:
+        speech = fold_turns(
+            [
+                Turn(
+                    "user" if str(event.get("kind")) == "turn.user" else "assistant",
+                    str(event.get("text") or ""),
+                    event.get("ts") if isinstance(event.get("ts"), str) else None,
+                )
+                for event in card.events
+                if event.get("kind") in {"turn.user", "turn.assistant"}
+            ]
+        )
+    speech_i = 0
+
+    def flush_speech_until(limit: str | None) -> None:
+        nonlocal speech_i
+        while speech_i < len(speech):
+            turn = speech[speech_i]
+            if limit is not None and (turn.ts or "") > limit:
+                break
+            if turn.role == "user":
+                beats.append(Beat("patient", "Patient", turn.text, ts=turn.ts))
+            else:
+                beats.append(Beat("agent", "Agent", turn.text, ts=turn.ts))
+            speech_i += 1
+
     if card.events:
         for event in card.events:
             kind = str(event.get("kind") or "")
             ts = event.get("ts") if isinstance(event.get("ts"), str) else None
-            if kind == "turn.user":
-                beats.append(Beat("patient", "Patient", str(event.get("text") or ""), ts=ts))
-            elif kind == "turn.assistant":
-                beats.append(Beat("agent", "Agent", str(event.get("text") or ""), ts=ts))
-            elif kind == "tool.called":
+            if kind in {"turn.user", "turn.assistant"}:
+                continue
+            if kind in {"tool.called", "tool.returned", "tool.failed", "submit.result"}:
+                flush_speech_until(ts)
+            if kind == "tool.called":
                 name = str(event.get("tool") or "")
                 pending[name] = len(beats)
                 beats.append(
@@ -577,6 +604,7 @@ def workflow_beats(card: CallCard | None) -> list[Beat]:
                         dot="ok",
                     )
                 )
+        flush_speech_until(None)
     else:
         beats.extend(_beats_from_turns_and_tools(card))
 
