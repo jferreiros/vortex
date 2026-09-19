@@ -106,7 +106,7 @@ def load(settings: Any) -> VoiceConfig:
         return VoiceConfig()
     if not row:
         return VoiceConfig()
-    return _clean(dict(zip(("voice", "tone", "friendliness", "speech_rate"), row)))
+    return _clean(dict(zip(("voice", "tone", "friendliness", "speech_rate"), row, strict=True)))
 
 
 def save(settings: Any, data: dict[str, Any] | None) -> VoiceConfig:
