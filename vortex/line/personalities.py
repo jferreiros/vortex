@@ -353,6 +353,16 @@ def _params(person: Personality) -> dict[str, Any]:
     }
 
 
+def _mirror_personality(settings: Any, person: Personality) -> None:
+    try:
+        from database.remote import mirrors_file, safe_upsert
+
+        if mirrors_file(db_path(settings)):
+            safe_upsert("personalities", [_params(person)], "slug")
+    except Exception:
+        pass
+
+
 def _from_row(row: sqlite3.Row) -> Personality:
     return Personality(
         slug=row["slug"],
@@ -429,6 +439,7 @@ def update(settings: Any, slug: str, payload: dict[str, Any] | None) -> Personal
     stored = current.model_copy(update={**draft.model_dump(), "updated_at": _now()})
     with closing(_connect(settings)) as conn, conn:
         conn.execute(_INSERT, _params(stored))
+    _mirror_personality(settings, stored)
     return stored
 
 
@@ -461,6 +472,7 @@ def create(settings: Any, payload: dict[str, Any] | None) -> Personality:
     )
     with closing(_connect(settings)) as conn, conn:
         conn.execute(_INSERT, _params(person))
+    _mirror_personality(settings, person)
     return person
 
 
@@ -481,4 +493,7 @@ def activate(settings: Any, slug: str) -> Personality:
             "UPDATE personalities SET active = 1, updated_at = ? WHERE slug = ?", (now, slug)
         )
         row = conn.execute("SELECT * FROM personalities WHERE slug = ?", (slug,)).fetchone()
-    return _from_row(row)
+    stored = _from_row(row)
+    for person in list_all(settings):
+        _mirror_personality(settings, person)
+    return stored

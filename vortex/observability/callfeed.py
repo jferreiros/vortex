@@ -4,21 +4,24 @@ NiceGUI pages.
 
 Order of sources:
 
-1. ``GET {VORTEX_LINE_URL}/calls`` — the line's own API. Bounded by *calls*
+1. The hosted SQL log (Supabase) when ``SUPABASE_*`` is set *and* the
+   screen asks by date — Home and Insights. A board with no line volume
+   still draws the same cards the product tables already hold.
+2. ``GET {VORTEX_LINE_URL}/calls`` — the line's own API. Bounded by *calls*
    (``calls=60`` for the wall) or by start date (``since=<ISO>`` for the
    Insights window), never by an arbitrary event tail: a tail cut can split a
    call and drop its ``call.started``, which is what emptied Insights on the
-   live deployment while the log itself was healthy.
-2. The last good fetch for that scope — one slow or dropped request degrades
+   live deployment while the log itself was healthy. The live wall stays
+   here so an in-flight call shows before the hosted flush lands.
+3. The last good fetch for that scope — one slow or dropped request degrades
    to slightly-stale real data instead of an empty board.
-3. The local JSONL at ``calls_log_path``. In production that path is the
-   line's own volume mounted into the board (see deploy/compose.yml); locally
-   it is the file ``make run`` writes. Either way the fallback reads real
-   events, and the returned ``source`` block says which kind served.
+4. The hosted SQL log again, then the local JSONL at ``calls_log_path``.
+   In production that path is the line's own volume mounted into the board
+   (see deploy/compose.yml); locally it is the file ``make run`` writes.
 
-Every result carries a ``source`` dict (``line_api`` | ``cache`` |
-``jsonl_fallback``, plus the error that degraded it) so a screen can say
-"degraded" instead of silently showing zeros.
+Every result carries a ``source`` dict (``supabase`` | ``line_api`` |
+``cache`` | ``jsonl_fallback``, plus the error that degraded it) so a
+screen can say "degraded" instead of silently showing zeros.
 """
 
 from __future__ import annotations
@@ -77,6 +80,34 @@ def _source(scope: str, kind: str, events: list[dict[str, Any]], detail: str | N
     }
 
 
+def _from_hosted(
+    scope: str,
+    log_path: Path | None,
+    *,
+    since: datetime | None,
+    max_calls: int | None,
+) -> tuple[list[dict[str, Any]], None, dict] | None:
+    """Events from the hosted SQL log, or ``None`` when unused / empty."""
+    if log_path is None:
+        return None
+    try:
+        from vortex.observability import supabase_log
+
+        if not supabase_log.uses_this_log(log_path):
+            return None
+        remote = supabase_log.fetch_window(max_calls=max_calls, since=since)
+        if remote is None:
+            return None
+        grouped, _meta = remote
+        events = flatten_grouped(grouped)
+        if not events:
+            return None
+        return events, None, _source(scope, "supabase", events, None)
+    except Exception:
+        log.exception("hosted log fetch failed for %s", scope)
+        return None
+
+
 def load_events(
     scope: str = "recent",
     log_path: Path | None = None,
@@ -100,6 +131,16 @@ def load_events(
         params = {"since": since.isoformat()}
         timeout = LINE_INSIGHTS_TIMEOUT_S
 
+    # Home / Insights ask by date: the hosted tables are the shared store
+    # the line already dual-writes, so a board without the line volume
+    # still paints real cards.
+    if since is not None:
+        hosted = _from_hosted(scope, log_path, since=since, max_calls=None)
+        if hosted is not None:
+            if cache_ttl:
+                _scope_cache[scope] = (time.monotonic(), *hosted)
+            return hosted
+
     result: tuple[list[dict[str, Any]], dict[str, Any] | None, dict]
     try:
         health = httpx.get(f"{LINE_URL}/health", timeout=LINE_HEALTH_TIMEOUT_S).json()
@@ -118,15 +159,24 @@ def load_events(
             events, health = _last_good[scope]
             result = (events, health, _source(scope, "cache", events, detail))
         else:
-            grouped = {}
-            if log_path is not None:
-                grouped, _meta = (
-                    read_calls(log_path, since=since)
-                    if since is not None
-                    else read_calls(log_path, max_calls=WALL_CALLS)
-                )
-            events = flatten_grouped(grouped)
-            result = (events, None, _source(scope, "jsonl_fallback", events, detail))
+            hosted = _from_hosted(
+                scope,
+                log_path,
+                since=since,
+                max_calls=None if since is not None else WALL_CALLS,
+            )
+            if hosted is not None:
+                result = hosted
+            else:
+                grouped = {}
+                if log_path is not None:
+                    grouped, _meta = (
+                        read_calls(log_path, since=since)
+                        if since is not None
+                        else read_calls(log_path, max_calls=WALL_CALLS)
+                    )
+                events = flatten_grouped(grouped)
+                result = (events, None, _source(scope, "jsonl_fallback", events, detail))
 
     if cache_ttl:
         _scope_cache[scope] = (time.monotonic(), *result)
