@@ -92,8 +92,11 @@ def _load_events(
     *,
     since: datetime | None = None,
     cache_ttl: float = 0.0,
+    max_calls: int | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any] | None, dict]:
-    return callfeed.load_events(scope, _log_path(), since=since, cache_ttl=cache_ttl)
+    return callfeed.load_events(
+        scope, _log_path(), since=since, cache_ttl=cache_ttl, max_calls=max_calls
+    )
 
 
 def _parse_ts(value: str | None) -> datetime | None:
@@ -1012,6 +1015,13 @@ def wall_business_insights_api(days: int = 30) -> JSONResponse:
 #: how fast these aggregates move.
 ANALYTICS_CACHE_TTL_S = 120.0
 ANALYTICS_WINDOWS = (7, 30, 90)
+#: How many calls one build reads. Bounded on purpose: the whole log is
+#: ~32k events and 13 MB, which the hosted project cannot aggregate inside
+#: its statement timeout, so an unbounded read fails and falls back to the
+#: container's local file — every screen then shows one container's calls.
+#: 250 calls is one request, a few seconds, and far more than any
+#: percentile on this page needs. The page says the number out loud.
+ANALYTICS_MAX_CALLS = 250
 _analytics_cache: dict[int, tuple[float, dict[str, Any]]] = {}
 #: One lock per window rather than one lock for all of them — a slow 90-day
 #: build must not stall a 7-day request. Also what a cold-path request and
@@ -1110,7 +1120,10 @@ def _build_analytics(days: int) -> dict[str, Any]:
     now = datetime.now(UTC)
     cutoff = now - timedelta(days=days)
     events, _health, source = _load_events(
-        f"analytics:{days}", since=cutoff, cache_ttl=ANALYTICS_CACHE_TTL_S
+        f"analytics:{days}",
+        since=cutoff,
+        cache_ttl=ANALYTICS_CACHE_TTL_S,
+        max_calls=ANALYTICS_MAX_CALLS,
     )
     cards = build_calls(events)
     in_range = [c for c in cards if (started := _card_started(c)) and started >= cutoff]
