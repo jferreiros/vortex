@@ -27,6 +27,9 @@ elif [[ "${1:-}" == "--bench" ]]; then
 elif [[ "${1:-}" == "--json" ]]; then
   mode="json"
   shift
+elif [[ "${1:-}" == "--calls" ]]; then
+  mode="calls"
+  shift
 fi
 
 export DISCORD_WEBHOOK_URL
@@ -46,12 +49,18 @@ if mode in ("evals", "bench"):
     if mode == "bench":
         args.append("--bench")
     payload = json.loads(subprocess.check_output(args, cwd=root))
+elif mode == "calls":
+    args = ["uv", "run", "python", "-m", "vortex.observability.discord_calls", "--json"]
+    log_path = os.environ.get("TEXT") or ""
+    if log_path:
+        args.extend(["--log", log_path])
+    payload = json.loads(subprocess.check_output(args, cwd=root))
 elif mode == "json":
     payload = json.loads(sys.stdin.read())
 else:
     text = os.environ.get("TEXT") or ""
     if not text:
-        sys.stderr.write("usage: notify-discord.sh [--evals | --bench | --json | <message>]\n")
+        sys.stderr.write("usage: notify-discord.sh [--evals | --bench | --calls | --json | <message>]\n")
         sys.exit(2)
     payload = {"username": "Vortex", "content": text[:1900]}
 
