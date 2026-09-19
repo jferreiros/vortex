@@ -234,6 +234,21 @@ async def run_all(
     started = time.monotonic()
     log_dir = results_dir / "conversation" / "calls"
     for scenario in scenarios:
+        if brain_name == "rules" and "multi-action" in scenario.tags:
+            run.cases.append(
+                CaseResult(
+                    id=scenario.id,
+                    name=scenario.name,
+                    status="skipped",
+                    problem=scenario.problem,
+                    group=scenario.group,
+                    tags=list(scenario.tags),
+                    details=[
+                        "rules brain submits one intent per call; problem 18 needs --brain model"
+                    ],
+                )
+            )
+            continue
         run.cases.append(await play(scenario, brain_name, log_dir, repeat, **kwargs))
     run.duration_ms = int((time.monotonic() - started) * 1000)
     run.cost_eur = sum(c.cost_eur for c in run.cases)
