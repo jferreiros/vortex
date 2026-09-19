@@ -844,10 +844,17 @@ def _CallLogObserver(  # noqa: N802 - factory that returns an observer
     """
     from pipecat.frames.frames import (
         InputAudioRawFrame,
+        InterruptionFrame,
+        LLMFullResponseEndFrame,
+        LLMFullResponseStartFrame,
         MetricsFrame,
         OutputAudioRawFrame,
         TranscriptionFrame,
         TTSTextFrame,
+        UserStartedSpeakingFrame,
+        UserStoppedSpeakingFrame,
+        VADUserStartedSpeakingFrame,
+        VADUserStoppedSpeakingFrame,
     )
     from pipecat.metrics.metrics import (
         LLMUsageMetricsData,
@@ -856,9 +863,14 @@ def _CallLogObserver(  # noqa: N802 - factory that returns an observer
     )
     from pipecat.observers.base_observer import BaseObserver, FramePushed
 
+    from vortex.line.turnclock import TurnClock
+
     policy = confirmations if confirmations is not None else ConfirmationPolicy()
     # Frame ids already counted. Per observer, so per socket.
     metered_frames: set[int] = set()
+    # Wall-clock bounds for ``turn.metrics``: caller speech start, the decided
+    # turn end, and the agent answer's open. One per call.
+    clock = TurnClock()
 
     def record_usage(frame: Any) -> None:
         if frame.id in metered_frames:
@@ -884,7 +896,8 @@ def _CallLogObserver(  # noqa: N802 - factory that returns an observer
             if isinstance(frame, MetricsFrame):
                 record_usage(frame)
             elif isinstance(frame, TranscriptionFrame):
-                session.ctx.log.user_turn(frame.text)
+                started_ts, ended_ts = clock.user_bounds()
+                session.ctx.log.user_turn(frame.text, started_ts=started_ts, ended_ts=ended_ts)
                 decision = policy.on_user_text(
                     frame.text, prepared=session.memory.prepared is not None
                 )
@@ -897,8 +910,19 @@ def _CallLogObserver(  # noqa: N802 - factory that returns an observer
                 ):
                     session.accept_refusal(f"caller accepted the refusal: {frame.text.strip()}")
             elif isinstance(frame, TTSTextFrame):
-                session.ctx.log.assistant_turn(frame.text)
+                started_ts, ended_ts, ttfb_ms = clock.assistant_bounds()
+                session.ctx.log.assistant_turn(
+                    frame.text, started_ts=started_ts, ended_ts=ended_ts, ttfb_ms=ttfb_ms
+                )
                 policy.on_assistant_text(frame.text)
+            elif isinstance(frame, (VADUserStartedSpeakingFrame, UserStartedSpeakingFrame)):
+                clock.on_user_speech_start()
+            elif isinstance(frame, (UserStoppedSpeakingFrame, VADUserStoppedSpeakingFrame)):
+                clock.on_user_turn_end()
+            elif isinstance(frame, LLMFullResponseStartFrame):
+                clock.on_agent_response_start()
+            elif isinstance(frame, (LLMFullResponseEndFrame, InterruptionFrame)):
+                clock.on_agent_response_end()
             elif isinstance(frame, InputAudioRawFrame):
                 session.media_frames_in += 1
             elif isinstance(frame, OutputAudioRawFrame):
