@@ -29,31 +29,28 @@
   gap: var(--space-5);
 }
 
+/* A grid, not a flex row: each event/arrow/suggestion sits at an explicit
+   column index (set inline per node from PatientTimeline.jsx) so the "why"
+   box below (row 2) can be placed by that same index — centered under the
+   evidence node(s) it explains instead of always trailing the row. */
 .pt-timeline-track {
   width: 100%;
-  display: flex;
-  align-items: flex-start;
+  display: grid;
+  align-items: start;
   justify-content: center;
-  gap: var(--space-6);
+  column-gap: var(--space-6);
+  row-gap: var(--space-5);
   overflow-x: auto;
   overflow-y: hidden;
   padding: var(--space-3);
 }
 
-/* The suggestion node and the "why" box that explains it share this column,
-   so the box reads as centered directly under that dashed shape. */
-.pt-suggestion-column {
-  flex: 0 0 auto;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-5);
-}
-
 /* Read-only history node — description above, shape, date below. No drag,
-   no when-editor: this is a fact, not something you configure. */
+   no when-editor: this is a fact, not something you configure. Always the
+   top row (row 1) — the "why" box is the only thing that ever lives below
+   it, in row 2. */
 .pt-node {
-  flex: 0 0 auto;
+  grid-row: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -164,12 +161,14 @@
 }
 
 /* Sits between the last real (or evidence-highlighted) event and the
-   suggestion, at the same height as the shape circles. The only arrow on
-   the page — the pattern box below doesn't repeat it. */
+   suggestion. Centered (not top-aligned) against row 1's own height: since
+   every node's caption-above and caption-below reserve the same height, a
+   node's vertical center always lands on its shape circle's center too, so
+   this centers the arrow on the row of icons without hardcoding an offset.
+   The only arrow on the page — the pattern box below doesn't repeat it. */
 .pt-timeline-arrow {
-  flex: 0 0 auto;
-  align-self: flex-start;
-  margin-top: 42px;
+  grid-row: 1;
+  align-self: center;
   width: 88px;
   height: 12px;
   stroke: var(--color-primary);
@@ -214,14 +213,18 @@
   background: var(--color-warn);
 }
 
-/* The "why", stacked in .pt-suggestion-column right under the dashed box it
-   explains. A quiet "Pattern detected" label, then a box with one abstract
-   circle per node in the pattern's rule (the concrete events are
-   highlighted in the timeline row above instead — see .pt-node-evidence),
-   then the pattern's own name as a quoted caption underneath — styled as
-   the bold uppercase title, since that's the one naming the actual pattern.
-   Never the suggestion — that only lives in the timeline row above. */
+/* The "why" — row 2 of the grid, placed (via an inline grid-column set from
+   PatientTimeline.jsx) to span the evidence event(s) it explains and
+   centered under them, never under the suggestion. A quiet "Pattern
+   detected" label, then a box with one abstract circle per node in the
+   pattern's rule (the concrete events are highlighted in the timeline row
+   above instead — see .pt-node-evidence), then the pattern's own name as a
+   quoted caption underneath — styled as the bold uppercase title, since
+   that's the one naming the actual pattern. Never the suggestion — that
+   only lives in the timeline row above. */
 .pt-explain {
+  grid-row: 2;
+  justify-self: center;
   display: flex;
   flex-direction: column;
   align-items: center;
