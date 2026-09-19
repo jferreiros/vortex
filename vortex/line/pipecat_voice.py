@@ -1,13 +1,19 @@
 """The real voice pipeline: pipecat over the Twilio-shaped socket.
 
     transport.input -> STT (Soniox stt-rt-v5) -> language watcher
-                    -> user aggregator -> LLM (OpenAI-compatible, EU)
+                    -> user aggregator -> LLM (OpenAI-compatible or Vertex, EU)
                     -> TTS (Google Chirp / Gemini-TTS, or ElevenLabs)
                     -> transport.output -> assistant aggregator
 
-Soniox transcribes, an OpenAI-compatible endpoint named by ``LLM_PROVIDER``
-answers, and the voice is Google Cloud Text-to-Speech — the only provider here
-with Catalan, Galician *and* Basque.
+Soniox transcribes, the endpoint named by ``LLM_PROVIDER`` answers, and the
+voice is Google Cloud Text-to-Speech — the only provider here with Catalan,
+Galician *and* Basque.
+
+Every preset but one is an OpenAI-compatible endpoint under the first-token
+guard. ``LLM_PROVIDER=vertex`` is Gemini on Google Cloud instead, in the region
+``VERTEX_LOCATION`` names, on the service account the TTS already uses:
+Google's own protocol, so no ``extra_body``, no tracing client and no
+first-token guard. ``_make_vertex_llm`` says why for each.
 
 Two TTS services can run at once. ``VORTEX_TTS_PROVIDER`` speaks Spanish and
 ``VORTEX_TTS_PROVIDER_ALT`` speaks what the primary cannot, so
@@ -127,7 +133,6 @@ async def run_pipecat_call(
     from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
     from pipecat.serializers.twilio import TwilioFrameSerializer
     from pipecat.services.llm_service import FunctionCallParams
-    from pipecat.services.openai.llm import OpenAILLMService
     from pipecat.services.soniox.stt import SonioxContextObject, SonioxSTTService
     from pipecat.transports.websocket.fastapi import (
         FastAPIWebsocketParams,
@@ -186,29 +191,8 @@ async def run_pipecat_call(
     # the router that reads it. Per call: a closure, never a module global.
     language_state = _LanguageState()
 
-    # ---- LLM: any OpenAI-compatible endpoint, as long as it is in the EU. ----
-    llm_settings = OpenAILLMService.Settings(
-        model=settings.llm_model,
-        temperature=settings.llm_temperature,
-        max_tokens=settings.llm_max_tokens,
-        extra=_llm_extra_body(settings),
-    )
-    llm = traced_openai_llm_service(
-        # The guard goes underneath the tracing subclass, which only overrides
-        # ``create_client``: a request that never streams a first token is
-        # abandoned, re-issued, and in the worst case answered with a short
-        # spoken line. See vortex/line/llm_timeout.py for the post-mortem.
-        first_token_guard(OpenAILLMService),
-        api_key=settings.llm_api_key,
-        base_url=settings.llm_base_url or None,
-        settings=llm_settings,
-        first_token_timeout_secs=settings.llm_first_token_timeout_secs,
-        llm_retries=settings.llm_retries,
-        # Read at fire time, so a mid-call language switch moves the line and
-        # the TTS router sends it down the branch that can say it.
-        timeout_fallback_text=lambda: wait_prompt_for(language_state.language),
-        timeout_log_event=ctx.log.event,
-    )
+    # ---- LLM: any OpenAI-compatible endpoint, or Gemini on Vertex. Both EU. --
+    llm = _make_llm(settings, ctx, language_state)
 
     tts = _make_tts_stage(settings, language_state)
 
@@ -229,15 +213,11 @@ async def run_pipecat_call(
     schemas: list[Any] = []
     for fn in registry.function_schemas(turns.exposed_tools):
         params_schema = fn["parameters"]
-        properties = dict(params_schema["properties"])
-        if params_schema.get("$defs"):
-            # Nested models (Slot, Action ...) need their definitions inline.
-            properties["$defs"] = params_schema["$defs"]
         schemas.append(
             FunctionSchema(
                 name=fn["name"],
                 description=fn["description"],
-                properties=properties,
+                properties=_tool_properties(params_schema, inline_defs=settings.llm_is_vertex),
                 required=params_schema["required"],
             )
         )
@@ -403,6 +383,194 @@ def _llm_extra_body(settings: Any) -> dict[str, Any]:
     if settings.llm_reasoning_effort:
         extra["reasoning_effort"] = settings.llm_reasoning_effort
     return extra
+
+
+def _make_llm(settings: Any, ctx: Any, language_state: _LanguageState) -> Any:
+    """The turn model: Gemini on Vertex, or any OpenAI-compatible endpoint."""
+    if settings.llm_is_vertex:
+        return _make_vertex_llm(settings, ctx)
+    return _make_openai_llm(settings, ctx, language_state)
+
+
+def _make_openai_llm(settings: Any, ctx: Any, language_state: _LanguageState) -> Any:
+    """Any OpenAI-compatible endpoint, under the first-token guard."""
+    from pipecat.services.openai.llm import OpenAILLMService
+
+    llm_settings = OpenAILLMService.Settings(
+        model=settings.llm_model,
+        temperature=settings.llm_temperature,
+        max_tokens=settings.llm_max_tokens,
+        extra=_llm_extra_body(settings),
+    )
+    return traced_openai_llm_service(
+        # The guard goes underneath the tracing subclass, which only overrides
+        # ``create_client``: a request that never streams a first token is
+        # abandoned, re-issued, and in the worst case answered with a short
+        # spoken line. See vortex/line/llm_timeout.py for the post-mortem.
+        first_token_guard(OpenAILLMService),
+        api_key=settings.llm_api_key,
+        base_url=settings.llm_base_url or None,
+        settings=llm_settings,
+        first_token_timeout_secs=settings.llm_first_token_timeout_secs,
+        llm_retries=settings.llm_retries,
+        # Read at fire time, so a mid-call language switch moves the line and
+        # the TTS router sends it down the branch that can say it.
+        timeout_fallback_text=lambda: wait_prompt_for(language_state.language),
+        timeout_log_event=ctx.log.event,
+    )
+
+
+def _make_vertex_llm(settings: Any, ctx: Any) -> Any:
+    """Gemini on Vertex AI, from the region ``VERTEX_LOCATION`` names.
+
+    Everything around it is unchanged — Soniox, the Google TTS, the tools, the
+    observers. Three things do *not* come along, and each one is a deliberate
+    omission rather than an oversight:
+
+    - ``_llm_extra_body``. ``chat_template_kwargs`` and ``reasoning_effort``
+      are fields of an OpenAI chat-completions request. Gemini has neither;
+      pipecat would splice them into ``GenerateContentConfig`` and google-genai
+      rejects the request. Reasoning is switched off through Google's own
+      setting instead, below.
+    - ``traced_openai_llm_service``. It swaps in an instrumented
+      ``AsyncOpenAI``; there is no OpenAI client here to swap.
+    - ``first_token_guard``. It wraps ``get_chat_completions``, which is the
+      OpenAI entry point. ``GoogleLLMService`` streams through
+      ``_stream_content``, so the subclass would install cleanly and then never
+      fire — the worst kind of guard. It is left off and said out loud at
+      startup, so a hung Vertex request shows up as silence we can name rather
+      than a retry we imagine we have.
+    """
+    from pipecat.services.google.vertex.llm import GoogleVertexLLMService
+
+    project_id = settings.vertex_project_id
+    if not project_id:
+        # Vertex takes the project from us, not from the token, so an empty one
+        # is a 400 on the first turn. Say which variable fixes it.
+        log.warning(
+            "LLM_PROVIDER=vertex with no project: set VERTEX_PROJECT_ID, or point "
+            "GOOGLE_APPLICATION_CREDENTIALS at a service-account JSON that carries one"
+        )
+    log.warning(
+        "LLM_PROVIDER=vertex: the first-token guard is OpenAI-only and is not installed, "
+        "so LLM_FIRST_TOKEN_TIMEOUT_SECS (%.1fs) and LLM_RETRIES (%d) do not apply to this call",
+        settings.llm_first_token_timeout_secs,
+        settings.llm_retries,
+    )
+    ctx.log.event(
+        "llm.vertex",
+        model=settings.llm_model,
+        location=settings.vertex_location,
+        project=project_id,
+        first_token_guard=False,
+    )
+
+    credentials = settings.vertex_credentials
+    # The credential is either the JSON itself or a path to it, exactly as the
+    # TTS reads it, and pipecat takes those under two different keywords.
+    credential_kwargs: dict[str, Any] = (
+        {"credentials": credentials}
+        if credentials.lstrip().startswith("{")
+        else {"credentials_path": credentials or None}
+    )
+    return GoogleVertexLLMService(
+        project_id=project_id,
+        location=settings.vertex_location,
+        settings=GoogleVertexLLMService.Settings(
+            model=settings.llm_model,
+            temperature=settings.llm_temperature,
+            max_tokens=settings.llm_max_tokens,
+            **_vertex_thinking(settings.llm_model),
+        ),
+        **credential_kwargs,
+    )
+
+
+def _vertex_thinking(model: str) -> dict[str, Any]:
+    """Thinking off for the Gemini 2.5 family. Newer models: pipecat's default.
+
+    A three-minute phone call cannot wait for a reasoning phase, which is the
+    same reason ``LLM_DISABLE_THINKING`` exists for the OpenAI presets. Gemini
+    2.5 switches it off with ``thinking_budget=0``. Gemini 3 replaced the
+    budget with ``thinking_level`` and may reject a budget set alongside it, so
+    anything that is not 2.5 is left to pipecat's own model-aware default,
+    which picks the lowest level that model accepts — the same intent, in the
+    field that model actually reads.
+    """
+    if not model.startswith("gemini-2.5"):
+        return {}
+    from pipecat.services.google.llm import GoogleLLMService
+
+    return {"thinking": GoogleLLMService.ThinkingConfig(thinking_budget=0)}
+
+
+def _tool_properties(params_schema: dict[str, Any], inline_defs: bool = False) -> dict[str, Any]:
+    """A tool's parameter properties, in the dialect the provider accepts.
+
+    ``model_json_schema()`` lifts every nested model (``Slot``, the six
+    ``Action`` variants) into a sibling ``$defs`` and leaves ``$ref`` pointers
+    behind. ``FunctionSchema`` carries properties and nothing else, so the
+    definitions have to travel inside them, and the two providers need that
+    done differently:
+
+    - OpenAI-compatible hosts take the whole JSON Schema, so ``$defs`` rides
+      along as one more property and the ``$ref`` pointers resolve against it.
+      This is what every preset but ``vertex`` has always sent, and it is left
+      exactly as it was.
+    - Gemini's schema object follows OpenAPI 3.0's, which predates the JSON
+      Schema keywords pydantic emits. google-genai validates the request
+      locally and rejects it before it leaves the process ("Extra inputs are
+      not permitted"). Verified against gemini-2.5-flash in europe-west1 on
+      19 Sep 2026: every tool with a nested model failed on ``$ref``/``$defs``
+      and ``submit_action``'s discriminated union failed again on ``const``,
+      so neither fix is optional. ``_gemini_schema`` does both.
+
+    pipecat's own ``GeminiLLMAdapter`` drops ``additionalProperties`` and
+    adapts union types on top of this, so those are not repeated here.
+    """
+    properties = dict(params_schema.get("properties", {}))
+    defs = params_schema.get("$defs") or {}
+    if not inline_defs:
+        if defs:
+            properties["$defs"] = defs
+        return properties
+    return {name: _gemini_schema(value, defs) for name, value in properties.items()}
+
+
+def _gemini_schema(node: Any, defs: dict[str, Any], seen: tuple[str, ...] = ()) -> Any:
+    """One property's schema, in the subset Gemini accepts.
+
+    Two rewrites, both loss-free:
+
+    - ``{"$ref": "#/$defs/X"}`` becomes the definition of ``X``. Sibling keys
+      of the ``$ref`` (pydantic puts ``description`` and ``default`` there) win
+      over the definition's own, which is how JSON Schema 2020-12 reads them.
+      ``seen`` carries the chain of names already expanded, so a
+      self-referential model stops at a bare object instead of inlining for
+      ever and hanging the pipeline build.
+    - ``const`` becomes a one-member ``enum``, which is what it means and is a
+      keyword Gemini has. This is how each ``Action`` variant names its
+      ``kind`` ("book", "cancel" ...), so without it the model cannot tell the
+      six apart. A non-string ``const`` has no equivalent and is dropped,
+      exactly as the adapter drops a non-string ``enum``.
+    """
+    if isinstance(node, list):
+        return [_gemini_schema(item, defs, seen) for item in node]
+    if not isinstance(node, dict):
+        return node
+    ref = node.get("$ref")
+    if isinstance(ref, str) and ref.startswith("#/$defs/"):
+        name = ref.removeprefix("#/$defs/")
+        if name in seen or name not in defs:
+            return {"type": "object"}
+        resolved = {**defs[name], **{k: v for k, v in node.items() if k != "$ref"}}
+        return _gemini_schema(resolved, defs, (*seen, name))
+    adapted = {
+        key: _gemini_schema(value, defs, seen) for key, value in node.items() if key != "const"
+    }
+    if "const" in node and isinstance(node["const"], str):
+        adapted["enum"] = [node["const"]]
+    return adapted
 
 
 def _make_tts(

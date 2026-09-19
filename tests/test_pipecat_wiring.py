@@ -933,3 +933,301 @@ def test_smart_turn_is_built_only_where_the_vad_mode_asks_for_it() -> None:
     assert count(TurnSettings()) == 0, "Soniox mode loaded a model it never uses"
     assert count(TurnSettings(soniox_turn_detection=False, use_smart_turn=False)) == 0
     assert count(TurnSettings(soniox_turn_detection=False)) == 1, "VAD mode wants it"
+
+
+# --- LLM: the OpenAI presets and the Vertex one ------------------------------
+
+LLM_ENV = (
+    "LLM_PROVIDER",
+    "LLM_MODEL",
+    "LLM_API_KEY",
+    "LLM_BASE_URL",
+    "LLM_DISABLE_THINKING",
+    "LLM_REASONING_EFFORT",
+    "HELMCODE_API_KEY",
+    "VERTEX_LOCATION",
+    "VERTEX_PROJECT_ID",
+    "GOOGLE_APPLICATION_CREDENTIALS",
+    "GOOGLE_TTS_CREDENTIALS_JSON",
+)
+
+
+@pytest.fixture
+def llm_settings(monkeypatch: pytest.MonkeyPatch):
+    """Settings built from a clean LLM environment, so a local .env cannot steer it."""
+
+    def build(**env: str) -> settings_module.Settings:
+        for key in LLM_ENV:
+            monkeypatch.delenv(key, raising=False)
+        for key, value in env.items():
+            monkeypatch.setenv(key, value)
+        settings_module.reset_settings()
+        return settings_module.get_settings()
+
+    yield build
+    settings_module.reset_settings()
+
+
+def _credentials_file(tmp_path) -> str:
+    path = tmp_path / "google-tts.json"
+    path.write_text('{"type": "service_account", "project_id": "vortex-test"}')
+    return str(path)
+
+
+class _RecordingVertexService:
+    """Stands in for GoogleVertexLLMService: remembers how it was called."""
+
+    Settings: type
+
+    def __init__(self, **kwargs: object) -> None:
+        self.kwargs = kwargs
+
+
+def _build_vertex(monkeypatch: pytest.MonkeyPatch, settings):
+    """Run ``_make_vertex_llm`` with the Google service class mocked out."""
+    from pipecat.services.google.vertex import llm as vertex_llm
+
+    from vortex.line import pipecat_voice
+
+    recorder = type(
+        "RecordingVertexService",
+        (_RecordingVertexService,),
+        {"Settings": vertex_llm.GoogleVertexLLMService.Settings},
+    )
+    monkeypatch.setattr(vertex_llm, "GoogleVertexLLMService", recorder)
+    events: list = []
+    service = pipecat_voice._make_vertex_llm(settings, _session(settings, events).ctx)
+    return service, events
+
+
+def test_vertex_builds_the_google_service_not_an_openai_one(
+    monkeypatch: pytest.MonkeyPatch, llm_settings, tmp_path
+) -> None:
+    pytest.importorskip("pipecat")
+    settings = llm_settings(
+        LLM_PROVIDER="vertex", GOOGLE_APPLICATION_CREDENTIALS=_credentials_file(tmp_path)
+    )
+    service, events = _build_vertex(monkeypatch, settings)
+
+    assert service.kwargs["project_id"] == "vortex-test"
+    assert service.kwargs["location"] == "europe-west1"
+    # The credential is a path here, so it travels as credentials_path.
+    assert str(service.kwargs["credentials_path"]).endswith("google-tts.json")
+    assert "credentials" not in service.kwargs
+
+    built = service.kwargs["settings"]
+    assert built.model == "gemini-2.5-flash"
+    assert built.temperature == settings.llm_temperature
+    assert built.max_tokens == settings.llm_max_tokens
+    # The call log says which model answered, from where, and that the
+    # first-token guard is not watching this one.
+    assert (
+        "llm.vertex",
+        {
+            "model": "gemini-2.5-flash",
+            "location": "europe-west1",
+            "project": "vortex-test",
+            "first_token_guard": False,
+        },
+    ) in events
+
+
+def test_vertex_never_sees_the_openai_reasoning_fields(
+    monkeypatch: pytest.MonkeyPatch, llm_settings, tmp_path
+) -> None:
+    """``extra_body`` and ``reasoning_effort`` are OpenAI request fields. Gemini 400s."""
+    pytest.importorskip("pipecat")
+    from vortex.line.pipecat_voice import _llm_extra_body
+
+    settings = llm_settings(
+        LLM_PROVIDER="vertex",
+        GOOGLE_APPLICATION_CREDENTIALS=_credentials_file(tmp_path),
+        LLM_DISABLE_THINKING="true",
+        LLM_REASONING_EFFORT="none",
+    )
+    service, _ = _build_vertex(monkeypatch, settings)
+
+    # The OpenAI path would send both dialects with these settings...
+    assert set(_llm_extra_body(settings)) == {"extra_body", "reasoning_effort"}
+    # ...and the Vertex path sends neither, in any shape.
+    built = service.kwargs["settings"]
+    assert not built.extra
+    assert "extra_body" not in service.kwargs
+    assert "reasoning_effort" not in service.kwargs
+    # Thinking is off through Google's own field instead.
+    assert built.thinking.thinking_budget == 0
+
+
+def test_vertex_leaves_a_gemini_3_model_to_pipecats_thinking_default(
+    monkeypatch: pytest.MonkeyPatch, llm_settings, tmp_path
+) -> None:
+    """``thinking_budget`` is the 2.5 control; a 3.x model takes ``thinking_level``."""
+    pytest.importorskip("pipecat")
+    from pipecat.services.settings import is_given
+
+    from vortex.line.pipecat_voice import _vertex_thinking
+
+    assert _vertex_thinking("gemini-2.5-flash")["thinking"].thinking_budget == 0
+    assert _vertex_thinking("gemini-3.6-flash") == {}
+
+    settings = llm_settings(
+        LLM_PROVIDER="vertex",
+        LLM_MODEL="gemini-3.6-flash",
+        GOOGLE_APPLICATION_CREDENTIALS=_credentials_file(tmp_path),
+    )
+    service, _ = _build_vertex(monkeypatch, settings)
+    built = service.kwargs["settings"]
+    assert built.model == "gemini-3.6-flash"
+    assert not is_given(built.thinking)
+
+
+def test_vertex_takes_inline_json_credentials(
+    monkeypatch: pytest.MonkeyPatch, llm_settings
+) -> None:
+    pytest.importorskip("pipecat")
+    settings = llm_settings(
+        LLM_PROVIDER="vertex",
+        GOOGLE_TTS_CREDENTIALS_JSON='{"type": "service_account", "project_id": "inline-project"}',
+    )
+    service, _ = _build_vertex(monkeypatch, settings)
+
+    assert str(service.kwargs["credentials"]).startswith("{")
+    assert "credentials_path" not in service.kwargs
+    assert service.kwargs["project_id"] == "inline-project"
+
+
+def test_the_openai_presets_still_build_an_openai_service(llm_settings) -> None:
+    """Adding vertex must not move any other provider."""
+    pytest.importorskip("pipecat")
+    from pipecat.services.openai.llm import OpenAILLMService
+
+    from vortex.line import pipecat_voice
+
+    settings = llm_settings(LLM_PROVIDER="helmcode", HELMCODE_API_KEY="helm-x")
+    llm = pipecat_voice._make_llm(settings, _session(settings).ctx, pipecat_voice._LanguageState())
+
+    assert isinstance(llm, OpenAILLMService)
+    # The first-token guard is still in the chain for every OpenAI preset.
+    assert llm._first_token_timeout_secs == settings.llm_first_token_timeout_secs
+
+
+# --- tool schemas: $defs for OpenAI, inlined for Gemini ----------------------
+
+
+def test_openai_tools_keep_carrying_defs_as_a_property() -> None:
+    from vortex.line.pipecat_voice import _tool_properties
+
+    schema = {
+        "properties": {"slot": {"$ref": "#/$defs/Slot"}},
+        "required": ["slot"],
+        "$defs": {"Slot": {"type": "object", "properties": {"start": {"type": "string"}}}},
+    }
+    properties = _tool_properties(schema)
+    assert properties["slot"] == {"$ref": "#/$defs/Slot"}
+    assert "Slot" in properties["$defs"]
+
+
+def test_vertex_tools_inline_every_ref_and_drop_defs() -> None:
+    """google-genai rejects $ref and $defs: "Extra inputs are not permitted"."""
+    from vortex.line.pipecat_voice import _tool_properties
+
+    schema = {
+        "properties": {
+            "slot": {"$ref": "#/$defs/Slot", "description": "the slot to hold"},
+            "action": {"anyOf": [{"$ref": "#/$defs/BookAction"}, {"type": "null"}]},
+        },
+        "required": ["slot"],
+        "$defs": {
+            "Slot": {
+                "type": "object",
+                "description": "generic",
+                "properties": {"start": {"type": "string"}},
+            },
+            "BookAction": {
+                "type": "object",
+                "properties": {"kind": {"const": "book", "type": "string"}},
+            },
+        },
+    }
+    properties = _tool_properties(schema, inline_defs=True)
+
+    assert "$defs" not in properties
+    assert properties["slot"]["type"] == "object"
+    assert properties["slot"]["properties"] == {"start": {"type": "string"}}
+    # A sibling of the $ref wins over the definition's own key.
+    assert properties["slot"]["description"] == "the slot to hold"
+    assert "$ref" not in json.dumps(properties)
+
+
+def test_vertex_tools_turn_const_into_a_one_member_enum() -> None:
+    """``const`` is how each Action names its kind, and Gemini has no ``const``."""
+    from vortex.line.pipecat_voice import _tool_properties
+
+    schema = {
+        "properties": {
+            "action": {"anyOf": [{"$ref": "#/$defs/BookAction"}]},
+            "retries": {"const": 3, "type": "integer"},
+        },
+        "required": ["action"],
+        "$defs": {
+            "BookAction": {
+                "type": "object",
+                "properties": {"kind": {"const": "book", "type": "string", "title": "Kind"}},
+            }
+        },
+    }
+    properties = _tool_properties(schema, inline_defs=True)
+
+    kind = properties["action"]["anyOf"][0]["properties"]["kind"]
+    assert kind == {"enum": ["book"], "type": "string", "title": "Kind"}
+    # A non-string const has no Gemini equivalent, so the constraint is dropped
+    # rather than sent in a shape that would be rejected.
+    assert properties["retries"] == {"type": "integer"}
+    assert "const" not in json.dumps(properties)
+
+
+def test_inlining_a_self_referential_model_terminates() -> None:
+    from vortex.line.pipecat_voice import _tool_properties
+
+    schema = {
+        "properties": {"node": {"$ref": "#/$defs/Node"}},
+        "required": [],
+        "$defs": {"Node": {"type": "object", "properties": {"child": {"$ref": "#/$defs/Node"}}}},
+    }
+    properties = _tool_properties(schema, inline_defs=True)
+    assert properties["node"]["properties"]["child"] == {"type": "object"}
+
+
+def test_the_real_tool_schemas_fit_geminis_subset() -> None:
+    """Every tool we expose survives the Gemini adapter and google-genai's validator.
+
+    The shape we send every other provider — ``$defs`` smuggled in as one more
+    property — fails this, which is why the Vertex path inlines instead.
+    """
+    pytest.importorskip("pipecat")
+    from google.genai import types as genai_types
+    from pipecat.adapters.schemas.function_schema import FunctionSchema
+    from pipecat.adapters.schemas.tools_schema import ToolsSchema
+    from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
+
+    from vortex.line.pipecat_voice import _tool_properties
+
+    def convert(inline_defs: bool) -> list:
+        schemas = [
+            FunctionSchema(
+                name=fn["name"],
+                description=fn["description"],
+                properties=_tool_properties(fn["parameters"], inline_defs=inline_defs),
+                required=fn["parameters"]["required"],
+            )
+            for fn in registry.function_schemas(default_turn_settings().exposed_tools)
+        ]
+        return GeminiLLMAdapter().to_provider_tools_format(ToolsSchema(standard_tools=schemas))
+
+    config = genai_types.GenerateContentConfig(tools=convert(inline_defs=True))
+    assert config.tools
+    names = {d.name for d in config.tools[0].function_declarations}
+    assert "submit_action" in names
+
+    with pytest.raises(Exception):  # noqa: B017 - pydantic ValidationError
+        genai_types.GenerateContentConfig(tools=convert(inline_defs=False))
