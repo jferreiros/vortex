@@ -1,7 +1,7 @@
 """Deprecated alias for ``evals.corpus.hydrate``.
 
-    uv run python -m evals.corpus.hydrate
-    uv run python -m evals.corpus.synthetic   # same thing
+uv run python -m evals.corpus.hydrate
+uv run python -m evals.corpus.synthetic   # same thing
 """
 
 from evals.corpus.hydrate import (  # noqa: F401
