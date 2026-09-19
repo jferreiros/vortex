@@ -35,7 +35,12 @@ from vortex.observability.demo import replay_cancellation_demo, write_scripted_c
 from vortex.observability.home_overview import home_overview, load_synthetic_cards, occupancy
 from vortex.observability.icons import icon
 from vortex.observability.view import CallCard, build_calls
-from vortex.observability.wall_timeline import build_timeline, call_summary, latest_intent
+from vortex.observability.wall_timeline import (
+    build_timeline,
+    call_phase,
+    call_summary,
+    latest_intent,
+)
 from vortex.settings import REPO_ROOT, get_settings
 
 log = logging.getLogger("vortex.observability")
@@ -953,6 +958,51 @@ def wall_timeline_api(call_id: str) -> JSONResponse:
             "line_up": health is not None,
         }
     )
+
+
+@app.get("/api/wall/calls/active")
+def wall_active_calls_api() -> JSONResponse:
+    """The calls on the line right now: every logged call with no ``call.ended``.
+
+    One row per live call for the React wall's Live section:
+
+    - ``from`` / ``from_masked`` - the caller's number, masked, never raw;
+    - ``started_ts`` - the ``call.started`` stamp;
+    - ``stage`` - 0..4, the ``explain.stage_of`` progress (Listen, Identify,
+      Decide, Submit);
+    - ``intent`` - the best guess so far, from ``call.intent`` events;
+    - ``phase`` - the fine-grained state the wave animates by (connecting,
+      listening, thinking, working, speaking, ended);
+    - ``tools_run`` - the names of the tools the call has already run.
+
+    Read through the same ``callfeed`` path as the rest of the wall, so it
+    degrades to the mounted log the same way. A call silent past
+    ``STALE_AFTER_S`` counts as over even when the socket died before
+    ``call.ended`` could be written - the same rule the board itself applies.
+    """
+    events, _health, _source_info = _load_events("recent")
+    now = datetime.now(UTC)
+    active: list[dict[str, Any]] = []
+    for card in build_calls(events):
+        if card.ended:
+            continue
+        last = _parse_ts(card.last_ts)
+        if last is not None and (now - last).total_seconds() >= STALE_AFTER_S:
+            continue
+        masked = insights.mask_phone(card.from_number)
+        active.append(
+            {
+                "call_id": card.call_id,
+                "from": masked,
+                "from_masked": masked,
+                "started_ts": card.started_at,
+                "stage": explain.stage_of(card),
+                "intent": latest_intent(events, card.call_id),
+                "phase": call_phase(card.events, card.call_id, now=now),
+                "tools_run": [tool.name for tool in card.tools],
+            }
+        )
+    return JSONResponse(active)
 
 
 def _card_started(card: CallCard) -> datetime | None:
