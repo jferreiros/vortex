@@ -1,5 +1,6 @@
 import { BrowserRouter, HashRouter, Routes, Route, Navigate } from "react-router-dom";
 import ScrollToTop from "./ScrollToTop";
+import PageWipeOverlay from "./PageWipeOverlay";
 import Landing from "../pages/landing/Landing";
 import ClinicShell from "../pages/clinic/ClinicShell";
 import Home from "../pages/clinic/home/Home";
@@ -9,6 +10,10 @@ import Insights from "../pages/clinic/insights/Insights";
 import LiveCalls from "../pages/clinic/live-calls/LiveCalls";
 import LiveCallDetail from "../pages/clinic/live-calls/LiveCallDetail";
 import Agenda from "../pages/clinic/agenda/Agenda";
+import Pathways from "../pages/clinic/pathways/Pathways";
+import PatientTimeline from "../pages/clinic/patient-timeline/PatientTimeline";
+import Patterns from "../pages/clinic/patterns/Patterns";
+import PatternsPathways from "../pages/clinic/patterns-pathways/PatternsPathways";
 
 // Hash-based on purpose: this SPA is served by FastAPI from a single
 // registered path (/call/{call_id}/zoom — see vortex/observability/live.py)
@@ -25,6 +30,7 @@ export default function AppRouter() {
   return (
     <Router>
       <ScrollToTop />
+      <PageWipeOverlay />
       <Routes>
         <Route path="/" element={<Landing />} />
 
@@ -39,6 +45,13 @@ export default function AppRouter() {
           <Route path="insights" element={<Insights />} />
           <Route path="live-calls" element={<LiveCalls />} />
           <Route path="live-calls/:callId" element={<LiveCallDetail />} />
+          <Route path="patterns-pathways" element={<PatternsPathways />} />
+          {/* Not in the Sidebar on their own — reachable directly for testing
+              each editor in isolation, outside the combined toggle page
+              above (which is what "Pathways & Patterns" links to). */}
+          <Route path="pathways" element={<Pathways />} />
+          <Route path="patient-timeline/:patientId" element={<PatientTimeline />} />
+          <Route path="patterns" element={<Patterns />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

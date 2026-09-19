@@ -1,0 +1,60 @@
+{
+  "_comment": "Catalog of shape types, grouped by family. Drives the Shapes tray in vortex/wall/src/pages/clinic/pathways/Pathways.jsx AND vortex/wall/src/pages/clinic/patterns/Patterns.jsx — pick a family tab, drag one of its types onto the canvas. Every 'call' type is something the clinic does (an outgoing action), so they all render the same small outgoing-arrow badge on the circle, unconditionally — there's no incoming/outgoing distinction (no `subfamily` field) left in this catalog. `emoji` renders inside the shape; a type with no emoji falls back to its name printed inside the shape instead. `defaultWhen` seeds a freshly dropped Pathways node's `when` (see pathways.json's _comment for the `when` shape) — Patterns nodes ignore it, they have no `when`. The 'condition' family is for pattern-building only (a gap, an absence of a follow-up, an open referral — not a real call/message/visit event) but lives in the same shared catalog as the rest. A pathway's fixed first node — family 'entry' — is deliberately left out of this catalog: it isn't a draggable type, always renders the same bell glyph regardless of type, and has no `when`. Patterns.jsx and patterns.json still track incoming vs. outgoing on their own pattern nodes directly (a patient's incoming call is a real historical fact its matcher depends on) — that `subfamily` lives on those nodes, independent of this catalog.",
+  "families": [
+    {
+      "key": "call",
+      "label": "Calls",
+      "shapeClass": "shape-circle",
+      "types": [
+        { "type": "appointment suggestion", "emoji": "🆕", "defaultWhen": "proactive" },
+        { "type": "rebooking offer", "emoji": "↩️", "defaultWhen": "proactive" },
+        { "type": "post-visit follow-up", "emoji": "📞", "defaultWhen": "proactive" },
+        { "type": "waitlist alert", "emoji": "⏳", "defaultWhen": "asap" },
+        { "type": "pre-op screening", "emoji": "🩺", "defaultWhen": "proactive" },
+        { "type": "billing/insurance query", "emoji": "💳", "defaultWhen": "proactive" },
+        { "type": "lab results published", "emoji": "🧪", "defaultWhen": "asap" }
+      ]
+    },
+    {
+      "key": "message",
+      "label": "Messages",
+      "shapeClass": "shape-parallelogram",
+      "types": [
+        { "type": "form", "emoji": "📝", "defaultWhen": "asap" },
+        { "type": "SMS", "emoji": "💬", "defaultWhen": "proactive" },
+        { "type": "results", "emoji": "🧪", "defaultWhen": "asap" },
+        { "type": "prep instructions", "emoji": "📖", "defaultWhen": "proactive" },
+        { "type": "post-visit summary", "emoji": "📄", "defaultWhen": "asap" },
+        { "type": "consent signature", "emoji": "✍️", "defaultWhen": "asap" },
+        { "type": "payment link", "emoji": "🔗", "defaultWhen": "asap" },
+        { "type": "annual recall", "emoji": "🔄", "defaultWhen": "proactive" }
+      ]
+    },
+    {
+      "key": "visit",
+      "label": "Visits",
+      "shapeClass": "shape-square",
+      "types": [
+        { "type": "any visit", "emoji": "🏥", "defaultWhen": "when_scheduled" },
+        { "type": "no-show", "emoji": "🚫", "defaultWhen": "asap" },
+        { "type": "standard consultation", "emoji": "🩺", "defaultWhen": "when_scheduled" },
+        { "type": "procedure / surgery", "emoji": "⚕️", "defaultWhen": "when_scheduled" },
+        { "type": "diagnostic test / lab", "emoji": "💉", "defaultWhen": "when_scheduled" },
+        { "type": "results review", "emoji": "📋", "defaultWhen": "when_scheduled" },
+        { "type": "telehealth / virtual", "emoji": "💻", "defaultWhen": "when_scheduled" },
+        { "type": "walk-in / urgent", "emoji": "🚑", "defaultWhen": "asap" },
+        { "type": "equipment fitting / setup", "emoji": "⚙️", "defaultWhen": "when_scheduled" }
+      ]
+    },
+    {
+      "key": "condition",
+      "label": "Conditions",
+      "shapeClass": "shape-circle",
+      "types": [
+        { "type": "time gap", "emoji": "⌛", "defaultWhen": "asap" },
+        { "type": "no follow-up", "emoji": "🔇", "defaultWhen": "asap" },
+        { "type": "open referral", "emoji": "🧭", "defaultWhen": "asap" }
+      ]
+    }
+  ]
+}
