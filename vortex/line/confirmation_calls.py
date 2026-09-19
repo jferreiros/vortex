@@ -1,4 +1,24 @@
-"""Day-before confirmation calls for accepted bookings.
+"""Outbound scheduled calls: a small generic scheduler plus its first job.
+
+``ConfirmationCall`` is the generic row (one per scheduled outbound call, with
+a ``job`` naming what the call is for), ``ConfirmationStore`` the shared JSON
+queue, and ``ConfirmationWorker`` the one loop that dials whatever is due.
+``server.py``'s ``/confirmation/*`` routes are the system's single webhook
+surface: every job's TwiML, Gather result, silence and terminal status flow
+through them and dispatch on the row's ``job``.
+
+A new scheduled-call job (waitlist offers, pre-op instructions, ...) registers
+a ``CallJob`` with its own texts, answer classification and scheduling policy;
+the queue, worker, routes and outcome bookkeeping come with the system.
+
+The first job is ``appointment_confirmation``: the day before an accepted
+booking we call the patient, say the appointment in their language and ask
+whether they will come; the answer (yes / no / wants to reschedule) is stored
+per appointment.
+
+--- the original confirmation-call notes ---
+
+Day-before confirmation calls for accepted bookings.
 
 When a book is accepted we queue a voice call for ``slot - lead`` (default one
 day). A small background worker drains due rows and calls the patient through
@@ -366,6 +386,78 @@ def twiml_say(text: str, language: str) -> str:
     return twiml_response(f'<Say language="{locale}">{escape(text)}</Say>')
 
 
+class CallJob(Protocol):
+    """One kind of scheduled outbound call.
+
+    The system owns the queue, the worker and the webhooks; a job owns only
+    what makes it itself: when it fires, what it says, and how to read the
+    answer.
+    """
+
+    job_id: str
+
+    def call_at(self, *, when: datetime, lead: timedelta) -> datetime:
+        """When the call should fire for an appointment starting at ``when``."""
+        ...
+
+    def ask_twiml(
+        self, call: ConfirmationCall, base_url: str, *, attempt: int, reprompt: bool
+    ) -> str: ...
+
+    def classify(self, transcript: str, language: str) -> CallOutcome: ...
+
+    def ack(self, outcome: CallOutcome, language: str) -> str: ...
+
+    def final_unclear(self, language: str) -> str: ...
+
+    def no_speech(self, language: str) -> str: ...
+
+
+CALL_JOBS: dict[str, CallJob] = {}
+
+
+def register_job(job: CallJob) -> CallJob:
+    """Add a job to the system. Dialing, webhooks and the store come with it."""
+    CALL_JOBS[job.job_id] = job
+    return job
+
+
+def job_for(job_id: str) -> CallJob:
+    try:
+        return CALL_JOBS[job_id]
+    except KeyError:
+        raise KeyError(f"unknown scheduled-call job: {job_id!r}") from None
+
+
+class AppointmentConfirmationJob:
+    """Day-before "¿va a venir?" call. The system's first job."""
+
+    job_id = "appointment_confirmation"
+
+    def call_at(self, *, when: datetime, lead: timedelta) -> datetime:
+        return when - lead
+
+    def ask_twiml(
+        self, call: ConfirmationCall, base_url: str, *, attempt: int, reprompt: bool
+    ) -> str:
+        return twiml_ask(call, base_url, attempt=attempt, reprompt=reprompt)
+
+    def classify(self, transcript: str, language: str) -> CallOutcome:
+        return classify_reply(transcript, language)
+
+    def ack(self, outcome: CallOutcome, language: str) -> str:
+        return ack_text(outcome, language)
+
+    def final_unclear(self, language: str) -> str:
+        return final_unclear_text(language)
+
+    def no_speech(self, language: str) -> str:
+        return no_speech_text(language)
+
+
+register_job(AppointmentConfirmationJob())
+
+
 @dataclass
 class ConfirmationCall:
     confirmation_id: str
@@ -379,6 +471,7 @@ class ConfirmationCall:
     provider_id: str = ""
     location_id: str = ""
     appointment_id: str = ""
+    job: str = "appointment_confirmation"
     status: ConfirmationStatus = "pending"
     detail: str = ""
     twilio_call_sid: str = ""
@@ -635,6 +728,7 @@ def build_confirmation_call(
     *,
     to: str,
     when: datetime,
+    job: str = "appointment_confirmation",
     language: str = "",
     provider_name: str = "",
     location_name: str = "",
@@ -654,11 +748,12 @@ def build_confirmation_call(
     if when - clock < MIN_BOOKING_GAP:
         return None
     gap = lead if lead is not None else timedelta(days=1)
-    call_at = when - gap
+    call_at = job_for(job).call_at(when=when, lead=gap)
     if call_at <= clock:
         return None
     return ConfirmationCall(
         confirmation_id=uuid.uuid4().hex,
+        job=job,
         to=to,
         appointment_at=when.isoformat(),
         call_at=call_at.isoformat(),
@@ -678,6 +773,7 @@ async def schedule_confirmation_call(
     *,
     to: str,
     when: datetime,
+    job: str = "appointment_confirmation",
     language: str = "",
     provider_name: str = "",
     location_name: str = "",
@@ -691,6 +787,7 @@ async def schedule_confirmation_call(
     call = build_confirmation_call(
         to=to,
         when=when,
+        job=job,
         language=language,
         provider_name=provider_name,
         location_name=location_name,
