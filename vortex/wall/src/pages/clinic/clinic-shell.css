@@ -34,10 +34,12 @@
 
 .clinic-sidebar-mark {
   flex: 0 0 auto;
-  width: 30px;
-  height: 30px;
-  border-radius: var(--radius-sm);
-  background: linear-gradient(155deg, var(--color-primary), var(--color-primary-deep));
+  width: 34px;
+  height: 34px;
+  /* Vorty's own head, served by live.py's /wall/vorty-face. The art has no
+     padding of its own, so it sits slightly larger than the old square to
+     read at the same weight beside the wordmark. */
+  object-fit: contain;
 }
 
 .clinic-sidebar-brand-text {
