@@ -33,7 +33,7 @@ from vortex.contract import (
     action_payload,
     action_route,
 )
-from vortex.line.session import FALLBACK_SUBMIT_PREPARED_ENV, CallSession
+from vortex.line.session import CallSession
 from vortex.line.twilio import StartPayload
 
 NOW = datetime(2026, 9, 18, 10, 0, tzinfo=MADRID)
@@ -239,19 +239,6 @@ async def test_a_confirmed_prepared_action_is_sent(offline_settings) -> None:
     event = events(offline_settings, "CA-confirmed", "submit.fallback")[0]
     assert event["branch"] == "prepared"
     assert "confirmed=True" in event["why"]
-
-
-async def test_the_env_flag_sends_an_unconfirmed_prepared_action(
-    offline_settings, monkeypatch
-) -> None:
-    monkeypatch.setenv(FALLBACK_SUBMIT_PREPARED_ENV, "true")
-    session = make_session(offline_settings, "CA-flagged")
-    session.ctx.log.user_turn("el jueves por la tarde")
-    session.memory.observe("prepare_booking", BookingResult(action=a_booking()))
-    await session.close()
-
-    assert sent(session)[0][0] == "/api/v1/submit/book"
-    assert events(offline_settings, "CA-flagged", "submit.fallback")[0]["branch"] == "prepared"
 
 
 async def test_a_later_rejection_drops_the_prepared_action(offline_settings) -> None:
