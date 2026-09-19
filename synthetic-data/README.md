@@ -19,5 +19,11 @@ more volume than the previous mock, 15-20% unresolved by the agent, at most
 10% of those escalated (with `medical_emergency`), the rest refused with a
 typed `reason`, and three REGISTER calls for new patients.
 
+`logs/cancellation_demo.jsonl` is an invented batch for the Insights
+"Cancelaciones" panel: five cancels plus two bookings that take two of the
+freed (provider, minute) slots, so relocated/lost/pending all show. Its slot
+dates are relative to when it was generated — regenerate with
+`uv run python scripts/make_cancellation_pack.py` before a demo.
+
 Never written here: the full availability calendar (`evals/corpus/world/`),
 the live call log (`logs/calls.jsonl`), or the fixtures the unit tests own.
