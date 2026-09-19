@@ -25,6 +25,16 @@ const ICONS = {
       <circle cx="18.5" cy="6.5" r="1.4" fill="currentColor" stroke="none" />
     </>
   ),
+  calls: (
+    <>
+      <line x1="8.5" y1="6" x2="20" y2="6" />
+      <line x1="8.5" y1="12" x2="20" y2="12" />
+      <line x1="8.5" y1="18" x2="20" y2="18" />
+      <circle cx="4.5" cy="6" r="0.9" fill="currentColor" stroke="none" />
+      <circle cx="4.5" cy="12" r="0.9" fill="currentColor" stroke="none" />
+      <circle cx="4.5" cy="18" r="0.9" fill="currentColor" stroke="none" />
+    </>
+  ),
 };
 
 const CLINIC_ITEMS = [
@@ -32,6 +42,7 @@ const CLINIC_ITEMS = [
   { to: "/clinic/settings", label: "Settings", icon: "settings" },
   { to: "/clinic/insights", label: "Insights", icon: "insights" },
   { to: "/clinic/live-calls", label: "Live Calls", icon: "liveCalls" },
+  { to: "/clinic/calls", label: "Calls", icon: "calls" },
   { to: "/clinic/doctor", label: "Horarios", icon: "doctor" },
 ];
 
