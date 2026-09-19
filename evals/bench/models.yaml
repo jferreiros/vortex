@@ -134,11 +134,11 @@ models:
 
   - id: cloudflare/@cf/qwen/qwen3-30b-a3b-fp8
     label: "Qwen3 30B (Cloudflare Workers AI)"
-    default: true
+    default: false
     billing: perk
     usd_per_1m_input: null
     usd_per_1m_output: null
-    notes: "Endpoint and id verified 2026-09-19 (needs CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN, $100 credit). Answered the probe in prose, no tool call. Workers AI list price unverified."
+    notes: "Endpoint and id verified 2026-09-19 (needs CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN, $100 credit). Answered the probe in prose, no tool call. Workers AI list price unverified. Opt in with --models until it returns a tool call."
 
   - id: cloudflare/@cf/meta/llama-4-scout-17b-16e-instruct
     label: "Llama 4 Scout 17B (Cloudflare Workers AI)"
