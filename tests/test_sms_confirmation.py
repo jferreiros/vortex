@@ -139,14 +139,14 @@ def sms_events(settings: Settings, call_id: str) -> list[dict[str, Any]]:
     return [x for x in lines if x["call_id"] == call_id and x["kind"].startswith("sms.")]
 
 
-def remember_appointment(session: CallSession) -> None:
+def remember_appointment(session: CallSession, *, start: datetime = REMEMBERED_START) -> None:
     appointment = Appointment(
         appointment_id="A0001",
         patient_id=PATIENT,
         provider_id="PR01",
         location_id="centro",
         appointment_type_id="review",
-        start=REMEMBERED_START,
+        start=start,
     )
     session.ctx.state.setdefault("diary_appointments", {})[appointment.appointment_id] = (
         appointment.model_dump(mode="json")
@@ -162,6 +162,11 @@ def test_format_slot_es_uses_madrid_wall_clock() -> None:
     assert "24" in text
     assert "septiembre" in text
     assert "16:30" in text
+
+
+def test_format_slot_es_refuses_a_naive_datetime() -> None:
+    with pytest.raises(ValueError, match="offset"):
+        format_slot_es(SLOT.replace(tzinfo=None))
 
 
 def test_booking_text_includes_doctor_and_site_when_known() -> None:
@@ -310,6 +315,23 @@ async def test_resolve_details_uses_the_remembered_appointment(
     assert known.missing == []
     assert unknown.when is None
     assert unknown.missing == ["appointment_details"]
+
+
+@pytest.mark.asyncio
+async def test_resolve_details_drops_a_naive_remembered_start(
+    offline_settings: Settings,
+) -> None:
+    session = make_session(offline_settings, "CA-cancel-naive")
+    remember_appointment(session, start=REMEMBERED_START.replace(tzinfo=None))
+
+    details = await resolve_details(session.ctx, a_cancel())
+    await session.close()
+
+    assert details.when is None
+    assert details.missing == ["naive_appointment_start"]
+    text = cancellation_confirmation_text(when=details.when)
+    assert "Cita cancelada" in text
+    assert "septiembre" not in text
 
 
 @pytest.mark.asyncio
