@@ -30,6 +30,7 @@ from vortex.contract import (
     MADRID,
     Action,
     BookAction,
+    CallerLineMatch,
     DeclineReason,
     EscalateAction,
     FindPatientResult,
@@ -42,6 +43,7 @@ from vortex.contract import (
     ToolContext,
     action_route,
 )
+from vortex.identity.tools import resolve_caller_line
 from vortex.line.submit import (
     DryRunSubmitClient,
     SubmitApi,
@@ -136,6 +138,11 @@ class CallMemory:
     # slot the platform offered. Kept apart from ``prepared`` because a call can
     # learn both and die before any tool draws the action up.
     identified_patient: PatientRecord | None = None
+    # Who the dialling line belongs to, from the caller-id lookup at open. Kept
+    # apart from ``identified_patient`` because it identifies the *line*: on a
+    # third-party call the phone's owner is not the patient. A lookup the
+    # conversation makes always wins; this is only what the call started with.
+    caller_line: CallerLineMatch | None = None
     free_slot: Slot | None = None
     prepared: Action | None = None
     prepared_tool: str = ""
@@ -187,15 +194,26 @@ class CallMemory:
         self.stored_reason = None
         self.stored_reason_tool = ""
 
+    @property
+    def line_owner(self) -> PatientRecord | None:
+        """The one patient the dialling line resolved to, if it resolved to one."""
+        return self.caller_line.patient if self.caller_line is not None else None
+
     def draft_booking(self) -> BookAction | None:
         """The booking the call had every part of and nobody drew up.
 
-        ``None`` unless the directory identified the caller and the platform
+        ``None`` unless the directory identified somebody and the platform
         offered a slot: a booking is only ours to draft off ids the API gave us.
         The slot is the most recent search's first, which is the one the caller
         was being read back when the line died.
+
+        Who it is booked for is whoever the conversation identified; failing
+        that, the owner of the dialling line, which the directory resolved from
+        the caller id before the call began. The line owner is a weaker claim -
+        a third-party call books someone else - but a slot was found for this
+        call, so the alternative here is a refusal that scores nothing.
         """
-        patient, slot = self.identified_patient, self.free_slot
+        patient, slot = self.identified_patient or self.line_owner, self.free_slot
         if patient is None or slot is None or self.identity_pending:
             return None
         assert patient.patient_id, "the directory never returns a match without an id"
@@ -317,6 +335,26 @@ class CallSession:
             **settings.describe(),
         )
         return session
+
+    async def resolve_caller_line(self) -> CallerLineMatch:
+        """Look the dialling line up before the caller speaks, and remember it.
+
+        Called once by the voice pipeline while it is still being built, so the
+        system prompt can name the caller instead of spending the first minute
+        of a three-minute call asking who they are. Bounded by
+        ``caller_id_lookup_timeout_secs``: the note is never worth holding the
+        greeting for, and without it the call simply asks as it always did.
+        """
+        try:
+            match = await asyncio.wait_for(
+                resolve_caller_line(self.ctx),
+                timeout=self.settings.caller_id_lookup_timeout_secs,
+            )
+        except TimeoutError:
+            self.ctx.log.event("identity.caller_line_timed_out")
+            match = CallerLineMatch()
+        self.memory.caller_line = match
+        return match
 
     async def call_tool(self, name: str, raw_args: dict[str, Any]) -> BaseModel:
         """Run one tool through the registry and keep what the end of the call needs.
