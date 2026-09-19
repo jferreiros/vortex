@@ -1,4 +1,4 @@
-import { useRef, useState, Fragment } from "react";
+import { useEffect, useRef, useState, Fragment } from "react";
 import { useLocation } from "react-router-dom";
 import SectionHeader from "../../../components/ui/SectionHeader";
 import Card from "../../../components/ui/Card";
@@ -77,6 +77,18 @@ function loadStoredState() {
     // corrupt or unavailable storage — fall back to the seed
   }
   return null;
+}
+
+function applyPatternsDoc(json, setPatterns, setSelectedId, preferredId) {
+  if (!Array.isArray(json?.patterns) || json.patterns.length === 0 || !json.patterns.every(isValidPattern)) {
+    return;
+  }
+  setPatterns(json.patterns);
+  const nextId =
+    (preferredId && json.patterns.some((p) => p.id === preferredId) && preferredId) ||
+    (json.selectedId && json.patterns.some((p) => p.id === json.selectedId) && json.selectedId) ||
+    json.patterns[0].id;
+  setSelectedId(nextId);
 }
 
 function SaveIcon() {
@@ -434,6 +446,20 @@ export default function Patterns() {
   const [saveStatus, setSaveStatus] = useState(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/wall/patterns")
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((json) => {
+        if (cancelled) return;
+        applyPatternsDoc(json, setPatterns, setSelectedId, detectedId);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const selected = patterns.find((p) => p.id === selectedId) ?? patterns[0];
 
   const handleCreate = () => {
@@ -544,14 +570,35 @@ export default function Patterns() {
     setPatterns((prev) => prev.map((p) => (p.id === selectedId ? { ...p, enabled } : p)));
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    const payload = {
+      patterns,
+      selectedId,
+      asOf: patternsSeed.asOf,
+      specialtyRecallDays: patternsSeed.specialtyRecallDays,
+    };
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ patterns, selectedId }));
+      const response = await fetch("/api/wall/patterns", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ patterns, selectedId }));
+      } catch {
+        /* cache is optional */
+      }
       setSaveStatus("saved");
-      setTimeout(() => setSaveStatus(null), 2000);
     } catch {
-      // storage unavailable — in-memory state still works, just won't persist
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ patterns, selectedId }));
+        setSaveStatus("saved");
+      } catch {
+        /* in-memory state still works */
+      }
     }
+    setTimeout(() => setSaveStatus(null), 2000);
   };
 
   return (

@@ -145,11 +145,7 @@ export default function LiveCallDetail() {
   const navigate = useNavigate();
   const { callId } = resolveRawId(rawParam);
   const { items, call } = useCallTimeline(callId);
-  // useLiveCalls() is the same real-with-fallback feed the list page reads:
-  // the mock while the first /api/wall/live-calls answer is in flight, the
-  // real "in progress right now" list after that — so the pager here always
-  // walks whatever Live Calls itself is showing, never a frozen demo set.
-  const calls = useLiveCalls();
+  const { calls } = useLiveCalls();
   const listed = listedCall(calls, rawParam);
   const streamedTurns = items.filter((it) => it.type === "turn");
   const streamedTools = items.filter((it) => it.type === "tool");

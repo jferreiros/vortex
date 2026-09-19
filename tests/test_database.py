@@ -479,3 +479,29 @@ async def test_confirmation_job_is_idempotent_within_a_day(tmp_path: Path, db_pa
 
     assert len(first) == 1
     assert len(second) == 0  # already confirmed; not dialled again
+
+
+def test_clinic_settings_round_trip(db_path: Path) -> None:
+    with db.connection(db_path) as conn:
+        defaults = db.get_clinic_settings(conn)
+        assert defaults["patient_identification_fields_required"] == 1
+        assert defaults["minimum_booking_lead_hours"] == 24
+        saved = db.put_clinic_settings(
+            conn,
+            {
+                "minimum_booking_lead_hours": 48,
+                "patient_identification_fields_required": 2,
+            },
+        )
+        assert saved["minimum_booking_lead_hours"] == 48
+        assert saved["patient_identification_fields_required"] == 2
+        assert db.get_clinic_settings(conn)["minimum_booking_lead_hours"] == 48
+
+
+def test_wall_documents_and_suggestion_rejections(db_path: Path) -> None:
+    with db.connection(db_path) as conn:
+        assert db.get_wall_document(conn, "pathways") is None
+        db.put_wall_document(conn, "pathways", {"pathways": [{"id": "annual"}]})
+        assert db.get_wall_document(conn, "pathways")["pathways"][0]["id"] == "annual"
+        db.add_suggestion_rejection(conn, "P00042", "first-visit-then-gap")
+        assert db.list_suggestion_rejections(conn, "P00042") == ["first-visit-then-gap"]

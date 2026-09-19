@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import Card from "../../../components/ui/Card";
 import Button from "../../../components/ui/Button";
@@ -50,11 +50,9 @@ function ShapeGlyphs({ family, type, subfamily }) {
   );
 }
 
-// Rejecting a suggestion is permanent for that patient — persisted so it
-// never comes back for them. TODO: this is a localStorage stand-in; once a
-// real database exists, record the rejection there instead (keyed by
-// patient_id + pattern id), the same way pathways/patterns/shapeTypes are
-// noted as JSON-only stand-ins elsewhere (see ISSUES.md).
+// Rejecting a suggestion is permanent for that patient — the wall API
+// stores it keyed by patient_id + pattern id. localStorage is a same-tab
+// cache for a board that cannot reach the API.
 const REJECTED_KEY = "vortex.rejectedSuggestions.v1";
 
 function loadRejectedMap() {
@@ -178,26 +176,65 @@ function TimelineArrow({ gridColumn }) {
 export default function PatientTimeline() {
   const { patientId } = useParams();
   const navigate = useNavigate();
-  const patient = patientTimelines.patients.find((p) => p.patientId === patientId) || patientTimelines.patients[0];
+  const fallback = patientTimelines.patients.find((p) => p.patientId === patientId) || {
+    patientId,
+    name: patientId,
+    events: [],
+    referrals: [],
+  };
 
-  // The specialty this history is being read for is always the one the call
-  // that opened it was about — never a user-picked filter. There's no
-  // per-call specialty on the caller side yet, so it's read off this
-  // patient's own most recent specialty-bearing event, which is the closest
-  // stand-in for "the specialty of the call" until real call context is
-  // threaded through. Events with no specialty at all (general calls,
-  // messages or visits) always stay in view alongside it.
+  const [patient, setPatient] = useState(fallback);
+  const [patternsDoc, setPatternsDoc] = useState(patternsData);
+  const [suggestionStatus, setSuggestionStatus] = useState(null);
+  const [rejectedMap, setRejectedMap] = useState(loadRejectedMap);
+
+  useEffect(() => {
+    const nextFallback = patientTimelines.patients.find((p) => p.patientId === patientId) || {
+      patientId,
+      name: patientId,
+      events: [],
+      referrals: [],
+    };
+    setPatient(nextFallback);
+    setSuggestionStatus(null);
+    let cancelled = false;
+    fetch(`/api/wall/patient-timeline/${encodeURIComponent(patientId)}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((json) => {
+        if (cancelled || !json) return;
+        setPatient({
+          patientId: json.patientId || patientId,
+          name: json.name || nextFallback.name,
+          events: Array.isArray(json.events) ? json.events : [],
+          referrals: [],
+        });
+        if (Array.isArray(json.rejectedPatternIds)) {
+          setRejectedMap((prev) => ({ ...prev, [patientId]: json.rejectedPatternIds }));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setPatient(nextFallback);
+      });
+    fetch("/api/wall/patterns")
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((json) => {
+        if (!cancelled && Array.isArray(json?.patterns)) setPatternsDoc({ ...patternsData, ...json });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [patientId]);
+
   const specialty = useMemo(() => {
-    for (let i = patient.events.length - 1; i >= 0; i -= 1) {
-      if (patient.events[i].specialty) return patient.events[i].specialty;
+    const list = patient.events || [];
+    for (let i = list.length - 1; i >= 0; i -= 1) {
+      if (list[i].specialty) return list[i].specialty;
     }
     return null;
   }, [patient]);
 
   const specialtyLabel = specialty ? specialty.charAt(0).toUpperCase() + specialty.slice(1) : null;
-
-  const [suggestionStatus, setSuggestionStatus] = useState(null);
-  const [rejectedMap, setRejectedMap] = useState(loadRejectedMap);
 
   const events = useMemo(
     () => patient.events.filter((e) => !e.specialty || e.specialty === specialty),
@@ -211,12 +248,12 @@ export default function PatientTimeline() {
       findMatchingPattern({
         events: patient.events,
         referrals: patient.referrals || [],
-        patterns: patternsData.patterns,
+        patterns: patternsDoc.patterns || [],
         specialty,
-        asOf: patternsData.asOf,
-        specialtyRecallDays: patternsData.specialtyRecallDays,
+        asOf: patternsDoc.asOf,
+        specialtyRecallDays: patternsDoc.specialtyRecallDays,
       }),
-    [patient, specialty]
+    [patient, specialty, patternsDoc]
   );
 
   // A pattern this patient already rejected never comes back for them.
@@ -224,12 +261,18 @@ export default function PatientTimeline() {
   const match = rawMatch && rejectedIds.includes(rawMatch.pattern.id) ? null : rawMatch;
 
   const handleReject = () => {
-    if (!match) return;
+    if (!match || patient.patientId !== patientId) return;
+    const patternId = match.pattern.id;
     setRejectedMap((prev) => {
-      const next = { ...prev, [patient.patientId]: [...(prev[patient.patientId] || []), match.pattern.id] };
+      const next = { ...prev, [patient.patientId]: [...(prev[patient.patientId] || []), patternId] };
       saveRejectedMap(next);
       return next;
     });
+    fetch(`/api/wall/patient-timeline/${encodeURIComponent(patient.patientId)}/reject`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ patternId }),
+    }).catch(() => {});
   };
 
   // Suggestion copy is generic ("<specialty>") — fill in the real specialty
