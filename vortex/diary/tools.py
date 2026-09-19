@@ -621,6 +621,13 @@ async def find_slots(ctx: ToolContext, args: FindSlotsInput) -> AvailabilityResu
                     rejection=None,
                     widened=True,
                 )
+            if extended.blocked:
+                return AvailabilityResult(
+                    blocked=extended.blocked,
+                    appointment_type=appointment_type or extended.appointment_type,
+                    rejection=None,
+                    widened=True,
+                )
             rejection = Rejection(
                 reason="no_availability",
                 detail=rejection.detail + f"; still nothing {args.widen_days} days further",
