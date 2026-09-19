@@ -9,6 +9,10 @@ import "./theme.css";
 // the Clinic View reads its colour/type/spacing/radius/shadow from here.
 import "./theme/tokens.css";
 import "./theme/base.css";
+// Tailwind utilities for the adopted ElevenLabs UI components only —
+// preflight is off, so this file adds no global resets (see the file's own
+// comment and tailwind.config.js).
+import "./theme/tailwind.css";
 
 bootstrapEntryHash();
 

@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
@@ -6,6 +7,14 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({
   plugins: [react()],
   base: "/wall-assets/",
+  resolve: {
+    alias: {
+      // shadcn-style path alias (see components.json + jsconfig.json):
+      // "@/lib/utils", "@/components/elevenlabs/..." inside the adopted
+      // ElevenLabs UI sources.
+      "@": fileURLToPath(new URL("./src", import.meta.url)),
+    },
+  },
   build: {
     outDir: "dist",
   },
