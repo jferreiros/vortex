@@ -13,10 +13,10 @@ def _card(cid: str, status_kind: str | None, reason: str | None = None, **kw) ->
 
 def test_reasons_and_outcomes_are_sorted_bars() -> None:
     cards = [
-        _card("a", "no-action", "specialty_not_covered"),
-        _card("b", "no-action", "specialty_not_covered"),
-        _card("c", "no-action", "no_availability"),
-        _card("d", "book"),
+        _card("a", "no-action", "specialty_not_covered", submit_status="accepted"),
+        _card("b", "no-action", "specialty_not_covered", submit_status="accepted"),
+        _card("c", "no-action", "no_availability", submit_status="accepted"),
+        _card("d", "book", submit_status="accepted"),
     ]
     bars = insights.reasons(cards, {"specialty_not_covered": "Not covered"})
     assert [b.key for b in bars] == ["specialty_not_covered", "no_availability"]
@@ -25,6 +25,18 @@ def test_reasons_and_outcomes_are_sorted_bars() -> None:
     assert bars[1].share == 0.5
     outcomes = insights.outcomes(cards)
     assert outcomes[0].key == "refused"
+
+
+def test_outcomes_count_unsent_action_as_ended() -> None:
+    """A prepared book that never reached /submit is ended, not booked."""
+    cards = [
+        _card("sent", "book", submit_status="accepted"),
+        _card("unsent", "book"),
+        _card("route_only", "cancel", submit_route="/api/v1/submit/cancel"),
+    ]
+    bars = insights.outcomes(cards)
+    by_key = {b.key: b.value for b in bars}
+    assert by_key == {"booked": 1, "ended": 1, "cancelled": 1}
 
 
 def test_tool_latency_slowest_first_and_failures() -> None:
@@ -52,13 +64,36 @@ def test_handle_times_and_hours() -> None:
     assert hours[10].value == 2  # 08:00 UTC is 10:00 in Madrid in September
 
 
-def test_patients_merge_by_name_and_mask_phone() -> None:
-    a = _card("a", "book", patient_name="Marta Ruiz", from_number="+34612345678")
+def test_patients_merge_by_patient_id_and_mask_phone() -> None:
+    a = _card(
+        "a",
+        "book",
+        patient_id="P00042",
+        patient_name="Marta Ruiz",
+        from_number="+34612345678",
+    )
     a.tools = [ToolStep("find_patient", status="ok", result={"patient": {"insurer": "sanitas"}})]
-    b = _card("b", "no-action", "no_availability", patient_name="Marta Ruiz")
+    # Same directory id, different phone — one row.
+    b = _card(
+        "b",
+        "no-action",
+        "no_availability",
+        patient_id="P00042",
+        patient_name="Marta Ruiz",
+        from_number="+34699999999",
+    )
+    # Same name, different directory id — separate row.
+    d = _card(
+        "d",
+        "book",
+        patient_id="P00099",
+        patient_name="Marta Ruiz",
+        from_number="+34611111111",
+    )
     c = _card("c", None, from_number="+34699000111")
-    rows = insights.patients([a, b, c])
-    assert [r.name for r in rows] == ["Marta Ruiz", "Unidentified patient"]
+    rows = insights.patients([a, b, d, c])
+    assert [r.key for r in rows] == ["P00042", "P00099", "+34699000111"]
+    assert [r.name for r in rows] == ["Marta Ruiz", "Marta Ruiz", "Unidentified patient"]
     assert rows[0].calls == 2
     assert rows[0].insurer == "sanitas"
     assert rows[0].last_call_id == "a"
