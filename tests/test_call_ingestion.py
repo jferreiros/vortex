@@ -109,6 +109,15 @@ def test_read_calls_truncation_is_reported(tmp_path: Path) -> None:
     assert meta["truncated"] is True
 
 
+def test_read_calls_unbounded_reads_every_call(tmp_path: Path) -> None:
+    path = tmp_path / "calls.jsonl"
+    for i in range(4):
+        _write_call(path, f"CA-{i}", f"2026-09-19T10:0{i}:00.000+00:00")
+    grouped, meta = read_calls(path)
+    assert meta["calls"] == 4
+    assert len(grouped) == 4
+
+
 def test_read_recent_still_reads_the_tail(tmp_path: Path) -> None:
     path = tmp_path / "calls.jsonl"
     _write_call(path, "one", "2026-09-19T10:00:00.000+00:00", events=10)
@@ -281,6 +290,32 @@ def test_load_events_treats_a_bad_response_as_a_failure(
     monkeypatch.setattr(callfeed.httpx, "get", weird_get)
     _events, _health, source = feed.load_events("recent", path)
     assert source["kind"] == "jsonl_fallback"
+
+
+def test_cancellation_demo_fills_every_status(tmp_path: Path) -> None:
+    """The scripted batch writes five frees: two rebooked (relocated), two
+    past their appointment day (lost) and one still open (pending) — plus
+    enough volume for the per-day chart."""
+    import asyncio
+
+    from vortex.observability.business_insights import cancellation_slots
+    from vortex.observability.demo import write_cancellation_demo
+    from vortex.observability.view import build_calls, flatten_grouped
+
+    path = tmp_path / "calls.jsonl"
+    written = asyncio.run(write_cancellation_demo(path, delay_s=0))
+    assert len(written) == 7
+
+    grouped, meta = read_calls(path)
+    assert meta["calls"] == 7
+    out = cancellation_slots(build_calls(flatten_grouped(grouped)))
+    assert out["freed_total"] == 5
+    assert out["relocated"] == 2
+    assert out["lost"] == 2
+    assert out["pending"] == 1
+    assert out["recovery_rate_pct"] == 50.0
+    assert out["daily"] is not None
+    assert out["suggested_action"]
 
 
 # ---------------------------------------------------------------------------

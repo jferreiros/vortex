@@ -209,7 +209,9 @@ def read_calls(
 
     since_ts = _since_str(since) if since is not None else None
     started: dict[str, str] = {}
-    past_horizon = since_ts is None
+    # No `since` means no horizon at all: the scan only stops at max_calls or
+    # EOF, so an unbounded read returns every call in the file.
+    past_horizon = False
     scanned = 0
 
     def _done() -> bool:

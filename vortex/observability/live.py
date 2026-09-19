@@ -25,7 +25,7 @@ from nicegui import app, ui
 
 from vortex.observability import auth, callfeed, explain, insights, pricing
 from vortex.observability.business_insights import business_insights
-from vortex.observability.demo import write_scripted_call
+from vortex.observability.demo import write_cancellation_demo, write_scripted_call
 from vortex.observability.icons import icon
 from vortex.observability.view import CallCard, build_calls
 from vortex.observability.wall_timeline import build_timeline, call_summary, latest_intent
@@ -198,6 +198,10 @@ async def _play_line() -> None:
 
 async def _replay(scenario: str) -> None:
     await write_scripted_call(_log_path(), scenario=scenario, delay_s=0.28)
+
+
+async def _replay_cancellations() -> None:
+    await write_cancellation_demo(_log_path(), delay_s=0.05)
 
 
 def _client_ip() -> str:
@@ -1094,6 +1098,9 @@ async def ops_page() -> None:
             "outline no-caps"
         ).classes("button-secondary")
         ui.button("Replay refusal", on_click=lambda: _replay("refuse")).props(
+            "outline no-caps"
+        ).classes("button-secondary")
+        ui.button("Replay cancellations", on_click=_replay_cancellations).props(
             "outline no-caps"
         ).classes("button-secondary")
 
