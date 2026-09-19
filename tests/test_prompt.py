@@ -121,13 +121,27 @@ def test_initial_messages_carries_the_whole_prompt() -> None:
     assert "submit_action" in content
 
 
+def test_the_prompt_teaches_change_and_cancel() -> None:
+    """Problem 8, call 096af75d: a doctor's name is staff, not another patient,
+    and moving a visit is a reschedule, never a new booking."""
+    text = build_system_prompt(NOW)
+    for needle in (
+        "doctor's name is staff, not a patient",
+        "The record's doctor wins a mismatch",
+        "never a booking",
+        "first slot after theirs",
+        '"later than/after a day" still goes to resolve_date',
+    ):
+        assert needle in text, needle
+
+
 # ---- versions ----------------------------------------------------------------
 
 
 def test_env_unset_loads_the_latest_version(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("VORTEX_PROMPT_VERSION", raising=False)
-    assert active_prompt_version() == latest_prompt_version() == "v4-nearest-offer"
-    assert build_system_prompt(NOW) == load_prompt_template("v4-nearest-offer").format(
+    assert active_prompt_version() == latest_prompt_version() == "v5-nearest-offer"
+    assert build_system_prompt(NOW) == load_prompt_template("v5-nearest-offer").format(
         clinic_name=CLINIC_NAME,
         now_human="09:00 on Friday 18 September 2026",
         tomorrow="Saturday 19 September 2026",

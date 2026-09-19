@@ -159,6 +159,44 @@ async def test_a_phrase_outside_the_vocabulary_returns_a_typed_reason(
     assert window.rejection.reason == "out_of_scope"
 
 
+async def test_a_later_than_phrase_opens_on_the_day_it_names(ctx: ToolContext) -> None:
+    """ "later than <day>" is a lower bound, not a day: the window opens on the
+    named day - a later slot that same day is still an answer - and runs wide,
+    so one find_slots call covers 'the first one after theirs'. Call 096af75d
+    lost the change_and_cancel case to this phrase returning out_of_scope."""
+    window = await _window(ctx, "later than my Friday 02 October appointment")
+    assert window.rejection is None
+    assert window.date_from == date(2026, 10, 2)
+    assert window.date_to > window.date_from
+    assert window.moved_from_closed_day is False
+
+
+@pytest.mark.parametrize(
+    ("phrase", "expected", "moved"),
+    [
+        ("after my appointment on Friday 2 October", date(2026, 10, 2), False),
+        ("the next one after October 5", date(2026, 10, 5), False),
+        ("later than the second of October", date(2026, 10, 2), False),
+        # Fiesta Nacional shuts the network; the bound moves to the next open day.
+        ("after the twelfth of October", date(2026, 10, 13), True),
+        ("despues de mi cita del viernes 2 de octubre", date(2026, 10, 2), False),
+    ],
+)
+async def test_after_phrases_in_every_voice(
+    ctx: ToolContext, phrase: str, expected: date, moved: bool
+) -> None:
+    window = await _window(ctx, phrase)
+    assert window.rejection is None, phrase
+    assert window.date_from == expected
+    assert window.moved_from_closed_day is moved
+
+
+async def test_an_after_phrase_that_names_no_day_is_still_refused(ctx: ToolContext) -> None:
+    window = await _window(ctx, "the next one after the weekend")
+    assert window.rejection is not None
+    assert window.rejection.reason == "out_of_scope"
+
+
 # ---- find_slots ----------------------------------------------------------
 
 
@@ -601,6 +639,15 @@ async def test_upcoming_is_split_against_the_call_not_the_machine(ctx: ToolConte
     assert {a.appointment_id for a in past.appointments} == {"A9001", "A9002"}
     assert all(a.start > ctx.now for a in upcoming.appointments)
     assert all(a.start <= ctx.now for a in past.appointments)
+
+
+async def test_the_appointment_record_names_its_own_doctor(ctx: ToolContext) -> None:
+    """The wire carries only ``provider_id``. The name is filled from the
+    catalogue so the model checks the caller's words against the record instead
+    of inventing one - call 096af75d died on an invented doctor's name."""
+    upcoming = await list_appointments(ctx, ListAppointmentsInput(patient_id=PATIENT))
+    assert upcoming.appointments[0].provider_id == "PR01"
+    assert upcoming.appointments[0].provider_name == "Dra. Ortiz"
 
 
 async def test_a_past_visit_cannot_be_cancelled(ctx: ToolContext) -> None:

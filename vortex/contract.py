@@ -447,6 +447,11 @@ class Appointment(_Record):
     appointment_type_id: str
     start: datetime  # platform: start_time
     duration_minutes: int = 15
+    #: Ours, not the platform's: the wire carries only provider_id, and the
+    #: model speaks names. ``list_appointments`` fills this from the catalogue
+    #: so the doctor on the record is a name the caller's words can be checked
+    #: against - call 096af75d died to a provider name the model invented.
+    provider_name: str = ""
     #: Ours, not the platform's: ``AppointmentOut`` carries no status, so on
     #: live data this is always "scheduled". What can be cancelled or moved is
     #: what ``when=upcoming`` returns, not what this field says.

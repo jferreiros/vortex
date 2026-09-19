@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="500" height="500" viewBox="59.87 13.32 125.3 125.3" fill="none">
+  <!-- Vorty accessory: twin spring antennae rising from the temples -->
+  <g id="accessory-antenna">
+    <path d="m96 33c-1.5-4 1.5-7 0-12" stroke="url(#an-rod)" stroke-linecap="round" stroke-width="2.5" fill="none"/>
+    <path d="m150 33c1.5-4-1.5-7 0-12" stroke="url(#an-rod)" stroke-linecap="round" stroke-width="2.5" fill="none"/>
+    <circle cx="96" cy="21" r="4" fill="url(#an-bulb)"/>
+    <circle cx="150" cy="21" r="4" fill="url(#an-bulb)"/>
+  </g>
+  <defs>
+    <linearGradient id="an-rod" x1="0" x2="0" y1="21" y2="33" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#B1B1B1" offset="0"/>
+      <stop stop-color="#6C6C6C" offset="1"/>
+    </linearGradient>
+    <radialGradient id="an-bulb" cx=".35" cy=".3" r=".8">
+      <stop stop-color="#FF6B6B" offset="0"/>
+      <stop stop-color="#B4222C" offset="1"/>
+    </radialGradient>
+  </defs>
+</svg>

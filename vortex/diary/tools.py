@@ -351,6 +351,16 @@ def _calendar_date(day_of_month: int, month: int, today: date) -> date | None:
     return None
 
 
+#: A "later than <day>" / "the next one after <day>" phrase is a lower bound,
+#: not a day. Post-canonical Spanish and Catalan land here too: "después de"
+#: surfaces as "despues of" once ``_WORD_ALIASES`` has run.
+_AFTER_PREFIX = re.compile(
+    r"^(?:the )?(?:next(?: one| slot| appointment| available)? )?(?:only )?"
+    r"(?:later than|after|past|from|no earlier than|"
+    r"despues(?: of)?|a partir(?: of| d)?|mes tard(?: of)?|despres(?: of)?)\s+"
+)
+
+
 def _parse_day(text: str, today: date) -> date | None:
     """The day the caller asked for, before any closure moves it."""
     if text in _DAY_OFFSETS:
@@ -391,6 +401,29 @@ def _parse_day(text: str, today: date) -> date | None:
     return None
 
 
+def _after_day(text: str, today: date) -> date | None:
+    """The day a "later than/after <day>" phrase starts from, else ``None``.
+
+    ``None`` is also the answer for an after-phrase that names no day at all
+    ("the next one after the weekend") - it falls back to the normal parse,
+    which refuses it.
+    """
+    match = _AFTER_PREFIX.match(text)
+    if not match:
+        return None
+    inner = text[match.end() :]
+    inner = re.sub(r"\bat \d{1,2}(?:[:.h ]?\d{2})?\b", " ", inner)
+    inner = re.sub(r"\bappoint?ments?\b|\bcitas?\b|\bvisita\b", " ", inner)
+    for _ in range(3):
+        inner = re.sub(
+            r"^(?:my|the|their|your|our|mi|meva|del|of|on|for|at|el|la)\s+",
+            "",
+            inner.strip(),
+        )
+    inner = re.sub(r"\s+", " ", inner).strip()
+    return _parse_day(inner, today) if inner else None
+
+
 async def resolve_date(ctx: ToolContext, args: ResolveDateInput) -> ResolvedWindow:
     """Turn a colloquial phrase into a date window in Europe/Madrid.
 
@@ -428,6 +461,23 @@ async def resolve_date(ctx: ToolContext, args: ResolveDateInput) -> ResolvedWind
         if catalogue.bookable_to:
             date_to = min(date_to, catalogue.bookable_to)
         return _window(opens, max(date_to, opens), part_of_day, moved=False)
+
+    after = _after_day(text, today)
+    if after is not None:
+        # A lower bound, not a day: the window opens on the named day - a later
+        # slot that same day is still an answer - and runs as wide as
+        # /availability takes, so "the first one after theirs" is one search.
+        opens = _first_open_day(catalogue, max(after, tomorrow))
+        if opens is None:
+            return _no_window(
+                today,
+                "clinic_closed",
+                f"nothing opens within {_MAX_MOVE_DAYS} days of {max(after, tomorrow)}",
+            )
+        date_to = opens + timedelta(days=_MAX_SPAN_DAYS)
+        if catalogue.bookable_to:
+            date_to = min(date_to, catalogue.bookable_to)
+        return _window(opens, date_to, part_of_day, moved=opens != after)
 
     asked_for = _parse_day(text, today)
     if asked_for is None:
@@ -830,6 +880,31 @@ def _remembered(ctx: ToolContext, appointment_id: str) -> Appointment | None:
     return Appointment.model_validate(raw) if raw else None
 
 
+async def _named(ctx: ToolContext, items: list[Appointment]) -> list[Appointment]:
+    """Fill ``provider_name`` from the catalogue so the model never invents one.
+
+    The wire carries only ``provider_id``. Call 096af75d (19 Sep, the change
+    and cancel run) died on this: the model told the caller their PR07 visit
+    was with PR01's doctor, the caller corrected it with the right name, and
+    the model took the doctor for another patient and refused. With the name
+    on the record, the caller's "with Dra. X" is a check the model can run,
+    not a guess.
+    """
+    if all(a.provider_name for a in items):
+        return items
+    try:
+        catalogue = await ctx.clinic.catalogue()
+    except ClinicApiError:
+        return items
+    names = {p.provider_id: p.name for p in catalogue.providers}
+    return [
+        a
+        if a.provider_name
+        else a.model_copy(update={"provider_name": names.get(a.provider_id, "")})
+        for a in items
+    ]
+
+
 async def _appointments_of(ctx: ToolContext, patient_id: str) -> list[Appointment]:
     """One patient's whole diary, past and future, as the API reports it.
 
@@ -840,6 +915,7 @@ async def _appointments_of(ctx: ToolContext, patient_id: str) -> list[Appointmen
         items = await ctx.clinic.appointments(patient_id, when="all")
     except ClinicApiError:
         items = await ctx.clinic.appointments(patient_id)
+    items = await _named(ctx, items)
     _remember(ctx, items)
     return items
 

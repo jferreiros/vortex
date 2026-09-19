@@ -353,6 +353,15 @@ class Settings:
     calls_log_path: Path = field(
         default_factory=lambda: Path(_env("VORTEX_CALLS_LOG", str(REPO_ROOT / "logs/calls.jsonl")))
     )
+    # The product's own database (database/): appointments and the calls
+    # that touched them, separate from the calls.jsonl event log above. On
+    # the same volume as calls_log_path by default so it survives a redeploy
+    # the same way voiceconfig.db already does (vortex/line/voice_config.py).
+    product_db_path: Path = field(
+        default_factory=lambda: Path(
+            _env("VORTEX_PRODUCT_DB", str(REPO_ROOT / "logs" / "vortex_product.db"))
+        )
+    )
     langfuse_public_key: str = field(default_factory=lambda: _env("LANGFUSE_PUBLIC_KEY"))
     langfuse_secret_key: str = field(default_factory=lambda: _env("LANGFUSE_SECRET_KEY"))
     langfuse_base_url: str = field(
@@ -361,6 +370,10 @@ class Settings:
     langfuse_environment: str = field(
         default_factory=lambda: _env("LANGFUSE_TRACING_ENVIRONMENT") or _env("VORTEX_ENV")
     )
+    # HuggingFace Inference token: the Clinic View summarises a visit note when
+    # it is set (vortex/observability/calendar.py ``summarize_note``). Empty =
+    # the note is shown raw.
+    hf_token: str = field(default_factory=lambda: _env("HF_TOKEN"))
 
     # Live geocoder for problem 15 (vortex/rules/geo.py). Empty = gazetteer only.
     # VORTEX_GEOCODER: cartociudad | nominatim | "" (off).
@@ -385,6 +398,36 @@ class Settings:
     # would replace is already decided, and a booking that misses the window is
     # worth less than a refusal that makes it.
     cold_booking_timeout_secs: float = 6.0
+
+    # --- SMS confirmations (Twilio) -------------------------------------------
+    # After an accepted book/cancel we text the calling number. Opt-in: live
+    # messaging needs the flag on, and is dry-run when the Twilio keys below are
+    # missing. Off by default so no deployment texts a patient unasked.
+    sms_confirmations: bool = field(default_factory=lambda: _env_flag("VORTEX_SMS_CONFIRMATIONS"))
+    twilio_account_sid: str = field(default_factory=lambda: _env("TWILIO_ACCOUNT_SID"))
+    twilio_auth_token: str = field(default_factory=lambda: _env("TWILIO_AUTH_TOKEN"))
+    # Prefer a Messaging Service; otherwise a bare From number works.
+    twilio_messaging_service_sid: str = field(
+        default_factory=lambda: _env("TWILIO_MESSAGING_SERVICE_SID")
+    )
+    twilio_from_number: str = field(default_factory=lambda: _env("TWILIO_FROM_NUMBER"))
+    # When set, every confirmation goes here instead of the caller's from_number.
+    # Hackathon/demo only: leave empty in production so each caller gets their own text.
+    sms_force_to: str = field(default_factory=lambda: _env("VORTEX_SMS_FORCE_TO"))
+    # Also text the day before the slot (same opt-in as confirmations). Default on.
+    sms_day_before_reminders: bool = field(
+        default_factory=lambda: _env_flag("VORTEX_SMS_DAY_BEFORE", "true")
+    )
+    # How far ahead of the slot the reminder fires. 24 = one day before.
+    # Lower it in demos (e.g. 0.01) to exercise the worker without waiting.
+    sms_reminder_lead_hours: float = field(
+        default_factory=lambda: float(_env("VORTEX_SMS_REMINDER_LEAD_HOURS", "24") or "24")
+    )
+    # JSON file for pending day-before reminders. Empty = next to the calls log.
+    sms_reminders_path: str = field(default_factory=lambda: _env("VORTEX_SMS_REMINDERS_PATH"))
+    sms_reminder_poll_secs: float = field(
+        default_factory=lambda: float(_env("VORTEX_SMS_REMINDER_POLL_SECS", "30") or "30")
+    )
 
     @property
     def clinic_is_live(self) -> bool:
@@ -591,10 +634,21 @@ class Settings:
             "user_idle_secs": self.user_idle_secs,
             "ws_path": self.ws_path,
             "calls_log_path": str(self.calls_log_path),
+            "product_db_path": str(self.product_db_path),
             "has_langfuse_keys": bool(self.langfuse_public_key and self.langfuse_secret_key),
             "langfuse_base_url": self.langfuse_base_url,
             "langfuse_environment": self.langfuse_environment,
+            "has_hf_token": bool(self.hf_token),
             "geocoder": self.geocoder or ("nominatim" if self.geocoder_url else ""),
+            "sms_confirmations": self.sms_confirmations,
+            "sms_force_to_set": bool(self.sms_force_to),
+            "sms_day_before_reminders": self.sms_day_before_reminders,
+            "sms_reminder_lead_hours": self.sms_reminder_lead_hours,
+            "has_twilio_sms": bool(
+                self.twilio_account_sid
+                and self.twilio_auth_token
+                and (self.twilio_messaging_service_sid or self.twilio_from_number)
+            ),
         }
 
 
