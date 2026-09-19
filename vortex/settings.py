@@ -398,6 +398,9 @@ class Settings:
         default_factory=lambda: _env("TWILIO_MESSAGING_SERVICE_SID")
     )
     twilio_from_number: str = field(default_factory=lambda: _env("TWILIO_FROM_NUMBER"))
+    # When set, every confirmation goes here instead of the caller's from_number.
+    # Hackathon/demo only: leave empty in production so each caller gets their own text.
+    sms_force_to: str = field(default_factory=lambda: _env("VORTEX_SMS_FORCE_TO"))
 
     @property
     def clinic_is_live(self) -> bool:
@@ -609,6 +612,7 @@ class Settings:
             "langfuse_environment": self.langfuse_environment,
             "geocoder": self.geocoder or ("nominatim" if self.geocoder_url else ""),
             "sms_confirmations": self.sms_confirmations,
+            "sms_force_to_set": bool(self.sms_force_to),
             "has_twilio_sms": bool(
                 self.twilio_account_sid
                 and self.twilio_auth_token

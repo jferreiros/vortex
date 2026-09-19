@@ -36,6 +36,7 @@ def offline_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> setting
         "TWILIO_MESSAGING_SERVICE_SID",
         "TWILIO_FROM_NUMBER",
         "VORTEX_SMS_CONFIRMATIONS",
+        "VORTEX_SMS_FORCE_TO",
     ):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("VORTEX_VOICE_MODE", "stub")
@@ -72,6 +73,7 @@ def _unset_dotenv_keys() -> None:
         "TWILIO_MESSAGING_SERVICE_SID",
         "TWILIO_FROM_NUMBER",
         "VORTEX_SMS_CONFIRMATIONS",
+        "VORTEX_SMS_FORCE_TO",
     ):
         os.environ.pop(key, None)
 

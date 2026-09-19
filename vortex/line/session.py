@@ -728,20 +728,27 @@ class CallSession:
             self.ctx.log.event("sms.failed", error=repr(task.exception()))
 
     async def _send_sms(self, action: Action) -> None:
-        to = self.ctx.from_number
+        forced = bool(self.settings.sms_force_to)
+        to = (self.settings.sms_force_to or self.ctx.from_number or "").strip()
         if not to:
             self.ctx.log.event("sms.skipped", reason="no_from_number", action_kind=action.kind)
             return
         details = await resolve_details(self.ctx, action)
         body = render_confirmation_text(action, details)
         payload = notification_payload(action, details)
-        self.ctx.log.event("sms.sending", to=mask_phone(to), **payload)
+        self.ctx.log.event(
+            "sms.sending",
+            to=mask_phone(to),
+            forced=forced,
+            **payload,
+        )
         result = await self.sms.send(to=to, body=body)
         self.ctx.log.event(
             f"sms.{result.status}",
             to=mask_phone(result.to or to),
             detail=result.detail,
             sid=result.sid,
+            forced=forced,
             **payload,
         )
 
