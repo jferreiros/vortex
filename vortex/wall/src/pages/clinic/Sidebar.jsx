@@ -52,10 +52,9 @@ const ICONS = {
 const CLINIC_ITEMS = [
   { to: "/clinic/home", label: "Home", icon: "home" },
   { to: "/clinic/settings", label: "Ajustes", icon: "settings" },
-  { to: "/clinic/ai", label: "IA", icon: "ai" },
-  { to: "/clinic/insights", label: "Statistics", icon: "insights" },
+  { to: "/clinic/ai", label: "Personalizar agente", icon: "ai" },
+  { to: "/clinic/insights", label: "Insights", icon: "insights" },
   { to: "/clinic/analytics", label: "Analytics", icon: "analytics" },
-  { to: "/clinic/live-calls", label: "Live Calls", icon: "liveCalls" },
   { to: "/clinic/doctor", label: "Horarios", icon: "doctor" },
   { to: "/clinic/patterns-pathways", label: "Pathways & Patterns", icon: "patternsPathways" },
 ];
@@ -81,7 +80,7 @@ export default function Sidebar() {
   return (
     <nav className="clinic-sidebar">
       <div className="clinic-sidebar-brand">
-        <span className="clinic-sidebar-mark" />
+        <img className="clinic-sidebar-mark" src="/wall/vorty-face" alt="" />
         <span className="clinic-sidebar-brand-text">
           Vortex
           <small>Clínica Arenal</small>

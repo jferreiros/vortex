@@ -2,9 +2,10 @@
 
 Replaces the page's ``PLACEHOLDER_CALLS`` mock: a call still in progress
 (no ``call.ended`` line yet) shows up here, off the same "recent" feed
-every other live card on the board reads (line API first, the hosted
-Supabase log as its automatic fallback, this process's JSONL last — see
-``vortex.observability.callfeed.load_events``).
+every other live card on the board reads (hosted Supabase first, then the
+line API, then this process's JSONL — see
+``vortex.observability.callfeed.load_events``). Ended no-action / escalate
+calls land in ``rejected`` / ``escalated``.
 """
 
 from __future__ import annotations
@@ -33,8 +34,21 @@ def _ended_call(path: Path, cid: str = "CA-done") -> None:
     log.summary(reason="hangup")
 
 
+def _refused_call(path: Path, cid: str = "CA-refused") -> None:
+    log = CallLog(cid, path)
+    log.event("call.started", from_number="+34611111111", voice="stub", clinic="fake")
+    log.user_turn("Quiero una cita mañana")
+    log.action_submitted(
+        "/api/v1/submit/no-action",
+        {"call_id": cid, "reason": "no_availability"},
+        {"status": "dry_run"},
+    )
+    log.event("call.ended", reason="hangup")
+    log.summary(reason="hangup")
+
+
 async def test_live_calls_lists_only_calls_still_in_progress(
-    user: User, offline_settings
+    offline_settings, user: User
 ) -> None:
     _live_call(Path(offline_settings.calls_log_path))
     _ended_call(Path(offline_settings.calls_log_path))
@@ -51,11 +65,25 @@ async def test_live_calls_lists_only_calls_still_in_progress(
     # find_patient is a "decide"-adjacent identify step; the phase reads
     # past "Listen" once the call has looked the patient up.
     assert live["phase"] != ""
+    assert live["phaseKey"] in {"listening", "speaking", "working"}
+    assert "rejected" in response.json()
+    assert "escalated" in response.json()
 
 
 async def test_live_calls_is_empty_with_no_calls_in_progress(
-    user: User, offline_settings
+    offline_settings, user: User
 ) -> None:
     _ended_call(Path(offline_settings.calls_log_path))
     response = await user.http_client.get("/api/wall/live-calls")
     assert response.json()["calls"] == []
+
+
+async def test_live_calls_lists_refused_calls_in_rejected(
+    offline_settings, user: User
+) -> None:
+    _refused_call(Path(offline_settings.calls_log_path))
+    response = await user.http_client.get("/api/wall/live-calls")
+    body = response.json()
+    assert body["calls"] == []
+    assert [c["id"] for c in body["rejected"]] == ["CA-refused"]
+    assert body["rejected"][0]["reason"] == "no_availability"

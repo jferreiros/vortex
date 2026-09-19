@@ -4,20 +4,20 @@ NiceGUI pages.
 
 Order of sources:
 
-1. The hosted SQL log (Supabase) when ``SUPABASE_*`` is set *and* the
-   screen asks by date — Home and Insights. A board with no line volume
-   still draws the same cards the product tables already hold.
-2. ``GET {VORTEX_LINE_URL}/calls`` — the line's own API. Bounded by *calls*
-   (``calls=60`` for the wall) or by start date (``since=<ISO>`` for the
-   Insights window), never by an arbitrary event tail: a tail cut can split a
-   call and drop its ``call.started``, which is what emptied Insights on the
-   live deployment while the log itself was healthy. The live wall stays
-   here so an in-flight call shows before the hosted flush lands.
+1. The hosted SQL log (Supabase) when ``SUPABASE_*`` is set and this is the
+   process's real call log — every board screen, not only dated windows.
+   Dual-write already lands here; the board should read the same store by
+   default so a machine that never served a call still paints real cards.
+2. ``GET {VORTEX_LINE_URL}/calls`` — the line's own API, when hosted is
+   unused or empty. Bounded by *calls* (``calls=60`` for the wall) or by
+   start date (``since=<ISO>`` for Insights), never by an arbitrary event
+   tail: a tail cut can split a call and drop its ``call.started``.
 3. The last good fetch for that scope — one slow or dropped request degrades
    to slightly-stale real data instead of an empty board.
-4. The hosted SQL log again, then the local JSONL at ``calls_log_path``.
-   In production that path is the line's own volume mounted into the board
-   (see deploy/compose.yml); locally it is the file ``make run`` writes.
+4. The hosted SQL log again (if the first pass skipped it), then the local
+   JSONL at ``calls_log_path``. In production that path is the line's own
+   volume mounted into the board (see deploy/compose.yml); locally it is
+   the file ``make run`` writes.
 
 Every result carries a ``source`` dict (``supabase`` | ``line_api`` |
 ``cache`` | ``jsonl_fallback``, plus the error that degraded it) so a
@@ -137,15 +137,19 @@ def load_events(
         params = {"since": since.isoformat()}
         timeout = LINE_INSIGHTS_TIMEOUT_S
 
-    # Home / Insights ask by date: the hosted tables are the shared store
-    # the line already dual-writes, so a board without the line volume
-    # still paints real cards.
-    if since is not None:
-        hosted = _from_hosted(scope, log_path, since=since, max_calls=max_calls)
-        if hosted is not None:
-            if cache_ttl:
-                _scope_cache[scope] = (time.monotonic(), *hosted)
-            return hosted
+    # Hosted SQL is the default store. Dated windows pass ``since`` through
+    # and may cap how many calls they need; the live wall asks for the
+    # newest ``WALL_CALLS`` complete calls.
+    hosted = _from_hosted(
+        scope,
+        log_path,
+        since=since,
+        max_calls=max_calls if since is not None else WALL_CALLS,
+    )
+    if hosted is not None:
+        if cache_ttl:
+            _scope_cache[scope] = (time.monotonic(), *hosted)
+        return hosted
 
     result: tuple[list[dict[str, Any]], dict[str, Any] | None, dict]
     try:

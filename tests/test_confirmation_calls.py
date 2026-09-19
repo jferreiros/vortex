@@ -8,8 +8,9 @@ from pathlib import Path
 import pytest
 from starlette.testclient import TestClient
 
-from vortex.contract import MADRID
+from vortex.contract import MADRID, BookAction
 from vortex.line.confirmation_calls import (
+    confirmation_store_from_settings,
     DEFAULT_MOTIVO,
     KNOWN_MOTIVOS,
     ConfirmationCall,
@@ -823,3 +824,82 @@ def test_session_open_picks_up_the_handoff(tmp_path: Path, offline_settings) -> 
         now=WHEN,
     )
     assert plain.handoff is None
+
+
+def _booking(*, slot: datetime = WHEN) -> BookAction:
+    return BookAction(
+        patient_id="P00042",
+        provider_id="PR05",
+        location_id="sur",
+        appointment_type_id="review",
+        slot=slot,
+        policy_id="sanitas",
+    )
+
+
+def _inbound_session(settings, call_id: str, *, from_number: str | None = "+34600111222"):
+    from vortex.line.session import CallSession
+    from vortex.line.twilio import StartPayload
+
+    params = {"from_number": from_number} if from_number else {}
+    return CallSession.open(
+        StartPayload(streamSid=f"MZ-{call_id}", callSid=call_id, customParameters=params),
+        settings=settings,
+        now=NOW,
+    )
+
+
+@pytest.fixture
+def confirmation_settings(offline_settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from vortex.settings import get_settings, reset_settings
+
+    monkeypatch.setenv("VORTEX_CONFIRMATION_CALLS", "true")
+    monkeypatch.setenv("VORTEX_CONFIRMATION_CALLS_PATH", str(tmp_path / "confirmation_calls.json"))
+    reset_settings()
+    yield get_settings()
+    reset_settings()
+
+
+@pytest.mark.asyncio
+async def test_dry_run_book_queues_confirmation(confirmation_settings) -> None:
+    session = _inbound_session(confirmation_settings, "CA-confirm-dry")
+    result = await session.submit(_booking())
+    await session.close()
+
+    assert result.status == "dry_run"
+    assert session.hangup_armed is False
+    store = confirmation_store_from_settings(confirmation_settings)
+    rows = store._read()
+    assert len(rows) == 1
+    assert rows[0].status == "pending"
+    assert rows[0].to == "+34600111222"
+    assert rows[0].appointment_at == WHEN.isoformat()
+
+
+@pytest.mark.asyncio
+async def test_same_day_book_skips_confirmation(confirmation_settings) -> None:
+    soon = NOW + timedelta(hours=12)
+    session = _inbound_session(confirmation_settings, "CA-confirm-soon")
+    await session.submit(_booking(slot=soon))
+    await session.close()
+
+    store = confirmation_store_from_settings(confirmation_settings)
+    assert store._read() == []
+
+
+@pytest.mark.asyncio
+async def test_submit_action_tool_dry_run_queues_confirmation(confirmation_settings) -> None:
+    session = _inbound_session(confirmation_settings, "CA-confirm-tool")
+    booking = _booking()
+    result = await session.call_tool(
+        "submit_action",
+        {"action": {"kind": "book", **booking.model_dump(mode="json")}},
+    )
+    await session.close()
+
+    assert result.status == "dry_run"
+    assert session.hangup_armed is False
+    store = confirmation_store_from_settings(confirmation_settings)
+    rows = store._read()
+    assert len(rows) == 1
+    assert rows[0].status == "pending"

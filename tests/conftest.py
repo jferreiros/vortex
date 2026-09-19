@@ -14,6 +14,14 @@ from vortex import settings as settings_module
 pytest_plugins = ["nicegui.testing.user_plugin"]
 
 
+@pytest.fixture(autouse=True)
+def _isolate_board_sources(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A local ``make run`` must not answer the board tests' /calls fetch."""
+    from vortex.observability import callfeed
+
+    monkeypatch.setattr(callfeed, "LINE_URL", "http://127.0.0.1:9")
+
+
 @pytest.fixture
 def offline_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> settings_module.Settings:
     """Settings with every key blank and the call log in a temp dir."""
