@@ -463,7 +463,7 @@ def _beat_dot_for_status(status: str) -> str:
 
 
 def _finish_tool_beat(
-    card: CallCard, name: str, ts: str | None, ms: float | None, *, fail: str = ""
+    name: str, result: Any, ts: str | None, ms: float | None, *, fail: str = ""
 ) -> Beat:
     if fail:
         return Beat(
@@ -475,16 +475,14 @@ def _finish_tool_beat(
             dot="bad",
             ms=ms,
         )
-    step = next((item for item in reversed(card.tools) if item.name == name), None)
-    said = step_text(step) if step is not None else "Done."
     return Beat(
         kind="tool",
         title=tool_description(name),
-        text=said,
+        text=step_text(ToolStep(name=name, result=result, ms=ms, status="ok")),
         tool=name,
         ts=ts,
-        dot="ok" if step is None or step.status != "fail" else "bad",
-        ms=ms if ms is not None else (step.ms if step is not None else None),
+        dot="ok",
+        ms=ms,
     )
 
 
@@ -578,7 +576,10 @@ def workflow_beats(card: CallCard | None) -> list[Beat]:
                 name = str(event.get("tool") or "")
                 ms = event.get("ms")
                 beat = _finish_tool_beat(
-                    card, name, ts, float(ms) if isinstance(ms, (int, float)) else None
+                    name,
+                    event.get("result"),
+                    ts,
+                    float(ms) if isinstance(ms, (int, float)) else None,
                 )
                 index = pending.pop(name, None)
                 if index is not None:
@@ -588,7 +589,7 @@ def workflow_beats(card: CallCard | None) -> list[Beat]:
             elif kind == "tool.failed":
                 name = str(event.get("tool") or "")
                 error = str(event.get("error") or "unknown error")
-                beat = _finish_tool_beat(card, name, ts, None, fail=error)
+                beat = _finish_tool_beat(name, None, ts, None, fail=error)
                 index = pending.pop(name, None)
                 if index is not None:
                     beats[index] = beat
