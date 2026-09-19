@@ -42,6 +42,22 @@ def test_static_pages_load_the_tokens() -> None:
         assert 'href="design.css"' in text, f"docs/{page} does not load design.css"
 
 
+def test_evals_report_uses_shared_pill_not_a_24px_override() -> None:
+    """report.py inlines design.css; its own _CSS must stay layout-only."""
+    from evals.common.report import _CSS, _pill
+    from evals.common.results import CaseResult
+
+    assert ".pill{" not in _CSS.replace(" ", "")
+    assert ".pill::before" not in _CSS
+    solid = _pill(CaseResult(id="a", name="a", status="pass"))
+    assert 'class="pill"' in solid
+    assert 'class="dot ok"' in solid
+    hollow = _pill(CaseResult(id="b", name="b", status="pass", hollow=True))
+    assert 'class="pill mute"' in hollow
+    assert 'class="dot off"' in hollow
+    assert "hollow" in hollow
+
+
 def test_tasks_html_does_not_redefine_chip() -> None:
     """Page CSS lays out only; .chip lives in design.css (issue #80)."""
     text = (REPO / "docs" / "tasks.html").read_text(encoding="utf-8")
