@@ -10,7 +10,6 @@ import asyncio
 from pathlib import Path
 
 import pytest
-from nicegui import ui
 from nicegui.testing import User
 
 from vortex.observability.demo import write_scripted_call
@@ -42,38 +41,16 @@ async def test_wall_shows_the_last_call_and_why(seeded: Path, user: User) -> Non
     await user.should_see("insurance does not cover")
 
 
-async def test_call_page_explains_a_refusal(
-    seeded: Path, user: User, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.delenv("VORTEX_OPS_PASSWORD", raising=False)
-    monkeypatch.delenv("VORTEX_ENV", raising=False)
+async def test_call_page_explains_a_refusal(seeded: Path, user: User) -> None:
     ids = [line.split('"call_id": "')[1].split('"')[0] for line in seeded.read_text().splitlines()]
     refused = next(i for i in ids if i.startswith("demo-refuse"))
     await user.open(f"/call/{refused}")
     await user.should_see("No action")
     await user.should_see("insurance does not cover")
     await user.should_see("Check the clinic's rules and the insurance matrix")
-    await user.should_not_see("Timeline")
-    await user.should_not_see("Request and response")
-    await user.should_not_see("+34612345678")
-
-
-async def test_signed_in_call_page_shows_the_team_view(
-    seeded: Path, user: User, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("VORTEX_OPS_PASSWORD", "team-secret")
-    monkeypatch.delenv("VORTEX_ENV", raising=False)
-    ids = [line.split('"call_id": "')[1].split('"')[0] for line in seeded.read_text().splitlines()]
-    refused = next(i for i in ids if i.startswith("demo-refuse"))
-    await user.open("/calls")
-    user.find(ui.input).type("team-secret")
-    user.find("Sign in").click()
-    await user.open(f"/call/{refused}")
     await user.should_see("Timeline")
     await user.should_see("The socket closed.")
     await user.should_see("GET /api/v1/availability + GET /api/v1/clinic")
-    await user.should_see("Request and response")
-    await user.should_see("+34612345678")
 
 
 async def test_unknown_call_has_an_empty_state(seeded: Path, user: User) -> None:

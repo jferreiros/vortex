@@ -56,3 +56,9 @@ def test_evals_report_uses_shared_pill_not_a_24px_override() -> None:
     assert 'class="pill mute"' in hollow
     assert 'class="dot off"' in hollow
     assert "hollow" in hollow
+def test_tasks_html_does_not_redefine_chip() -> None:
+    """Page CSS lays out only; .chip lives in design.css (issue #80)."""
+    text = (REPO / "docs" / "tasks.html").read_text(encoding="utf-8")
+    style = text.split("<style>", 1)[1].split("</style>", 1)[0]
+    assert ".chip{" not in style.replace(" ", "")
+    assert ".chip[aria-pressed" not in style
