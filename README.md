@@ -40,8 +40,10 @@ default). No answer lands as `no_answer` or `unclear`. A reschedule answer does
 not end the call: when the live voice pipeline runs behind the same server the
 call hands off into the agent's rebooking loop (`<Connect><Stream>` back to
 `/ws` with the appointment and language on the start message), so the patient
-moves the appointment in the same call; on stub voice the callback promise
-stands. Every row lives in
+moves the appointment in the same call; without a live pipeline, a short
+TwiML loop offers the provider's next openings from the clinic's availability
+and moves the appointment on the caller's pick (`/confirmation/reschedule-pick`).
+Every row lives in
 `logs/confirmation_calls.json` — the hooks a waitlist filler or a retry/SMS
 fallback would subscribe to. Try it: `uv run python scripts/try_confirmation_call.py`
 (`--live --to <E.164> --base-url <tunnel>` to dial for real).
