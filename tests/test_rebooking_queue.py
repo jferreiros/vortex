@@ -1,0 +1,238 @@
+from __future__ import annotations
+
+from datetime import date
+from pathlib import Path
+from typing import Any
+
+from vortex.clinic.client import FakeClinicClient
+from vortex.contract import AvailabilityResponse, BookAction, RescheduleAction
+from vortex.diary.rebooking import (
+    RebookingStore,
+    RebookingWatcher,
+    analyze_call,
+    analyze_calls,
+    analyze_latest_call,
+)
+
+CALL_ID = "CA-no-slot"
+PATIENT_ID = "P00042"
+
+
+class ReopeningClinic(FakeClinicClient):
+    """A fake diary where another client's cancellation later exposes slots."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.reopened = False
+
+    async def availability(self, **kwargs: Any) -> AvailabilityResponse:
+        answer = await super().availability(**kwargs)
+        if self.reopened:
+            return answer
+        return answer.model_copy(update={"slots": []})
+
+
+def _patient_result() -> dict[str, Any]:
+    return {
+        "status": "found",
+        "patient": {
+            "patient_id": PATIENT_ID,
+            "given_name": "Marta",
+            "first_surname": "Ruiz",
+            "second_surname": "López",
+            "insurer": "sanitas",
+            "has_visited_before": True,
+        },
+    }
+
+
+def _submitted_no_availability() -> dict[str, Any]:
+    return {
+        "kind": "submit.result",
+        "call_id": CALL_ID,
+        "route": "/api/v1/submit/no-action",
+        "payload": {"call_id": CALL_ID, "reason": "no_availability"},
+        "result": {"status": "dry_run"},
+    }
+
+
+def _summary_no_availability() -> dict[str, Any]:
+    return {
+        "kind": "call.summary",
+        "call_id": CALL_ID,
+        "actions": [
+            {
+                "route": "/api/v1/submit/no-action",
+                "payload": {"call_id": CALL_ID, "reason": "no_availability"},
+                "result": {"status": "dry_run"},
+            }
+        ],
+    }
+
+
+def _book_events() -> list[dict[str, Any]]:
+    return [
+        {"kind": "call.started", "call_id": CALL_ID},
+        {
+            "kind": "turn.user",
+            "call_id": CALL_ID,
+            "text": "I need the earliest general practice appointment on Saturday.",
+        },
+        {
+            "kind": "tool.returned",
+            "call_id": CALL_ID,
+            "tool": "find_patient",
+            "result": _patient_result(),
+        },
+        {
+            "kind": "tool.called",
+            "call_id": CALL_ID,
+            "tool": "find_slots",
+            "args": {
+                "patient_id": PATIENT_ID,
+                "specialty_id": "general_practice",
+                "date_from": "2026-09-19",
+                "date_to": "2026-09-19",
+            },
+        },
+        {
+            "kind": "tool.returned",
+            "call_id": CALL_ID,
+            "tool": "find_slots",
+            "result": {
+                "slots": [],
+                "blocked": [],
+                "appointment_type": None,
+                "rejection": {"reason": "no_availability"},
+            },
+        },
+        _submitted_no_availability(),
+        _summary_no_availability(),
+    ]
+
+
+def _reschedule_events() -> list[dict[str, Any]]:
+    events = _book_events()
+    events[1] = {
+        "kind": "turn.user",
+        "call_id": CALL_ID,
+        "text": "I need to move my appointment with Dra. Ortiz to Saturday.",
+    }
+    events.insert(
+        3,
+        {
+            "kind": "tool.returned",
+            "call_id": CALL_ID,
+            "tool": "list_appointments",
+            "result": {
+                "appointments": [
+                    {
+                        "appointment_id": "A0001",
+                        "patient_id": PATIENT_ID,
+                        "provider_id": "PR01",
+                        "location_id": "centro",
+                        "appointment_type_id": "review",
+                        "start": "2026-09-30T10:00:00+02:00",
+                    }
+                ]
+            },
+        },
+    )
+    search = events[4]["args"]
+    search.pop("specialty_id")
+    search["provider_id"] = "PR01"
+    search["location_id"] = "centro"
+    return events
+
+
+def test_no_availability_call_becomes_pending_rebooking() -> None:
+    request = analyze_call(_book_events())
+
+    assert request is not None
+    assert request.intent == "book"
+    assert request.patient_id == PATIENT_ID
+    assert request.policy_id == "sanitas"
+    assert request.specialty_id == "general_practice"
+    assert request.date_from == date(2026, 9, 19)
+
+
+def test_solved_calls_are_not_queued() -> None:
+    events = _book_events()
+    events[-2] = {
+        "kind": "submit.result",
+        "call_id": CALL_ID,
+        "route": "/api/v1/submit/book",
+        "payload": {"call_id": CALL_ID, "patient_id": PATIENT_ID},
+        "result": {"status": "dry_run"},
+    }
+    events[-1] = {
+        "kind": "call.summary",
+        "call_id": CALL_ID,
+        "actions": [
+            {
+                "route": "/api/v1/submit/book",
+                "payload": {"call_id": CALL_ID, "patient_id": PATIENT_ID},
+                "result": {"status": "dry_run"},
+            }
+        ],
+    }
+
+    assert analyze_call(events) is None
+
+
+def test_store_is_idempotent_when_the_same_call_is_analyzed_twice(tmp_path: Path) -> None:
+    store = RebookingStore(tmp_path / "rebooking.sqlite3")
+    [request] = analyze_calls(_book_events() + _book_events())
+
+    first = store.add(request)
+    second = store.add(request)
+
+    assert first.request_id == second.request_id
+    assert [item.request_id for item in store.pending()] == [request.request_id]
+
+
+def test_latest_call_helper_only_queues_the_last_call() -> None:
+    earlier = [event | {"call_id": "CA-earlier"} for event in _book_events()]
+    later = _book_events()
+
+    request = analyze_latest_call(earlier + later)
+
+    assert request is not None
+    assert request.call_id == CALL_ID
+
+
+async def test_reopened_slot_creates_draft_booking(tmp_path: Path) -> None:
+    store = RebookingStore(tmp_path / "rebooking.sqlite3")
+    request = analyze_call(_book_events())
+    assert request is not None
+    store.add(request)
+    clinic = ReopeningClinic()
+    watcher = RebookingWatcher(clinic, store)
+
+    assert await watcher.check_once() == []
+
+    clinic.reopened = True
+    [matched] = await watcher.check_once()
+
+    assert matched.status == "matched"
+    assert matched.matched_slot is not None
+    assert isinstance(matched.draft_action, BookAction)
+    assert matched.draft_action.patient_id == PATIENT_ID
+    assert matched.draft_action.slot == matched.matched_slot.start
+
+
+async def test_reopened_slot_can_draft_a_reschedule(tmp_path: Path) -> None:
+    store = RebookingStore(tmp_path / "rebooking.sqlite3")
+    request = analyze_call(_reschedule_events())
+    assert request is not None
+    assert request.intent == "reschedule"
+    assert request.appointment_id == "A0001"
+    store.add(request)
+    clinic = ReopeningClinic()
+    clinic.reopened = True
+
+    [matched] = await RebookingWatcher(clinic, store).check_once()
+
+    assert isinstance(matched.draft_action, RescheduleAction)
+    assert matched.draft_action.appointment_id == "A0001"
+    assert matched.draft_action.provider_id == "PR01"
