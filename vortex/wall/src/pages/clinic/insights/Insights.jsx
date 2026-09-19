@@ -19,23 +19,29 @@ const POLL_MS = 6000;
 // which reads calls.jsonl through vortex.observability.business_insights.
 // No patient name, DNI or phone ever appears here — only doctors, dates
 // and counts, all already-anonymous by the time they leave the API.
+//
+// The endpoint reports where its events came from (payload.source.kind:
+// line_api, cache or jsonl_fallback). A failed poll or a degraded source
+// must never render as real zeros — the notice below says so instead.
 function useBusinessInsights(days) {
-  const [data, setData] = useState(null);
+  const [state, setState] = useState({ data: null, failed: false });
   const cancelledRef = useRef(false);
 
   useEffect(() => {
     cancelledRef.current = false;
-    setData(null);
+    setState({ data: null, failed: false });
 
     async function poll() {
       try {
         const res = await fetch(`/api/wall/business-insights?days=${days}`);
-        if (!res.ok || cancelledRef.current) return;
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = await res.json();
         if (cancelledRef.current) return;
-        setData(json);
+        setState({ data: json, failed: false });
       } catch {
-        // The page keeps polling; a dropped request just skips a beat.
+        // Keep the last good payload if there is one: a dropped request
+        // degrades to slightly stale data plus the notice, not an empty page.
+        if (!cancelledRef.current) setState((s) => ({ ...s, failed: true }));
       }
     }
 
@@ -47,7 +53,24 @@ function useBusinessInsights(days) {
     };
   }, [days]);
 
-  return data;
+  return state;
+}
+
+function SourceNotice({ failed, source }) {
+  let text = null;
+  if (failed) {
+    text = "No se pudieron cargar los datos de llamadas en vivo — se reintenta cada pocos segundos.";
+  } else if (source?.kind === "cache") {
+    text = "La línea no respondió en la última lectura — mostrando la última copia recibida.";
+  } else if (source?.kind === "jsonl_fallback") {
+    text = "Sin conexión directa con la línea — leyendo el registro de llamadas compartido.";
+  }
+  if (!text) return null;
+  return (
+    <div className="insights-notice" role="status">
+      {text}
+    </div>
+  );
 }
 
 function Suggestion({ text }) {
@@ -232,7 +255,7 @@ function CancellationStats({ cancellations }) {
 
 export default function Insights() {
   const [days, setDays] = useState(30);
-  const data = useBusinessInsights(days);
+  const { data, failed } = useBusinessInsights(days);
 
   return (
     <div className="insights-page">
@@ -255,6 +278,8 @@ export default function Insights() {
           </div>
         }
       />
+
+      <SourceNotice failed={failed} source={data?.source} />
 
       <div className="insights-bento">
         <Card padding="lg" className="insights-cell wide">

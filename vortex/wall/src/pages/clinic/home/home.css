@@ -122,12 +122,33 @@
   display: grid;
   grid-template-columns: 1.4fr 1fr;
   gap: var(--space-6);
-  align-items: start;
+  align-items: stretch;
+}
+
+.home-grid-main,
+.home-grid-side {
+  display: flex;
+  flex-direction: column;
 }
 
 .home-grid-main > .ui-section-header,
 .home-grid-side > .ui-section-header {
   margin-bottom: var(--space-4);
+}
+
+/* The hourly chart carries a legend row the trend line doesn't need (single
+   series, per the dataviz skill). Without this, the two cards in the row
+   above would end up different heights even though the grid stretches them
+   — the shorter chart just centers in the extra space instead of the card
+   trailing off with a gap below it. */
+.home-grid-main > .chart-root,
+.home-grid-side > .chart-root,
+.home-grid-main > .ui-placeholder,
+.home-grid-side > .ui-placeholder {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 
 /* Responsive ----------------------------------------------------------------------*/

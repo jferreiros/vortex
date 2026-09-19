@@ -12,14 +12,15 @@ import json
 import re
 import sqlite3
 from collections.abc import Iterable, Sequence
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any, Literal
 
+import httpx
 from pydantic import BaseModel, Field
 
-from vortex.clinic.client import ClinicApi
-from vortex.contract import BookAction, RescheduleAction, Slot
+from vortex.clinic.client import ClinicApi, ClinicApiError
+from vortex.contract import MADRID, BookAction, RescheduleAction, Slot
 
 RebookingIntent = Literal["book", "reschedule"]
 RebookingStatus = Literal["pending", "matched"]
@@ -268,19 +269,36 @@ class RebookingWatcher:
         self.clinic = clinic
         self.store = store
 
-    async def check_once(self) -> list[RebookingRequest]:
+    async def check_once(self, *, now: datetime) -> list[RebookingRequest]:
+        """Draft every pending request whose window still has a bookable day left.
+
+        This runs outside the call, so there is no ``ToolContext`` and no machine
+        clock to trust: the caller passes the same Europe/Madrid instant a call
+        would carry. Nothing is booked same-day, so a window that ends today or
+        earlier is dropped instead of queried again, and the query starts
+        tomorrow. A rejected or unreachable query costs its own row a turn and
+        leaves the rest of the batch alone.
+        """
+
+        assert now.tzinfo is not None, "check_once needs a timezone-aware now"
+        earliest = now.astimezone(MADRID).date() + timedelta(days=1)
         matched: list[RebookingRequest] = []
         for request in self.store.pending():
-            answer = await self.clinic.availability(
-                date_from=request.date_from,
-                date_to=request.date_to,
-                provider_id=request.provider_id,
-                specialty_id=request.specialty_id,
-                location_id=request.location_id,
-                patient_id=request.patient_id,
-                insurer=[request.policy_id] if request.policy_id else None,
-            )
-            slots = _filter_time(answer.slots, request)
+            if request.date_to < earliest:
+                continue
+            try:
+                answer = await self.clinic.availability(
+                    date_from=max(request.date_from, earliest),
+                    date_to=request.date_to,
+                    provider_id=request.provider_id,
+                    specialty_id=request.specialty_id,
+                    location_id=request.location_id,
+                    patient_id=request.patient_id,
+                    insurer=[request.policy_id] if request.policy_id else None,
+                )
+            except (ClinicApiError, httpx.HTTPError):
+                continue
+            slots = _filter_time(answer.slots, request, earliest)
             if not slots:
                 continue
             slot = slots[0]
@@ -310,9 +328,11 @@ def _draft_action(request: RebookingRequest, slot: Slot) -> DraftAction:
     )
 
 
-def _filter_time(slots: list[Slot], request: RebookingRequest) -> list[Slot]:
+def _filter_time(slots: list[Slot], request: RebookingRequest, earliest: date) -> list[Slot]:
     def keep(slot: Slot) -> bool:
-        local_time = slot.start.timetz().replace(tzinfo=None)
+        if slot.start.astimezone(MADRID).date() < earliest:
+            return False
+        local_time = slot.start.astimezone(MADRID).time()
         if request.time_from and local_time < request.time_from:
             return False
         if request.time_to and local_time >= request.time_to:

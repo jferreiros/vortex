@@ -993,3 +993,200 @@ def test_the_real_llm_service_records_the_tools_as_async() -> None:
         assert llm.has_function(schema.name)
         item = llm._functions[schema.name]
         assert item.cancel_on_interruption is False, f"{schema.name} dies on barge-in"
+
+
+# --- usage metering ----------------------------------------------------------
+
+
+def _pipeline_params_kwargs() -> dict[str, object]:
+    """The keywords ``run_pipecat_call`` builds ``PipelineParams`` with.
+
+    Read off the source, like the hangup wiring test: building the real
+    pipeline needs the four provider keys. The keywords are then handed to the
+    real ``PipelineParams``, so a flag pipecat renamed fails here too.
+    """
+    import ast
+    import inspect
+
+    from vortex.line import pipecat_voice
+
+    tree = ast.parse(inspect.getsource(pipecat_voice.run_pipecat_call))
+    for node in ast.walk(tree):
+        is_params = isinstance(node, ast.Call) and getattr(node.func, "id", "") == "PipelineParams"
+        if not is_params:
+            continue
+        kwargs: dict[str, object] = {}
+        for keyword in node.keywords:
+            assert keyword.arg is not None, "**kwargs would hide the flags"
+            if isinstance(keyword.value, ast.Constant):
+                kwargs[keyword.arg] = keyword.value.value
+            elif isinstance(keyword.value, ast.Name):
+                kwargs[keyword.arg] = getattr(pipecat_voice, keyword.value.id)
+            else:
+                raise AssertionError(f"unreadable PipelineParams keyword {keyword.arg}")
+        return kwargs
+    raise AssertionError("run_pipecat_call builds no PipelineParams")
+
+
+def test_pipeline_enables_usage_metrics() -> None:
+    """Without both flags pipecat measures nothing the wall can price a call with.
+
+    ``enable_metrics`` alone gives latencies only: the three
+    ``start_*_usage_metrics`` hooks are gated on ``enable_usage_metrics`` and
+    return silently without it, so no STT second, no token and no character is
+    ever pushed as a frame.
+    """
+    pytest.importorskip("pipecat")
+    from pipecat.pipeline.task import PipelineParams
+
+    params = PipelineParams(**_pipeline_params_kwargs())
+
+    assert params.enable_metrics is True
+    assert params.enable_usage_metrics is True
+
+
+def test_the_lane_marks_the_call_as_metered() -> None:
+    """``metered`` is the flag's echo, so it is set where the flag is."""
+    pytest.importorskip("pipecat")
+    import inspect
+
+    from vortex.line.pipecat_voice import run_pipecat_call
+
+    assert "session.usage.metered = True" in inspect.getsource(run_pipecat_call)
+
+
+def _metrics_frame(*data: object):
+    from pipecat.frames.frames import MetricsFrame
+
+    return MetricsFrame(data=list(data))
+
+
+def _pushed(frame: object):
+    from pipecat.processors.frame_processor import FrameDirection
+
+    return type(
+        "FramePushed",
+        (),
+        {"frame": frame, "direction": FrameDirection.DOWNSTREAM},
+    )()
+
+
+async def test_the_observer_meters_stt_llm_and_each_tts_service(offline_settings) -> None:
+    """Usage frames in, one ``call.usage`` line out, split per TTS service.
+
+    Chirp 3 HD and Gemini-TTS bill at different rates, so their characters may
+    never land in the same bucket. Every frame is pushed twice here because
+    pipecat pushes it at every link it crosses: the totals must not double.
+    """
+    pytest.importorskip("pipecat")
+    import json
+    from pathlib import Path
+
+    from pipecat.metrics.metrics import (
+        LLMTokenUsage,
+        LLMUsageMetricsData,
+        STTUsage,
+        STTUsageMetricsData,
+        TTFBMetricsData,
+        TTSUsageMetricsData,
+    )
+
+    from vortex.line.pipecat_voice import _CallLogObserver
+    from vortex.line.session import CallSession
+    from vortex.line.twilio import StartPayload
+
+    call_id = "CA-usage"
+    start = StartPayload(streamSid="MZ-usage", callSid=call_id, customParameters={})
+    session = CallSession.open(start, settings=offline_settings)
+    session.usage.metered = True
+    observer = _CallLogObserver(session)
+
+    soniox = "SonioxSTTService#0"
+    frames = [
+        _metrics_frame(STTUsageMetricsData(processor=soniox, value=STTUsage(audio_seconds=30.25))),
+        _metrics_frame(STTUsageMetricsData(processor=soniox, value=STTUsage(audio_seconds=17.05))),
+        _metrics_frame(
+            LLMUsageMetricsData(
+                processor="OpenAILLMService#0",
+                model="whatever-the-host-called-it",
+                value=LLMTokenUsage(
+                    prompt_tokens=11840,
+                    completion_tokens=512,
+                    total_tokens=12352,
+                    cache_read_input_tokens=64,
+                ),
+            )
+        ),
+        _metrics_frame(
+            TTSUsageMetricsData(processor="GoogleHttpTTSService#0", model="", value=1000)
+        ),
+        _metrics_frame(
+            TTSUsageMetricsData(processor="GoogleHttpTTSService#0", model="", value=180)
+        ),
+        _metrics_frame(
+            TTSUsageMetricsData(
+                processor="GeminiTTSService#1", model="gemini-2.5-flash-tts", value=90
+            )
+        ),
+        # A latency frame: measured, not billed.
+        _metrics_frame(TTFBMetricsData(processor="OpenAILLMService#0", value=0.4)),
+    ]
+    for frame in frames:
+        await observer.on_push_frame(_pushed(frame))
+        await observer.on_push_frame(_pushed(frame))
+
+    usage = session.usage
+    assert usage.stt_audio_seconds == pytest.approx(47.3)
+    assert usage.stt_requests == 2
+    assert usage.prompt_tokens == 11840
+    assert usage.completion_tokens == 512
+    assert usage.reasoning_tokens == 0
+    assert usage.cache_read_input_tokens == 64
+    assert usage.llm_requests == 1
+    assert usage.tts_characters == 1270
+
+    await session.close(reason="test")
+
+    log_lines = Path(offline_settings.calls_log_path).read_text().splitlines()
+    lines = [json.loads(line) for line in log_lines]
+    kinds = [line["kind"] for line in lines if line["call_id"] == call_id]
+    assert kinds.index("call.usage") == kinds.index("call.ended") - 1
+
+    event = next(line for line in lines if line["kind"] == "call.usage")
+    event.pop("ts")
+    assert event == {
+        "call_id": call_id,
+        "kind": "call.usage",
+        "metered": True,
+        "stt": {
+            "provider": "soniox",
+            "model": offline_settings.soniox_stt_model,
+            "audio_seconds": 47.3,
+            "requests": 2,
+        },
+        "llm": {
+            "provider": offline_settings.llm_provider,
+            "model": offline_settings.llm_model,
+            "prompt_tokens": 11840,
+            "completion_tokens": 512,
+            "reasoning_tokens": 0,
+            "cache_read_input_tokens": 64,
+            "requests": 1,
+        },
+        "tts": [
+            {
+                "provider": "google",
+                "service": "GoogleHttpTTSService",
+                "model": offline_settings.google_tts_voice_es,
+                "characters": 1180,
+                "requests": 2,
+            },
+            {
+                "provider": "google",
+                "service": "GeminiTTSService",
+                "model": "gemini-2.5-flash-tts",
+                "characters": 90,
+                "requests": 1,
+            },
+        ],
+    }
