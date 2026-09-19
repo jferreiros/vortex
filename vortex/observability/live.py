@@ -30,10 +30,11 @@ from vortex.clinic.client import FakeClinicClient
 from vortex.line import personalities, voice_config
 from vortex.observability import auth, callfeed, explain, insights, pricing
 from vortex.observability import calendar as cal
-from vortex.observability.business_insights import business_insights
+from vortex.observability.business_insights import business_insights, is_real_call
 from vortex.observability.demo import replay_cancellation_demo, write_scripted_call
+from vortex.observability.home_overview import WINDOW_DAYS as HOME_WINDOW_DAYS
 from vortex.observability.home_overview import home_overview
-from vortex.observability.home_pack import load_synthetic_cards, occupancy
+from vortex.observability.home_pack import occupancy
 from vortex.observability.icons import icon
 from vortex.observability.view import CallCard, build_calls
 from vortex.observability.wall_timeline import build_timeline, call_summary, latest_intent
@@ -1004,9 +1005,15 @@ def _sync_catalogue() -> Any:
     return _sync_clinic(FakeClinicClient().catalogue())
 
 
+#: How far back to read the log for the roster. Wider than the Home window
+#: because a provider record is a lasting fact about the clinic, so an older
+#: call that happened to look one up is still the best source for it.
+AGENDA_ROSTER_DAYS = 30
+
+
 def _ensure_agenda() -> None:
     """Load catalogue, directory and appointments through the clinic client."""
-    global _AGENDA_CATALOGUE, _AGENDA_PATIENTS, _AGENDA_BOOKINGS
+    global _AGENDA_CATALOGUE, _AGENDA_PATIENTS
     if _AGENDA_CATALOGUE is not None and _AGENDA_PATIENTS is not None:
         return
     pack = cal.SYNTHETIC_DATA_DIR
@@ -1014,6 +1021,15 @@ def _ensure_agenda() -> None:
     pack_client = FakeClinicClient(data_dir=data_dir) if data_dir is not None else None
     api_client = FakeClinicClient()
     _AGENDA_CATALOGUE = _sync_clinic(api_client.catalogue())
+    # Offline that catalogue is fixtures, which know seven of the clinic's
+    # twelve doctors. The call log carries the platform's own records for the
+    # rest, so fold them in before any grid is built off it.
+    events, _health, _source = _load_events(
+        f"agenda:{AGENDA_ROSTER_DAYS}",
+        since=datetime.now(UTC) - timedelta(days=AGENDA_ROSTER_DAYS),
+        cache_ttl=callfeed.INSIGHTS_CACHE_TTL_S,
+    )
+    _AGENDA_CATALOGUE = cal.catalogue_with_log_roster(_AGENDA_CATALOGUE, events)
     records = _sync_clinic((pack_client or api_client).directory())
     seen = {row.patient_id for row in records}
     for row in _sync_clinic(api_client.directory()):
@@ -1021,7 +1037,15 @@ def _ensure_agenda() -> None:
             records.append(row)
             seen.add(row.patient_id)
     _AGENDA_PATIENTS = cal.patient_index_from_records(records)
-    _AGENDA_BOOKINGS = cal.load_agenda_bookings(_AGENDA_CATALOGUE)
+    # Bookings are deliberately not loaded here: they are the one part of the
+    # agenda that changes while the board runs, and ``_agenda_bookings_live``
+    # owns them on its own TTL.
+    # Real callers are not in the offline directory, so their visits would show
+    # an id where a name belongs. The database carries whatever name the call
+    # that booked them established; the directory still wins where it knows.
+    rows, _call_ids = cal.load_database_agenda()
+    for patient_id, brief in cal.patient_index_from_rows(rows).items():
+        _AGENDA_PATIENTS.setdefault(patient_id, brief)
 
 
 _AGENDA_CATALOGUE = None
@@ -1142,9 +1166,24 @@ def _wall_cancelled_keys() -> set[cal.BookingKey]:
     return keys
 
 
+#: How long a diary read is reused. The catalogue and the roster beside it
+#: stay cached for the process — a provider's schedule is not what changes —
+#: but the bookings are a database read, and the database gains rows while the
+#: board runs. Caching those for the process life would leave the Agenda
+#: showing whatever the diary held when the first tab opened.
+AGENDA_BOOKINGS_TTL_S = 30.0
+
+_AGENDA_BOOKINGS_AT = 0.0
+
+
 def _agenda_bookings_live() -> dict[cal.BookingKey, cal.Booking]:
-    """The loaded bookings minus the slots the wall already cancelled."""
+    """The current bookings minus the slots the wall already cancelled."""
+    global _AGENDA_BOOKINGS, _AGENDA_BOOKINGS_AT
     _ensure_agenda()
+    stale = (time.monotonic() - _AGENDA_BOOKINGS_AT) > AGENDA_BOOKINGS_TTL_S
+    if _AGENDA_BOOKINGS is None or stale:
+        _AGENDA_BOOKINGS = cal.load_agenda_bookings(_AGENDA_CATALOGUE)
+        _AGENDA_BOOKINGS_AT = time.monotonic()
     return cal.drop_cancelled(_AGENDA_BOOKINGS or {}, _wall_cancelled_keys())
 
 
@@ -1351,29 +1390,39 @@ async def wall_cancel_visit_api(request: Request) -> JSONResponse:
             slot_start=booking.start.astimezone(MADRID).isoformat(),
         )
     queued = _enqueue_rebookings([booking])
-    return JSONResponse(
-        {"ok": True, "appointment_updated": touched, "rebookings_queued": queued}
+    return JSONResponse({"ok": True, "appointment_updated": touched, "rebookings_queued": queued})
+
+
+def _home_cards() -> tuple[list[CallCard], dict]:
+    """The real calls of the last ``HOME_WINDOW_DAYS`` days, and their source.
+
+    Bounded by start date rather than by an event tail for the same reason
+    the Insights fetch is: a tail cut can split a call and drop its
+    ``call.started``. ``is_real_call`` then removes the eval probes and
+    scripted demo calls that share this log.
+
+    Not cached for the life of the process: ``home_overview`` buckets against
+    a live clock, so cards fixed at start-up would report a stale "today"
+    from the moment the day rolled over.
+    """
+    cutoff = datetime.now(UTC) - timedelta(days=HOME_WINDOW_DAYS)
+    events, _health, source = _load_events(
+        f"home:{HOME_WINDOW_DAYS}", since=cutoff, cache_ttl=callfeed.INSIGHTS_CACHE_TTL_S
     )
-
-
-#: The Home page's own numbers never come from the live line: the pack is a
-#: fixed corpus of eval calls, cached for the life of the process the same
-#: way the React app's build is.
-_HOME_CARDS_CACHE: list[CallCard] | None = None
-
-
-def _home_cards() -> list[CallCard]:
-    global _HOME_CARDS_CACHE
-    if _HOME_CARDS_CACHE is None:
-        _HOME_CARDS_CACHE = load_synthetic_cards()
-    return _HOME_CARDS_CACHE
+    return [c for c in build_calls(events) if is_real_call(c)], source
 
 
 @app.get("/api/wall/home-overview")
 def wall_home_overview_api() -> JSONResponse:
-    """Stats, hourly and daily volume for the Home page — read straight off
-    ``synthetic-data/`` (see ``home_overview.py``), never a per-render mock."""
-    return JSONResponse(home_overview(_home_cards(), now=datetime.now(UTC)))
+    """Today's diary activity for the Home page, off the line's own call log.
+
+    ``source`` rides along so a page of zeros can be told apart from a feed
+    that degraded to stale or empty data.
+    """
+    cards, source = _home_cards()
+    payload = home_overview(cards, now=datetime.now(UTC))
+    payload["source"] = source
+    return JSONResponse(payload)
 
 
 @app.get("/api/wall/occupancy")
@@ -1889,10 +1938,58 @@ def _precompute_wall_cache() -> None:
         print(f"wall-cache precompute failed, keeping any existing file: {result.stderr.strip()}")
 
 
+#: How often the board rebuilds its product database from the call log.
+#: Nothing else will ever put a real call in it: ``database/hooks.py`` writes
+#: forward-only from the line's own process, into the line's own file, and
+#: ``deploy/compose.yml`` gives the board a separate writable volume (the log
+#: is the only thing the two share, mounted read-only). So without this the
+#: Agenda would only ever hold whatever the last manual backfill put there.
+#: A timer is safe because the backfill is idempotent by construction.
+PRODUCT_DB_REFRESH_S = 120.0
+
+
+def _backfill_product_db() -> None:
+    """Turn the call log's landed actions into product-database rows.
+
+    Subprocess for the same reasons ``_precompute_wall_cache`` gives: it is a
+    standalone script rather than a package import, and a slow or failing run
+    must never take the board down — the Agenda simply keeps the rows it
+    already has until the next run succeeds.
+    """
+    script = REPO_ROOT / "database" / "scripts" / "backfill_from_logs.py"
+    result = subprocess.run(
+        [sys.executable, str(script)], cwd=str(REPO_ROOT), capture_output=True, text=True
+    )
+    if result.returncode == 0:
+        print(result.stdout.strip().splitlines()[-1] if result.stdout.strip() else "backfill: ok")
+    else:
+        print(f"product-db backfill failed, keeping existing rows: {result.stderr.strip()}")
+
+
+async def _refresh_product_db_forever() -> None:
+    while True:
+        await asyncio.sleep(PRODUCT_DB_REFRESH_S)
+        await asyncio.to_thread(_backfill_product_db)
+
+
+def _start_product_db_refresh() -> None:
+    """Launch the refresh loop on the server's own event loop.
+
+    A sync start-up handler that creates the task, rather than an async one:
+    NiceGUI awaits an async handler, and a loop that never returns would hang
+    start-up instead of running beside it.
+    """
+    asyncio.create_task(_refresh_product_db_forever())
+
+
 def main() -> None:
     if auth.is_production() and not auth.ops_password():
         raise SystemExit("VORTEX_OPS_PASSWORD is required in production")
     _precompute_wall_cache()
+    # Registered here rather than at import time so tests and any other
+    # importer of this module never start a background subprocess loop.
+    _backfill_product_db()
+    app.on_startup(_start_product_db_refresh)
     ui.run(
         host="0.0.0.0",
         port=BOARD_PORT,

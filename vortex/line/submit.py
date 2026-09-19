@@ -178,24 +178,28 @@ async def submit_action(ctx: ToolContext, args: SubmitInput) -> SubmitResult:
     ctx.log.event("submit.sent", route=route, payload=payload)
     result = await ctx.submitter.submit(ctx.call_id, action)
     ctx.log.action_submitted(route, payload, result)
-    if action.kind in {"book", "cancel", "reschedule"}:
-        if result.status in {"accepted", "duplicate"}:
-            invalidate = getattr(ctx.clinic, "invalidate_availability", None)
-            if invalidate is not None:
-                invalidate()
-        # dry_run counts too: with no PLATFORM_API_KEY (the default local
-        # setup — see database/README.md's "Entorno (local)") nothing is
-        # ever "accepted", but the action is exactly as real locally as it
-        # would be against the platform, and make call/make run must
-        # populate database/ the same way a keyed deploy does. Only a
-        # rejected, late or unknown-call submit means the action never
-        # happened at all.
-        if result.status in {"accepted", "duplicate", "dry_run"}:
-            # Late import: database/ has no reason to load at process start
-            # for every call, and this keeps the product database an
-            # optional layer the line depends on for one call, not a
-            # startup-time dependency.
-            from database.hooks import persist_submission
+    if action.kind in {"book", "cancel", "reschedule"} and result.status in {
+        "accepted",
+        "duplicate",
+    }:
+        invalidate = getattr(ctx.clinic, "invalidate_availability", None)
+        if invalidate is not None:
+            invalidate()
+    # dry_run counts too: with no PLATFORM_API_KEY (the default local
+    # setup — see database/README.md's "Entorno (local)") nothing is
+    # ever "accepted", but the action is exactly as real locally as it
+    # would be against the platform, and make call/make run must
+    # populate database/ the same way a keyed deploy does. Only a
+    # rejected, late or unknown-call submit means the action never
+    # happened at all. All six verbs land a ``calls`` row so Home and
+    # the Agenda move the moment the platform accepts, not at the next
+    # backfill.
+    if result.status in {"accepted", "duplicate", "dry_run"}:
+        # Late import: database/ has no reason to load at process start
+        # for every call, and this keeps the product database an
+        # optional layer the line depends on for one call, not a
+        # startup-time dependency.
+        from database.hooks import persist_submission
 
-            await persist_submission(ctx, action, db_path=get_settings().product_db_path)
+        await persist_submission(ctx, action, db_path=get_settings().product_db_path)
     return result

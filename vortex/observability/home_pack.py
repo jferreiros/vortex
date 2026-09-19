@@ -23,6 +23,7 @@ for how. This module just reads the file.
 from __future__ import annotations
 
 import json
+import time
 from collections import Counter
 from dataclasses import dataclass
 from datetime import date as date_cls
@@ -228,6 +229,80 @@ def _matching_cells(
     ]
 
 
+#: One 15-minute step, the unit ``scripts/precompute_wall_cache.py`` counts
+#: capacity in, so a booked half-hour has to weigh two.
+SLOT_MINUTES = 15
+
+
+def _busy_from_database() -> dict[tuple[str, str, str], int]:
+    """Booked 15-minute steps per (day, site, specialty), from the real diary.
+
+    The cached ``busy_slots`` is only as real as the clinic client that built
+    it, which offline is ``vortex/clinic/fixtures.py``. The product database
+    holds what the line actually booked, so it is the better answer whenever
+    it has rows — and the only one that reflects real traffic.
+
+    Counted over distinct (provider, site, minute) steps rather than over
+    appointments: several calls in this log booked the same opening, and a
+    diary slot can only be taken once.
+    """
+    try:
+        from database import db
+        from vortex.settings import get_settings
+
+        with db.connection(get_settings().product_db_path) as conn:
+            rows = db.list_appointments(conn)
+    except Exception:
+        return {}
+
+    steps: set[tuple[str, str, str, str, str]] = set()
+    for row in rows:
+        if not row.site_id or not row.specialty_id:
+            continue
+        try:
+            start = datetime.fromisoformat(row.slot_start)
+            end = datetime.fromisoformat(row.slot_end)
+        except (TypeError, ValueError):
+            continue
+        local = start.astimezone(MADRID)
+        minutes = max(SLOT_MINUTES, int((end - start).total_seconds() // 60))
+        for offset in range(0, minutes, SLOT_MINUTES):
+            step = local + timedelta(minutes=offset)
+            steps.add(
+                (
+                    step.date().isoformat(),
+                    row.site_id,
+                    row.specialty_id,
+                    row.provider_id or "",
+                    step.isoformat(),
+                )
+            )
+
+    busy: Counter[tuple[str, str, str]] = Counter()
+    for day, site_id, specialty_id, _provider, _minute in steps:
+        busy[(day, site_id, specialty_id)] += 1
+    return dict(busy)
+
+
+#: How long a diary read is reused. Unlike the occupancy file beside it, this
+#: one is not fixed at start-up: the database gains rows while the board runs,
+#: so caching it for the life of the process would freeze the Home page's
+#: occupancy at whatever the diary held when the first tab opened.
+BUSY_CACHE_TTL_S = 30.0
+
+_busy_cache: dict[tuple[str, str, str], int] | None = None
+_busy_cached_at = 0.0
+
+
+def _database_busy() -> dict[tuple[str, str, str], int]:
+    """The booked steps, re-read once every ``BUSY_CACHE_TTL_S``."""
+    global _busy_cache, _busy_cached_at
+    if _busy_cache is None or (time.monotonic() - _busy_cached_at) > BUSY_CACHE_TTL_S:
+        _busy_cache = _busy_from_database()
+        _busy_cached_at = time.monotonic()
+    return _busy_cache
+
+
 def _day_pct(
     by_date: dict[str, list[dict[str, Any]]], day: date_cls, *, location_id: str, specialty_id: str
 ) -> int:
@@ -237,7 +312,16 @@ def _day_pct(
     capacity = sum(c["capacity_slots"] for c in cells)
     if capacity <= 0:
         return 0
-    busy = sum(c["busy_slots"] for c in cells)
+    # The larger of the two, never one replacing the other: the cached number
+    # is capacity minus what /availability still offered, so it covers the
+    # clinic's own seed bookings; the database covers what this line booked,
+    # which the clinic (read-only) never learned about. Each is a floor the
+    # other does not see, so a booking can only ever make a day fuller.
+    real = _database_busy()
+    busy = sum(
+        max(c["busy_slots"], real.get((day.isoformat(), c["location_id"], c["specialty_id"]), 0))
+        for c in cells
+    )
     return max(0, min(100, round(100 * busy / capacity)))
 
 

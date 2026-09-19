@@ -117,6 +117,25 @@ def save(settings: Any, data: dict[str, Any] | None) -> VoiceConfig:
             "(id, voice, tone, friendliness, speech_rate) VALUES (1, ?, ?, ?, ?)",
             (cfg.voice, cfg.tone, cfg.friendliness, cfg.speech_rate),
         )
+    try:
+        from database.remote import mirrors_file, safe_upsert
+
+        if mirrors_file(db_path(settings)):
+            safe_upsert(
+                "voiceconfig",
+                [
+                    {
+                        "id": 1,
+                        "voice": cfg.voice,
+                        "tone": cfg.tone,
+                        "friendliness": cfg.friendliness,
+                        "speech_rate": cfg.speech_rate,
+                    }
+                ],
+                "id",
+            )
+    except Exception:
+        pass
     return cfg
 
 
