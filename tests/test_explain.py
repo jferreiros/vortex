@@ -2,9 +2,15 @@ from __future__ import annotations
 
 from vortex.contract import ALL_REASONS
 from vortex.observability.explain import (
+    ACTION_LABEL,
+    EVENT_TEXT,
+    LIVE_SUB,
     REASON_TEXT,
+    STAGES,
+    TOOL_TEXT,
     event_detail,
     event_text,
+    featured_call,
     is_lifecycle,
     outcome_text,
     outcome_title,
@@ -14,6 +20,8 @@ from vortex.observability.explain import (
     status_label,
     step_text,
     tool_endpoint,
+    wall_sub,
+    workflow_beats,
 )
 from vortex.observability.view import CallCard, ToolStep, Turn
 
@@ -77,7 +85,8 @@ def test_step_text_reads_results() -> None:
         status="ok",
         result={"allowed": False, "rejection": {"reason": "referral_required", "detail": "d"}},
     )
-    assert step_text(step) == "Rejected: referral_required — d"
+    assert "referral" in step_text(step)
+    assert "Rejected" in step_text(step)
     assert step_text(ToolStep("find_slots", status="ok", result={"slots": []})).startswith(
         "No slot"
     )
@@ -128,3 +137,84 @@ def test_event_text_says_what_happened_and_event_detail_says_the_facts() -> None
     )
     assert event_text({"kind": "socket.odd"}) == "Socket odd"
     assert event_detail({"kind": "socket.odd"}) == ""
+
+
+def test_screen_words_say_patient_never_caller() -> None:
+    blob = " ".join(
+        [
+            *REASON_TEXT.values(),
+            *TOOL_TEXT.values(),
+            *(text for _, _, text in STAGES),
+            *EVENT_TEXT.values(),
+            *ACTION_LABEL.values(),
+            LIVE_SUB,
+            wall_sub("Clínica Arenal"),
+        ]
+    )
+    assert "caller" not in blob.lower()
+    assert "patient" in blob.lower()
+
+
+def test_featured_call_skips_an_empty_stale_socket() -> None:
+    greeting = CallCard(call_id="empty", ended=True, from_number="+1")
+    greeting.turns.append(Turn("assistant", "Clínica Arenal, buenos días."))
+    booked = _booked()
+    assert featured_call([greeting, booked]) is booked
+    assert featured_call([booked, greeting]) is booked
+    live = CallCard(call_id="live")
+    live.turns.append(Turn("user", "hola"))
+    assert featured_call([booked, live]) is live
+
+
+def test_workflow_beats_follow_the_line_and_pulse_the_speaker() -> None:
+    card = CallCard(call_id="CA-w", from_number="+34600")
+    card.events = [
+        {"kind": "call.started", "ts": "t0", "from_number": "+34600"},
+        {"kind": "turn.assistant", "ts": "t1", "text": "Clínica Arenal, buenos días."},
+        {"kind": "turn.user", "ts": "t2", "text": "Quiero una cita."},
+        {"kind": "tool.called", "ts": "t3", "tool": "find_patient", "args": {"name": "Marta"}},
+        {
+            "kind": "tool.returned",
+            "ts": "t4",
+            "tool": "find_patient",
+            "ms": 12,
+            "result": {
+                "status": "found",
+                "patient": {"given_name": "Marta", "first_surname": "Ruiz", "patient_id": "P1"},
+            },
+        },
+        {"kind": "turn.assistant", "ts": "t5", "text": "Marta, ¿para cuándo?"},
+    ]
+    card.turns = [
+        Turn("assistant", "Clínica Arenal, buenos días.", "t1"),
+        Turn("user", "Quiero una cita.", "t2"),
+        Turn("assistant", "Marta, ¿para cuándo?", "t5"),
+    ]
+    card.tools = [
+        ToolStep(
+            "find_patient",
+            status="ok",
+            ms=12,
+            result={
+                "status": "found",
+                "patient": {"given_name": "Marta", "first_surname": "Ruiz", "patient_id": "P1"},
+            },
+        )
+    ]
+    beats = workflow_beats(card)
+    kinds = [beat.kind for beat in beats]
+    assert kinds == ["start", "agent", "patient", "tool", "agent"]
+    tool = next(beat for beat in beats if beat.kind == "tool")
+    assert tool.title.startswith("Look the patient")
+    assert "Marta" in tool.text
+    assert tool.tool == "find_patient"
+    assert beats[-1].speaking is True
+    assert beats[-1].kind == "agent"
+    card.ended = True
+    card.action_kind = "book"
+    card.submit_status = "accepted"
+    card.patient_name = "Marta Ruiz"
+    ended = workflow_beats(card)
+    assert ended[-1].kind == "outcome"
+    assert ended[-1].title == "Booked"
+    assert all(not beat.speaking for beat in ended)
