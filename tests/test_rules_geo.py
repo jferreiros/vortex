@@ -110,8 +110,11 @@ async def test_nearest_location_passes_socket_settings_to_locate(
     ctx.settings = socket_settings  # type: ignore[attr-defined]
     seen: list[Settings] = []
 
-    async def fake_locate(address: str, settings: Settings):
+    caches: list[geo.GeocodeCache] = []
+
+    async def fake_locate(address: str, settings: Settings, cache: geo.GeocodeCache):
         seen.append(settings)
+        caches.append(cache)
         return geo.gazetteer_lookup(address)
 
     monkeypatch.setattr(geo, "locate", fake_locate)
@@ -119,3 +122,5 @@ async def test_nearest_location_passes_socket_settings_to_locate(
         ctx, NearestLocationInput(address="Getafe", specialty_id="general_practice")
     )
     assert seen == [socket_settings]
+    # The cache the tool hands down is this call's own, never a module global.
+    assert caches == [ctx.state[geo.GEOCODE_CACHE_KEY]]
