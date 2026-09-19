@@ -24,6 +24,7 @@ from vortex.line.confirmation_calls import (
     handoff_ws_url,
     offered_slots_payload,
     parse_offered_slots,
+    pick_reschedule_slots,
     reschedule_offer_text,
     schedule_confirmation_call,
     twilio_locale,
@@ -722,3 +723,28 @@ def test_reschedule_pick_reprompts_once_then_falls_back(confirmation_client) -> 
     assert row is not None
     assert row.detail == "rebooking_unpicked"
     assert row.rescheduled_to == ""
+
+
+def test_classify_slot_pick_by_time_of_day() -> None:
+    starts = _starts()
+    assert classify_slot_pick("el lunes a las 9:30", "", starts, "es") == 0
+    assert classify_slot_pick("a las 11:00", "", starts, "es") == 2
+    assert classify_slot_pick("las diez y cuarto, vamos a por esa", "", starts, "es") is None
+
+
+async def test_pick_reschedule_slots_spreads_days(offline_settings) -> None:
+    from vortex.clinic import make_clinic_client
+
+    call = _pending(provider_id="PR01", patient_id="P00042")
+    slots = await pick_reschedule_slots(make_clinic_client(offline_settings), call)
+    assert len(slots) == 3
+    days = [slot.start.date() for slot in slots]
+    assert len(set(days)) == 3  # one opening per day, not three in one morning
+    assert all(slot.start.date() > call.appointment_dt.date() for slot in slots)
+
+
+async def test_pick_reschedule_slots_without_provider_cannot_offer() -> None:
+    from vortex.clinic import make_clinic_client
+
+    call = _pending()  # no provider_id
+    assert await pick_reschedule_slots(make_clinic_client(), call) == []

@@ -513,7 +513,17 @@ async def pick_reschedule_slots(
     except Exception:
         log.warning("confirmation %s: availability lookup failed", call.confirmation_id)
         return []
-    return availability.slots[:limit]
+    # One opening per day: three slots on the same morning are one real option.
+    spread: list[Any] = []
+    seen_days: set[Any] = set()
+    for slot in availability.slots:
+        if slot.start.date() in seen_days:
+            continue
+        seen_days.add(slot.start.date())
+        spread.append(slot)
+        if len(spread) == limit:
+            break
+    return spread
 
 
 def offered_slots_payload(slots: list[Any]) -> str:
@@ -600,6 +610,24 @@ def classify_slot_pick(
     for index, words in enumerate(_PICK_ORDINALS[lang][: len(starts)]):
         if any(word in folded for word in words):
             return index
+    time_match = re.search(r"(\d{1,2})[:.](\d{2})", folded)
+    if time_match is None:
+        time_match = re.search(r"las (\d{1,2}) y media", folded)
+        if time_match is not None:
+            matches = [
+                i for i, start in enumerate(starts)
+                if start.hour == int(time_match.group(1)) and start.minute == 30
+            ]
+            if len(matches) == 1:
+                return matches[0]
+    if time_match is not None and time_match.lastindex and time_match.lastindex >= 2:
+        matches = [
+            i
+            for i, start in enumerate(starts)
+            if start.hour == int(time_match.group(1)) and start.minute == int(time_match.group(2))
+        ]
+        if len(matches) == 1:
+            return matches[0]
     for weekday_words in _WEEKDAY_WORDS.values():
         for weekday, word in enumerate(weekday_words):
             if word in folded:
