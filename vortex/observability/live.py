@@ -101,13 +101,58 @@ def _is_live(card: CallCard) -> bool:
     return (datetime.now(UTC) - last).total_seconds() < STALE_AFTER_S
 
 
-def _load_cards() -> tuple[list[CallCard], dict[str, Any] | None]:
+def _build_cards() -> tuple[list[CallCard], dict[str, Any] | None]:
     events, health = _load_events()
     cards = build_calls(events)
     for card in cards:
         if card.live and not _is_live(card):
             card.ended = True
             card.reason = card.reason or "stale"
+    return cards, health
+
+
+#: (log path, monotonic stamp, cards, health). One load feeds every open tab.
+_cards_cache: tuple[str, float, list[CallCard], dict[str, Any] | None] | None = None
+_cards_task: asyncio.Task[tuple[list[CallCard], dict[str, Any] | None]] | None = None
+#: A redraw ticks about twice a second, so a load older than this is worth
+#: repeating and anything newer is what the previous tick already read.
+CARDS_TTL_S = 0.5
+
+
+def _fresh_cards(key: str) -> tuple[list[CallCard], dict[str, Any] | None] | None:
+    cached = _cards_cache
+    if cached is None or cached[0] != key or time.monotonic() - cached[1] > CARDS_TTL_S:
+        return None
+    return cached[2], cached[3]
+
+
+def _load_cards() -> tuple[list[CallCard], dict[str, Any] | None]:
+    """The cards, for a page being built. Blocks; call it once per render."""
+    global _cards_cache
+    key = str(_log_path())
+    fresh = _fresh_cards(key)
+    if fresh is not None:
+        return fresh
+    cards, health = _build_cards()
+    _cards_cache = (key, time.monotonic(), cards, health)
+    return cards, health
+
+
+async def _load_cards_async() -> tuple[list[CallCard], dict[str, Any] | None]:
+    """The same cards for a redraw: one load per TTL for the whole board, in a
+    worker thread. ``_build_cards`` makes two HTTP calls and reads the log, and
+    a redraw runs on the event loop with every other client's redraw."""
+    global _cards_cache, _cards_task
+    key = str(_log_path())
+    fresh = _fresh_cards(key)
+    if fresh is not None:
+        return fresh
+    task = _cards_task
+    if task is None or task.done() or task.get_loop() is not asyncio.get_running_loop():
+        task = asyncio.create_task(asyncio.to_thread(_build_cards))
+        _cards_task = task
+    cards, health = await task
+    _cards_cache = (key, time.monotonic(), cards, health)
     return cards, health
 
 
@@ -722,7 +767,7 @@ def _facts(health: dict[str, Any] | None) -> None:
 
 
 @ui.page("/wall/classic")
-def wall_page() -> None:
+async def wall_page() -> None:
     """The original NiceGUI projector view: three columns, ten-second read
     from across the room. Superseded as the public entry by the React app
     (vortex/wall/) now mounted at /wall itself, kept here as a fallback/
@@ -733,8 +778,8 @@ def wall_page() -> None:
     stage = ui.element("div").classes("shell")
     rendered: dict[str, Any] = {"sig": None}
 
-    def redraw() -> None:
-        cards, health = _load_cards()
+    async def redraw() -> None:
+        cards, health = await _load_cards_async()
         sig = _signature(cards, health)
         if sig == rendered["sig"]:
             return
@@ -768,20 +813,20 @@ def wall_page() -> None:
                 _facts(health)
             _footer()
 
-    redraw()
+    await redraw()
     ui.timer(0.5, redraw)
 
 
 @ui.page("/call/{call_id}")
-def call_page(call_id: str) -> None:
+async def call_page(call_id: str) -> None:
     """One call, by id. Public. The same panel as Live, plus every request."""
     _apply_chrome()
     ui.page_title(f"Vortex · {call_id}")
     stage = ui.element("div").classes("shell")
     rendered: dict[str, Any] = {"sig": None}
 
-    def redraw() -> None:
-        cards, health = _load_cards()
+    async def redraw() -> None:
+        cards, health = await _load_cards_async()
         card = next((c for c in cards if c.call_id == call_id), None)
         sig = _signature(cards, health, call_id)
         if sig == rendered["sig"]:
@@ -816,7 +861,7 @@ def call_page(call_id: str) -> None:
                     _call_panel(card, verbose=team, public=not team)
             _footer()
 
-    redraw()
+    await redraw()
     ui.timer(0.6, redraw)
 
 
@@ -969,7 +1014,7 @@ def _passes(card: CallCard, key: str) -> bool:
 
 
 @ui.page("/calls")
-def ops_page() -> None:
+async def ops_page() -> None:
     _apply_chrome()
     ui.page_title("Vortex · Calls")
     if not _ops_ok():
@@ -1017,17 +1062,17 @@ def ops_page() -> None:
 
     rendered: dict[str, Any] = {"sig": None}
 
-    def pick(call_id: str) -> None:
+    async def pick(call_id: str) -> None:
         state["id"] = call_id
-        redraw()
+        await redraw()
 
-    def set_filter(key: str) -> None:
+    async def set_filter(key: str) -> None:
         state["filter"] = key
-        redraw()
+        await redraw()
 
-    def redraw() -> None:
+    async def redraw() -> None:
         _beat(name.value or "joaquin")
-        cards, health = _load_cards()
+        cards, health = await _load_cards_async()
         shown = [c for c in cards if _passes(c, state["filter"])]
         if state["id"] is None and shown:
             featured = explain.featured_call(shown)
@@ -1079,7 +1124,7 @@ def ops_page() -> None:
                 ui.element("div").style("height: 16px")
                 _transcript(card)
 
-    redraw()
+    await redraw()
     ui.timer(0.6, redraw)
 
 
