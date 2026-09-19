@@ -34,9 +34,7 @@ The server always starts. Missing keys switch components to fake mode:
 | any of `SONIOX_API_KEY`, the LLM key and base URL the active `LLM_PROVIDER` resolves to, or the credentials of `VORTEX_TTS_PROVIDER` (and of `VORTEX_TTS_PROVIDER_ALT` when it differs) | the stub voice pipeline: beeps out, counts frames in, submits a typed refusal at the end |
 
 `GET /health` says which mode is active. `VORTEX_VOICE_MODE` and
-`VORTEX_CLINIC_MODE` force a mode (see `.env.example`). Set
-`VORTEX_VOICE_MODE=gemini-live` with `GOOGLE_API_KEY` for the jury-only
-speech-to-speech demo (`GeminiLiveLLMService`); `auto` never picks it.
+`VORTEX_CLINIC_MODE` force a mode (see `.env.example`).
 
 ## Providers
 

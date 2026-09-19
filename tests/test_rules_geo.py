@@ -58,7 +58,7 @@ def test_nearest_picks_the_closer_of_two_known_points() -> None:
 
 
 def test_the_gazetteer_resolves_a_town_and_a_castellana_address_offline() -> None:
-    """No ``VORTEX_GEOCODER`` is set in tests: this must never hit a network."""
+    """No ``VORTEX_GEOCODER_URL`` is set in tests: this must never hit a network."""
     assert geo.gazetteer_lookup("Getafe") is not None
     assert geo.gazetteer_lookup("Paseo de la Castellana 200, Madrid") is not None
     assert geo.gazetteer_lookup("somewhere nobody has ever published") is None
