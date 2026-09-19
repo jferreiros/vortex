@@ -11,13 +11,12 @@ dependencies = [
     "httpx>=0.27",
     "pydantic>=2.10",
     "python-dotenv>=1.0",
-    "pipecat-ai[deepgram,google,websocket,aic]>=1.11,<2",
+    "pipecat-ai[deepgram,google,websocket]>=1.11,<2",
     "nicegui>=2.22",
     "langfuse>=4.15.4",
     "email-validator>=2.3.0",
     "phonenumbers>=9.0.39",
 ]
-
 
 [dependency-groups]
 dev = [
