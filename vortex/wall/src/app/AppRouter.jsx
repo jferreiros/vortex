@@ -7,6 +7,7 @@ import Home from "../pages/clinic/home/Home";
 import Settings from "../pages/clinic/settings/Settings";
 import AiConfig from "../pages/clinic/ai/AiConfig";
 import Insights from "../pages/clinic/insights/Insights";
+import Analytics from "../pages/clinic/analytics/Analytics";
 import LiveCalls from "../pages/clinic/live-calls/LiveCalls";
 import LiveCallDetail from "../pages/clinic/live-calls/LiveCallDetail";
 import Agenda from "../pages/clinic/agenda/Agenda";
@@ -43,6 +44,7 @@ export default function AppRouter() {
           <Route path="ai" element={<AiConfig />} />
           <Route path="personalities" element={<Navigate to="/clinic/ai" replace />} />
           <Route path="insights" element={<Insights />} />
+          <Route path="analytics" element={<Analytics />} />
           <Route path="live-calls" element={<LiveCalls />} />
           <Route path="live-calls/:callId" element={<LiveCallDetail />} />
           <Route path="patterns-pathways" element={<PatternsPathways />} />
