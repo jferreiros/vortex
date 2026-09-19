@@ -203,6 +203,25 @@ board (`https://vortex.167.233.80.47.sslip.io/wall`) are the same factory
 clone, built from `Dockerfile.board` with `deploy/compose.yml`.
 `deploy/deploy-both.sh` (and the timer) publishes both.
 
+How the board sees calls, in order:
+
+1. `GET http://vortex-line:7860/calls` — container-name DNS on the `coolify`
+   network. The wall asks for the newest N *complete* calls (`calls=60`); the
+   Insights API asks by start date (`since=<ISO>`), so a busy day can never
+   push an in-range call out of the read the way the old 800-event tail did.
+2. The last good fetch, so one slow request degrades to stale data.
+3. `VORTEX_CALLS_LOG` (`/app/logs/calls.jsonl`) — which is the *line's* volume
+   (`vortex-line_line-logs`) mounted read-only into the board, not a private
+   empty one. The `external: true` declaration in `deploy/compose.yml` means
+   the board refuses to start if that volume is missing; deploy the line
+   first (deploy-both.sh already does).
+
+Every `/api/wall/business-insights` response carries a `source` block —
+`line_api`, `cache` or `jsonl_fallback`, plus the error that degraded it — so
+an empty Insights page is distinguishable from a broken ingestion path.
+Fetch timeouts: `VORTEX_LINE_HEALTH_TIMEOUT_S` (3), `VORTEX_LINE_CALLS_TIMEOUT_S`
+(6), `VORTEX_LINE_INSIGHTS_TIMEOUT_S` (25).
+
 The Discord line after a successful publish needs
 `DISCORD_UPDATES_WEBHOOK_URL` in `deploy/.env` (or the repo `.env`). That
 post has to leave from this machine: Discord 403s GitHub Actions runner IPs.

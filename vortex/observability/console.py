@@ -13,7 +13,7 @@ from typing import Any
 from nicegui import ui
 
 from vortex.clinic import make_clinic_client
-from vortex.observability import agents, explain, insights, live, pricing
+from vortex.observability import agents, callfeed, explain, insights, live, pricing
 from vortex.observability.shell import (
     bars,
     console_page,
@@ -839,7 +839,7 @@ def integrations_page() -> None:
                     with section("Console"):
                         with ui.element("dl").classes("def"):
                             for k, v in (
-                                ("Reads calls from", live.LINE_URL),
+                                ("Reads calls from", callfeed.LINE_URL),
                                 ("Public pages", "/wall, /call/{id} (phone numbers masked)"),
                             ):
                                 ui.html(f"<dt>{k}</dt><dd>{live._escape(v)}</dd>")
