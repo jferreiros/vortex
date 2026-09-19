@@ -210,9 +210,8 @@ def tts_voice_for(
 
     Per provider, because the languages are not evenly covered:
 
-    - google      en / es / ca / gl / eu  (Chirp 3 HD for English and Spanish;
-                  Gemini-TTS short names for ca/gl/eu, or Standard-* when
-                  ``GOOGLE_TTS_STANDARD_FALLBACK`` is on)
+    - google      en / es / ca / gl / eu  (Chirp 3 HD for English and Spanish,
+                  Standard for the rest)
     - elevenlabs  en / es (the same multilingual voice id speaks both)
 
     ``provider`` names the service the answer is for; it defaults to the
