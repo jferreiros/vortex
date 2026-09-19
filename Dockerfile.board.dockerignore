@@ -1,0 +1,25 @@
+# BuildKit reads this file because it sits next to Dockerfile.board, the same
+# way deploy/Dockerfile.dockerignore works for deploy/Dockerfile.
+# It only trims the build context; the image never gets a bare `COPY . .`.
+.git
+.github
+.claude
+.venv
+venv
+logs
+docs
+tests
+evals
+deploy
+.env
+.env.*
+!.env.example
+.pytest_cache
+.ruff_cache
+__pycache__
+**/__pycache__
+*.py[cod]
+.coverage
+node_modules
+**/node_modules
+vortex/wall/dist

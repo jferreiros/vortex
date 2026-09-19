@@ -9,12 +9,15 @@ stated policy and a published index says what the run said.
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 
 from evals.bench import pricing
 from evals.bench.publish import README, build_files, index_entry
 from evals.bench.runner import (
+    EST_TOKENS_IN_PER_SCENARIO,
+    EST_TOKENS_OUT_PER_SCENARIO,
     RECEPTIONIST_P95_CAP_MS,
     Candidate,
     aggregate,
@@ -84,6 +87,24 @@ def test_known_price_converts_to_euros() -> None:
     assert eur == pytest.approx((0.40 + 1.60) * 0.92)
     per_call = pricing.list_cost_per_call_eur("openai/gpt-4.1-mini")
     assert per_call is not None and 0.001 < per_call < 0.02
+
+
+def test_full_run_notes_match_the_brake_estimate() -> None:
+    declared = re.compile(r"([\d.]+) EUR per full run of (\d+) scenarios")
+    checked = 0
+    for row in pricing.entries():
+        found = declared.search(str(row.get("notes") or ""))
+        if found is None:
+            continue
+        stated_eur, scenarios = float(found.group(1)), int(found.group(2))
+        estimated_eur = pricing.cost_eur(
+            row["id"],
+            EST_TOKENS_IN_PER_SCENARIO * scenarios,
+            EST_TOKENS_OUT_PER_SCENARIO * scenarios,
+        )
+        assert estimated_eur == pytest.approx(stated_eur, rel=0.02), row["id"]
+        checked += 1
+    assert checked, "no note in models.yaml declares a full-run cost"
 
 
 def test_brake_counts_only_priced_runnable_models() -> None:

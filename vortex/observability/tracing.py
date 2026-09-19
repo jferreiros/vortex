@@ -7,7 +7,9 @@ dates of birth, addresses and clinical free text never go out, phones and
 national ids are masked, the identifiers that tie a record to a person or a
 call go out as keyed pseudonyms, and audio is never sent.
 
-The OpenAI drop-in records each completion as a generation (model, tokens,
+Prompts and completions never leave the process. The model calls go through the
+uninstrumented OpenAI client and each one is recorded by hand as a generation
+carrying only metadata (model, parameters, message and tool counts, tokens,
 latency, errors). Tool calls nest as ``tool`` or ``retriever`` observations.
 """
 
@@ -15,11 +17,15 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import logging
 import os
 import re
-from collections.abc import Iterator
+import sys
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import Any
+
+log = logging.getLogger(__name__)
 
 RETRIEVER_TOOLS = frozenset(
     {
@@ -170,6 +176,16 @@ _EXPORTED_KEYS = frozenset(
 )
 _REDACTED = "[redacted]"
 _PSEUDONYM_SECRET = os.urandom(32)
+
+GENERATION_NAME = "generate-response"
+GENERATION_PARAMETER_KEYS = (
+    "temperature",
+    "max_tokens",
+    "top_p",
+    "stream",
+    "reasoning_effort",
+)
+
 _DNI_RE = re.compile(r"\b\d{8}[A-Za-z]\b")
 _NIE_RE = re.compile(r"\b[XYZxyz]\d{7}[A-Za-z]\b")
 _PHONE_RE = re.compile(r"\+?\d[\d\s-]{7,}\d")
@@ -211,13 +227,77 @@ def _sync_env() -> None:
     os.environ.setdefault("OTEL_SERVICE_NAME", "vortex")
 
 
-def _client() -> Any | None:
-    if not enabled():
+def _quiet(what: str, call: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    """Run one Langfuse call. A trace we lose is never a call we lose."""
+    try:
+        return call(*args, **kwargs)
+    except Exception:
+        log.debug("langfuse %s failed", what, exc_info=True)
         return None
-    _sync_env()
-    from langfuse import get_client
 
-    return get_client()
+
+class _SafeObservation:
+    """An observation whose ``update`` cannot break the code that traces itself.
+
+    ``vortex.tools.call_tool`` updates the observation after the tool has already
+    run, and ``submit_action`` reaches the platform inside that tool. An update
+    that raised there would lose the submission the session must remember.
+    """
+
+    __slots__ = ("_observation",)
+
+    def __init__(self, observation: Any) -> None:
+        self._observation = observation
+
+    def update(self, **fields: Any) -> None:
+        _quiet("observation update", self._observation.update, **fields)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._observation, name)
+
+
+@contextmanager
+def _entered(manager: Any) -> Iterator[Any]:
+    """Enter a Langfuse context manager. Yields ``None`` when it fails to start.
+
+    Exceptions raised by the body are handed to ``__exit__`` and then re-raised:
+    the application keeps its own errors, Langfuse never adds one.
+    """
+    if manager is None:
+        yield None
+        return
+    try:
+        value = manager.__enter__()
+    except Exception:
+        log.debug("langfuse context start failed", exc_info=True)
+        yield None
+        return
+    try:
+        yield value
+    except BaseException:
+        _quiet("context exit", manager.__exit__, *sys.exc_info())
+        raise
+    _quiet("context exit", manager.__exit__, None, None, None)
+
+
+@contextmanager
+def _observation(client: Any, **kwargs: Any) -> Iterator[Any]:
+    manager = _quiet("observation start", client.start_as_current_observation, **kwargs)
+    with _entered(manager) as observation:
+        yield None if observation is None else _SafeObservation(observation)
+
+
+def _client() -> Any | None:
+    try:
+        if not enabled():
+            return None
+        _sync_env()
+        from langfuse import get_client
+
+        return get_client()
+    except Exception:
+        log.debug("langfuse client unavailable", exc_info=True)
+        return None
 
 
 def mask_phone(value: str | None) -> str:
@@ -270,6 +350,65 @@ def tool_observation_name(name: str) -> str:
     return name.replace("_", "-")
 
 
+def _generation_model_parameters(create_kwargs: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: create_kwargs[key]
+        for key in GENERATION_PARAMETER_KEYS
+        if create_kwargs.get(key) is not None
+    }
+
+
+def _generation_metadata(create_kwargs: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "message_count": len(create_kwargs.get("messages") or []),
+        "tool_count": len(create_kwargs.get("tools") or []),
+    }
+
+
+def _usage_details(response: Any) -> dict[str, int]:
+    usage = getattr(response, "usage", None)
+    if usage is None:
+        return {}
+    counted = {
+        "input": getattr(usage, "prompt_tokens", None),
+        "output": getattr(usage, "completion_tokens", None),
+        "total": getattr(usage, "total_tokens", None),
+    }
+    return {key: value for key, value in counted.items() if isinstance(value, int)}
+
+
+def content_free_create(original: Any) -> Any:
+    """``chat.completions.create`` wrapped in a generation that carries no content.
+
+    The messages hold names, national ids, phone numbers, insurers and clinical
+    reasons, and the completion repeats them, so neither is ever passed to
+    Langfuse as ``input`` or ``output``. Only the shape of the request survives.
+    """
+
+    async def create(*args: Any, **create_kwargs: Any) -> Any:
+        client = _client()
+        if client is None:
+            return await original(*args, **create_kwargs)
+        with client.start_as_current_observation(
+            as_type="generation",
+            name=GENERATION_NAME,
+            model=create_kwargs.get("model"),
+            model_parameters=_generation_model_parameters(create_kwargs),
+            metadata=_generation_metadata(create_kwargs),
+        ) as generation:
+            try:
+                response = await original(*args, **create_kwargs)
+            except Exception as exc:
+                generation.update(level="ERROR", status_message=f"{type(exc).__name__}: {exc}")
+                raise
+            usage = _usage_details(response)
+            if usage:
+                generation.update(usage_details=usage)
+            return response
+
+    return create
+
+
 def async_openai_client(
     *,
     api_key: str | None = None,
@@ -294,21 +433,13 @@ def async_openai_client(
         kwargs["project"] = project
     if default_headers is not None:
         kwargs["default_headers"] = default_headers
-    if enabled():
-        _sync_env()
-        from langfuse.openai import AsyncOpenAI
-    else:
-        from openai import AsyncOpenAI
+    from openai import AsyncOpenAI
 
     client = AsyncOpenAI(**kwargs)
     if enabled():
-        original = client.chat.completions.create
-
-        async def create(*args: Any, **create_kwargs: Any) -> Any:
-            create_kwargs.setdefault("name", "generate-response")
-            return await original(*args, **create_kwargs)
-
-        client.chat.completions.create = create  # type: ignore[method-assign]
+        client.chat.completions.create = content_free_create(  # type: ignore[method-assign]
+            client.chat.completions.create
+        )
     return client
 
 
@@ -366,51 +497,71 @@ def _call_output(session: Any) -> dict[str, Any]:
     )
 
 
-@contextmanager
-def trace_call(session: Any) -> Iterator[Any]:
-    client = _client()
-    if client is None:
-        yield None
-        return
-    from langfuse import propagate_attributes
-
+def _call_tags(session: Any) -> list[str]:
     tags = ["voice", session.settings.llm_provider]
     tags.append("pipecat" if session.settings.voice_is_pipecat else "stub")
     problem = _problem_id(session)
     if problem:
         tags.append(problem)
-    call_ref = pseudonym(session.call_id)
-    metadata = {
-        "call_id": call_ref,
+    return tags
+
+
+def _call_metadata(session: Any) -> dict[str, Any]:
+    return {
+        "call_id": pseudonym(session.call_id),
         "stream_sid": pseudonym(session.stream_sid),
         "llm_provider": session.settings.llm_provider,
         "llm_model": session.settings.llm_model,
         "voice": "pipecat" if session.settings.voice_is_pipecat else "stub",
         "clinic": "live" if session.settings.clinic_is_live else "fake",
     }
-    with client.start_as_current_observation(
+
+
+def _propagation(session: Any, metadata: dict[str, Any]) -> Any:
+    from langfuse import propagate_attributes
+
+    return propagate_attributes(
+        session_id=pseudonym(session.call_id),
+        user_id=mask_phone(session.start.from_number),
+        tags=_call_tags(session),
+        metadata=metadata,
+        environment=session.settings.langfuse_environment or None,
+    )
+
+
+def _flush(client: Any) -> None:
+    client.flush()
+
+
+def _record_call_output(observation: Any, session: Any) -> None:
+    output = _call_output(session)
+    update: dict[str, Any] = {"output": output}
+    if output.get("reason") == "crashed":
+        update["level"] = "ERROR"
+    if observation is not None:
+        observation.update(**update)
+
+
+@contextmanager
+def trace_call(session: Any) -> Iterator[Any]:
+    client = _client()
+    if client is None:
+        yield None
+        return
+    metadata = _quiet("call metadata", _call_metadata, session) or {}
+    with _observation(
+        client,
         as_type="agent",
         name="handle-inbound-call",
-        input=_call_input(session),
+        input=_quiet("call input", _call_input, session),
         metadata=metadata,
     ) as observation:
-        with propagate_attributes(
-            session_id=call_ref,
-            user_id=mask_phone(session.start.from_number),
-            tags=tags,
-            metadata=metadata,
-            environment=session.settings.langfuse_environment or None,
-        ):
+        with _entered(_quiet("propagate attributes", _propagation, session, metadata)):
             try:
                 yield observation
             finally:
-                output = _call_output(session)
-                level = "ERROR" if output.get("reason") == "crashed" else None
-                update: dict[str, Any] = {"output": output}
-                if level:
-                    update["level"] = level
-                observation.update(**update)
-                client.flush()
+                _quiet("call output", _record_call_output, observation, session)
+                _quiet("flush", _flush, client)
 
 
 @contextmanager
@@ -419,19 +570,21 @@ def observe_tool(name: str, raw_args: dict[str, Any]) -> Iterator[Any]:
     if client is None:
         yield None
         return
-    with client.start_as_current_observation(
+    with _observation(
+        client,
         as_type=tool_observation_type(name),
         name=tool_observation_name(name),
-        input=redact(raw_args),
+        input=_quiet("redact input", redact, raw_args),
         metadata={"tool": name},
     ) as observation:
         try:
             yield observation
         except Exception as exc:
-            # The type, never the message: a ValidationError quotes the raw
-            # arguments back, patient data included. ``logs/calls.jsonl`` keeps
-            # the full error, and that file never leaves the machine.
-            observation.update(output={"error": type(exc).__name__}, level="ERROR")
+            if observation is not None:
+                observation.update(
+                    output={"error": type(exc).__name__},
+                    level="ERROR",
+                )
             raise
 
 
@@ -443,10 +596,11 @@ def observe_span(
     if client is None:
         yield None
         return
-    with client.start_as_current_observation(
+    with _observation(
+        client,
         as_type="span",
         name=name,
-        input=redact(input) if input is not None else None,
+        input=_quiet("redact input", redact, input) if input is not None else None,
         metadata=metadata or {},
     ) as observation:
         yield observation
@@ -455,4 +609,4 @@ def observe_span(
 def flush() -> None:
     client = _client()
     if client is not None:
-        client.flush()
+        _quiet("flush", _flush, client)
