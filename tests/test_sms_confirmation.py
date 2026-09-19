@@ -388,6 +388,8 @@ async def test_sms_events_never_persist_the_number_or_the_body(
     for event in logged:
         assert event["to"] == mask_phone(CALLER)
         assert "body" not in event
+        assert "provider_name" not in event
+        assert "location_name" not in event
         assert CALLER not in json.dumps(event, ensure_ascii=False)
 
 
