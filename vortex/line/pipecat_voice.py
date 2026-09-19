@@ -251,6 +251,7 @@ async def run_pipecat_call(
         settings=llm_settings,
         first_token_timeout_secs=settings.llm_first_token_timeout_secs,
         llm_retries=settings.llm_retries,
+        retry_model=settings.llm_alt_model,
         # Read at fire time, so a mid-call language switch moves the line and
         # the TTS router sends it down the branch that can say it.
         timeout_fallback_text=lambda: wait_prompt_for(language_state.language),
