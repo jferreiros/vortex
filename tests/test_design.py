@@ -40,3 +40,10 @@ def test_static_pages_load_the_tokens() -> None:
     for page in ("index.html", "tasks.html"):
         text = (REPO / "docs" / page).read_text(encoding="utf-8")
         assert 'href="design.css"' in text, f"docs/{page} does not load design.css"
+
+
+def test_index_nav_links_reuse_chip() -> None:
+    """docs/index.html must use .chip from design.css, not recreate it in page CSS."""
+    text = (REPO / "docs" / "index.html").read_text(encoding="utf-8")
+    assert ".nav a{" not in text and ".nav a {" not in text
+    assert text.count('class="chip"') >= 7
