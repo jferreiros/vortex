@@ -19,7 +19,11 @@ PUBLISHED_ROWS: tuple[tuple[str, str, str], ...] = (
     ("pub.ortho.ankle", "orthopaedics", "Went over on their ankle, swollen, walking hurts"),
     ("pub.ortho.bike", "orthopaedics", "Came off a bike, cannot lift the arm above the shoulder"),
     ("pub.ortho.knee", "orthopaedics", "Knee clicks and locks going up stairs, gave way"),
-    ("pub.ortho.wrist", "orthopaedics", "Slipped onto an outstretched hand, wrist painful and weak"),
+    (
+        "pub.ortho.wrist",
+        "orthopaedics",
+        "Slipped onto an outstretched hand, wrist painful and weak",
+    ),
     ("pub.paeds.temp", "paediatrics", "Child with a temperature for two days, off their food"),
     ("pub.paeds.cough", "paediatrics", "Child with a cough for over a week, worse at night"),
     ("pub.paeds.ear", "paediatrics", "Child pulling at their ear and crying, barely slept"),
@@ -35,9 +39,18 @@ PUBLISHED_ROWS: tuple[tuple[str, str, str], ...] = (
 
 RED_FLAGS: tuple[tuple[str, str], ...] = (
     ("pub.flag.chest", "Tight pain across the chest and struggling to catch their breath."),
-    ("pub.flag.stroke", "One side of the face gone droopy and an arm gone weak, all of a sudden, words slurred."),
-    ("pub.flag.breathless", "Cannot get their breath at all, came on out of nowhere, stopping between words."),
-    ("pub.flag.bleeding", "A cut that is bleeding heavily and will not stop after ten minutes of pressure."),
+    (
+        "pub.flag.stroke",
+        "One side of the face gone droopy and an arm gone weak, all of a sudden, words slurred.",
+    ),
+    (
+        "pub.flag.breathless",
+        "Cannot get their breath at all, came on out of nowhere, stopping between words.",
+    ),
+    (
+        "pub.flag.bleeding",
+        "A cut that is bleeding heavily and will not stop after ten minutes of pressure.",
+    ),
     ("pub.flag.head", "Banged their head an hour ago, confused and being sick since."),
 )
 
@@ -162,11 +175,15 @@ def public_roster_cases() -> list[SpikeCase]:
         if case.problem_id == "triage":
             text = _complaint_text(data)
             flag = bool(triage_table.red_flag(text))
-            specialty = None if flag else (
-                _specialty_from_appointment_type(
-                    str(first.get("appointment_type_id") or "") if first else None
+            specialty = (
+                None
+                if flag
+                else (
+                    _specialty_from_appointment_type(
+                        str(first.get("appointment_type_id") or "") if first else None
+                    )
+                    or triage_table.route(text)
                 )
-                or triage_table.route(text)
             )
             out.append(
                 SpikeCase(

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sys
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -236,7 +236,7 @@ def _markdown(rows: list[dict[str, Any]], verdict: str, error: str | None) -> st
     lines = [
         "# Jev spike report",
         "",
-        f"Ran: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
+        f"Ran: {datetime.now(UTC).strftime('%Y-%m-%d %H:%M UTC')}",
         f"Model: `{rows[0]['model'] if rows else 'n/a'}`",
         f"Cases: {passed}/{len(rows)} passed",
         f"Verdict: **{verdict}**",
