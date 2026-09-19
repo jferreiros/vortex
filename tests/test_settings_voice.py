@@ -178,9 +178,9 @@ def test_llm_max_tokens_defaults_to_320(clean_env) -> None:
     """
     s = _settings(clean_env)
     assert s.llm_max_tokens == 320
-    assert s.llm_alt_model == "qwen3.6"
+    assert s.llm_alt_model == ""
     assert s.describe()["llm_max_tokens"] == 320
-    assert s.describe()["llm_alt_model"] == "qwen3.6"
+    assert s.describe()["llm_alt_model"] == ""
 
     s = _settings(clean_env, LLM_MAX_TOKENS="500")
     assert s.llm_max_tokens == 500

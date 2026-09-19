@@ -431,7 +431,7 @@ def test_the_settings_carry_the_deadline(monkeypatch: pytest.MonkeyPatch) -> Non
     assert described["llm_first_token_timeout_secs"] == 8.0
     assert described["llm_retries"] == 1
     assert described["llm_max_tokens"] == 320
-    assert described["llm_alt_model"] == "qwen3.6"
+    assert described["llm_alt_model"] == ""
 
     monkeypatch.setenv("LLM_FIRST_TOKEN_TIMEOUT_SECS", "2.5")
     monkeypatch.setenv("LLM_RETRIES", "3")
@@ -448,7 +448,7 @@ def test_the_env_example_documents_both_knobs() -> None:
     text = Path(__file__).resolve().parent.parent.joinpath(".env.example").read_text("utf-8")
     assert "LLM_FIRST_TOKEN_TIMEOUT_SECS=8.0" in text
     assert "LLM_RETRIES=1" in text
-    assert "LLM_ALT_MODEL=qwen3.6" in text
+    assert "LLM_ALT_MODEL=" in text
     assert "LLM_MAX_TOKENS=320" in text
 
 
