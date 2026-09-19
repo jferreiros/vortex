@@ -19,6 +19,7 @@ from vortex.line.privacy import (
     protected_from_session,
     scrub_outgoing,
     scrub_session_text,
+    split_speakable,
 )
 
 
@@ -91,9 +92,19 @@ def test_empty_session_never_blocks() -> None:
     assert "12345678Z" in text
 
 
-async def test_privacy_guard_replaces_frame_and_logs() -> None:
-    pytest.importorskip("pipecat")
-    from pipecat.frames.frames import TextFrame, TTSSpeakFrame
+def test_split_speakable_holds_what_no_boundary_closed_yet() -> None:
+    units, rest = split_speakable("Su cita es el martes. Le espero")
+    assert units == ["Su cita es el martes."]
+    assert rest == " Le espero"
+    assert split_speakable("612 ") == ([], "612 ")
+    assert split_speakable("Son 1.500 euros")[0] == []
+    text = "¿Le va bien? Sí. Queda cerrado"
+    units, rest = split_speakable(text)
+    assert "".join(units) + rest == text
+
+
+def _guard_under_test() -> tuple[object, list[object], list[tuple[str, dict]], ToolContext]:
+    """A guard wired to a session that already knows one patient's data."""
     from pipecat.processors.frame_processor import FrameDirection
 
     from vortex.line.pipecat_voice import _LanguageState, _PrivacyGuard
@@ -124,10 +135,19 @@ async def test_privacy_guard_replaces_frame_and_logs() -> None:
         pushed.append(frame)
 
     guard.push_frame = capture  # type: ignore[method-assign]
+    return guard, pushed, events, ctx
+
+
+async def test_privacy_guard_replaces_frame_and_logs() -> None:
+    pytest.importorskip("pipecat")
+    from pipecat.frames.frames import TextFrame, TTSSpeakFrame
+    from pipecat.processors.frame_processor import FrameDirection
+
+    guard, pushed, events, ctx = _guard_under_test()
 
     safe = TextFrame("Buenos días, ¿en qué puedo ayudarle?")
     await guard.process_frame(safe, FrameDirection.DOWNSTREAM)
-    assert safe.text.startswith("Buenos")
+    assert [f.text for f in pushed] == ["Buenos días, ¿en qué puedo ayudarle?"]
     assert events == []
 
     leaky = TTSSpeakFrame("Su teléfono es 612 345 678")
@@ -136,3 +156,41 @@ async def test_privacy_guard_replaces_frame_and_logs() -> None:
     assert events and events[0][0] == "voice.privacy_block"
     assert events[0][1]["kinds"] == ["phone"]
     assert PATIENT_RECORDS_KEY in ctx.state
+
+
+async def test_privacy_guard_scans_the_sentence_the_chunks_spell() -> None:
+    pytest.importorskip("pipecat")
+    from pipecat.frames.frames import LLMFullResponseEndFrame, LLMTextFrame
+    from pipecat.processors.frame_processor import FrameDirection
+
+    from vortex.conversation.prompt import refusal_line_for
+
+    guard, pushed, events, _ = _guard_under_test()
+
+    for chunk in ("Su teléfono ", "es 612 ", "345 ", "678"):
+        await guard.process_frame(LLMTextFrame(chunk), FrameDirection.DOWNSTREAM)
+    assert pushed == []
+
+    await guard.process_frame(LLMFullResponseEndFrame(), FrameDirection.DOWNSTREAM)
+    spoken = "".join(getattr(f, "text", "") for f in pushed)
+    assert "612" not in spoken
+    assert spoken == refusal_line_for("es")
+    assert events and events[0][0] == "voice.privacy_block"
+    assert events[0][1]["kinds"] == ["phone"]
+
+
+async def test_privacy_guard_forwards_clean_chunks_whole_and_in_order() -> None:
+    pytest.importorskip("pipecat")
+    from pipecat.frames.frames import LLMFullResponseEndFrame, LLMTextFrame
+    from pipecat.processors.frame_processor import FrameDirection
+
+    guard, pushed, events, _ = _guard_under_test()
+
+    chunks = ("Tiene ", "cita el martes ", "a las diez. ", "¿Le va bien", "?")
+    for chunk in chunks:
+        await guard.process_frame(LLMTextFrame(chunk), FrameDirection.DOWNSTREAM)
+    await guard.process_frame(LLMFullResponseEndFrame(), FrameDirection.DOWNSTREAM)
+
+    assert "".join(getattr(f, "text", "") for f in pushed) == "".join(chunks)
+    assert all(isinstance(f, LLMTextFrame) for f in pushed[:-1])
+    assert events == []

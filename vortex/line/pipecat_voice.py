@@ -582,27 +582,91 @@ def _PrivacyGuard(  # noqa: N802 - factory that returns a processor
 ):
     """Block national_id and phone values before they reach TTS.
 
-    Every ``TextFrame`` and ``TTSSpeakFrame`` is normalised and compared to the
-    national ids and phones this call has already seen (directory records on
-    the session, plus ``from_number``). A match replaces the phrase with a
-    safe refusal and logs ``voice.privacy_block``. The call stays open.
+    Every spoken phrase is normalised and compared to the national ids and
+    phones this call has already seen (directory records on the session, plus
+    ``from_number``). A match replaces the phrase with a safe refusal and logs
+    ``voice.privacy_block``. The call stays open.
+
+    The phrase is never the chunk. The LLM streams its answer one
+    ``LLMTextFrame`` at a time and the TTS service aggregates those chunks
+    into sentences before it synthesises them, so "612 ", "345 " and "678"
+    each pass a per-chunk scan and are still spoken as one phone number. The
+    guard holds the chunks until they close a sentence, scans that sentence
+    with the one before it in front — a value split across the boundary is
+    still seen whole — and forwards it as a single frame. Nothing raw is
+    forwarded. The buffer drains when the response ends and is dropped on an
+    interruption, so text the caller cut off is never spoken later.
+
+    An ``AggregatedTextFrame`` and a ``TTSSpeakFrame`` are whole phrases
+    already, so they are scanned where they are and pass straight through.
     """
-    from pipecat.frames.frames import Frame, TextFrame, TTSSpeakFrame
+    from pipecat.frames.frames import (
+        AggregatedTextFrame,
+        EndFrame,
+        Frame,
+        InterruptionFrame,
+        LLMFullResponseEndFrame,
+        TextFrame,
+        TTSSpeakFrame,
+    )
     from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
     from vortex.conversation.prompt import refusal_line_for
-    from vortex.line.privacy import PRIVACY_BLOCK_LINE, scrub_session_text
+    from vortex.line.privacy import PRIVACY_BLOCK_LINE, scrub_session_text, split_speakable
 
     language_state = state if state is not None else _LanguageState()
 
     class PrivacyGuard(FrameProcessor):
+        def __init__(self) -> None:
+            super().__init__()
+            self._pending = ""
+            self._chunk: TextFrame | None = None
+            self._previous = ""
+
         async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
             await super().process_frame(frame, direction)
-            if direction == FrameDirection.DOWNSTREAM and isinstance(
-                frame, (TextFrame, TTSSpeakFrame)
-            ):
+            if direction != FrameDirection.DOWNSTREAM:
+                await self.push_frame(frame, direction)
+                return
+            if isinstance(frame, TextFrame) and not isinstance(frame, AggregatedTextFrame):
+                await self._buffer(frame)
+                return
+            if isinstance(frame, (AggregatedTextFrame, TTSSpeakFrame)):
                 await self._scrub(frame)
+            elif isinstance(frame, InterruptionFrame):
+                self._pending = ""
+                self._chunk = None
+                self._previous = ""
+            elif isinstance(frame, (LLMFullResponseEndFrame, EndFrame)):
+                await self._drain()
             await self.push_frame(frame, direction)
+
+        async def _buffer(self, frame: TextFrame) -> None:
+            self._chunk = frame
+            self._pending += frame.text or ""
+            units, self._pending = split_speakable(self._pending)
+            for unit in units:
+                await self._speak(unit, frame)
+
+        async def _drain(self) -> None:
+            remainder, self._pending = self._pending, ""
+            chunk, self._chunk = self._chunk, None
+            self._previous = ""
+            if remainder.strip() and chunk is not None:
+                await self._speak(remainder, chunk)
+
+        async def _speak(self, unit: str, chunk: TextFrame) -> None:
+            _, leaks = scrub_session_text(session.ctx, self._previous + unit)
+            if leaks:
+                self._previous = ""
+                text = self._refusal(leaks)
+            else:
+                self._previous = unit
+                text = unit
+            out = type(chunk)(text)
+            out.skip_tts = chunk.skip_tts
+            out.append_to_context = chunk.append_to_context
+            await self.push_frame(out, FrameDirection.DOWNSTREAM)
 
         async def _scrub(self, frame: TextFrame | TTSSpeakFrame) -> None:
             text = frame.text or ""
@@ -611,12 +675,15 @@ def _PrivacyGuard(  # noqa: N802 - factory that returns a processor
             _, leaks = scrub_session_text(session.ctx, text)
             if not leaks:
                 return
-            frame.text = refusal_line_for(language_state.language) or PRIVACY_BLOCK_LINE
+            frame.text = self._refusal(leaks)
+
+        def _refusal(self, leaks: list[str]) -> str:
             session.ctx.log.event(
                 "voice.privacy_block",
                 kinds=sorted({leak.split(" ", 1)[0] for leak in leaks}),
                 leaks=len(leaks),
             )
+            return refusal_line_for(language_state.language) or PRIVACY_BLOCK_LINE
 
     return PrivacyGuard()
 
