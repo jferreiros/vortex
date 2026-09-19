@@ -27,7 +27,7 @@ from vortex.contract import ToolContext
 from vortex.diary import tools as diary
 from vortex.identity import tools as identity
 from vortex.line import submit as line_submit
-from vortex.observability.tracing import observe_tool, redact
+from vortex.observability.tracing import observe_tool, redact, update_observation
 from vortex.rules import tools as rules
 
 ToolFn = Callable[[ToolContext, Any], Awaitable[BaseModel]]
@@ -253,8 +253,7 @@ async def call_tool(name: str, ctx: ToolContext, raw_args: dict[str, Any]) -> Ba
     """Validate, run, validate, log. The one path every tool call goes through."""
     with observe_tool(name, raw_args) as observation:
         result = await _run_tool(name, ctx, raw_args)
-        if observation is not None:
-            observation.update(output=redact(result.model_dump(mode="json")))
+        update_observation(observation, output=redact(result.model_dump(mode="json")))
         return result
 
 

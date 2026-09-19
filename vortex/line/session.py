@@ -55,7 +55,7 @@ from vortex.line.submit import (
 )
 from vortex.line.twilio import StartPayload
 from vortex.observability.calllog import CallLog
-from vortex.observability.tracing import observe_span
+from vortex.observability.tracing import observe_span, update_observation
 from vortex.rules.triage import DEFAULT_SPECIALTY
 from vortex.settings import Settings, get_settings
 
@@ -631,8 +631,7 @@ class CallSession:
             retrying=retrying,
             sent_so_far=len(self.submitted),
         )
-        if span is not None:
-            span.update(output={"skipped": False, "retrying": retrying, "branch": branch})
+        update_observation(span, output={"skipped": False, "retrying": retrying, "branch": branch})
         await self.submit(action)
 
     async def cold_booking(self) -> BookAction | None:

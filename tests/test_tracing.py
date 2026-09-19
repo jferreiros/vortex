@@ -1,4 +1,7 @@
-"""Langfuse tracing stays off without keys and never writes phone numbers or ids."""
+"""Langfuse tracing stays off without keys and never writes phone numbers or ids.
+
+It also fails open: a broken SDK never stops a call from reaching its submission.
+"""
 
 from __future__ import annotations
 
@@ -7,10 +10,12 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from evals.common.context import make_context, submitted_actions
 from vortex.line.session import CallSession
 from vortex.line.twilio import StartPayload
 from vortex.observability import tracing
 from vortex.settings import Settings, reset_settings
+from vortex.tools import call_tool
 
 NOW = datetime(2026, 9, 19, 10, 0, tzinfo=ZoneInfo("Europe/Madrid"))
 
@@ -92,3 +97,114 @@ def test_async_openai_client_is_plain_openai_when_off(clean_langfuse) -> None:
 
     client = tracing.async_openai_client(api_key="x", base_url="https://example.invalid/v1")
     assert type(client) is AsyncOpenAI
+
+
+class _FailingObservation:
+    """An observation whose every write hits a dead exporter."""
+
+    def update(self, **_fields: object) -> None:
+        raise RuntimeError("langfuse update failed")
+
+
+class _Manager:
+    def __init__(self, observation: object) -> None:
+        self.observation = observation
+
+    def __enter__(self) -> object:
+        return self.observation
+
+    def __exit__(self, *_exc: object) -> bool:
+        return False
+
+
+class _DeadClient:
+    """Langfuse is down: it cannot even open an observation."""
+
+    def start_as_current_observation(self, **_kwargs: object) -> object:
+        raise RuntimeError("langfuse start failed")
+
+    def flush(self) -> None:
+        raise RuntimeError("langfuse flush failed")
+
+
+class _WriteFailsClient:
+    """Observations open, but every update and the flush fail."""
+
+    def __init__(self) -> None:
+        self.observation = _FailingObservation()
+        self.flushes = 0
+
+    def start_as_current_observation(self, **_kwargs: object) -> object:
+        return _Manager(self.observation)
+
+    def flush(self) -> None:
+        self.flushes += 1
+        raise RuntimeError("langfuse flush failed")
+
+
+def test_observe_tool_runs_the_body_when_the_sdk_cannot_start(clean_langfuse) -> None:
+    clean_langfuse.setattr(tracing, "_client", _DeadClient)
+    ran = False
+    with tracing.observe_tool("find_patient", {"name": "Ana"}) as observation:
+        assert observation is None
+        ran = True
+    assert ran is True
+
+
+def test_observe_tool_re_raises_the_body_error_not_the_sdk_error(clean_langfuse) -> None:
+    clean_langfuse.setattr(tracing, "_client", _WriteFailsClient)
+    with pytest.raises(ValueError, match="tool blew up"):
+        with tracing.observe_tool("submit_action", {"action": {}}):
+            raise ValueError("tool blew up")
+
+
+def test_observe_span_runs_the_body_when_the_sdk_cannot_start(clean_langfuse) -> None:
+    clean_langfuse.setattr(tracing, "_client", _DeadClient)
+    with tracing.observe_span("submit-fallback", input={"branch": "no_action"}) as span:
+        assert span is None
+        tracing.update_observation(span, output={"skipped": False})
+
+
+def test_update_observation_swallows_a_failing_write(clean_langfuse) -> None:
+    tracing.update_observation(None, output={"any": "thing"})
+    tracing.update_observation(_FailingObservation(), output={"any": "thing"})
+
+
+def test_flush_survives_a_broken_client(clean_langfuse) -> None:
+    clean_langfuse.setattr(tracing, "_client", _DeadClient)
+    tracing.flush()
+
+
+def test_trace_call_keeps_the_body_when_update_and_flush_fail(clean_langfuse, tmp_path) -> None:
+    client = _WriteFailsClient()
+    clean_langfuse.setattr(tracing, "_client", lambda: client)
+    start = StartPayload.model_validate(
+        {
+            "streamSid": "MZ-fail-open",
+            "callSid": "CA-fail-open",
+            "customParameters": {"from_number": "+34600111222"},
+        }
+    )
+    session = CallSession.open(
+        start, settings=Settings(calls_log_path=tmp_path / "calls.jsonl"), now=NOW
+    )
+    with tracing.trace_call(session) as observation:
+        assert observation is client.observation
+        session.end_reason = "pipeline_finished"
+    assert client.flushes == 1
+
+
+async def test_call_tool_returns_its_result_when_the_observation_write_fails(
+    clean_langfuse, tmp_path
+) -> None:
+    """A write that fails after a submit must not hide the result from the session.
+
+    The session records what came back; a swallowed result would leave it looking
+    unsubmitted and let the fallback POST a second action.
+    """
+    clean_langfuse.setattr(tracing, "_client", _WriteFailsClient)
+    ctx = make_context(call_id="trace-write-fails", now=NOW.isoformat(), log_dir=tmp_path)
+    action = {"kind": "no-action", "reason": "out_of_scope"}
+    result = await call_tool("submit_action", ctx, {"action": action})
+    assert result.status == "dry_run"
+    assert submitted_actions(ctx) == [action]
