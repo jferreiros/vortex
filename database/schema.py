@@ -164,8 +164,33 @@ _MIGRATION_3 = """
 ALTER TABLE calls ADD COLUMN motivo TEXT;
 """
 
+#: Migration 4: clinic-console documents the wall already edits — call
+#: rules, the Pathways / Patterns builders, and per-patient suggestion
+#: rejections. JSON blobs on purpose: the builders' shape is the UI's, not
+#: a relational diary, and dual-write to Supabase is one upsert per row.
+_MIGRATION_4 = """
+CREATE TABLE clinic_settings (
+    id                                      INTEGER PRIMARY KEY CHECK (id = 1),
+    minimum_booking_lead_hours              INTEGER NOT NULL,
+    patient_identification_fields_required  INTEGER NOT NULL,
+    call_time_cap_minutes                   INTEGER NOT NULL,
+    updated_at                              TEXT NOT NULL
+);
+CREATE TABLE wall_documents (
+    kind        TEXT PRIMARY KEY,
+    body        TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+CREATE TABLE suggestion_rejections (
+    patient_id   TEXT NOT NULL,
+    pattern_id   TEXT NOT NULL,
+    rejected_at  TEXT NOT NULL,
+    PRIMARY KEY (patient_id, pattern_id)
+);
+"""
+
 #: Append, never edit — see the module docstring.
-MIGRATIONS: tuple[str, ...] = (_MIGRATION_1, _MIGRATION_2, _MIGRATION_3)
+MIGRATIONS: tuple[str, ...] = (_MIGRATION_1, _MIGRATION_2, _MIGRATION_3, _MIGRATION_4)
 
 
 def migrate(conn: sqlite3.Connection) -> int:

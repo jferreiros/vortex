@@ -142,6 +142,13 @@ function loadStoredState() {
   return null;
 }
 
+function applyPathwaysDoc(json, setPathways, setSelectedId) {
+  if (!Array.isArray(json?.pathways) || json.pathways.length === 0) return;
+  const next = migratePathways(json.pathways);
+  setPathways(next);
+  setSelectedId(next.some((pathway) => pathway.id === json.selectedId) ? json.selectedId : next[0].id);
+}
+
 function SaveIcon() {
   return (
     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -562,6 +569,19 @@ export default function Pathways() {
   const [saveStatus, setSaveStatus] = useState(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/wall/pathways")
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((json) => {
+        if (!cancelled) applyPathwaysDoc(json, setPathways, setSelectedId);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const selected = pathways.find((w) => w.id === selectedId) ?? pathways[0];
 
   const handleCreate = () => {
@@ -674,14 +694,30 @@ export default function Pathways() {
     );
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    const payload = { pathways, selectedId };
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ pathways, selectedId }));
+      const response = await fetch("/api/wall/pathways", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+      } catch {
+        /* cache is optional */
+      }
       setSaveStatus("saved");
-      setTimeout(() => setSaveStatus(null), 2000);
     } catch {
-      // storage unavailable — in-memory state still works, just won't persist
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+        setSaveStatus("saved");
+      } catch {
+        /* in-memory state still works */
+      }
     }
+    setTimeout(() => setSaveStatus(null), 2000);
   };
 
   return (

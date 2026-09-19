@@ -1,32 +1,26 @@
-.pt-page {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-  max-width: var(--content-max-width);
-  padding-bottom: var(--space-8);
-}
-
-/* One toolbar row above the main pane, holding just the "Manage
-   suggestions" button flush to the pane's own right edge. */
-.pt-main-toolbar {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.pt-main {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-}
-
-/* The card's whole content (row, and the suggestion's column below it) is
-   centered vertically as one block, not pinned to the top. */
-.pt-main-card {
+/* Opened over whatever page linked here (Home, Patterns…) as one big
+   focused pane, the same way a Live Call opens from Home — literally the
+   same shell (.transcript-page/.transcript-card/.tx-head/.tx-close from
+   live-call-detail.css), just with this page's own content below the
+   header instead of a chat transcript. .tx-close calls navigate(-1) here,
+   not a hardcoded destination, since this opens from more than one place. */
+.pt-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
   display: flex;
   flex-direction: column;
   justify-content: center;
-  min-height: 420px;
   gap: var(--space-5);
+  padding: var(--space-6) var(--space-5);
+}
+
+/* "Manage suggestions" sits in the header, left of the × — same row,
+   same alignment as tx-head-left, via tx-head's own space-between. */
+.tx-head-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
 }
 
 /* A grid, not a flex row: each event/arrow/suggestion sits at an explicit
@@ -39,7 +33,7 @@
   align-items: start;
   justify-content: center;
   column-gap: var(--space-6);
-  row-gap: var(--space-5);
+  row-gap: var(--space-3);
   overflow-x: auto;
   overflow-y: hidden;
   padding: var(--space-3);
@@ -51,6 +45,7 @@
    it, in row 2. */
 .pt-node {
   grid-row: 1;
+  justify-self: center;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -156,8 +151,12 @@
   border-color: var(--color-warn);
 }
 
+/* Pushed well below the shape: the accept/reject pair now hangs lower too
+   (see .pt-suggestion-actions), and this needs to clear that as well as the
+   shape's own family/direction emoji badges. */
 .pt-suggestion-label {
   font-style: italic;
+  margin-top: 36px;
 }
 
 /* Sits between the last real (or evidence-highlighted) event and the
@@ -175,9 +174,11 @@
   stroke-width: 2;
 }
 
+/* Dropped well clear of the shape's bottom edge — .pt-shape-family-wrap
+   (bottom: -4px, a ~28px badge) would otherwise sit right on top of these. */
 .pt-suggestion-actions {
   position: absolute;
-  bottom: -14px;
+  bottom: -36px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -257,13 +258,41 @@
   gap: var(--space-3);
 }
 
+/* Same ShapeGlyphs markup/rules as the real 96px shapes (see .pt-shape),
+   just scaled to this box's 48px circle — one icon per node in the
+   pattern's own rule, not a blank placeholder. */
 .pt-pattern-abstract-node {
+  position: relative;
   flex: 0 0 auto;
   width: 48px;
   height: 48px;
   border-radius: 50%;
   background: var(--color-panel);
   border: 2px solid var(--color-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pt-pattern-abstract-node .pt-shape-main-emoji {
+  font-size: 22px;
+}
+
+.pt-pattern-abstract-node .pt-shape-family-wrap {
+  bottom: -3px;
+  right: -5px;
+}
+
+.pt-pattern-abstract-node .pt-shape-family-badge {
+  font-size: 14px;
+}
+
+.pt-pattern-abstract-node .pt-shape-direction-badge {
+  width: 11px;
+  height: 11px;
+  font-size: 6px;
+  top: -2px;
+  right: -3px;
 }
 
 .pt-pattern-plus {

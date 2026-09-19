@@ -481,11 +481,8 @@ async def test_sms_force_to_overrides_caller(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("submitter_cls", [DryRunSubmitter, RejectingSubmitter])
-async def test_non_accepted_submit_skips_sms(
-    sms_settings: Settings, submitter_cls: type[AcceptingSubmitter]
-) -> None:
-    session = make_session(sms_settings, "CA-not-accepted", submitter=submitter_cls())
+async def test_rejected_submit_skips_sms(sms_settings: Settings) -> None:
+    session = make_session(sms_settings, "CA-not-accepted", submitter=RejectingSubmitter())
     sms = session.sms
     assert isinstance(sms, DryRunSmsClient)
 
@@ -493,6 +490,19 @@ async def test_non_accepted_submit_skips_sms(
     await session.close()
 
     assert sms.sent == []
+
+
+@pytest.mark.asyncio
+async def test_dry_run_submit_still_sends_sms(sms_settings: Settings) -> None:
+    session = make_session(sms_settings, "CA-dry-run-sms", submitter=DryRunSubmitter())
+    sms = session.sms
+    assert isinstance(sms, DryRunSmsClient)
+
+    await session.submit(a_booking())
+    await session.close()
+
+    assert len(sms.sent) == 1
+    assert sms.sent[0][0] == CALLER
 
 
 @pytest.mark.asyncio

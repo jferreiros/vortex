@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 
+import vortex.clinic_policy as clinic_policy
 from vortex.clinic.client import FakeClinicClient
 from vortex.contract import (
     MADRID,
@@ -224,6 +225,27 @@ async def test_an_unshared_line_finds_its_own_owner(tmp_path: Path) -> None:
     assert result.status == "found"
     assert result.patient is not None
     assert result.patient.patient_id == "P00043"
+
+
+async def test_clinic_settings_can_require_a_second_identifying_field(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(clinic_policy, "identification_fields_required", lambda: 2)
+    solo = ToolContext(
+        call_id="CA-identity-lead",
+        now=NOW,
+        from_number="+34699000111",
+        clinic=FakeClinicClient(),
+        log=CallLog("CA-identity-lead", tmp_path / "calls.jsonl"),
+        submitter=DryRunSubmitClient(),
+    )
+    by_line = await find_patient(solo, FindPatientInput())
+    assert by_line.status == "ambiguous"
+    by_two = await find_patient(
+        solo,
+        FindPatientInput(name="Marta Ruiz García", date_of_birth=date(1992, 11, 2)),
+    )
+    assert by_two.status == "found"
 
 
 # ---- problem 9: caller identity vs. the patient actually booked -----------
