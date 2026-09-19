@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +46,17 @@ class RecordingClinic(FakeClinicClient):
     async def availability(self, **kwargs: Any) -> AvailabilityResponse:
         self.windows.append((kwargs["date_from"], kwargs["date_to"]))
         return await super().availability(**kwargs)
+
+
+class UtcClinic(FakeClinicClient):
+    """A fake diary that reports the same slots with a non-Madrid offset."""
+
+    async def availability(self, **kwargs: Any) -> AvailabilityResponse:
+        answer = await super().availability(**kwargs)
+        slots = [
+            slot.model_copy(update={"start": slot.start.astimezone(UTC)}) for slot in answer.slots
+        ]
+        return answer.model_copy(update={"slots": slots})
 
 
 class FlakyClinic(FakeClinicClient):
@@ -324,3 +335,21 @@ async def test_a_transport_failure_leaves_the_row_pending(tmp_path: Path) -> Non
 
     assert await RebookingWatcher(clinic, store).check_once(now=NOW) == []
     assert [row.request_id for row in store.pending()] == [request.request_id]
+
+
+async def test_the_time_range_is_read_in_madrid_whatever_offset_the_slot_carries(
+    tmp_path: Path,
+) -> None:
+    store = RebookingStore(tmp_path / "rebooking.sqlite3")
+    events = _book_events()
+    events[3]["args"] |= {"time_from": "10:00", "time_to": "11:00"}
+    request = analyze_call(events)
+    assert request is not None
+    assert request.time_from == time(10, 0)
+    store.add(request)
+
+    [matched] = await RebookingWatcher(UtcClinic(), store).check_once(now=NOW)
+
+    assert matched.matched_slot is not None
+    assert matched.matched_slot.start.utcoffset() == timedelta(0)
+    assert time(10, 0) <= matched.matched_slot.start.astimezone(MADRID).time() < time(11, 0)

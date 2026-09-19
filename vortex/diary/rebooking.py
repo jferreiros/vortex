@@ -332,7 +332,7 @@ def _filter_time(slots: list[Slot], request: RebookingRequest, earliest: date) -
     def keep(slot: Slot) -> bool:
         if slot.start.astimezone(MADRID).date() < earliest:
             return False
-        local_time = slot.start.timetz().replace(tzinfo=None)
+        local_time = slot.start.astimezone(MADRID).time()
         if request.time_from and local_time < request.time_from:
             return False
         if request.time_to and local_time >= request.time_to:
