@@ -14,7 +14,6 @@ once the socket is gone. ``close()`` runs the 30-second-window logic.
 from __future__ import annotations
 
 import asyncio
-import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -49,20 +48,6 @@ SUBMIT_TOOL = "submit_action"
 # (the same action twice) is a record; everything else is not, ``dry_run``
 # included - see ``CallSession.has_accepted_submission``.
 ACCEPTED_STATUSES: tuple[str, ...] = ("accepted", "duplicate")
-
-# Escape hatch for the fallback's first branch. Off by default: sending a
-# booking the caller never agreed to is a wrong write, not a missing one.
-FALLBACK_SUBMIT_PREPARED_ENV = "VORTEX_FALLBACK_SUBMIT_PREPARED"
-_TRUE = ("1", "true", "yes", "on")
-
-
-def submit_unconfirmed_prepared() -> bool:
-    """``VORTEX_FALLBACK_SUBMIT_PREPARED=true``: send prepared actions unconfirmed.
-
-    Read at the end of each call rather than at import, so a test (or a run)
-    can flip it without rebuilding the settings.
-    """
-    return os.environ.get(FALLBACK_SUBMIT_PREPARED_ENV, "").strip().lower() in _TRUE
 
 
 @dataclass
@@ -350,10 +335,10 @@ class CallSession:
         """The action a silent call ends on: (branch, action, why)."""
         memory = self.memory
 
-        # (a) Something was drawn up and never sent. Only with the caller's yes,
-        #     or with the escape hatch on: a booking nobody agreed to is a wrong
-        #     write on a read-only clinic, which is worse than a named refusal.
-        if memory.prepared is not None and (memory.confirmed or submit_unconfirmed_prepared()):
+        # (a) Something was drawn up and never sent. Only with the caller's yes:
+        #     a booking nobody agreed to is a wrong write, which is worse than
+        #     a named refusal.
+        if memory.prepared is not None and memory.confirmed:
             return (
                 "prepared",
                 memory.prepared,
