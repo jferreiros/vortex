@@ -1,8 +1,9 @@
-"""Dry-run (or live Twilio) day-before confirmation call for a fake booking.
+"""Dry-run (or live Twilio) outbound call for a fake booking.
 
 Usage:
   uv run python scripts/try_confirmation_call.py
   uv run python scripts/try_confirmation_call.py --lang ca
+  uv run python scripts/try_confirmation_call.py --motivo recordatorio
   uv run python scripts/try_confirmation_call.py --live --to +34600111222 \
       --base-url https://<tunnel-host>
 
@@ -10,6 +11,15 @@ Without --live it prints the TwiML and what would be dialled. With --live it
 writes a pending row to the store (so the /confirmation/* webhooks resolve it)
 and places the real call. --wait polls the store afterwards and prints the
 recorded outcome once the call ends.
+
+``--motivo`` is any of KNOWN_MOTIVOS (confirmacion, recordatorio,
+reprogramacion, seguimiento, call_now) or a new string of your own — the
+opening line changes, the rest of the flow (yes/no/reschedule) does not.
+This script always dials on the next tick regardless of ``--motivo``: it
+builds the row directly with ``call_at=now``, the same thing a real
+``motivo="call_now"`` row does through the normal scheduling path (see
+README.md, "Day-before confirmation calls", for how to queue one of those
+by hand instead of through this script).
 """
 
 from __future__ import annotations
@@ -20,6 +30,7 @@ from datetime import datetime, timedelta
 
 from vortex.contract import MADRID
 from vortex.line.confirmation_calls import (
+    DEFAULT_MOTIVO,
     ConfirmationCall,
     DryRunCallsClient,
     TwilioCallsClient,
@@ -38,6 +49,14 @@ async def main() -> int:
     parser.add_argument("--to", default="+34662046392", help="E.164 destination")
     parser.add_argument(
         "--lang", default="es", help="ISO-639-1 the call speaks: es, ca, gl, eu, en"
+    )
+    parser.add_argument(
+        "--motivo",
+        default=DEFAULT_MOTIVO,
+        help=(
+            "confirmacion (default), recordatorio, reprogramacion, seguimiento, "
+            "call_now, or any string"
+        ),
     )
     parser.add_argument(
         "--base-url",
@@ -71,16 +90,18 @@ async def main() -> int:
         provider_id="PR01",
         location_id="centro",
         patient_id="P00042",
+        motivo=args.motivo,
     )
 
     print("=== confirmation call preview ===")
-    print(f"to: {call.to}  lang: {call.language}")
+    print(f"to: {call.to}  lang: {call.language}  motivo: {call.motivo}")
     print(f"appointment: {call.appointment_at}  call_at: {call.call_at}")
     script = ask_text(
         language=call.language,
         when=call.appointment_dt,
         provider_name=call.provider_name,
         location_name=call.location_name,
+        motivo=call.motivo,
     )
     print(f"script: {script}")
     print(f"twilio configured: {twilio_calls_configured(settings)}  base: {base or '(none)'}")

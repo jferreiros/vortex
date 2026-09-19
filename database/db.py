@@ -94,24 +94,30 @@ def insert_call(
     duration_ms: int | None = None,
     outcome: str | None = None,
     appointment_id: str | None = None,
+    motivo: str | None = None,
 ) -> CallRecord:
     """Insert one ``calls`` row, or update it in place if ``call_id`` was
     already seen — a retried identical submit (the platform's own 409
     "duplicate, treat as success") must update the same row, never mint a
     second one for the same call.
+
+    ``motivo`` is the outbound-call reason (confirmacion / recordatorio /
+    reprogramacion / seguimiento / call_now); leave it ``None`` for an
+    inbound call.
     """
     row = conn.execute(
         """
         INSERT INTO calls
             (call_id, direction, purpose, language, from_number,
-             started_at, duration_ms, outcome, appointment_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             started_at, duration_ms, outcome, appointment_id, motivo)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(call_id) DO UPDATE SET
             purpose = excluded.purpose,
             language = excluded.language,
             duration_ms = COALESCE(excluded.duration_ms, calls.duration_ms),
             outcome = excluded.outcome,
-            appointment_id = COALESCE(excluded.appointment_id, calls.appointment_id)
+            appointment_id = COALESCE(excluded.appointment_id, calls.appointment_id),
+            motivo = COALESCE(excluded.motivo, calls.motivo)
         RETURNING *
         """,
         (
@@ -124,6 +130,7 @@ def insert_call(
             duration_ms,
             outcome,
             appointment_id,
+            motivo,
         ),
     ).fetchone()
     from database.remote import after_write

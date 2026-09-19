@@ -72,7 +72,16 @@ async def read_handshake(ws: WebSocket, *, max_messages: int = 5) -> twilio.Star
 
 @asynccontextmanager
 async def _app_lifespan(app: FastAPI):
-    """Start the day-before SMS worker while the server is up."""
+    """Start the day-before SMS worker and the outbound-call worker while the
+    server is up.
+
+    Both run for the app's whole lifetime, independent of any inbound
+    ``/ws`` connection: a call queues a row (``session.py``'s
+    ``_queue_confirmation_call``), it never has to drive the worker's next
+    poll. So a scheduled row — confirmación, recordatorio, reprogramación,
+    seguimiento, or a ``call_now`` row someone queued by hand — fires on its
+    own schedule even if the line takes no inbound calls at all today.
+    """
     cfg: Settings = app.state.settings
     worker: ReminderWorker | None = None
     if cfg.sms_confirmations and cfg.sms_day_before_reminders:

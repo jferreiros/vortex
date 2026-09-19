@@ -153,8 +153,19 @@ CREATE INDEX idx_wall_cancellations_slot
     ON wall_cancellations(provider_id, site_id, slot_start);
 """
 
+#: Migration 3: ``calls.motivo`` — why an *outbound* call was placed
+#: (confirmacion / recordatorio / reprogramacion / seguimiento / call_now —
+#: see ``vortex.line.confirmation_calls.KNOWN_MOTIVOS``, the source of these
+#: values). Deliberately no CHECK: that list is meant to grow without a
+#: migration, unlike ``purpose``/``outcome`` above which name the contract's
+#: own closed vocabulary. NULL for an inbound call (booking, cancellation,
+#: reschedule) and for any outbound row from before this migration.
+_MIGRATION_3 = """
+ALTER TABLE calls ADD COLUMN motivo TEXT;
+"""
+
 #: Append, never edit — see the module docstring.
-MIGRATIONS: tuple[str, ...] = (_MIGRATION_1, _MIGRATION_2)
+MIGRATIONS: tuple[str, ...] = (_MIGRATION_1, _MIGRATION_2, _MIGRATION_3)
 
 
 def migrate(conn: sqlite3.Connection) -> int:
