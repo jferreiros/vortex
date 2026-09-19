@@ -118,8 +118,9 @@ production) sit behind a sidebar:
 | `/insights` | refusal reasons, handle times, tool latency, calls by hour |
 | `/settings`, `/settings/rules`, `/settings/integrations`, `/settings/engineering` | sites, doctors, rules and the insurance matrix from the clinic API; providers; evals |
 
-Public pages for the jury: `/wall` (the projector view) and `/call/<id>` (one
-call, shareable). Phone numbers are masked there. The board reads calls from
+Public pages for the jury: `/wall` (the Live flow: the call in progress as
+conversation, workflow and outcome, on a dark canvas made for a projector) and
+`/call/<id>` (one call, shareable). Phone numbers are masked there. The board reads calls from
 the line at `VORTEX_LINE_URL`. Every screen follows `DESIGN.md`.
 
 ## Design

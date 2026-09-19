@@ -300,7 +300,7 @@ def agent_page(slug: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-@ui.page("/calls/live")
+@ui.page("/calls/live/classic")
 async def calls_live_page() -> None:
     if not _guard():
         return
