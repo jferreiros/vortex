@@ -225,7 +225,7 @@ def schedule(location_id: str, location_name: str, hours: dict[str, str]) -> dic
     return {"location_id": location_id, "location_name": location_name, "days": days(hours)}
 
 
-CENTRO_HOURS = schedule("centro", "Arenal Centro", WEEKDAYS_9_20)
+CENTRO_HOURS = schedule("centro", "Arenal Centro", WEEKDAYS_9_20 | {"saturday": "09:00–14:00"})
 NORTE_HOURS = schedule("norte", "Arenal Norte", WEEKDAYS_9_20)
 SUR_HOURS = schedule("sur", "Arenal Sur", WEEKDAYS_9_20 | {"friday": "09:00–14:00"})
 

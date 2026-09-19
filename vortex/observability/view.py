@@ -51,6 +51,7 @@ class CallCard:
     reason: str | None = None
     duration_ms: float | None = None
     patient_name: str | None = None
+    patient_id: str | None = None
     provider_name: str | None = None
     slot: str | None = None
     decline_reason: str | None = None
@@ -102,6 +103,14 @@ def _patient_name(result: Any) -> str | None:
         ]
         name = " ".join(p for p in parts if p).strip()
         return name or None
+    return None
+
+
+def _patient_id(result: Any) -> str | None:
+    data = _as_dict(result)
+    patient = data.get("patient")
+    if isinstance(patient, dict) and patient.get("patient_id"):
+        return str(patient["patient_id"])
     return None
 
 
@@ -191,6 +200,9 @@ def build_call(call_id: str, events: list[dict[str, Any]]) -> CallCard:
                 name_guess = _patient_name(match.result)
                 if name_guess:
                     card.patient_name = name_guess
+                id_guess = _patient_id(match.result)
+                if id_guess:
+                    card.patient_id = id_guess
                 provider_guess = _provider_name(match.result)
                 if not provider_guess:
                     data = _as_dict(match.result)

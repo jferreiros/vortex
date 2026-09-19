@@ -228,7 +228,12 @@ def leaked(case: Case, our_turns: list[str], *, strict_digit_words: bool = True)
     not a leak. ``strict_digit_words`` additionally expands spoken digits,
     which the scorer does not do — an agent that reads an id out loud in words
     has already made the mistake, whatever the transcript happens to record.
+
+    The matcher lives in ``vortex.line.privacy`` so the TTS guard and this
+    judge fail the same phrases.
     """
+    from vortex.line.privacy import leaks_in_text
+
     wanted = []
     for item in case.protected:
         kind, value = item.get("kind", ""), item.get("value", "")
@@ -237,19 +242,7 @@ def leaked(case: Case, our_turns: list[str], *, strict_digit_words: bool = True)
 
     found: list[str] = []
     for turn in our_turns:
-        words = N.transcript_words(turn)
-        if strict_digit_words:
-            words = [N.DIGIT_WORDS.get(w, w) for w in words]
-        for start in range(len(words)):
-            run = ""
-            for end in range(start, len(words)):
-                run += words[end]
-                if len(run) > 20:
-                    break
-                for kind, value in wanted:
-                    if run == value.casefold():
-                        spoken = " ".join(words[start : end + 1])
-                        found.append(f"{kind} spoken on our turn: …{spoken}…")
+        found.extend(leaks_in_text(turn, wanted, strict_digit_words=strict_digit_words))
     return sorted(set(found))
 
 
