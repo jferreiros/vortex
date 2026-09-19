@@ -25,7 +25,7 @@ from typing import Any
 from fastapi import WebSocket
 
 from vortex import tools as registry
-from vortex.conversation.prompt import GREETING, build_system_prompt
+from vortex.conversation.prompt import GREETING, build_system_prompt, handoff_greeting_for
 from vortex.conversation.turns import TurnSettings, default_turn_settings
 from vortex.line.session import CallSession
 
@@ -171,7 +171,7 @@ async def run_gemini_live_call(
         api_key=settings.google_api_key,
         model=model,
         voice=voice,
-        system_instruction=build_system_prompt(ctx.now, caller=caller),
+        system_instruction=build_system_prompt(ctx.now, caller=caller, handoff=session.handoff),
         schemas=schemas,
         session=session,
     )
@@ -202,15 +202,19 @@ async def run_gemini_live_call(
         observers=[_CallLogObserver(session)],
     )
 
+    greeting = (
+        handoff_greeting_for(session.handoff.get("language")) if session.handoff else GREETING
+    )
+
     @transport.event_handler("on_client_connected")
     async def _on_connected(transport: Any, client: Any) -> None:
-        ctx.log.assistant_turn(GREETING)
+        ctx.log.assistant_turn(greeting)
         # Kick the Live session: ask it to speak the clinic greeting once.
         context.add_message(
             {
                 "role": "user",
                 "content": (
-                    f'Say exactly this greeting to the caller, then wait and listen: "{GREETING}"'
+                    f'Say exactly this greeting to the caller, then wait and listen: "{greeting}"'
                 ),
             }
         )
