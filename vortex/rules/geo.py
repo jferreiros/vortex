@@ -265,6 +265,7 @@ async def _geocode_cartociudad(address: str) -> tuple[float, float] | None:
         params={
             "q": address,
             "limit": 5,
+            "provincia_filter": CARTOCIUDAD_PROVINCE,
             "no_process": "municipio,provincia,toponimo",
         },
     )
