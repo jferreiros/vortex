@@ -1,7 +1,7 @@
 """A chat+tool timeline for one call, for the react-spring zoom page.
 
 ``build_timeline`` replays a call's raw JSONL events into the shape
-``wall-app/src`` expects: an ordered list of ``turn`` and ``tool`` items.
+``vortex/wall/src`` expects: an ordered list of ``turn`` and ``tool`` items.
 A ``tool`` item is created on ``tool.called`` and mutated in place on
 ``tool.returned``/``tool.failed`` (same ``id``, ``status`` flips from
 ``"running"`` to ``"ok"``/``"fail"``) — the client tells the two apart by

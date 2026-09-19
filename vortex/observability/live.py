@@ -20,7 +20,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import httpx
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from nicegui import app, ui
 
 from vortex.observability import auth, explain, insights
@@ -38,10 +38,15 @@ _HERE = Path(__file__).parent
 DESIGN_CSS = (_HERE / "design.css").read_text(encoding="utf-8")
 BOARD_CSS = (_HERE / "board.css").read_text(encoding="utf-8")
 EVALS_SUMMARY = REPO_ROOT / "evals" / "results" / "summary.json"
-#: The react-spring per-call "zoom" page (vortex/observability/wall-app/),
-#: built by `npm run build`. /call/{id} above is the NiceGUI page; this is
-#: an animated alternative at /call/{id}/zoom, additive and never required.
-WALL_APP_DIST = _HERE / "wall-app" / "dist"
+#: The React app (vortex/wall/) — landing page, Clinic View and the
+#: react-spring per-call "zoom" page — built by `npm run build`. /call/{id}
+#: above is the NiceGUI page; /call/{id}/zoom below serves this app's
+#: index.html and it takes over routing client-side from there. Additive,
+#: never required: /call/{id} keeps working with no build present.
+WALL_APP_DIST = REPO_ROOT / "vortex" / "wall" / "dist"
+#: Source art for the app — not part of the Vite build, served straight off
+#: disk. vortex/wall/media/avatar2d.png -> GET /wall/avatar2d.
+WALL_MEDIA_DIR = REPO_ROOT / "vortex" / "wall" / "media"
 
 MADRID = ZoneInfo("Europe/Madrid")
 
@@ -687,8 +692,13 @@ def _facts(health: dict[str, Any] | None) -> None:
 # ---------------------------------------------------------------------------
 
 
-@ui.page("/wall")
+@ui.page("/wall/classic")
 def wall_page() -> None:
+    """The original NiceGUI projector view: three columns, ten-second read
+    from across the room. Superseded as the public entry by the React app
+    (vortex/wall/) now mounted at /wall itself, kept here as a fallback/
+    reference — nothing about it changed, only its address.
+    """
     _apply_chrome()
     ui.page_title("Vortex · Live")
     stage = ui.element("div").classes("shell")
@@ -704,7 +714,7 @@ def wall_page() -> None:
         live_count = sum(1 for c in cards if c.live)
         stage.clear()
         with stage:
-            slot = _nav("/wall", team=False)
+            slot = _nav("/wall/classic", team=False)
             with slot:
                 _line_pill(health)
                 zoom_id = featured.call_id if featured else "demo"
@@ -802,17 +812,42 @@ def wall_timeline_api(call_id: str) -> JSONResponse:
     )
 
 
+@app.get("/wall/avatar2d")
+def wall_avatar2d() -> FileResponse:
+    """The 2D avatar art, served as a plain image — not wrapped in a page —
+    so it can be linked or embedded directly. Source: vortex/wall/media/.
+    """
+    return FileResponse(WALL_MEDIA_DIR / "avatar2d.png", media_type="image/png")
+
+
+@app.get("/wall", response_model=None)
+def wall_entry() -> Response:
+    """The public URL (see README's production table): the React app
+    (vortex/wall/) — landing page, then client-side into the Clinic View —
+    if it has been built. Falls back to the classic NiceGUI projector view
+    so this address never 404s for the jury just because a deploy skipped
+    ``npm run build``.
+    """
+    index = WALL_APP_DIST / "index.html"
+    if index.exists():
+        return HTMLResponse(index.read_text(encoding="utf-8"))
+    return RedirectResponse("/wall/classic")
+
+
 if WALL_APP_DIST.exists():
     app.add_static_files("/wall-assets", str(WALL_APP_DIST))
     _WALL_INDEX_HTML = (WALL_APP_DIST / "index.html").read_text(encoding="utf-8")
 
     @app.get("/call/{call_id}/zoom")
     def call_zoom_page(call_id: str) -> HTMLResponse:
-        """The react-spring zoom page: voice orb, live tool demo, extracted
-        info with the rule behind each, final action.
+        """The React app's per-call view: voice orb, live tool demo, extracted
+        info with the rule behind each, final action. Also the app's SPA
+        entry point — with no call_id of interest (e.g. /call/demo/zoom) it
+        opens on the landing page instead, then routes client-side from there
+        into the Clinic View.
 
-        Built by ``npm run build`` in ``vortex/observability/wall-app/``. It
-        reads its data from ``/api/wall/timeline/{call_id}`` above, client-side.
+        Built by ``npm run build`` in ``vortex/wall/``. It reads its data
+        from ``/api/wall/timeline/{call_id}`` above, client-side.
         Additive: ``/call/{call_id}`` (no ``/zoom``) stays the NiceGUI page.
         """
         del call_id  # the SPA reads the id itself from window.location

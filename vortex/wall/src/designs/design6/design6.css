@@ -1,0 +1,453 @@
+/* Design 6 — Neobrutalist. Same 3-column skeleton as 1/2, entirely
+   different register: raw, high-contrast, hand-poster energy. Thick black
+   borders, flat hard shadows (no blur), zero radius, Archivo Black. */
+
+.design6-root {
+  --d6-ink: #0a0a0a;
+  --d6-bg: #f2efe4;
+  --d6-panel: #ffffff;
+  --d6-yellow: #ffe600;
+  --d6-red: #ff3b30;
+  --d6-blue: #2b5bff;
+  --d6-border: 3px solid var(--d6-ink);
+  --d6-shadow: 6px 6px 0 var(--d6-ink);
+
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background: var(--d6-bg);
+  color: var(--d6-ink);
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+
+.design6-root .d6-shell {
+  height: 100%;
+  display: flex;
+}
+
+.design6-root .d6-label {
+  font-family: "Archivo Black", ui-sans-serif, sans-serif;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+.design6-root .d6-label.on-dark {
+  color: var(--d6-yellow);
+  display: block;
+  margin-bottom: 6px;
+}
+
+/* Left ---------------------------------------------------------------*/
+
+.design6-root .d6-left {
+  flex: 0 0 28%;
+  max-width: 420px;
+  height: 100%;
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  overflow: hidden;
+  border-right: var(--d6-border);
+}
+
+.design6-root .d6-duration-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.design6-root .d6-duration-value {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.design6-root .d6-duration-value .mute {
+  opacity: 0.5;
+  font-size: 12px;
+}
+
+.design6-root .d6-duration-track {
+  height: 14px;
+  border: var(--d6-border);
+  background: var(--d6-panel);
+}
+
+.design6-root .d6-duration-fill {
+  height: 100%;
+  background: var(--d6-blue);
+}
+
+.design6-root .d6-duration-fill.warn {
+  background: var(--d6-red);
+}
+
+.design6-root .d6-duration-chips {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.design6-root .d6-chip {
+  font-family: "Archivo Black", sans-serif;
+  font-size: 10px;
+  padding: 4px 9px;
+  border: 2px solid var(--d6-ink);
+  background: var(--d6-yellow);
+}
+
+.design6-root .d6-chip.warn {
+  background: var(--d6-red);
+  color: #fff;
+}
+
+.design6-root .d6-orb-wrap {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 0;
+}
+
+.design6-root .d6-orb {
+  width: 128px;
+  height: 128px;
+  border: 4px solid var(--d6-ink);
+  background: var(--d6-yellow);
+  box-shadow: var(--d6-shadow);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.design6-root .d6-orb.phase-speaking,
+.design6-root .d6-orb.phase-working {
+  background: var(--d6-red);
+  color: #fff;
+}
+
+.design6-root .d6-orb.phase-thinking,
+.design6-root .d6-orb.phase-listening {
+  background: var(--d6-blue);
+  color: #fff;
+}
+
+.design6-root .d6-orb-label {
+  font-family: "Archivo Black", sans-serif;
+  font-size: 15px;
+}
+
+.design6-root .d6-tool-card {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border: var(--d6-border);
+  box-shadow: var(--d6-shadow);
+  background: var(--d6-panel);
+}
+
+.design6-root .d6-tool-card-head {
+  flex: 0 0 auto;
+  font-family: "Archivo Black", sans-serif;
+  font-size: 12px;
+  padding: 10px 14px;
+  background: var(--d6-ink);
+  color: #fff;
+}
+
+.design6-root .d6-tool-card-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 16px;
+  display: flex;
+}
+
+.design6-root .stage-head,
+.design6-root .tool-live-label,
+.design6-root .recent-tools-title {
+  display: none;
+}
+
+.design6-root .stage,
+.design6-root .tool-live,
+.design6-root .recent-tools {
+  width: 100%;
+}
+
+.design6-root .stage-ring {
+  border: 3px solid var(--d6-ink) !important;
+  border-radius: 0 !important;
+  opacity: 1 !important;
+  background: var(--d6-yellow);
+}
+
+.design6-root .stage-icon,
+.design6-root .tool-live-icon,
+.design6-root .recent-tool-name svg {
+  color: var(--d6-ink);
+}
+
+.design6-root .stage-label,
+.design6-root .stage-record-name,
+.design6-root .recent-tool-name {
+  font-family: "Archivo Black", sans-serif;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.design6-root .stage-section h4 {
+  font-family: "Archivo Black", sans-serif;
+  color: var(--d6-ink);
+  opacity: 0.55;
+}
+
+.design6-root .chip,
+.design6-root .stage-record,
+.design6-root .stage-cal-day,
+.design6-root .recent-tool-row {
+  background: var(--d6-panel);
+  border: 2px solid var(--d6-ink);
+  border-radius: 0;
+}
+
+.design6-root .stage-cal-day.has-slots {
+  background: var(--d6-yellow);
+}
+
+.design6-root .recent-tool-ms {
+  font-family: "IBM Plex Mono", monospace;
+  color: var(--d6-red);
+}
+
+/* Middle -----------------------------------------------------------------*/
+
+.design6-root .d6-main {
+  flex: 1 1 44%;
+  min-width: 0;
+  height: 100%;
+  padding: 22px 10px;
+  display: flex;
+}
+
+.design6-root .d6-chat {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.design6-root .d6-chat-head {
+  font-family: "Archivo Black", sans-serif;
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 22px 16px;
+}
+
+.design6-root .d6-dot-live {
+  width: 12px;
+  height: 12px;
+  background: var(--d6-red);
+  border: 2px solid var(--d6-ink);
+}
+
+.design6-root .d6-chat-stream {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 14px;
+  padding: 0 22px 70px;
+}
+
+.design6-root .d6-empty {
+  margin: auto;
+  font-family: "Archivo Black", sans-serif;
+  font-size: 12px;
+  opacity: 0.4;
+}
+
+.design6-root .d6-row {
+  display: flex;
+}
+
+.design6-root .d6-row.user {
+  justify-content: flex-end;
+}
+
+.design6-root .d6-bubble {
+  max-width: 66%;
+  padding: 12px 16px;
+  border: var(--d6-border);
+  box-shadow: 4px 4px 0 var(--d6-ink);
+  font-size: 14.5px;
+  line-height: 1.5;
+  font-weight: 500;
+}
+
+.design6-root .d6-bubble.user {
+  background: var(--d6-red);
+  color: #fff;
+}
+
+.design6-root .d6-bubble.assistant {
+  background: var(--d6-panel);
+  color: var(--d6-ink);
+}
+
+.design6-root .d6-who {
+  display: block;
+  font-family: "Archivo Black", sans-serif;
+  font-size: 10px;
+  margin-bottom: 4px;
+  opacity: 0.75;
+}
+
+.design6-root .d6-bubble p {
+  margin: 0;
+}
+
+/* Right --------------------------------------------------------------------*/
+
+.design6-root .d6-right {
+  flex: 0 0 28%;
+  max-width: 420px;
+  height: 100%;
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow: hidden;
+  border-left: var(--d6-border);
+}
+
+.design6-root .d6-insight-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.design6-root .d6-insight-card {
+  border: var(--d6-border);
+  box-shadow: var(--d6-shadow);
+  background: var(--d6-panel);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.design6-root .d6-insight-card.tone-0 {
+  border-top: 6px solid var(--d6-yellow);
+}
+
+.design6-root .d6-insight-card.tone-1 {
+  border-top: 6px solid var(--d6-blue);
+}
+
+.design6-root .d6-insight-title {
+  font-family: "Archivo Black", sans-serif;
+  font-size: 10.5px;
+  opacity: 0.6;
+}
+
+.design6-root .d6-insight-value {
+  font-weight: 800;
+  font-size: 18px;
+}
+
+.design6-root .d6-insight-rule {
+  font-size: 11.5px;
+  opacity: 0.75;
+  line-height: 1.4;
+}
+
+.design6-root .d6-final {
+  flex: 0 0 auto;
+  border: var(--d6-border);
+  box-shadow: var(--d6-shadow);
+  padding: 18px;
+  background: var(--d6-ink);
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.design6-root .d6-final-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.design6-root .d6-final-value {
+  font-family: "Archivo Black", sans-serif;
+  font-size: 21px;
+  display: block;
+}
+
+.design6-root .d6-final-note {
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.design6-root .d6-final-note.warn {
+  color: var(--d6-red);
+}
+
+.design6-root .d6-final.done {
+  box-shadow: var(--d6-shadow), 0 0 0 3px var(--d6-yellow) inset;
+}
+
+.design6-root .countdown-ring-track {
+  stroke: rgba(255, 255, 255, 0.2);
+}
+
+.design6-root .countdown-ring-fill {
+  stroke: var(--d6-yellow);
+}
+
+.design6-root .countdown-ring {
+  position: relative;
+}
+
+.design6-root .countdown-ring-content {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* Responsive -----------------------------------------------------------------*/
+
+@media (max-width: 1024px) {
+  .design6-root .d6-shell {
+    flex-direction: column;
+    overflow-y: auto;
+  }
+  .design6-root .d6-left,
+  .design6-root .d6-right {
+    max-width: none;
+    flex: 0 0 auto;
+  }
+  .design6-root .d6-main {
+    flex: 0 0 auto;
+    height: 420px;
+  }
+}
