@@ -81,7 +81,9 @@ class DryRunSmsClient:
 
     async def send(self, *, to: str, body: str) -> SmsResult:
         self.sent.append((to, body))
-        return SmsResult(status="dry_run", detail="no Twilio credentials: not sent", to=to, body=body)
+        return SmsResult(
+            status="dry_run", detail="no Twilio credentials: not sent", to=to, body=body
+        )
 
     async def aclose(self) -> None:
         return None
@@ -192,10 +194,7 @@ def cancellation_confirmation_text(
     location_name: str = "",
 ) -> str:
     if when is None:
-        return (
-            "Cita cancelada: hemos cancelado tu cita. "
-            "Para reservar otra, llama a la clínica."
-        )
+        return "Cita cancelada: hemos cancelado tu cita. Para reservar otra, llama a la clínica."
     stamp = format_slot_es(when)
     if provider_name and location_name:
         head = f"Cita cancelada con {provider_name} en {location_name}: {stamp}."
