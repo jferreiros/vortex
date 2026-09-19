@@ -20,7 +20,9 @@ Everything above them speaks ``vortex.contract``.
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import date, datetime, time, timedelta
+from pathlib import Path
 from typing import Any, Literal, Protocol
 
 import httpx
@@ -500,6 +502,21 @@ def _digits9(phone: str) -> str:
     return digits[-9:]
 
 
+def _load_json_list(path: Path) -> list[dict[str, Any]]:
+    """A ``patients.json`` / ``appointments.json`` list, or empty if missing."""
+    if not path.exists():
+        return []
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if isinstance(payload, list):
+        return payload
+    if isinstance(payload, dict):
+        for key in ("patients", "appointments", "items"):
+            items = payload.get(key)
+            if isinstance(items, list):
+                return items
+    return []
+
+
 class FakeClinicClient:
     """Offline client over ``fixtures``. Deterministic; no network.
 
@@ -507,13 +524,28 @@ class FakeClinicClient:
     ``_adapt_*`` functions as a live response. That is the point: offline runs
     exercise the adapters, and a field name that only the platform knows about
     breaks a test here instead of a call there.
+
+    Pass ``data_dir`` to read ``patients.json`` and ``appointments.json`` from
+    the isolated ``synthetic-data/`` pack instead. Catalogue and slot generation
+    still come from fixtures. Default (no ``data_dir``) is unchanged.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, data_dir: Path | None = None) -> None:
         self._catalogue = Catalogue.model_validate(_adapt_catalogue(fixtures.CLINIC))
-        self._patients = [PatientRecord.model_validate(p) for p in fixtures.PATIENTS]
+        if data_dir is None:
+            patient_rows = list(fixtures.PATIENTS)
+            appointment_rows = list(fixtures.APPOINTMENTS)
+        else:
+            root = Path(data_dir)
+            patient_rows = _load_json_list(root / "patients.json")
+            appointment_rows = [
+                row
+                for row in _load_json_list(root / "appointments.json")
+                if row.get("appointment_id") and row.get("start_time")
+            ]
+        self._patients = [PatientRecord.model_validate(p) for p in patient_rows]
         self._appointments = [
-            Appointment.model_validate(_adapt_appointment(a)) for a in fixtures.APPOINTMENTS
+            Appointment.model_validate(_adapt_appointment(a)) for a in appointment_rows
         ]
 
     async def health(self) -> bool:
