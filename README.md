@@ -12,15 +12,17 @@
 | vortex/conversation/language.py        |       71 |        7 |     90% |137-138, 186-187, 195-199 |
 | vortex/conversation/prompt.py          |       40 |        0 |    100% |           |
 | vortex/conversation/stt\_context.py    |       56 |        2 |     96% |   305-306 |
-| vortex/conversation/turns.py           |       36 |        0 |    100% |           |
+| vortex/conversation/turns.py           |       51 |        0 |    100% |           |
 | vortex/diary/tools.py                  |      311 |       31 |     90% |248, 251, 321-322, 331-332, 335, 345-348, 406, 422, 424, 434, 496, 532, 556-557, 666-667, 710-711, 719-720, 725-726, 747, 795-796, 867 |
 | vortex/identity/dictation.py           |       79 |        5 |     94% |230-231, 234, 245, 249 |
 | vortex/identity/tools.py               |      218 |       35 |     84% |159, 260, 270-275, 292, 296-301, 303-317, 321-323, 326-331, 342, 348, 359, 437-438, 484, 488-491, 497, 546, 579, 596 |
+| vortex/line/aic\_filter.py             |       22 |        1 |     95% |        45 |
 | vortex/line/llm\_timeout.py            |      124 |        2 |     98% |  259, 272 |
-| vortex/line/pipecat\_voice.py          |      210 |       84 |     60% |82-83, 90-249, 253, 346, 497, 547-550, 576-577, 602-622 |
+| vortex/line/pipecat\_voice.py          |      214 |       87 |     59% |84-85, 92-261, 265, 360, 511, 561-564, 590-591, 616-636 |
 | vortex/line/privacy.py                 |       72 |        5 |     93% |61, 85, 88, 94, 154 |
 | vortex/line/server.py                  |       70 |       18 |     74% |46-48, 61-62, 67, 72, 80-82, 90-92, 97-102 |
 | vortex/line/session.py                 |      153 |        3 |     98% |197, 266, 317 |
+| vortex/line/smart\_turn\_ab.py         |      152 |        7 |     95% |115, 126, 198-200, 208, 212 |
 | vortex/line/stub\_voice.py             |       43 |        7 |     84% | 34, 57-62 |
 | vortex/line/submit.py                  |       47 |       22 |     53% |41, 48-66, 69, 89 |
 | vortex/line/twilio.py                  |       77 |        3 |     96% |61, 153, 160 |
@@ -45,9 +47,9 @@
 | vortex/rules/geo.py                    |      103 |       11 |     89% |239, 242-243, 255-257, 272, 278, 288-289, 330 |
 | vortex/rules/tools.py                  |      127 |       21 |     83% |144-145, 193-200, 296, 300, 332, 353, 374, 383-389, 392, 394, 400 |
 | vortex/rules/triage.py                 |       57 |        5 |     91% |205-206, 217, 225, 230 |
-| vortex/settings.py                     |      195 |        1 |     99% |       322 |
+| vortex/settings.py                     |      198 |        1 |     99% |       334 |
 | vortex/tools.py                        |       93 |        7 |     92% |257, 264, 275-277, 279, 298 |
-| **TOTAL**                              | **5625** |  **902** | **84%** |           |
+| **TOTAL**                              | **5821** |  **913** | **84%** |           |
 
 6 empty files skipped.
 
