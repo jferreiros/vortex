@@ -56,7 +56,7 @@ AGENTS: tuple[Agent, ...] = (
             "submit_action",
         ),
         rules=(
-            "Ids come from the clinic API, never from the caller",
+            "Ids come from the clinic API, never from what the patient says",
             "Nothing same-day; the earliest slot is tomorrow",
             "Age, referral and insurance checks before any slot is offered",
             "Red-flag symptoms escalate, never book",
