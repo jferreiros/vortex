@@ -282,7 +282,7 @@ def observe_tool(name: str, raw_args: dict[str, Any]) -> Iterator[Any]:
             yield observation
         except Exception as exc:
             observation.update(
-                output={"error": f"{type(exc).__name__}: {exc}"},
+                output={"error": type(exc).__name__},
                 level="ERROR",
             )
             raise
