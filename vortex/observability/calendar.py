@@ -69,6 +69,11 @@ class CalendarCell:
     appointment_type_id: str = ""
     location_id: str = ""
     call_id: str = ""
+    #: Which diary this cell sits on and which clinic appointment fills it —
+    #: the pair a wall cancellation keys on (BookingKey's provider leg is the
+    #: calendar's own; keeping it here lets a visit row carry it downstream).
+    provider_id: str = ""
+    appointment_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -102,6 +107,8 @@ class VisitBrief:
     location_name: str = ""
     sex: str = ""
     age: str = ""
+    provider_id: str = ""
+    appointment_id: str = ""
 
 
 @dataclass
@@ -319,6 +326,30 @@ def bookings_from_events(
     return bookings
 
 
+def cancel_key(provider_id: str, location_id: str, slot_start: Any) -> BookingKey | None:
+    """The ``BookingKey`` a wall-cancellation row names — the same triple the
+    diary itself keys bookings on. ``slot_start`` is an ISO string or a
+    datetime; ``None`` when it cannot be parsed."""
+    start = _parse_dt(slot_start)
+    if start is None or not provider_id:
+        return None
+    return _key(provider_id, location_id, start)
+
+
+def drop_cancelled(
+    bookings: dict[BookingKey, Booking], cancelled: set[BookingKey]
+) -> dict[BookingKey, Booking]:
+    """The bookings minus every slot the control centre cancelled by hand.
+
+    Same effect as a CANCEL event in the log — the slot reads free — but the
+    source is ``wall_cancellations`` in the product database, not the event
+    stream. A fresh copy; ``bookings`` is not mutated.
+    """
+    if not cancelled:
+        return bookings
+    return {key: booking for key, booking in bookings.items() if key not in cancelled}
+
+
 def _booked_cell(booking: Booking, start: datetime, location_id: str) -> CalendarCell:
     return CalendarCell(
         start=start,
@@ -327,6 +358,8 @@ def _booked_cell(booking: Booking, start: datetime, location_id: str) -> Calenda
         appointment_type_id=booking.appointment_type_id,
         location_id=location_id,
         call_id=booking.call_id,
+        provider_id=booking.provider_id,
+        appointment_id=booking.appointment_id,
     )
 
 
@@ -803,6 +836,8 @@ def briefing_for(
         location_name=(location_names or {}).get(loc_id, loc_id),
         sex=patient.sex if patient else "",
         age=age_years(patient.date_of_birth if patient else "", today),
+        provider_id=cell.provider_id,
+        appointment_id=cell.appointment_id,
     )
 
 
@@ -823,6 +858,12 @@ def _visit_row(
         "date": date_iso,
         "time": brief.start.strftime("%H:%M"),
         "when": brief.start.strftime("%a %d/%m · %H:%M"),
+        # The slot key a wall cancellation posts back: doctor + site + the
+        # minute, plus the clinic's own appointment id when the visit has one.
+        "slot": brief.start.isoformat(),
+        "provider_id": brief.provider_id,
+        "patient_id": brief.patient_id,
+        "appointment_id": brief.appointment_id,
         "duration_minutes": minutes,
         "full_name": brief.full_name,
         "phone": brief.phone,
@@ -916,6 +957,7 @@ def agenda_options(catalogue: Catalogue) -> dict[str, Any]:
     """Dropdown values that already exist in the clinic catalogue."""
     doctors = [
         {
+            "id": provider.provider_id,
             "name": provider.name,
             "specialty": provider.specialty_name or provider.specialty_id,
             "specialty_id": provider.specialty_id,

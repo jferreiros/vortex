@@ -140,6 +140,60 @@ def analyze_latest_call(events: Iterable[dict[str, Any]]) -> RebookingRequest | 
     return analyze_call(grouped[order[-1]])
 
 
+def wall_cancel_request(
+    *,
+    provider_id: str,
+    location_id: str,
+    slot_start: datetime,
+    patient_id: str,
+    appointment_id: str | None = None,
+    specialty_id: str | None = None,
+    today: date,
+) -> RebookingRequest | None:
+    """Queue a reschedule callback for a visit the control centre cancelled
+    by hand — the board's Horarios "Cancelar" buttons are the only callers
+    (``/api/wall/agenda/cancel`` and ``/api/wall/appointments/cancel`` in
+    ``vortex/observability/live.py``).
+
+    A wall cancel has no phone call behind it, so ``call_id`` is minted as a
+    deterministic ``WALLC-`` id off the slot key instead of pointing at a
+    transcript — and the request itself is stable per slot, so confirming the
+    same cancel twice can never queue the patient twice. ``intent`` is
+    ``reschedule``: the appointment existed, so the outbound call should move
+    it, not book blind. ``None`` when the cancelled visit names no patient —
+    there is nobody to call.
+
+    The rebook window is [tomorrow, slot day + 30d]: nothing is booked
+    same-day (the clinic's own rule, same as ``check_once``'s ``earliest``),
+    and a cancelled slot in the past still leaves the patient a full month of
+    runway instead of an instantly-expired request.
+    """
+    if not patient_id:
+        return None
+    earliest = today + timedelta(days=1)
+    slot_day = slot_start.astimezone(MADRID).date()
+    payload = {
+        "call_id": "WALLC-"
+        + hashlib.sha1(
+            f"{provider_id}|{location_id}|{slot_start.astimezone(MADRID).isoformat()}".encode()
+        ).hexdigest()[:12],
+        "intent": "reschedule",
+        "patient_id": patient_id,
+        "appointment_id": appointment_id or None,
+        "provider_id": provider_id,
+        "location_id": location_id or None,
+        "specialty_id": specialty_id or None,
+        "date_from": earliest,
+        "date_to": max(slot_day, earliest) + timedelta(days=30),
+        "policy_id": _DEFAULT_POLICY,
+    }
+    return RebookingRequest(
+        request_id=_stable_id(payload),
+        source_reason="wall_cancel",
+        **payload,
+    )
+
+
 class RebookingStore:
     """SQLite-backed queue, safe to recreate whenever the process starts."""
 

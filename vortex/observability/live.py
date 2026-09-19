@@ -1081,7 +1081,7 @@ def wall_doctor_agenda_api(
             month_date = date.fromisoformat(raw)
         except ValueError:
             month_date = None
-    calendars = cal.build_calendars(catalogue, _AGENDA_BOOKINGS or {})
+    calendars = cal.build_calendars(catalogue, _agenda_bookings_live())
     payload = cal.clinic_agenda(
         calendars,
         _AGENDA_PATIENTS,
@@ -1098,6 +1098,261 @@ def wall_doctor_agenda_api(
         plan_names={plan.insurer_id: plan.name for plan in catalogue.insurance_plans},
     )
     return JSONResponse(payload)
+
+
+# ---- Wall cancellations ----------------------------------------------------
+# The Horarios page's "Cancelar" buttons land here. The data layer is
+# ``database/`` (the control centre's own store): one ``wall_cancellations``
+# row per freed slot, plus a status flip on ``appointments`` when the
+# appointment exists there — the same ``cancelled`` a phone cancellation
+# writes through ``database/hooks.py``. Reads then drop those slots via
+# ``cal.drop_cancelled``, so a cancelled visit simply shows as a free slot,
+# the same thing a CANCEL replayed from the call log does. Every cancelled
+# visit with a patient on it also lands in the rebooking queue
+# (``rebooking.sqlite3`` next to the product DB) as a pending ``reschedule``
+# — the outbound dialer calls the patient back for a new slot once the line
+# can dial out. Nothing is submitted anywhere: the clinic's own diary is the
+# system of record here.
+
+
+def _wall_db_path() -> Path:
+    return get_settings().product_db_path
+
+
+def _wall_cancelled_keys() -> set[cal.BookingKey]:
+    """The slots the control centre cancelled by hand, as diary keys."""
+    from database import db  # late import, same as vortex/line/submit.py's
+
+    keys: set[cal.BookingKey] = set()
+    try:
+        conn = db.connect(_wall_db_path())
+        try:
+            rows = db.list_wall_cancellations(conn)
+        finally:
+            conn.close()
+    except Exception:
+        # A missing/unwritable store must never blank the diary.
+        log.exception("wall_cancellations read failed; agenda shows every slot")
+        return keys
+    for row in rows:
+        key = cal.cancel_key(row.provider_id, row.site_id, row.slot_start)
+        if key is not None:
+            keys.add(key)
+    return keys
+
+
+def _agenda_bookings_live() -> dict[cal.BookingKey, cal.Booking]:
+    """The loaded bookings minus the slots the wall already cancelled."""
+    _ensure_agenda()
+    return cal.drop_cancelled(_AGENDA_BOOKINGS or {}, _wall_cancelled_keys())
+
+
+def _rebooking_store_path() -> Path:
+    """The reschedule-callback queue file: ``rebooking.sqlite3`` next to the
+    product DB (``logs/`` locally, the board's writable volume in deploy —
+    same place a real outbound dialer would read it from)."""
+    return _wall_db_path().with_name("rebooking.sqlite3")
+
+
+def _enqueue_rebookings(bookings: list[cal.Booking]) -> int:
+    """One pending ``rebooking_requests`` row per cancelled visit — the queue
+    ``vortex/diary/rebooking.py``'s watcher re-checks and the line's outbound
+    dialer will drain once it can place calls. A failed queue must not roll
+    back a cancel that already committed, so this logs and degrades to 0
+    instead of propagating."""
+    from vortex.diary import rebooking  # late import, same as database/ below
+
+    today = datetime.now(MADRID).date()
+    try:
+        store = rebooking.RebookingStore(_rebooking_store_path())
+    except Exception:
+        log.exception("rebooking queue unavailable; cancelled slots stay cancelled")
+        return 0
+    queued = 0
+    for booking in bookings:
+        request = rebooking.wall_cancel_request(
+            provider_id=booking.provider_id,
+            location_id=booking.location_id,
+            slot_start=booking.start,
+            patient_id=booking.patient_id,
+            appointment_id=booking.appointment_id or None,
+            today=today,
+        )
+        if request is None:
+            continue  # no patient on the visit — nobody to call back
+        try:
+            store.add(request)
+            queued += 1
+        except Exception:
+            log.exception("rebooking enqueue failed for slot %s", booking.start.isoformat())
+    return queued
+
+
+def _parse_day(raw: Any) -> date | None:
+    try:
+        return date.fromisoformat(str(raw or "").strip())
+    except ValueError:
+        return None
+
+
+def _cancel_range_args(
+    payload: Any,
+) -> tuple[str, date | None, date | None, str | None]:
+    """Shared validation for the two range routes. ``from`` > ``to`` is a
+    slips-of-the-mouse case, not an error — the range swaps ends."""
+    if not isinstance(payload, dict):
+        return "", None, None, "bad_request"
+    provider_id = str(payload.get("provider_id") or "").strip()
+    day_from = _parse_day(payload.get("from"))
+    day_to = _parse_day(payload.get("to"))
+    if not provider_id:
+        return provider_id, day_from, day_to, "missing_doctor"
+    if day_from is None or day_to is None:
+        return provider_id, day_from, day_to, "missing_dates"
+    if day_from > day_to:
+        day_from, day_to = day_to, day_from
+    return provider_id, day_from, day_to, None
+
+
+def _cancel_targets(
+    provider_id: str, day_from: date, day_to: date
+) -> tuple[str, list[cal.Booking]]:
+    """One doctor's still-booked slots inside the range — the exact set a
+    range cancel frees, so preview and confirm can never disagree on what
+    "all appointments in the range" means."""
+    _ensure_agenda()
+    catalogue = _AGENDA_CATALOGUE
+    provider = next((p for p in catalogue.providers if p.provider_id == provider_id), None)
+    if provider is None:
+        return "", []
+    hits = [
+        booking
+        for booking in _agenda_bookings_live().values()
+        if booking.provider_id == provider_id
+        and day_from <= booking.start.astimezone(MADRID).date() <= day_to
+    ]
+    return provider.name, sorted(hits, key=lambda booking: booking.start)
+
+
+def _cancel_sample(bookings: list[cal.Booking], limit: int = 8) -> list[dict[str, str]]:
+    """The first few affected visits, for the modal's "this is what goes" list."""
+    patients = _AGENDA_PATIENTS or {}
+    sample = []
+    for booking in bookings[:limit]:
+        person = patients.get(booking.patient_id)
+        start = booking.start.astimezone(MADRID)
+        sample.append(
+            {
+                "date": start.date().isoformat(),
+                "time": start.strftime("%H:%M"),
+                "full_name": (person.full_name if person else "") or "Cita",
+            }
+        )
+    return sample
+
+
+@app.post("/api/wall/agenda/cancel-preview")
+async def wall_cancel_preview_api(request: Request) -> JSONResponse:
+    """The count (and a sample) a range cancel would free — the number the
+    modal shows before its explicit confirm. Writes nothing."""
+    provider_id, day_from, day_to, err = _cancel_range_args(await request.json())
+    if err:
+        return JSONResponse({"ok": False, "error": err}, status_code=400)
+    doctor, hits = _cancel_targets(provider_id, day_from, day_to)
+    if not doctor:
+        return JSONResponse({"ok": False, "error": "unknown_doctor"}, status_code=404)
+    return JSONResponse(
+        {
+            "ok": True,
+            "doctor": doctor,
+            "count": len(hits),
+            "sample": _cancel_sample(hits),
+        }
+    )
+
+
+@app.post("/api/wall/agenda/cancel")
+async def wall_cancel_range_api(request: Request) -> JSONResponse:
+    """Batch cancel: every booked slot of one doctor inside [from, to]."""
+    provider_id, day_from, day_to, err = _cancel_range_args(await request.json())
+    if err:
+        return JSONResponse({"ok": False, "error": err}, status_code=400)
+    doctor, hits = _cancel_targets(provider_id, day_from, day_to)
+    if not doctor:
+        return JSONResponse({"ok": False, "error": "unknown_doctor"}, status_code=404)
+    from database import db
+
+    patients = _AGENDA_PATIENTS or {}
+    with db.connection(_wall_db_path()) as conn:
+        for booking in hits:
+            person = patients.get(booking.patient_id)
+            db.insert_wall_cancellation(
+                conn,
+                provider_id=booking.provider_id,
+                site_id=booking.location_id,
+                slot_start=booking.start.astimezone(MADRID).isoformat(),
+                appointment_id=booking.appointment_id or None,
+                patient_name=person.full_name if person else None,
+                provider_name=doctor,
+            )
+        touched = db.cancel_appointment_rows(
+            conn, provider_id=provider_id, day_from=day_from, day_to=day_to
+        )
+    queued = _enqueue_rebookings(hits)
+    return JSONResponse(
+        {
+            "ok": True,
+            "doctor": doctor,
+            "cancelled": len(hits),
+            "appointments_updated": len(touched),
+            "rebookings_queued": queued,
+        }
+    )
+
+
+@app.post("/api/wall/appointments/cancel")
+async def wall_cancel_visit_api(request: Request) -> JSONResponse:
+    """Single cancel from a visit's detail view. The body names the slot the
+    way the diary keys it — provider + site + minute — and the server takes
+    every other fact (patient, appointment id) from the booking itself."""
+    payload = await request.json()
+    if not isinstance(payload, dict):
+        return JSONResponse({"ok": False, "error": "bad_request"}, status_code=400)
+    provider_id = str(payload.get("provider_id") or "").strip()
+    location_id = str(payload.get("location_id") or "").strip()
+    key = cal.cancel_key(provider_id, location_id, payload.get("slot_start"))
+    if key is None:
+        return JSONResponse({"ok": False, "error": "bad_slot"}, status_code=400)
+    booking = _agenda_bookings_live().get(key)
+    if booking is None:
+        # Free already (or never booked, or cancelled earlier) — a wall cancel
+        # must never mint a row for a slot nothing was on.
+        return JSONResponse({"ok": False, "error": "not_booked"}, status_code=409)
+    catalogue = _AGENDA_CATALOGUE
+    provider = next((p for p in catalogue.providers if p.provider_id == provider_id), None)
+    person = (_AGENDA_PATIENTS or {}).get(booking.patient_id)
+    from database import db
+
+    with db.connection(_wall_db_path()) as conn:
+        db.insert_wall_cancellation(
+            conn,
+            provider_id=provider_id,
+            site_id=location_id,
+            slot_start=booking.start.astimezone(MADRID).isoformat(),
+            appointment_id=booking.appointment_id or None,
+            patient_name=person.full_name if person else None,
+            provider_name=provider.name if provider else None,
+        )
+        touched = db.cancel_appointment_row(
+            conn,
+            appointment_id=booking.appointment_id or None,
+            provider_id=provider_id,
+            slot_start=booking.start.astimezone(MADRID).isoformat(),
+        )
+    queued = _enqueue_rebookings([booking])
+    return JSONResponse(
+        {"ok": True, "appointment_updated": touched, "rebookings_queued": queued}
+    )
 
 
 #: The Home page's own numbers never come from the live line: the pack is a
