@@ -43,7 +43,11 @@ def reasons(cards: list[CallCard], labels: dict[str, str] | None = None) -> list
 
 
 def outcomes(cards: list[CallCard], labels: dict[str, str] | None = None) -> list[Bar]:
-    counter: Counter[str] = Counter(c.status for c in cards if not c.live)
+    counter: Counter[str] = Counter(
+        "ended" if c.action_kind and not (c.submit_status or c.submit_route) else c.status
+        for c in cards
+        if not c.live
+    )
     return _bars(counter, labels)
 
 
