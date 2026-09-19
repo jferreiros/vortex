@@ -133,7 +133,7 @@ scenarios:
       - says: "Nací el dos de noviembre de mil novecientos noventa y dos."
         means: {identify: {date_of_birth: "1992-11-02"}}
       - says: "¿Cerrado el sábado en Sur? Vale, no importa el día. La primera que tengan con él ahí, cualquier día."
-        means: {request: {intent: book, provider: "doctor Iglesia", specialty_id: orthopaedics, location_id: sur}, accept: true}
+        means: {clear: [when], request: {intent: book, provider: "doctor Iglesia", specialty_id: orthopaedics, location_id: sur}, accept: true}
     expect:
       actions:
         - kind: book
@@ -171,6 +171,8 @@ scenarios:
       - says: "Soy Marta Ruiz, doce del tres del ochenta y cinco. Necesito medicina general a primera hora del lunes doce de octubre."
         means: {identify: {name: "Marta Ruiz", date_of_birth: "1985-03-12"}, request: {intent: book, specialty_id: general_practice, when: "first thing on Monday the twelfth of October", part_of_day: morning}}
       - says: "Si está cerrado, pues el siguiente día que abran, a primera hora."
+        means: {accept: true}
+      - says: "Sí, esa me viene bien. Muchas gracias."
         means: {accept: true}
     expect:
       actions:

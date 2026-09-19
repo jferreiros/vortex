@@ -1,7 +1,7 @@
-"""Audio helpers: PCM, WAV, noise at a fixed SNR, and word error rate.
+"""Audio helpers: PCM, WAV, noise at a fixed SNR, word/entity error rates.
 
 Everything is 16-bit mono PCM. The line is 8 kHz µ-law; providers are fed
-16 kHz WAV (Deepgram, OpenAI and Cartesia all accept it) after the same
+16 kHz WAV (Deepgram, OpenAI, Cartesia and Soniox all accept it) after the same
 8 kHz round trip the platform imposes, so what they hear is what a call
 sounds like.
 """
@@ -132,15 +132,64 @@ _NUM_WORDS = {
     "cero": "0",
     "uno": "1",
     "una": "1",
+    "u": "1",  # Catalan
     "dos": "2",
     "tres": "3",
+    "quatre": "4",  # Catalan
     "cuatro": "4",
     "cinco": "5",
+    "cinc": "5",  # Catalan
     "seis": "6",
+    "sis": "6",  # Catalan
     "siete": "7",
+    "set": "7",  # Catalan
     "ocho": "8",
+    "vuit": "8",  # Catalan
     "nueve": "9",
 }
+
+# Spoken letter names for DNI/NIE check letters (Spanish + common Catalan).
+_LETTER_WORDS = {
+    "a": "a",
+    "be": "b",
+    "ce": "c",
+    "de": "d",
+    "e": "e",
+    "efe": "f",
+    "ge": "g",
+    "hache": "h",
+    "i": "i",
+    "jota": "j",
+    "ka": "k",
+    "ele": "l",
+    "eme": "m",
+    "ene": "n",
+    "enie": "n",
+    "eñe": "n",
+    "o": "o",
+    "pe": "p",
+    "cu": "q",
+    "erre": "r",
+    "ese": "s",
+    "te": "t",
+    "u": "u",
+    "uve": "v",
+    "equis": "x",
+    "ye": "y",
+    "zeta": "z",
+}
+
+_EMAIL_SPOKEN = (
+    ("guion bajo", "_"),
+    ("arroba", "@"),
+    ("at", "@"),
+    ("punto", "."),
+    ("punt", "."),
+    ("dot", "."),
+    ("guion", "-"),
+)
+
+ENTITY_KINDS = ("name", "dni", "phone", "email")
 
 
 def normalise_text(text: str) -> list[str]:
@@ -170,6 +219,10 @@ def word_error_rate(reference: str, hypothesis: str) -> float:
 def char_error_rate(reference: str, hypothesis: str) -> float:
     ref = " ".join(normalise_text(reference))
     hyp = " ".join(normalise_text(hypothesis))
+    return _edit_rate(ref, hyp)
+
+
+def _edit_rate(ref: str, hyp: str) -> float:
     if not ref:
         return 0.0 if not hyp else 1.0
     d = list(range(len(hyp) + 1))
@@ -181,3 +234,78 @@ def char_error_rate(reference: str, hypothesis: str) -> float:
             d[j] = min(d[j] + 1, d[j - 1] + 1, prev + cost)
             prev = cur
     return d[len(hyp)] / len(ref)
+
+
+def _best_window_cer(ref: str, haystack: str) -> float:
+    """Character error rate of ``ref`` against the best contiguous window of ``haystack``."""
+    if not ref:
+        return 0.0 if not haystack else 1.0
+    if ref in haystack:
+        return 0.0
+    best = _edit_rate(ref, haystack)
+    n = len(ref)
+    lo, hi = max(1, n // 2), max(n, len(haystack))
+    for win in range(lo, hi + 1):
+        if win > len(haystack):
+            break
+        for i in range(0, len(haystack) - win + 1):
+            best = min(best, _edit_rate(ref, haystack[i : i + win]))
+            if best == 0.0:
+                return 0.0
+    return best
+
+
+def _fold_email_spoken(text: str) -> str:
+    out = text.lower()
+    for spoken, symbol in _EMAIL_SPOKEN:
+        out = re.sub(rf"(?<![a-z0-9]){re.escape(spoken)}(?![a-z0-9])", symbol, out)
+    return out
+
+
+def compact_entity(kind: str, text: str) -> str:
+    """Canonical form of an entity for character-level scoring."""
+    if kind == "email":
+        folded = _fold_email_spoken(text)
+        folded = unicodedata.normalize("NFKD", folded.lower())
+        folded = "".join(ch for ch in folded if not unicodedata.combining(ch))
+        return re.sub(r"\s+", "", folded)
+    words = normalise_text(text)
+    if kind == "name":
+        return " ".join(words)
+    mapped: list[str] = []
+    for w in words:
+        if w in _LETTER_WORDS:
+            mapped.append(_LETTER_WORDS[w])
+        else:
+            mapped.append(w)
+    joined = "".join(mapped)
+    if kind == "dni":
+        return re.sub(r"[^0-9a-z]", "", joined)
+    if kind == "phone":
+        digits = re.sub(r"\D", "", joined)
+        if digits.startswith("34") and len(digits) > 9:
+            digits = digits[2:]
+        return digits[-9:] if len(digits) >= 9 else digits
+    return joined
+
+
+def entity_char_error_rate(kind: str, reference: str, hypothesis: str) -> float:
+    """CER of one entity value against the best span in the transcript.
+
+    ``kind`` is one of ``name``, ``dni``, ``phone``, ``email``. Digits spoken
+    as words and DNI letter names are folded before the edit distance runs, so
+    a perfect read-back scores zero even when the STT writes Arabic numerals.
+    """
+    assert kind in ENTITY_KINDS, f"unknown entity kind {kind!r}"
+    ref = compact_entity(kind, reference)
+    hyp = compact_entity(kind, hypothesis)
+    return _best_window_cer(ref, hyp)
+
+
+def entity_cers(entities: dict[str, str], hypothesis: str) -> dict[str, float]:
+    """CER per annotated entity present on an utterance."""
+    return {
+        kind: entity_char_error_rate(kind, value, hypothesis)
+        for kind, value in entities.items()
+        if kind in ENTITY_KINDS and value
+    }

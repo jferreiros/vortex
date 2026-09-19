@@ -51,6 +51,7 @@ from vortex.contract import (
     Appointment,
     AppointmentList,
     AppointmentTypeRecord,
+    AvailabilityResponse,
     AvailabilityResult,
     BlockedProvider,
     BookAction,
@@ -674,6 +675,14 @@ async def find_slots(ctx: ToolContext, args: FindSlotsInput) -> AvailabilityResu
     ``time_to`` is exclusive, so a morning window ending at 14:00 does not
     return the 14:00 slot - 14:00 is the afternoon.
 
+    The platform names a ``blocked`` rule only when it stops the whole window
+    asked for: one day past the end of a leave and the rule is gone from the
+    answer, replaced by the slots after it (docs/evals-corpus.md). So when the
+    walk comes back with slots and no rule, the slot-free head of the window -
+    the stretch before the first slot, where the rule is still visible - is
+    re-asked in API-sized chunks and whatever it names is carried. A wide
+    search then reports both the October slots and the September leave.
+
     When nothing comes back the answer says which kind of nothing it is:
     ``clinic_closed`` when every site in scope is shut for the whole window
     (the caller takes the next open day), ``no_availability`` when the sites
@@ -686,6 +695,11 @@ async def find_slots(ctx: ToolContext, args: FindSlotsInput) -> AvailabilityResu
     window had nothing, and it is what gets submitted if they decline. Empty
     ``nearest`` with the rejection means the calendar is full: submit
     ``no_availability`` and nothing else.
+
+    Problem 7: a true ``no_availability`` (never ``clinic_closed``, never a
+    kept ``blocked`` rule) with ``args.widen_days`` set searches forward that
+    many days past ``date_to`` once, under the same constraints, before giving
+    up — so the caller can be offered the nearest thing that works.
     """
     catalogue = await ctx.clinic.catalogue()
     today = ctx.now.astimezone(MADRID).date()
@@ -712,6 +726,18 @@ async def find_slots(ctx: ToolContext, args: FindSlotsInput) -> AvailabilityResu
         return AvailabilityResult(rejection=fetched)
     raw, blocked, appointment_type = fetched
 
+    # A wide window that found slots hides the rule that emptied its head: the
+    # platform only names a rule when it stops the whole window. Re-ask the
+    # stretch before the first slot, where the rule is still reported.
+    if raw and not blocked:
+        head_to = min(s.start.astimezone(MADRID).date() for s in raw) - timedelta(days=1)
+        probe = await _fetch(ctx, args, date_from, head_to)
+        if not isinstance(probe, Rejection):
+            raw.extend(probe[0])
+            for provider_id, entry in probe[1].items():
+                blocked.setdefault(provider_id, entry)
+            appointment_type = appointment_type or probe[2]
+
     same_days = _bookable(catalogue, raw, args, today)
     slots = _within_hours(same_days, args.time_from, args.time_to)
     slots.sort(key=lambda s: (s.start, s.provider_id, s.location_id))
@@ -736,12 +762,51 @@ async def find_slots(ctx: ToolContext, args: FindSlotsInput) -> AvailabilityResu
             reason="clinic_closed" if not window_opens else "no_availability",
             detail=detail,
         )
+
+    widened = False
+    if rejection is not None and rejection.reason == "no_availability" and args.widen_days:
+        further_to = date_to + timedelta(days=args.widen_days)
+        if catalogue.bookable_to:
+            further_to = min(further_to, catalogue.bookable_to)
+        if further_to > date_to:
+            extended = await find_slots(
+                ctx,
+                args.model_copy(
+                    update={
+                        "date_from": date_to + timedelta(days=1),
+                        "date_to": further_to,
+                        "widen_days": None,  # one widen per call: stop the recursion here
+                    }
+                ),
+            )
+            widened = True
+            if extended.slots:
+                return AvailabilityResult(
+                    slots=extended.slots,
+                    blocked=extended.blocked or kept,
+                    appointment_type=appointment_type or extended.appointment_type,
+                    rejection=None,
+                    widened=True,
+                )
+            if extended.blocked:
+                return AvailabilityResult(
+                    blocked=extended.blocked,
+                    appointment_type=appointment_type or extended.appointment_type,
+                    rejection=None,
+                    widened=True,
+                )
+            rejection = Rejection(
+                reason="no_availability",
+                detail=rejection.detail + f"; still nothing {args.widen_days} days further",
+            )
+
     return AvailabilityResult(
         slots=slots,
         blocked=kept,
         appointment_type=appointment_type,
         nearest=nearest,
         rejection=rejection,
+        widened=widened,
     )
 
 
@@ -868,6 +933,14 @@ def _slot_rejection(
     return None
 
 
+async def _fresh_availability(ctx: ToolContext, **query: object) -> AvailabilityResponse:
+    """Use a client's live hook when its normal availability path is cached."""
+    fresh = getattr(ctx.clinic, "fresh_availability", None)
+    if fresh is not None:
+        return await fresh(**query)
+    return await ctx.clinic.availability(**query)  # type: ignore[arg-type]
+
+
 async def prepare_booking(ctx: ToolContext, args: PrepareBookingInput) -> BookingResult:
     """Build the ``BookAction`` for a chosen slot, or reject it.
 
@@ -895,7 +968,8 @@ async def prepare_booking(ctx: ToolContext, args: PrepareBookingInput) -> Bookin
 
     day = args.slot.start.astimezone(MADRID).date()
     try:
-        availability = await ctx.clinic.availability(
+        availability = await _fresh_availability(
+            ctx,
             date_from=day,
             date_to=day,
             provider_id=args.slot.provider_id,

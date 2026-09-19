@@ -51,10 +51,15 @@ class CallCard:
     reason: str | None = None
     duration_ms: float | None = None
     patient_name: str | None = None
+    patient_id: str | None = None
     provider_name: str | None = None
     slot: str | None = None
     decline_reason: str | None = None
     last_ts: str | None = None
+    #: The ``call.usage`` payload: what the STT, LLM and TTS providers metered
+    #: for this call. None when the call was logged before metering existed or
+    #: ran on the stub lane; ``pricing`` keeps those out of every average.
+    usage: dict[str, Any] | None = None
     events: list[dict[str, Any]] = field(default_factory=list)
 
     @property
@@ -81,6 +86,41 @@ class CallCard:
         return self.status == "live"
 
 
+def _norm_text(text: str) -> str:
+    return " ".join(text.split())
+
+
+def _extends(short: str, long: str) -> bool:
+    if not long.startswith(short):
+        return False
+    if len(long) == len(short):
+        return True
+    return long[len(short)] in " \t.,;:!?…"
+
+
+def fold_turns(turns: list[Turn]) -> list[Turn]:
+    out: list[Turn] = []
+    for turn in turns:
+        text = _norm_text(turn.text)
+        if not text:
+            continue
+        if out:
+            last = out[-1]
+            last_text = _norm_text(last.text)
+            if last.role == turn.role:
+                if text == last_text:
+                    continue
+                if _extends(last_text, text):
+                    out[-1] = Turn(turn.role, text, turn.ts)
+                    continue
+                if _extends(text, last_text):
+                    continue
+            if any(item.role == turn.role and _norm_text(item.text) == text for item in out[-8:]):
+                continue
+        out.append(Turn(turn.role, text, turn.ts))
+    return out
+
+
 def _as_dict(value: Any) -> dict[str, Any]:
     if value is None:
         return {}
@@ -102,6 +142,14 @@ def _patient_name(result: Any) -> str | None:
         ]
         name = " ".join(p for p in parts if p).strip()
         return name or None
+    return None
+
+
+def _patient_id(result: Any) -> str | None:
+    data = _as_dict(result)
+    patient = data.get("patient")
+    if isinstance(patient, dict) and patient.get("patient_id"):
+        return str(patient["patient_id"])
     return None
 
 
@@ -191,6 +239,9 @@ def build_call(call_id: str, events: list[dict[str, Any]]) -> CallCard:
                 name_guess = _patient_name(match.result)
                 if name_guess:
                     card.patient_name = name_guess
+                id_guess = _patient_id(match.result)
+                if id_guess:
+                    card.patient_id = id_guess
                 provider_guess = _provider_name(match.result)
                 if not provider_guess:
                     data = _as_dict(match.result)
@@ -229,6 +280,8 @@ def build_call(call_id: str, events: list[dict[str, Any]]) -> CallCard:
                 card.submit_status = result
             if isinstance(payload, dict) and payload.get("reason"):
                 card.decline_reason = str(payload["reason"])
+        elif kind == "call.usage":
+            card.usage = {k: v for k, v in event.items() if k not in {"ts", "call_id", "kind"}}
         elif kind == "call.ended":
             card.ended = True
             card.reason = event.get("reason")
@@ -251,6 +304,12 @@ def build_call(call_id: str, events: list[dict[str, Any]]) -> CallCard:
                         card.action_payload = payload
                         if payload.get("reason"):
                             card.decline_reason = str(payload["reason"])
+    card.turns = fold_turns(card.turns)
+    if card.action_kind in {"book", "register", "reschedule", "cancel"}:
+        payload_reason = None
+        if isinstance(card.action_payload, dict) and card.action_payload.get("reason"):
+            payload_reason = str(card.action_payload["reason"])
+        card.decline_reason = payload_reason
     return card
 
 

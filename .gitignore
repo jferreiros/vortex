@@ -32,6 +32,7 @@ logs/*
 api_results/
 database/processed/*
 !database/processed/.gitkeep
+wall-cache/*.json
 
 # Coverage (CI job `coverage`, and local `pytest --cov`)
 .coverage

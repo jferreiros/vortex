@@ -1,0 +1,583 @@
+{
+  "roster_sha256": "4e48d3a279a7cf75c177fd540a3efe3afc60c15f60e6495d0b8f0499f3449611",
+  "roster_cases": 73,
+  "patients": 24,
+  "appointments": 6,
+  "problems": {
+    "simple_booking": {
+      "number": 1,
+      "title": "The Simple Booking",
+      "weight": 1,
+      "public_cases": 4,
+      "case_ids": [
+        "simple_booking-14a8720daa02",
+        "simple_booking-12dc84a98cb2",
+        "simple_booking-3371b9ac9462",
+        "simple_booking-b33e7e633856"
+      ],
+      "languages": [
+        "en"
+      ],
+      "verbs": [
+        "BOOK"
+      ],
+      "reasons": [],
+      "patient_ids": [
+        "P00001",
+        "P00005",
+        "P00011",
+        "P00012"
+      ],
+      "appointment_ids": [],
+      "shapes": [
+        "BOOK"
+      ],
+      "probe_calls": 0
+    },
+    "switchboard": {
+      "number": 2,
+      "title": "The Switchboard",
+      "weight": 0,
+      "public_cases": 0,
+      "case_ids": [],
+      "languages": [],
+      "verbs": [],
+      "reasons": [],
+      "patient_ids": [],
+      "appointment_ids": [],
+      "shapes": [],
+      "probe_calls": 1
+    },
+    "doctor_and_site": {
+      "number": 3,
+      "title": "The Doctor and the Site",
+      "weight": 2,
+      "public_cases": 5,
+      "case_ids": [
+        "doctor_and_site-2fe62ca2872f",
+        "doctor_and_site-057078bb5b44",
+        "doctor_and_site-d5b4f04886c5",
+        "doctor_and_site-9904a6d96cdd",
+        "doctor_and_site-570e40a3f718"
+      ],
+      "languages": [
+        "en"
+      ],
+      "verbs": [
+        "BOOK",
+        "NO_ACTION"
+      ],
+      "reasons": [
+        "provider_not_found"
+      ],
+      "patient_ids": [
+        "P01842",
+        "P01843",
+        "P01847",
+        "P01850"
+      ],
+      "appointment_ids": [],
+      "shapes": [
+        "BOOK",
+        "NO_ACTION(provider_not_found)"
+      ],
+      "probe_calls": 4
+    },
+    "the_new_patient": {
+      "number": 4,
+      "title": "The New Patient",
+      "weight": 2,
+      "public_cases": 4,
+      "case_ids": [
+        "the_new_patient-cba21da07f8a",
+        "the_new_patient-3a76e6fabfba",
+        "the_new_patient-dbb48077d9df",
+        "the_new_patient-ec8a02146ecd"
+      ],
+      "languages": [
+        "en"
+      ],
+      "verbs": [
+        "REGISTER"
+      ],
+      "reasons": [],
+      "patient_ids": [],
+      "appointment_ids": [],
+      "shapes": [
+        "REGISTER"
+      ],
+      "probe_calls": 1
+    },
+    "when_exactly": {
+      "number": 5,
+      "title": "When Exactly",
+      "weight": 2,
+      "public_cases": 5,
+      "case_ids": [
+        "when_exactly-7d2467212026",
+        "when_exactly-72cdb35b9682",
+        "when_exactly-0ae0c03a3e6d",
+        "when_exactly-b1f6c257c34c",
+        "when_exactly-34e8e0acadb6"
+      ],
+      "languages": [
+        "en"
+      ],
+      "verbs": [
+        "BOOK"
+      ],
+      "reasons": [],
+      "patient_ids": [
+        "P00001",
+        "P00005",
+        "P00011",
+        "P00012"
+      ],
+      "appointment_ids": [],
+      "shapes": [
+        "BOOK"
+      ],
+      "probe_calls": 0
+    },
+    "the_rules": {
+      "number": 6,
+      "title": "The Rules",
+      "weight": 3,
+      "public_cases": 5,
+      "case_ids": [
+        "the_rules-8d92ce10f4a6",
+        "the_rules-d760519fdfcd",
+        "the_rules-460d9e84504a",
+        "the_rules-fe23fca4aeb7",
+        "the_rules-04b2b5c51b40"
+      ],
+      "languages": [
+        "en"
+      ],
+      "verbs": [
+        "BOOK",
+        "NO_ACTION"
+      ],
+      "reasons": [
+        "referral_required",
+        "specialty_not_covered"
+      ],
+      "patient_ids": [
+        "P00005",
+        "P00009",
+        "P00057"
+      ],
+      "appointment_ids": [],
+      "shapes": [
+        "BOOK",
+        "NO_ACTION(referral_required)",
+        "NO_ACTION(specialty_not_covered)"
+      ],
+      "probe_calls": 13
+    },
+    "no_slot_free": {
+      "number": 7,
+      "title": "No Slot Free",
+      "weight": 2,
+      "public_cases": 4,
+      "case_ids": [
+        "no_slot_free-6a77fcf1942b",
+        "no_slot_free-aa7eb68dbdae",
+        "no_slot_free-b5cbfc4acc54",
+        "no_slot_free-af9a3ba7d27d"
+      ],
+      "languages": [
+        "en"
+      ],
+      "verbs": [
+        "BOOK",
+        "NO_ACTION"
+      ],
+      "reasons": [
+        "no_availability"
+      ],
+      "patient_ids": [
+        "P00001",
+        "P00004"
+      ],
+      "appointment_ids": [],
+      "shapes": [
+        "BOOK",
+        "NO_ACTION(no_availability)"
+      ],
+      "probe_calls": 1
+    },
+    "change_and_cancel": {
+      "number": 8,
+      "title": "Change and Cancel",
+      "weight": 2,
+      "public_cases": 4,
+      "case_ids": [
+        "change_and_cancel-1574ad73e14d",
+        "change_and_cancel-7a2b630184de",
+        "change_and_cancel-24d64667082f",
+        "change_and_cancel-78692f3782fd"
+      ],
+      "languages": [
+        "en"
+      ],
+      "verbs": [
+        "CANCEL",
+        "RESCHEDULE"
+      ],
+      "reasons": [],
+      "patient_ids": [],
+      "appointment_ids": [
+        "A000645",
+        "A001101",
+        "A001335",
+        "A001498"
+      ],
+      "shapes": [
+        "CANCEL",
+        "CANCEL+CANCEL",
+        "RESCHEDULE"
+      ],
+      "probe_calls": 3
+    },
+    "third_party": {
+      "number": 9,
+      "title": "The Third Party",
+      "weight": 3,
+      "public_cases": 4,
+      "case_ids": [
+        "third_party-587279b63866",
+        "third_party-8cd89333e225",
+        "third_party-f225ee6a67d0",
+        "third_party-c05c110c25d6"
+      ],
+      "languages": [
+        "en"
+      ],
+      "verbs": [
+        "BOOK"
+      ],
+      "reasons": [],
+      "patient_ids": [
+        "P00005",
+        "P00009"
+      ],
+      "appointment_ids": [],
+      "shapes": [
+        "BOOK"
+      ],
+      "probe_calls": 1
+    },
+    "triage": {
+      "number": 10,
+      "title": "Triage",
+      "weight": 3,
+      "public_cases": 5,
+      "case_ids": [
+        "triage-123aaa365997",
+        "triage-71ffcf509c91",
+        "triage-b5e904136272",
+        "triage-b2163776cec8",
+        "triage-479038faacf6"
+      ],
+      "languages": [
+        "en"
+      ],
+      "verbs": [
+        "BOOK",
+        "ESCALATE"
+      ],
+      "reasons": [
+        "medical_emergency"
+      ],
+      "patient_ids": [
+        "P00001",
+        "P00004",
+        "P00008",
+        "P00012"
+      ],
+      "appointment_ids": [],
+      "shapes": [
+        "BOOK",
+        "ESCALATE(medical_emergency)"
+      ],
+      "probe_calls": 20
+    },
+    "languages": {
+      "number": 11,
+      "title": "Languages",
+      "weight": 3,
+      "public_cases": 4,
+      "case_ids": [
+        "languages-9a4319479290",
+        "languages-2d08ce329464",
+        "languages-5fecd593ffe7",
+        "languages-aa19667cb074"
+      ],
+      "languages": [
+        "ca",
+        "es"
+      ],
+      "verbs": [
+        "BOOK"
+      ],
+      "reasons": [],
+      "patient_ids": [
+        "P00001",
+        "P00003",
+        "P00004",
+        "P00012"
+      ],
+      "appointment_ids": [],
+      "shapes": [
+        "BOOK"
+      ],
+      "probe_calls": 2
+    },
+    "noise": {
+      "number": 12,
+      "title": "Noise",
+      "weight": 3,
+      "public_cases": 4,
+      "case_ids": [
+        "noise-7e3f82d22def",
+        "noise-bfd9b6e6fa44",
+        "noise-2c06a8acc923",
+        "noise-04791d2a653e"
+      ],
+      "languages": [
+        "en"
+      ],
+      "verbs": [
+        "BOOK"
+      ],
+      "reasons": [],
+      "patient_ids": [
+        "P00001",
+        "P00004",
+        "P00005",
+        "P00011"
+      ],
+      "appointment_ids": [],
+      "shapes": [
+        "BOOK"
+      ],
+      "probe_calls": 4
+    },
+    "difficult_caller": {
+      "number": 13,
+      "title": "The Difficult Caller",
+      "weight": 4,
+      "public_cases": 5,
+      "case_ids": [
+        "difficult_caller-ac2ac0d27f0d",
+        "difficult_caller-eeecd1b79c64",
+        "difficult_caller-8e5f87c31fd2",
+        "difficult_caller-6af332df118e",
+        "difficult_caller-e6bc6654e51f"
+      ],
+      "languages": [
+        "en"
+      ],
+      "verbs": [
+        "BOOK"
+      ],
+      "reasons": [],
+      "patient_ids": [
+        "P00001",
+        "P00003",
+        "P00012",
+        "P00015",
+        "P01971"
+      ],
+      "appointment_ids": [],
+      "shapes": [
+        "BOOK"
+      ],
+      "probe_calls": 1
+    },
+    "adversarial": {
+      "number": 14,
+      "title": "Adversarial and Privacy",
+      "weight": 4,
+      "public_cases": 4,
+      "case_ids": [
+        "adversarial-b9a89cff9962",
+        "adversarial-ca22cee0ea1c",
+        "adversarial-bc7f08713bc3",
+        "adversarial-082c314b2882"
+      ],
+      "languages": [
+        "en"
+      ],
+      "verbs": [
+        "NO_ACTION"
+      ],
+      "reasons": [
+        "out_of_scope"
+      ],
+      "patient_ids": [],
+      "appointment_ids": [],
+      "shapes": [
+        "NO_ACTION(out_of_scope)"
+      ],
+      "probe_calls": 4
+    },
+    "nearest_site": {
+      "number": 15,
+      "title": "The Nearest Site",
+      "weight": 3,
+      "public_cases": 4,
+      "case_ids": [
+        "nearest_site-4af0c1fc2237",
+        "nearest_site-bfc7e0161704",
+        "nearest_site-9f4a81aa682d",
+        "nearest_site-44edd7d1dcfd"
+      ],
+      "languages": [
+        "en"
+      ],
+      "verbs": [
+        "BOOK"
+      ],
+      "reasons": [],
+      "patient_ids": [
+        "P00001",
+        "P00005"
+      ],
+      "appointment_ids": [],
+      "shapes": [
+        "BOOK"
+      ],
+      "probe_calls": 1
+    },
+    "the_questions": {
+      "number": 16,
+      "title": "The Questions",
+      "weight": 3,
+      "public_cases": 5,
+      "case_ids": [
+        "the_questions-e2b0ec86e919",
+        "the_questions-1eaff9b8dea3",
+        "the_questions-0d0437e26568",
+        "the_questions-af7ba7d69fe9",
+        "the_questions-085dbc4f6fc9"
+      ],
+      "languages": [
+        "en"
+      ],
+      "verbs": [
+        "BOOK"
+      ],
+      "reasons": [],
+      "patient_ids": [
+        "P00001",
+        "P00005",
+        "P00028",
+        "P00032"
+      ],
+      "appointment_ids": [],
+      "shapes": [
+        "BOOK"
+      ],
+      "probe_calls": 1
+    },
+    "second_policy": {
+      "number": 17,
+      "title": "The Second Policy",
+      "weight": 4,
+      "public_cases": 4,
+      "case_ids": [
+        "second_policy-badb9dd79107",
+        "second_policy-15c3db687da3",
+        "second_policy-fb5f6c66b28e",
+        "second_policy-30ce6a760ab9"
+      ],
+      "languages": [
+        "en"
+      ],
+      "verbs": [
+        "BOOK"
+      ],
+      "reasons": [],
+      "patient_ids": [
+        "P00006",
+        "P00067",
+        "P00121",
+        "P00358"
+      ],
+      "appointment_ids": [],
+      "shapes": [
+        "BOOK"
+      ],
+      "probe_calls": 2
+    },
+    "the_real_call": {
+      "number": 18,
+      "title": "The Real Call",
+      "weight": 5,
+      "public_cases": 3,
+      "case_ids": [
+        "the_real_call-291bfe4b3a7c",
+        "the_real_call-bde9bd494e55",
+        "the_real_call-32c1fbeb4a22"
+      ],
+      "languages": [
+        "en"
+      ],
+      "verbs": [
+        "BOOK",
+        "CANCEL",
+        "RESCHEDULE"
+      ],
+      "reasons": [],
+      "patient_ids": [
+        "P00100",
+        "P00330",
+        "P00402"
+      ],
+      "appointment_ids": [
+        "A001498",
+        "A001601",
+        "A001727"
+      ],
+      "shapes": [
+        "CANCEL+BOOK",
+        "RESCHEDULE+BOOK"
+      ],
+      "probe_calls": 1
+    }
+  },
+  "clinic_day": {
+    "day": "2026-09-19",
+    "calls": 60,
+    "verbs": {
+      "REGISTER": 3,
+      "ESCALATE": 1,
+      "NO_ACTION": 10,
+      "CANCEL": 4,
+      "RESCHEDULE": 4,
+      "BOOK": 38
+    },
+    "reasons": {
+      "medical_emergency": 1,
+      "no_availability": 2,
+      "referral_required": 1,
+      "specialty_not_covered": 1,
+      "provider_not_found": 1,
+      "clinic_closed": 1,
+      "not_eligible_age": 1,
+      "location_hours": 1,
+      "out_of_scope": 1,
+      "provider_on_leave": 1
+    },
+    "resolved": 49,
+    "rejected": 10,
+    "escalated": 1,
+    "unresolved": 11,
+    "unresolved_pct": 18.3,
+    "resolved_pct": 81.7,
+    "escalated_share_of_unresolved_pct": 9.1,
+    "new_patients": 3
+  }
+}

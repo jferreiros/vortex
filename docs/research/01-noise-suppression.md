@@ -135,9 +135,21 @@ Second benefit independent of WER: a filter before Silero VAD cuts false speech 
 
 Order of attempts. Stop when a step wins.
 
+### Ship decision (T62, 2026-09-19)
+
+`AICFilter` with `quail-ms-l-8khz` is wired behind `VORTEX_AIC_FILTER` /
+`AIC_SDK_LICENSE` in `vortex/line/aic_filter.py` and attached to
+`FastAPIWebsocketParams.audio_in_filter` from `pipecat_voice.py`.
+`pipecat-ai[aic]` is in the project deps.
+
+**Default remains off.** No REAL Soniox entity-CER A/B (T54 yardstick) has
+shown a drop with the filter on, and the Dec 2025 paper plus Deepgram's
+guidance say to measure before shipping. Flip `VORTEX_AIC_FILTER=on` only
+after that bench wins; until then the live path stays raw 8 kHz into Soniox.
+
 1. Build the yardstick first. Take 5-10 problem-1 recordings, mix noise at 5 dB SNR (same as the scorer), run Soniox stt-rt-v5 on raw vs filtered audio. Compute WER, and a stricter "name and DNI digits correct" rate. Do not ship a filter that does not lower both. (30-60 min with `jiwer`.)
 2. Baseline without filters. Give Soniox `context` with the clinic's names, "DNI", and digit patterns. Soniox says context helps most in noisy audio. Check if this alone clears the bar.
-3. `AICFilter` with `model_id="quail-ms-l-8khz"` (ASR variant, native 8 kHz). Sign up at developers.ai-coustics.com, set `AIC_SDK_LICENSE`, `pip install "pipecat-ai[aic]"`. 30 ms added latency. Try `enhancement_level` 0.5-1.0. Also try `quail-vf-2.2-l-16khz` for the grandmother call if other voices are the problem.
+3. `AICFilter` with `model_id="quail-ms-l-8khz"` (ASR variant, native 8 kHz). Sign up at developers.ai-coustics.com, set `AIC_SDK_LICENSE`, `VORTEX_AIC_FILTER=on`. 30 ms added latency. Try `enhancement_level` 0.5-1.0. Also try `quail-vf-2.2-l-16khz` for the grandmother call if other voices are the problem.
 4. `RNNoiseFilter` as the zero-signup fallback. `pip install "pipecat-ai[rnnoise]"`. Expect small or negative WER change; keep only if VAD stability improves.
 5. Optional: `KoalaFilter` (free Picovoice key) or `pipecat-deepfilternet-stream`. Only if steps 3-4 fail and time remains.
 6. Krisp VIVA: request access now in parallel; use only if keys arrive. Best published numbers, worst access.

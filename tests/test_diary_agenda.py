@@ -10,15 +10,21 @@ empty (problem 7).
 
 from __future__ import annotations
 
+import copy
 from dataclasses import replace
 from datetime import date, datetime, time
 from pathlib import Path
+from typing import Any
+from unittest import mock
 
 import pytest
 
+from vortex.clinic import fixtures
 from vortex.clinic.client import FakeClinicClient
 from vortex.contract import (
     MADRID,
+    AvailabilityResponse,
+    BlockedProvider,
     FindSlotsInput,
     ListAppointmentsInput,
     PrepareCancelInput,
@@ -230,6 +236,92 @@ async def test_a_blocked_provider_survives_an_open_window(ctx: ToolContext) -> N
     assert answer.rejection is None  # slots exist; the rule is not a refusal
 
 
+class PlatformLeaveClinic(FakeClinicClient):
+    """The platform's rule visibility, over the fixtures.
+
+    ``/availability`` names a ``blocked`` rule only when it stops the whole
+    window asked for (docs/evals-corpus.md, "The window decides whether a rule
+    is visible at all"). Dr. Sáez (PR02) here carries the 14-30 September
+    leave: a window inside it answers empty with the rule named, a window that
+    reaches past its end answers with the days after it and ``blocked: []``.
+    """
+
+    LEAVE_START = date(2026, 9, 14)
+    LEAVE_END = date(2026, 9, 30)
+
+    def __init__(self) -> None:
+        clinic = copy.deepcopy(fixtures.CLINIC)
+        provider = next(p for p in clinic["providers"] if p["id"] == "PR02")
+        provider["leave"] = {
+            "start": self.LEAVE_START.isoformat(),
+            "end": self.LEAVE_END.isoformat(),
+            "reason": "annual leave",
+        }
+        with mock.patch.object(fixtures, "CLINIC", clinic):
+            super().__init__()
+
+    async def availability(self, **kwargs: Any) -> AvailabilityResponse:
+        answer = await super().availability(**kwargs)
+        if kwargs["date_from"] < self.LEAVE_START or kwargs["date_to"] > self.LEAVE_END:
+            kept = [b for b in answer.blocked if b.provider_id != "PR02"]
+            return answer.model_copy(update={"blocked": kept})
+        return answer
+
+
+def _leave_ctx(tmp_path: Path) -> ToolContext:
+    return ToolContext(
+        call_id="CA-diary-leave",
+        now=NOW,
+        from_number="+34612345678",
+        clinic=PlatformLeaveClinic(),
+        log=CallLog("CA-diary-leave", tmp_path / "calls.jsonl"),
+        submitter=DryRunSubmitClient(),
+    )
+
+
+async def test_a_window_over_leave_and_the_days_after_still_names_the_rule(
+    tmp_path: Path,
+) -> None:
+    """PR02, 21 September - 4 October: his leave AND the days after it.
+
+    The platform answers that window with October slots and ``blocked: []`` --
+    one day past the leave's end and Dr. Sáez simply looks available. A wide
+    search must not lose why the September days were empty: find_slots re-asks
+    the slot-free head of the window, where the rule is still named.
+    """
+    answer = await find_slots(
+        _leave_ctx(tmp_path),
+        FindSlotsInput(provider_id="PR02", date_from=date(2026, 9, 21), date_to=date(2026, 10, 4)),
+    )
+    assert answer.slots  # the days after the leave are genuinely on offer
+    assert all(s.start.astimezone(MADRID).date() >= date(2026, 10, 1) for s in answer.slots)
+    assert [b.provider_id for b in answer.blocked] == ["PR02"]
+    assert answer.blocked[0].reason == "provider_on_leave"
+    assert answer.rejection is None  # slots exist; the rule is not a refusal
+
+
+async def test_a_window_inside_the_leave_names_the_rule(tmp_path: Path) -> None:
+    """The corpus' first row: 21-30 September answers empty with the rule named."""
+    answer = await find_slots(
+        _leave_ctx(tmp_path),
+        FindSlotsInput(provider_id="PR02", date_from=date(2026, 9, 21), date_to=date(2026, 9, 30)),
+    )
+    assert answer.slots == []
+    assert [b.provider_id for b in answer.blocked] == ["PR02"]
+    assert answer.blocked[0].reason == "provider_on_leave"
+
+
+async def test_a_window_wholly_past_the_leave_names_nothing(tmp_path: Path) -> None:
+    """1-4 October: he is back. No slot-free head, no rule, nothing re-asked."""
+    answer = await find_slots(
+        _leave_ctx(tmp_path),
+        FindSlotsInput(provider_id="PR02", date_from=date(2026, 10, 1), date_to=date(2026, 10, 4)),
+    )
+    assert answer.slots
+    assert answer.blocked == []
+    assert answer.rejection is None
+
+
 async def test_a_site_closed_that_afternoon_simply_has_nothing(ctx: ToolContext) -> None:
     """Sur shuts Friday lunchtime: a Friday afternoon there is empty, not blocked."""
     answer = await find_slots(
@@ -360,6 +452,145 @@ async def test_a_window_with_slots_offers_nothing_beyond_itself(ctx: ToolContext
     assert answer.nearest == []
 
 
+# ---- widen_days: problem 7, no slot free -----------------------------------
+
+
+async def test_widen_days_finds_the_nearest_alternative(ctx: ToolContext) -> None:
+    """The same empty Friday afternoon at Sur, but now free to look further out."""
+    answer = await find_slots(
+        ctx,
+        FindSlotsInput(
+            location_id="sur",
+            specialty_id="orthopaedics",
+            date_from=date(2026, 9, 25),
+            date_to=date(2026, 9, 25),
+            time_from=time(14, 0),
+            widen_days=7,
+        ),
+    )
+    assert answer.widened is True
+    assert answer.rejection is None
+    assert answer.slots  # a weekday afternoon further out is open
+    assert all(s.location_id == "sur" for s in answer.slots)
+    assert all(s.start.astimezone(MADRID).time() >= time(14, 0) for s in answer.slots)
+
+
+async def test_widen_days_still_says_no_availability_when_it_truly_isnt_there(
+    ctx: ToolContext,
+) -> None:
+    """No site is open past 20:00. Widening further out cannot invent a slot.
+
+    Dermatology (one provider, never on leave) keeps this a pure no_availability
+    case: nothing here comes from a blocked provider surviving the window.
+    """
+    answer = await find_slots(
+        ctx,
+        FindSlotsInput(
+            specialty_id="dermatology",
+            date_from=date(2026, 9, 21),
+            date_to=date(2026, 9, 25),
+            time_from=time(21, 0),
+            widen_days=30,
+        ),
+    )
+    assert answer.widened is True
+    assert answer.slots == []
+    assert answer.rejection is not None
+    assert answer.rejection.reason == "no_availability"
+
+
+async def test_widen_days_is_never_reached_for_a_real_rule_or_a_closure(
+    ctx: ToolContext,
+) -> None:
+    """Sunday is clinic_closed, not no_availability: widen_days must not fire on it."""
+    answer = await find_slots(
+        ctx,
+        FindSlotsInput(
+            specialty_id="general_practice",
+            date_from=date(2026, 9, 20),
+            date_to=date(2026, 9, 20),
+            widen_days=14,
+        ),
+    )
+    assert answer.widened is False
+    assert answer.rejection is not None
+    assert answer.rejection.reason == "clinic_closed"
+
+
+class BlockedFurtherOutClinic(FakeClinicClient):
+    """A fake whose answer past ``blocked_from`` is a rule rather than a slot."""
+
+    def __init__(self, blocked_from: date) -> None:
+        super().__init__()
+        self._blocked_from = blocked_from
+
+    async def availability(self, **kwargs) -> AvailabilityResponse:
+        answer = await super().availability(**kwargs)
+        if kwargs["date_from"] < self._blocked_from:
+            return answer.model_copy(update={"slots": [], "blocked": []})
+        return answer.model_copy(
+            update={
+                "slots": [],
+                "blocked": [
+                    BlockedProvider(
+                        provider_id="PR07",
+                        reason="provider_on_leave",
+                        restriction="provider_on_leave",
+                    )
+                ],
+            }
+        )
+
+
+async def test_widen_days_keeps_the_rule_the_wider_window_names(tmp_path: Path) -> None:
+    """The wider window is blocked by a rule: that reason is what we submit.
+
+    Overwriting it with ``no_availability`` would tell the caller the diary was
+    full when a standing rule is what stopped the only provider left.
+    """
+    ctx = ToolContext(
+        call_id="CA-diary-widen",
+        now=NOW,
+        from_number="+34612345678",
+        clinic=BlockedFurtherOutClinic(date(2026, 9, 26)),
+        log=CallLog("CA-diary-widen", tmp_path / "calls.jsonl"),
+        submitter=DryRunSubmitClient(),
+    )
+    answer = await find_slots(
+        ctx,
+        FindSlotsInput(
+            specialty_id="general_practice",
+            date_from=date(2026, 9, 21),
+            date_to=date(2026, 9, 25),
+            widen_days=7,
+        ),
+    )
+    assert answer.widened is True
+    assert answer.slots == []
+    assert [b.provider_id for b in answer.blocked] == ["PR07"]
+    assert answer.blocked[0].reason == "provider_on_leave"
+    assert answer.rejection is None  # a named rule is not a no_availability
+
+
+# ---- language filter: problem 11 -------------------------------------------
+
+
+async def test_language_filter_is_empty_rather_than_inventing_a_speaker(
+    ctx: ToolContext,
+) -> None:
+    """The fixtures' one dermatologist speaks Spanish and English, never Catalan."""
+    answer = await find_slots(
+        ctx,
+        FindSlotsInput(
+            specialty_id="dermatology",
+            date_from=date(2026, 9, 21),
+            date_to=date(2026, 10, 2),
+            language="ca",
+        ),
+    )
+    assert answer.slots == []
+
+
 # ---- list_appointments and the prepare_* guards --------------------------
 
 
@@ -404,6 +635,26 @@ async def test_the_childs_appointment_is_cancelled_under_the_childs_id(ctx: Tool
     assert result.rejection is None
     assert result.action is not None
     assert result.action.appointment_id == "A0002"
+
+
+async def test_two_cancellations_in_one_call_do_not_cross_contaminate(
+    ctx: ToolContext,
+) -> None:
+    """Problem 8: cancelling for two different patients in the same call, in turn."""
+    first = await prepare_cancel(
+        ctx, PrepareCancelInput(appointment_id="A0001", patient_id=PATIENT)
+    )
+    second = await prepare_cancel(ctx, PrepareCancelInput(appointment_id="A0002", patient_id=CHILD))
+    assert first.rejection is None
+    assert first.action is not None
+    assert first.action.appointment_id == "A0001"
+    assert second.rejection is None
+    assert second.action is not None
+    assert second.action.appointment_id == "A0002"
+    # Neither cancellation borrowed the other patient's authorisation.
+    cross = await prepare_cancel(ctx, PrepareCancelInput(appointment_id="A0001", patient_id=CHILD))
+    assert cross.rejection is not None
+    assert cross.rejection.reason == "caller_not_authorised"
 
 
 async def test_a_past_visit_cannot_be_moved(ctx: ToolContext) -> None:

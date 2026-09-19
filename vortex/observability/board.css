@@ -35,7 +35,7 @@ body,
 .nicegui-content {
   gap: 0 !important;
   align-items: stretch !important;
-  overflow-x: hidden;
+  overflow-x: clip;
 }
 
 .nicegui-content > * {
@@ -142,6 +142,32 @@ body,
   color: var(--ink);
 }
 
+body:not(:has(.app)) .q-layout,
+body:not(:has(.app)) .q-page-container,
+body:not(:has(.app)) .q-page,
+body:not(:has(.app)) .nicegui-content {
+  height: auto !important;
+  min-height: 100dvh;
+  overflow: visible !important;
+}
+
+body:not(:has(.app)) .nicegui-content {
+  overflow-x: clip !important;
+}
+
+body:has(.app) {
+  overflow: hidden;
+}
+
+body:has(.app) .q-layout,
+body:has(.app) .q-page-container,
+body:has(.app) .q-page,
+body:has(.app) .nicegui-content {
+  height: 100dvh !important;
+  max-height: 100dvh !important;
+  overflow: hidden !important;
+}
+
 /* NiceGUI labels are <div>s; give the text roles their font explicitly. */
 .primary-nav .brand,
 .primary-nav .brand .q-link {
@@ -187,6 +213,7 @@ body,
   display: grid;
   grid-template-columns: 1.1fr 1.2fr 0.9fr;
   gap: var(--space-xl);
+  align-items: start;
 }
 
 @media (max-width: 1024px) {
@@ -299,4 +326,38 @@ body,
 .table th .q-label,
 .table td > div:not(.row) {
   display: inline;
+}
+
+/* ------------------------------------------------------------------ */
+/* App shell on NiceGUI                                                */
+/* ------------------------------------------------------------------ */
+
+.app .page {
+  padding: var(--space-xl) var(--space-xxl) var(--space-xxl);
+  max-width: 1440px;
+  margin: 0;
+}
+
+@media (max-width: 640px) {
+  .app .page {
+    padding: var(--space-lg);
+  }
+}
+
+.sidebar .q-link,
+.sidebar a {
+  text-decoration: none;
+}
+
+.sidebar .pill {
+  align-self: flex-start;
+}
+
+.ops-grid {
+  grid-template-columns: minmax(0, 1.4fr) minmax(380px, 1fr);
+}
+
+.sidebar .q-btn {
+  height: 32px !important;
+  padding: 0 14px !important;
 }

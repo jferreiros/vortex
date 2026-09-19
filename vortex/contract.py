@@ -202,9 +202,23 @@ def action_route(action: Action) -> str:
     return ACTION_ROUTES[action.kind]
 
 
+# The published judge scores three refusal codes: ``referral_required``,
+# ``specialty_not_covered``, ``provider_not_found``. The clinic has a finer
+# word, ``insurer_referral_required`` (the plan's own referral, not the
+# specialty's). Call ``e50c1c96`` of the 19 Sep 11:30 run sent that finer
+# word; the case wanted ``referral_required`` and scored zero. The wire
+# collapses the alias so the judge sees the code it actually accepts.
+SCORE_REASON_ALIASES: dict[str, str] = {
+    "insurer_referral_required": "referral_required",
+}
+
+
 def action_payload(action: Action, call_id: str) -> dict[str, Any]:
     """The JSON body for the submit route: snake_case, ``call_id`` first."""
     body = action.model_dump(mode="json", exclude={"kind"})
+    reason = body.get("reason")
+    if isinstance(reason, str) and reason in SCORE_REASON_ALIASES:
+        body["reason"] = SCORE_REASON_ALIASES[reason]
     return {"call_id": call_id, **body}
 
 
@@ -505,15 +519,43 @@ class FindPatientResult(BaseModel):
     ask_for: Literal["date_of_birth", "national_id", "phone", "name", ""] = ""
 
 
+class CallerLineMatch(BaseModel):
+    """Who the dialling line belongs to, resolved before the caller speaks.
+
+    The directory takes a phone on its own, so the number Twilio hands us is a
+    free exact query: one match names the line's owner, none says the line is on
+    no record. It is a *hint about the line*, never an identification of the
+    person holding it - the owner of the phone and the patient being booked for
+    are different people on a third-party call.
+
+    ``looked_up`` is False when there was no caller id, the lookup failed or it
+    did not answer in time. The prompt renders no CALLER block for those, so the
+    call behaves exactly as it did before the lookup existed.
+    """
+
+    looked_up: bool = False
+    from_number: str = ""
+    patient: PatientRecord | None = None
+    #: Several records share the line (a family). Never one identity, so the
+    #: prompt says nothing; the ordering hint still helps ``find_patient``.
+    candidates: list[PatientRecord] = Field(default_factory=list)
+
+
 class ValidateNationalIdInput(BaseModel):
     value: str = Field(description="DNI or NIE as heard, letters and digits")
 
 
 class NationalIdCheck(BaseModel):
-    normalized: str  # uppercase, no spaces or dashes
+    normalized: str  # uppercase, no spaces or dashes; always the id as heard
     kind: Literal["dni", "nie", "invalid"]
-    valid: bool  # the check letter matches the digits
+    valid: bool  # the check letter matches the digits (of normalized)
     expected_letter: str | None = None
+    # Heard form before a 1-edit digit repair. Always None: a repair is a
+    # candidate the caller has to confirm, never an id this lane adopts.
+    repaired_from: str | None = None
+    # 0-based indexes into the digit body to ask again when a 1-edit candidate
+    # fits the heard check letter. Empty otherwise.
+    ask_digit_positions: list[int] = Field(default_factory=list)
 
 
 class BuildRegistrationInput(BaseModel):
@@ -522,7 +564,11 @@ class BuildRegistrationInput(BaseModel):
     second_surname: str
     national_id: str
     date_of_birth: date
-    phone: str
+    #: Empty or absent means the line they are calling from. A new patient
+    #: registers themselves, so the number they would dictate is the number
+    #: Twilio already handed us, and a registration has eight fields to collect
+    #: inside three minutes. ``build_registration`` fills it.
+    phone: str = ""
     email: str
     insurer: str
 
@@ -563,6 +609,16 @@ class FindSlotsInput(BaseModel):
     time_to: time | None = None
     insurer: str | None = Field(default=None, description="Plan to price against")
     language: str | None = Field(default=None, description="ISO-639-1 the provider must speak")
+    widen_days: int | None = Field(
+        default=None,
+        ge=1,
+        le=45,
+        description=(
+            "Problem 7 (no slot free): when the exact window comes back genuinely "
+            "empty (no_availability, never a closure or a rule), search this many "
+            "days past date_to for the nearest alternative before giving up."
+        ),
+    )
 
 
 class AvailabilityResult(BaseModel):
@@ -575,6 +631,9 @@ class AvailabilityResult(BaseModel):
     #: Empty together with ``slots`` and ``blocked`` means the calendar is full.
     nearest: list[Slot] = Field(default_factory=list)
     rejection: Rejection | None = None
+    widened: bool = Field(
+        default=False, description="True when widen_days triggered a further search."
+    )
 
 
 class ListAppointmentsInput(BaseModel):
@@ -629,25 +688,46 @@ class CheckEligibilityInput(BaseModel):
     insurer: str | None = None
 
 
+#: Patient-record rules ``check_eligibility`` can stand down when the directory
+#: record is not in hand. Allowance is never in this list: only ``/availability``
+#: names it, with or without a record.
+SkippedEligibilityCheck = Literal["age", "referral"]
+
+
 class EligibilityVerdict(BaseModel):
     allowed: bool
     rejection: Rejection | None = None
     # Providers that can serve the same request when the named one cannot.
     redirect_to: list[ProviderRecord] = Field(default_factory=list)
-    # What the verdict could not be sure of. Set when the directory record was
-    # not in hand, so the rules read off it (age, referral, allowance) stood
-    # down and only /availability answered. Never a refusal on its own.
+    # Spoken-plan resolution hint (insurer id to reuse). Never a refusal.
     note: str = ""
+    # Patient-record rules that stood down because the directory record was not
+    # in hand, so only /availability answered them. Empty when the record was
+    # available. Never a refusal on its own.
+    skipped_checks: list[SkippedEligibilityCheck] = Field(default_factory=list)
 
 
 class TriageInput(BaseModel):
-    complaint: str = Field(description="The symptom, in the caller's words")
+    complaint: str = Field(
+        description=(
+            "Why they are calling, in the caller's own words, verbatim and never "
+            "a summary: the symptom and any specialty they named. Dropping "
+            "'gynaecology' from 'a gynaecology appointment for contraception "
+            "questions' routes them to a GP."
+        )
+    )
+    provider_name: str | None = Field(
+        default=None,
+        description="The doctor the caller named, as said. Their specialty is the one to book.",
+    )
 
 
 class TriageResult(BaseModel):
     specialty_id: str | None = None
     emergency: bool = False
     rejection: Rejection | None = None  # medical_emergency when emergency
+    #: Set when a named doctor decided the specialty — the id to pass onward.
+    provider_id: str | None = None
 
 
 class NearestLocationInput(BaseModel):
@@ -670,6 +750,63 @@ class ProviderMatch(BaseModel):
     status: Literal["found", "ambiguous", "not_found", "on_leave"]
     provider: ProviderRecord | None = None
     candidates: list[ProviderRecord] = Field(default_factory=list)
+    rejection: Rejection | None = None
+
+
+#: A weekday as the caller says it. The tool input takes the name rather than
+#: ``OpeningHours.weekday``'s number so a small model never has to count.
+Weekday = Literal["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+
+WEEKDAY_IDS: tuple[str, ...] = (
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
+)
+
+
+class ClinicFactsInput(BaseModel):
+    """A question about the clinic itself (problem 16), answered off the catalogue.
+
+    Fill only what the caller asked about; every filter narrows the sites.
+    Empty = every site. The caller acts on the answer, so it comes from
+    ``GET /clinic`` and never from memory.
+    """
+
+    location_id: str | None = Field(default=None, description="One site, when they named it")
+    town: str | None = Field(default=None, description='A town or district as said: "Getafe"')
+    specialty_id: str | None = Field(default=None, description="Keep sites with somebody in it")
+    weekday: Weekday | None = Field(default=None, description="Keep sites that open that day")
+
+
+class ProviderFact(BaseModel):
+    provider_id: str
+    name: str  # as spoken, title included
+    specialty_id: str
+    location_ids: list[str] = Field(default_factory=list)
+    on_leave_until: date | None = None  # set when the leave covers the day of the call
+
+
+class SiteFact(BaseModel):
+    location_id: str
+    name: str
+    address: str = ""
+    open_days: list[Weekday] = Field(default_factory=list)
+    hours: list[OpeningHours] = Field(default_factory=list)
+    #: Who sits here - narrowed to the specialty when one was asked about.
+    providers: list[ProviderFact] = Field(default_factory=list)
+
+
+class ClinicFacts(BaseModel):
+    """What the catalogue says. An empty ``sites`` is an answer, not a failure."""
+
+    sites: list[SiteFact] = Field(default_factory=list)
+    closure_days: list[date] = Field(default_factory=list)  # network-wide, every site shut
+    #: Set when the day or the specialty asked for leaves no site at all, so
+    #: the call has the reason to submit if the caller still wants that.
     rejection: Rejection | None = None
 
 
@@ -751,6 +888,10 @@ class NearestLocationTool(Protocol):
 
 class FindProviderTool(Protocol):
     async def __call__(self, ctx: ToolContext, args: FindProviderInput) -> ProviderMatch: ...
+
+
+class ClinicFactsTool(Protocol):
+    async def __call__(self, ctx: ToolContext, args: ClinicFactsInput) -> ClinicFacts: ...
 
 
 class SubmitTool(Protocol):
@@ -912,6 +1053,26 @@ async def stub_nearest_location(
 
 async def stub_find_provider(ctx: ToolContext, args: FindProviderInput) -> ProviderMatch:
     return ProviderMatch(status="found", provider=FAKE_PROVIDER)
+
+
+async def stub_clinic_facts(ctx: ToolContext, args: ClinicFactsInput) -> ClinicFacts:
+    return ClinicFacts(
+        sites=[
+            SiteFact(
+                location_id="centro",
+                name="Arenal Centro",
+                open_days=["monday", "tuesday", "wednesday", "thursday", "friday", "saturday"],
+                providers=[
+                    ProviderFact(
+                        provider_id=FAKE_PROVIDER.provider_id,
+                        name=FAKE_PROVIDER.name,
+                        specialty_id=FAKE_PROVIDER.specialty_id,
+                        location_ids=list(FAKE_PROVIDER.location_ids),
+                    )
+                ],
+            )
+        ]
+    )
 
 
 async def stub_submit(ctx: ToolContext, args: SubmitInput) -> SubmitResult:

@@ -16,6 +16,8 @@ def env(monkeypatch: pytest.MonkeyPatch):
         "LLM_BASE_URL",
         "LLM_API_KEY",
         "LLM_MODEL",
+        "LLM_MAX_TOKENS",
+        "LLM_ALT_MODEL",
         "ARBITER_PROVIDER",
         "ARBITER_MODEL",
         "ARBITER_BASE_URL",
@@ -28,6 +30,9 @@ def env(monkeypatch: pytest.MonkeyPatch):
         "OPENAI_BASE_URL",
         "LLM_SUMMARY_PROVIDER",
         "LLM_SUMMARY_MODEL",
+        "LANGFUSE_PUBLIC_KEY",
+        "LANGFUSE_SECRET_KEY",
+        "LANGFUSE_BASE_URL",
     ):
         monkeypatch.delenv(var, raising=False)
     reset_settings()
@@ -83,10 +88,10 @@ def test_unknown_provider_raises(env: pytest.MonkeyPatch) -> None:
 def test_request_kwargs_carry_the_runtime_settings(env: pytest.MonkeyPatch) -> None:
     env.setenv("HELMCODE_API_KEY", "hk")
     env.setenv("LLM_TEMPERATURE", "0.7")
-    env.setenv("LLM_MAX_TOKENS", "64")
+    env.setenv("LLM_MAX_TOKENS", "400")
     kwargs = models.resolve("helmcode/qwen3.6", Settings()).request_kwargs()
     assert kwargs["model"] == "qwen3.6"
-    assert kwargs["temperature"] == 0.7 and kwargs["max_tokens"] == 64
+    assert kwargs["temperature"] == 0.7 and kwargs["max_tokens"] == 400
     assert kwargs["reasoning_effort"] == "none"
     assert kwargs["extra_body"] == {"chat_template_kwargs": {"enable_thinking": False}}
 

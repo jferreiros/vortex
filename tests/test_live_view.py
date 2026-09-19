@@ -17,6 +17,7 @@ def test_build_call_pairs_tools_and_booking(tmp_path: Path) -> None:
         {
             "status": "found",
             "patient": {
+                "patient_id": "P00042",
                 "given_name": "Marta",
                 "first_surname": "Ruiz",
                 "second_surname": "López",
@@ -51,6 +52,7 @@ def test_build_call_pairs_tools_and_booking(tmp_path: Path) -> None:
     assert card.live is False
     assert card.status == "booked"
     assert card.patient_name == "Marta Ruiz López"
+    assert card.patient_id == "P00042"
     assert card.slot == "19/09 10:15"
     assert card.tools[0].status == "ok"
     assert card.tools[0].ms == 12.0
@@ -91,6 +93,22 @@ def test_refuse_reason_from_eligibility() -> None:
     card = build_call("CA-3", events)
     assert card.status == "refused"
     assert card.decline_reason == "not_eligible_age"
+
+
+def test_turn_time_renders_the_madrid_clock() -> None:
+    """The regression: a workflow card showed the host machine's clock.
+
+    ``_turn_time`` converts to Europe/Madrid explicitly, so a UTC timestamp
+    renders as the Madrid wall clock whatever timezone the host runs in. This
+    is asserted directly rather than through ``time.tzset``, which is Unix-only.
+    """
+    from vortex.observability.live import _turn_time
+
+    card = build_call(
+        "CA-4",
+        [{"kind": "call.started", "call_id": "CA-4", "ts": "2026-09-19T08:00:00+00:00"}],
+    )
+    assert _turn_time(card, "2026-09-19T08:00:30+00:00") == "10:00:30 +30.0s"
 
 
 def test_build_calls_newest_first() -> None:

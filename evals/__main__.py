@@ -103,9 +103,46 @@ def cmd_corpus(args: argparse.Namespace) -> int:
     run = run_sync(
         only=args.only,
         judge_log=args.judge_log,
+        case_id=args.case,
+        verify_roster=args.verify_roster,
         results_dir=args.results_dir,
     )
     return _finish(run, args.results_dir)
+
+
+def cmd_replay(args: argparse.Namespace) -> int:
+    from evals.common.replay import BudgetExceeded, render_score, run_sync
+
+    try:
+        run = run_sync(
+            only=args.only,
+            model=args.model,
+            concurrency=args.concurrency,
+            max_eur=args.max_eur,
+            max_turns=args.turns,
+            results_dir=args.results_dir,
+        )
+    except (BudgetExceeded, FileNotFoundError, RuntimeError, ValueError) as exc:
+        print(f"refused: {exc}")
+        return 2
+    save_run(run, args.results_dir)
+    mode = ", ".join(f"{k}={v}" for k, v in run.mode.items() if not isinstance(v, (list, dict)))
+    print(f"[{run.layer}] {mode} · {_dur(run.duration_ms)}")
+    for note in run.notes:
+        print(f"  note: {note}")
+    print()
+    print(render_score(run.summary["score"]))
+    print()
+    failed = [c for c in run.cases if c.status in ("fail", "error")]
+    if failed:
+        print(f"{len(failed)} case(s) did not pass; the closest accepted answer:")
+        for c in failed[:12]:
+            print(f"  {c.status:5s} {c.id}")
+            for d in c.details[:3]:
+                print(f"        {d}")
+        if len(failed) > 12:
+            print(f"        ... and {len(failed) - 12} more (evals/results/replay/latest.json)")
+    return 0
 
 
 def cmd_ci(args: argparse.Namespace) -> int:
@@ -244,9 +281,27 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--only", help="substring filter on case or probe ids")
     p.add_argument("--judge-log", type=Path, default=None, help="score the calls in this JSONL log")
     p.add_argument(
+        "--case",
+        default=None,
+        help="the public case every call in the log dialled, when the number cannot say",
+    )
+    p.add_argument(
         "--coverage", action="store_true", help="print the points-at-stake table and exit"
     )
+    p.add_argument(
+        "--verify-roster",
+        action="store_true",
+        help="check every published answer against the clinic snapshot",
+    )
     p.set_defaults(fn=cmd_corpus)
+
+    p = sub.add_parser("replay", help="the official cases through the agent, on the real snapshot")
+    p.add_argument("--only", help="substring filter on case ids or problem ids")
+    p.add_argument("--model", default=None, help="provider/model id; default: the deployed one")
+    p.add_argument("--concurrency", type=int, default=12, help="cases in flight")
+    p.add_argument("--max-eur", type=float, default=1.0, help="refuse a run estimated above this")
+    p.add_argument("--turns", type=int, default=24, help="caller turns per case before hang-up")
+    p.set_defaults(fn=cmd_replay)
 
     p = sub.add_parser("bench", help="layer 5: every candidate model on the same scenarios")
     p.add_argument("--models", default=None, help="comma-separated provider/model ids")

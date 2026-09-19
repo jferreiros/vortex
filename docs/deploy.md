@@ -30,3 +30,30 @@ morning — is in [`deploy/README.md`](../deploy/README.md).
 `make run`, `make dev` and `make tunnel` still work for local development. The
 deployment does not replace them; it replaces the tunnel for the people dialling
 us from outside.
+
+## The explainer page
+
+`docs/didactica.html` is served by its own nginx container, so publishing it can
+never restart the socket the organisers dial. It has its own compose project, its
+own Traefik router names and its own host.
+
+```
+https://docs.203.0.113.20.sslip.io/
+```
+
+**To publish the latest page:**
+
+```bash
+make didactica                                              # inline the tokens
+docker compose -f deploy/compose.docs.yaml up -d --build     # ship the file
+```
+
+The page is self-contained, so the image is one HTML file inside nginx: no
+stylesheet, no font, no asset to get out of sync. Rebuild after the page changes;
+there is nothing else to deploy. To take it down:
+`docker compose -f deploy/compose.docs.yaml down`.
+
+Recreating the container replaces it, so Traefik answers **503 for about twenty
+seconds** while it re-registers the new one. Harmless here, and the reason this
+page has its own container: the same twenty seconds on the line would be a failed
+run. Do not publish a docs change while someone is showing the page to the jury.
