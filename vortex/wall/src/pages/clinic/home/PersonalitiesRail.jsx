@@ -124,9 +124,9 @@ export default function PersonalitiesRail() {
   return (
     <section className="persona-block">
       <SectionHeader
-        eyebrow="Personalidades"
+        eyebrow="IA"
         title="Quién atiende el teléfono"
-        subtitle="Elige una cara y cómo habla. Eso es todo lo que hace falta para ponerla en la línea."
+        subtitle="Elige una cara y cómo habla. Debajo, voz, ritmo y permisos."
       />
 
       {offline && (

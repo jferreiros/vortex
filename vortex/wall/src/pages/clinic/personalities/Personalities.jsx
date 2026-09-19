@@ -1,11 +1,6 @@
-import PersonalitiesRail from "../home/PersonalitiesRail";
-import "../home/home.css";
+import { Navigate } from "react-router-dom";
 
-// Clinic View picker: `/clinic/personalities` in the sidebar.
+// Old hash `#/clinic/personalities` now lives under IA.
 export default function Personalities() {
-  return (
-    <div className="home-page">
-      <PersonalitiesRail />
-    </div>
-  );
+  return <Navigate to="/clinic/ai" replace />;
 }
