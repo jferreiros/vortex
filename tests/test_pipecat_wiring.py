@@ -717,14 +717,16 @@ async def test_a_short_ambiguous_turn_keeps_the_call_language(voice_settings) ->
 
 
 async def test_the_idle_handler_speaks_the_prompt_in_the_call_language(voice_settings) -> None:
-    """A silent caller hears "are you still there?" in the language of the call.
+    """A silent caller hears the nudge in the language of the call.
 
-    The platform cuts a call that goes quiet, so the idle event has to speak.
-    The prompt is read at fire time, so a mid-call language switch moves it.
+    The platform cuts a call that goes quiet, so the first silence has to
+    answer. The line is read at fire time, so a mid-call language switch moves
+    it — the second nudge below comes out in Catalan because the call did.
     """
     pytest.importorskip("pipecat")
 
-    from vortex.conversation.prompt import idle_prompt_for
+    from vortex.conversation.prompt import idle_patience_for, idle_prompt_for
+    from vortex.conversation.turns import IdlePolicy, default_turn_settings
     from vortex.line.pipecat_voice import _LanguageState, _make_idle_speaker
 
     settings = voice_settings()
@@ -735,17 +737,59 @@ async def test_the_idle_handler_speaks_the_prompt_in_the_call_language(voice_set
         async def queue_frames(self, frames: list[object]) -> None:
             queued.extend(frames)
 
+    now = [0.0]
+    policy = IdlePolicy(default_turn_settings(), clock=lambda: now[0])
     state = _LanguageState("es")
-    handler = _make_idle_speaker(_session(settings, events), state, Task())
+    handler = _make_idle_speaker(_session(settings, events), state, Task(), policy)
 
     await handler(None)
     assert [kind for kind, _ in events] == ["voice.user_idle"]
     assert [frame.text for frame in queued] == [idle_prompt_for("es")]
+    assert events[-1][1]["count"] == 1
+    assert events[-1][1]["level"] == 1
 
+    now[0] = 12.0
     state.language = "ca"
     await handler(None)
-    assert queued[-1].text == idle_prompt_for("ca")
+    assert queued[-1].text == idle_patience_for("ca")
     assert [kind for kind, _ in events] == ["voice.user_idle"] * 2
+    assert events[-1][1]["level"] == 2
+
+    # Third event inside the mute window: logged, but nothing is spoken.
+    now[0] = 20.0
+    await handler(None)
+    assert len(queued) == 2
+    assert events[-1][1]["spoke"] is False
+    assert events[-1][1]["suppressed"] == "muted"
+
+
+async def test_the_idle_escalation_is_per_socket(voice_settings) -> None:
+    """Two handlers never share a count. Run All opens ten sockets at once."""
+    pytest.importorskip("pipecat")
+
+    from vortex.conversation.prompt import idle_prompt_for
+    from vortex.line.pipecat_voice import _LanguageState, _make_idle_speaker
+
+    settings = voice_settings()
+
+    def make() -> tuple[object, list[object]]:
+        queued: list[object] = []
+
+        class Task:
+            async def queue_frames(self, frames: list[object]) -> None:
+                queued.extend(frames)
+
+        handler = _make_idle_speaker(_session(settings, []), _LanguageState("en"), Task())
+        return handler, queued
+
+    first, first_queued = make()
+    second, second_queued = make()
+
+    await first(None)
+    await second(None)
+
+    assert [f.text for f in first_queued] == [idle_prompt_for("en")]
+    assert [f.text for f in second_queued] == [idle_prompt_for("en")]
 
 
 async def test_tool_filler_speaks_one_short_phrase_per_language(voice_settings) -> None:
@@ -845,3 +889,47 @@ def test_vad_mode_wires_our_turn_strategies() -> None:
     assert soniox_params.user_turn_strategies.start[0]._min_words == 2
     assert soniox_params.user_turn_strategies.stop[0].resolves_proposed_turn_stop_frames is True
     assert soniox_params.vad_analyzer.params.stop_secs == 0.4
+    assert soniox_params.user_idle_timeout == TurnSettings().user_idle_secs
+
+
+def test_smart_turn_is_built_only_where_the_vad_mode_asks_for_it() -> None:
+    """The default pipeline never constructs ``LocalSmartTurnAnalyzerV3``.
+
+    It used to, once per socket: ``user_turn_strategies=None`` made the
+    aggregator build ``UserTurnStrategies()``, whose ``__post_init__`` fills an
+    empty ``stop`` from ``default_user_turn_stop_strategies()``, which builds an
+    ``onnxruntime.InferenceSession`` over ``smart-turn-v3.2-cpu.onnx`` eagerly
+    in ``__init__``. Soniox's own endpoint detection then made it redundant, so
+    every call loaded and threw away a model.
+
+    The VAD path builds it on purpose. That is where it earns its keep.
+    Silero VAD is a different model and stays in both: it feeds the aggregator.
+    """
+    pytest.importorskip("pipecat")
+    import pipecat.audio.turn.smart_turn.local_smart_turn_v3 as smart_turn_v3
+    from pipecat.processors.aggregators.llm_context import LLMContext
+    from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+
+    from vortex.conversation.turns import TurnSettings
+    from vortex.line.pipecat_voice import _user_aggregator_params
+
+    built: list[object] = []
+    original = smart_turn_v3.LocalSmartTurnAnalyzerV3.__init__
+
+    def spy(self, *args, **kwargs):
+        built.append(self)
+        return original(self, *args, **kwargs)
+
+    def count(turns: TurnSettings) -> int:
+        built.clear()
+        smart_turn_v3.LocalSmartTurnAnalyzerV3.__init__ = spy
+        try:
+            # Constructing the aggregator is where the fallback used to bite.
+            LLMContextAggregatorPair(LLMContext([]), user_params=_user_aggregator_params(turns))
+        finally:
+            smart_turn_v3.LocalSmartTurnAnalyzerV3.__init__ = original
+        return len(built)
+
+    assert count(TurnSettings()) == 0, "Soniox mode loaded a model it never uses"
+    assert count(TurnSettings(soniox_turn_detection=False, use_smart_turn=False)) == 0
+    assert count(TurnSettings(soniox_turn_detection=False)) == 1, "VAD mode wants it"
