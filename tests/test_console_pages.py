@@ -44,6 +44,8 @@ async def test_wall_shows_the_last_call_and_why(seeded: Path, user: User) -> Non
     await user.should_see("Marta Ruiz López")
     await user.should_see("Recent calls")
     await user.should_see("insurance does not cover")
+    await user.open("/wall/flow")
+    await user.should_see("Workflow")
 
 
 def test_the_seeded_log_does_not_outlive_the_fixture(
@@ -114,7 +116,7 @@ async def test_console_routes_render(seeded: Path, user: User) -> None:
         ("/agents/reminders", "Preview"),
         ("/agents/nope", "No agent with this name"),
         ("/calls", "Why not booked"),
-        ("/calls/live", "Call opened"),
+        ("/calls/live", "Workflow"),
         ("/patients", "Marta Ruiz López"),
         ("/insights", "Why not booked"),
         ("/settings", "Sites"),
@@ -129,10 +131,24 @@ async def test_console_routes_render(seeded: Path, user: User) -> None:
 async def test_calendar_page_renders_doctor_grids(seeded: Path, user: User) -> None:
     await user.open("/calendar")
     await user.should_see("Calendar")
-    await user.should_see("Doctors")
-    # Doctor names come from the catalogue, so the rail renders with or without
-    # the synthetic-data pack present.
+    await user.should_see("Type your name to open it.")
+    await user.should_not_see("Dra. Ortiz")
+
+
+async def test_calendar_login_opens_one_diary_and_a_visit(
+    seeded: Path, user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("VORTEX_CALENDAR_TODAY", "2026-09-19")
+    await user.open("/calendar")
+    user.find(ui.input).type("Dra. Ortiz")
+    user.find("Open").click()
     await user.should_see("Dra. Ortiz")
+    await user.should_see("Next")
+    await user.should_see("Today")
+    await user.should_not_see("Dr. Sáez")
+    await user.should_see("Teresa López García")
+    await user.should_not_see("Roster record")
+    await user.should_not_see("Fake record")
 
 
 async def test_calendar_hides_patient_data_on_a_booked_slot(
