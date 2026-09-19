@@ -33,6 +33,14 @@ const ICONS = {
       <circle cx="18.5" cy="6.5" r="1.4" fill="currentColor" stroke="none" />
     </>
   ),
+  patternsPathways: (
+    <>
+      <circle cx="5" cy="6" r="2.2" />
+      <circle cx="5" cy="18" r="2.2" />
+      <circle cx="19" cy="12" r="2.2" />
+      <path d="M7.1 6.9L16.9 11M7.1 17.1L16.9 13" />
+    </>
+  ),
 };
 
 const CLINIC_ITEMS = [
@@ -42,6 +50,7 @@ const CLINIC_ITEMS = [
   { to: "/clinic/insights", label: "Statistics", icon: "insights" },
   { to: "/clinic/live-calls", label: "Live Calls", icon: "liveCalls" },
   { to: "/clinic/doctor", label: "Horarios", icon: "doctor" },
+  { to: "/clinic/patterns-pathways", label: "Pathways & Patterns", icon: "patternsPathways" },
 ];
 
 function NavIcon({ name }) {

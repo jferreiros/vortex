@@ -12,12 +12,19 @@ const EASE_IN_OUT_CUBIC = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t 
 const FADE_IN_MS = 420;
 const SCROLL_MS = 900;
 const HOLD_MS = 140;
+// Matches landing.css's .landing-scroll-veil transition duration — the
+// veil isn't fully transparent, and the section isn't "shown entire",
+// until this finishes too.
+const FADE_OUT_MS = 420;
 
 export function useCrossfadeScroll() {
   const [veilOpacity, setVeilOpacity] = useState(0);
   const runningRef = useRef(false);
 
-  const scrollToId = useCallback((targetId) => {
+  // onSettled fires once the veil has fully faded out and the destination
+  // section is sitting there uncovered — the cue the landing uses to start
+  // the intro video.
+  const scrollToId = useCallback((targetId, onSettled) => {
     if (runningRef.current) return;
     const target = document.getElementById(targetId);
     if (!target) return;
@@ -39,6 +46,7 @@ export function useCrossfadeScroll() {
           window.setTimeout(() => {
             setVeilOpacity(0);
             runningRef.current = false;
+            if (onSettled) window.setTimeout(onSettled, FADE_OUT_MS);
           }, HOLD_MS);
         }
       }

@@ -3,9 +3,127 @@ import { useLayoutEffect, useRef, useState } from "react";
 import Card from "../../../components/ui/Card";
 import { MOCK_OVERVIEW, useHomeOverview } from "./useHomeOverview";
 import { PLACEHOLDER_CALLS } from "../live-calls/placeholderCalls";
+import { REASON_LABEL } from "../../../lib/labels";
+import patientTimelines from "../../../data/patientTimelines.json";
+import "../live-calls/live-calls.css";
 import "./home.css";
 
 const MANAGER_NAME = "Ricardo";
+
+// Placeholder name→id lookup until calls carry a real patient_id — falls
+// back to the first mock timeline for anyone not in it.
+const PATIENT_ID_BY_NAME = Object.fromEntries(
+  patientTimelines.patients.map((p) => [p.name, p.patientId])
+);
+function patientIdFor(name) {
+  return PATIENT_ID_BY_NAME[name] || patientTimelines.patients[0].patientId;
+}
+
+// "Rechazada" = the agent submitted NO_ACTION. `reason` is one of the closed
+// 18-value vocabulary (see .claude/skills/submit-action) — the exact rule
+// that bit — plus the moment it happened and a way to ring the caller back.
+const REJECTED_CALLS = [
+  { id: "rej-1", patient: "Sin identificar", phone: "+34 611 224 578", time: "11:42:07", reason: "no_availability" },
+  { id: "rej-2", patient: "Marcos Iglesias Peña", phone: "+34 699 015 332", time: "11:26:51", reason: "location_hours" },
+  { id: "rej-3", patient: "Sin identificar", phone: "+34 622 887 140", time: "10:58:19", reason: "out_of_scope" },
+];
+
+// "Escalada" = handed off to a human. The reason is the thing worth showing.
+const ESCALATED_CALLS = [
+  { id: "call-4", patient: "Ana Salas Ferrer", time: "11:39:22", reason: "Síntomas que requieren triaje clínico" },
+  { id: "esc-2", patient: "Jorge Nieto Campos", time: "11:15:40", reason: "Solicita cambio fuera de la ventana permitida" },
+];
+
+function HistoryIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 12a9 9 0 1 0 3-6.7" />
+      <path d="M3 4v4h4" />
+      <path d="M12 8v4l3 2" />
+    </svg>
+  );
+}
+
+function PhoneIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M6.5 3.5h3l1.4 4.2-2.1 1.8a13.5 13.5 0 0 0 5.7 5.7l1.8-2.1 4.2 1.4v3a1.5 1.5 0 0 1-1.6 1.5A16 16 0 0 1 5 5.1a1.5 1.5 0 0 1 1.5-1.6z" />
+    </svg>
+  );
+}
+
+function AlertIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 3.5L21.5 20h-19z" />
+      <line x1="12" y1="9.5" x2="12" y2="14" />
+      <circle cx="12" cy="17" r="0.9" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+function EscalateIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M5 19L19 5" />
+      <path d="M9 5h10v10" />
+    </svg>
+  );
+}
+
+function RejectedRow({ call, onOpenHistory }) {
+  return (
+    <li className="feed-row">
+      <span className="feed-row-dot urgent" />
+      <div className="feed-row-grid">
+        <span className="feed-row-name">{call.patient}</span>
+        <span className="feed-row-time mono">{call.time}</span>
+        <span className="feed-row-reason">{REASON_LABEL[call.reason] || call.reason}</span>
+        <div className="feed-row-actions">
+          <button
+            type="button"
+            className="feed-row-history"
+            onClick={onOpenHistory}
+            title="Ver historial del paciente"
+            aria-label="Ver historial del paciente"
+          >
+            <HistoryIcon />
+          </button>
+          <a
+            className="feed-row-call"
+            href={`tel:${call.phone.replace(/\s+/g, "")}`}
+            title={`Devolver llamada a ${call.phone}`}
+            aria-label={`Devolver llamada a ${call.phone}`}
+          >
+            <PhoneIcon />
+          </a>
+        </div>
+      </div>
+    </li>
+  );
+}
+
+function EscalatedRow({ call, onOpenHistory }) {
+  return (
+    <li className="feed-row">
+      <span className="feed-row-dot muted" />
+      <div className="feed-row-grid">
+        <span className="feed-row-name">{call.patient}</span>
+        <span className="feed-row-time mono">{call.time}</span>
+        <span className="feed-row-reason">{call.reason}</span>
+        <button
+          type="button"
+          className="feed-row-history"
+          onClick={onOpenHistory}
+          title="Ver historial del paciente"
+          aria-label="Ver historial del paciente"
+        >
+          <HistoryIcon />
+        </button>
+      </div>
+    </li>
+  );
+}
 
 function dayGreeting(now = new Date()) {
   const hour = Number(
@@ -137,6 +255,7 @@ export default function Home() {
   const moved = today.rescheduled + today.cancelled;
   const liveCalls =
     liveFilter === "all" ? PLACEHOLDER_CALLS : PLACEHOLDER_CALLS.filter((c) => c.direction === liveFilter);
+  const openHistory = (patientName) => navigate(`/clinic/patient-timeline/${patientIdFor(patientName)}`);
 
   const kpis = [
     {
@@ -212,10 +331,12 @@ export default function Home() {
           <ul className="home-call-list">
             {liveCalls.map((call) => (
               <li key={call.id}>
-                <button
-                  type="button"
+                <div
                   className="home-call-row"
+                  role="button"
+                  tabIndex={0}
                   onClick={() => navigate(`/clinic/live-calls/${call.id}`)}
+                  onKeyDown={(e) => e.key === "Enter" && navigate(`/clinic/live-calls/${call.id}`)}
                 >
                   <span className={`home-call-avatar ${call.status}`}>{initials(call.patient)}</span>
                   <span className="home-call-main">
@@ -228,11 +349,60 @@ export default function Home() {
                     </span>
                   </span>
                   <span className="home-call-time">{call.duration}</span>
-                </button>
+                  <button
+                    type="button"
+                    className="home-call-history-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openHistory(call.patient);
+                    }}
+                    title="Ver historial del paciente"
+                    aria-label="Ver historial del paciente"
+                  >
+                    <HistoryIcon />
+                  </button>
+                </div>
               </li>
             ))}
           </ul>
         </Card>
+      </section>
+
+      <section className="home-review">
+        <div className="home-live-head">
+          <h2>Revisión</h2>
+        </div>
+        <div className="home-review-grid">
+          <Card padding="sm" className="home-review-half">
+            <div className="feed-panel-head">
+              <span className="feed-panel-title-group urgent">
+                <AlertIcon />
+                <span className="feed-panel-title">Llamadas rechazadas</span>
+              </span>
+              <span className="feed-panel-count">{REJECTED_CALLS.length}</span>
+            </div>
+            <ul className="feed-list">
+              {REJECTED_CALLS.map((call) => (
+                <RejectedRow key={call.id} call={call} onOpenHistory={() => openHistory(call.patient)} />
+              ))}
+            </ul>
+          </Card>
+
+          <Card padding="sm" className="home-review-half">
+            <div className="feed-panel-head">
+              <span className="feed-panel-title-group muted">
+                <EscalateIcon />
+                <span className="feed-panel-title">Llamadas escaladas</span>
+              </span>
+              <span className="feed-panel-count">{ESCALATED_CALLS.length}</span>
+            </div>
+            <ul className="feed-list">
+              {ESCALATED_CALLS.map((call) => (
+                <EscalatedRow key={call.id} call={call} onOpenHistory={() => openHistory(call.patient)} />
+              ))}
+            </ul>
+          </Card>
+        </div>
       </section>
     </div>
   );
