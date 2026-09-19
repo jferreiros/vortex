@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """Login to Prosper dashboard and POST Run All. Creds from vortex .env."""
+
 from __future__ import annotations
 
+import http.cookiejar
 import json
 import os
 import sys
 import time
 import urllib.error
 import urllib.request
-import http.cookiejar
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -44,9 +45,7 @@ class Prosper:
     def __init__(self, base: str) -> None:
         self.base = base.rstrip("/") + "/leaderboard"
         self.cj = http.cookiejar.CookieJar()
-        self.opener = urllib.request.build_opener(
-            urllib.request.HTTPCookieProcessor(self.cj)
-        )
+        self.opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(self.cj))
 
     def request(self, method: str, path: str, body: dict | None = None) -> dict:
         data = None
@@ -115,7 +114,7 @@ def main() -> int:
             if "429" in msg or "cooldown" in msg.lower():
                 team = api.request("GET", f"/api/teams/{team_id}")
                 wait = int(team["eligibility"].get("private_wait") or 60)
-                print(f"cooldown 429 — sleep {wait}s (attempt {attempt+1})", flush=True)
+                print(f"cooldown 429 — sleep {wait}s (attempt {attempt + 1})", flush=True)
                 notify(f"Run All cooldown · wait {wait}s")
                 time.sleep(min(max(wait, 30), 300))
                 continue

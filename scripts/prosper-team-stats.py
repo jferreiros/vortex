@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Fetch vortex Prosper team stats (best points, dump JSON)."""
+
 from __future__ import annotations
 
 import argparse
@@ -9,7 +10,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-from importlib.machinery import SourceFileLoader
+from importlib.machinery import SourceFileLoader  # noqa: E402  after the path insert above
 
 pra = SourceFileLoader(
     "prosper_run_all", str(ROOT / "scripts" / "prosper-run-all.py")
