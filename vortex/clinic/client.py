@@ -600,6 +600,7 @@ class ClinicClient:
             query.get("provider_id"),
             query.get("specialty_id"),
         )
+        generation = self._availability_generation
         answer = await self._fetch_availability(
             query["date_from"],
             query["date_to"],
@@ -619,7 +620,8 @@ class ClinicClient:
             query.get("insurer"),
         )
         async with self._availability_lock:
-            self._availability_cache[key] = answer
+            if generation == self._availability_generation:
+                self._availability_cache[key] = answer
         return answer.model_copy(deep=True)
 
     def invalidate_availability(self) -> None:
@@ -680,6 +682,7 @@ class FakeClinicClient:
     def __init__(self, *, data_dir: Path | None = None) -> None:
         self._catalogue = Catalogue.model_validate(_adapt_catalogue(fixtures.CLINIC))
         self._availability_cache: dict[tuple[Any, ...], AvailabilityResponse] = {}
+        self._availability_generation = 0
         self._directory_cache: OrderedDict[tuple[Any, ...], list[PatientRecord]] = OrderedDict()
         if data_dir is None:
             patient_rows = list(fixtures.PATIENTS)
@@ -777,6 +780,7 @@ class FakeClinicClient:
         cached = self._availability_cache.get(key)
         if cached is not None:
             return cached.model_copy(deep=True)
+        generation = self._availability_generation
         answer = await self._fetch_availability(
             date_from=date_from,
             date_to=date_to,
@@ -786,7 +790,8 @@ class FakeClinicClient:
             patient_id=patient_id,
             insurer=insurer,
         )
-        self._availability_cache[key] = answer
+        if generation == self._availability_generation:
+            self._availability_cache[key] = answer
         return answer.model_copy(deep=True)
 
     async def _fetch_availability(
@@ -897,6 +902,7 @@ class FakeClinicClient:
             query.get("provider_id"),
             query.get("specialty_id"),
         )
+        generation = self._availability_generation
         answer = await self._fetch_availability(
             date_from=query["date_from"],
             date_to=query["date_to"],
@@ -915,11 +921,17 @@ class FakeClinicClient:
             query.get("patient_id"),
             query.get("insurer"),
         )
-        self._availability_cache[key] = answer
+        if generation == self._availability_generation:
+            self._availability_cache[key] = answer
         return answer.model_copy(deep=True)
 
     def invalidate_availability(self) -> None:
-        """Drop availability derived before one of our writes was accepted."""
+        """Drop availability derived before one of our writes was accepted.
+
+        The generation bump also disowns fetches already in flight, so a
+        response read before the write cannot be stored after this clear.
+        """
+        self._availability_generation += 1
         self._availability_cache.clear()
 
     async def appointments(
