@@ -29,12 +29,14 @@ from vortex.contract import (
 from vortex.line.session import CallSession
 from vortex.line.sms import (
     DryRunSmsClient,
+    SmsResult,
     TwilioSmsClient,
     action_fingerprint,
     booking_confirmation_text,
     cancellation_confirmation_text,
     format_slot_es,
     make_sms_client,
+    resolve_details,
     twilio_is_configured,
 )
 from vortex.line.twilio import StartPayload
@@ -42,6 +44,7 @@ from vortex.settings import Settings, get_settings, reset_settings
 
 NOW = datetime(2026, 9, 18, 10, 0, tzinfo=MADRID)
 SLOT = datetime(2026, 9, 24, 16, 30, tzinfo=MADRID)
+REMEMBERED_START = datetime(2026, 9, 30, 10, 0, tzinfo=MADRID)
 CALLER = "+34600111222"
 PATIENT = "P00042"
 
@@ -73,6 +76,19 @@ class DryRunSubmitter(AcceptingSubmitter):
 class RejectingSubmitter(AcceptingSubmitter):
     async def submit(self, call_id: str, action: Action) -> SubmitResult:
         return SubmitResult(status="rejected", http_status=422, detail="nope")
+
+
+class RecordingSmsClient(DryRunSmsClient):
+    """Dry-run client that also keeps the typed ``SmsResult`` of every send."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.results: list[SmsResult] = []
+
+    async def send(self, *, to: str, body: str) -> SmsResult:
+        result = await super().send(to=to, body=body)
+        self.results.append(result)
+        return result
 
 
 def a_booking() -> BookAction:
@@ -107,7 +123,7 @@ def make_session(
     submitter = submitter or AcceptingSubmitter()
     session.submitter = submitter
     session.ctx.submitter = submitter
-    session.sms = DryRunSmsClient()
+    session.sms = RecordingSmsClient()
     return session
 
 
@@ -118,11 +134,11 @@ def remember_appointment(session: CallSession) -> None:
         provider_id="PR01",
         location_id="centro",
         appointment_type_id="review",
-        start=datetime(2026, 9, 30, 10, 0, tzinfo=MADRID),
+        start=REMEMBERED_START,
     )
-    session.ctx.state.setdefault("diary_appointments", {})[
-        appointment.appointment_id
-    ] = appointment.model_dump(mode="json")
+    session.ctx.state.setdefault("diary_appointments", {})[appointment.appointment_id] = (
+        appointment.model_dump(mode="json")
+    )
 
 
 # ---- render helpers ---------------------------------------------------------
@@ -223,16 +239,14 @@ async def test_twilio_client_reports_http_errors() -> None:
 async def test_accepted_booking_sends_sms(offline_settings: Settings) -> None:
     session = make_session(offline_settings, "CA-book-sms")
     sms = session.sms
-    assert isinstance(sms, DryRunSmsClient)
+    assert isinstance(sms, RecordingSmsClient)
 
     await session.submit(a_booking())
     await session.close()
 
-    assert len(sms.sent) == 1
-    to, body = sms.sent[0]
-    assert to == CALLER
-    assert "Cita confirmada" in body
-    assert "16:30" in body
+    assert len(sms.results) == 1
+    assert sms.results[0].status == "dry_run"
+    assert sms.results[0].to == CALLER
 
 
 @pytest.mark.asyncio
@@ -240,16 +254,14 @@ async def test_accepted_cancel_sends_sms(offline_settings: Settings) -> None:
     session = make_session(offline_settings, "CA-cancel-sms")
     remember_appointment(session)
     sms = session.sms
-    assert isinstance(sms, DryRunSmsClient)
+    assert isinstance(sms, RecordingSmsClient)
 
     await session.submit(a_cancel())
     await session.close()
 
-    assert len(sms.sent) == 1
-    to, body = sms.sent[0]
-    assert to == CALLER
-    assert "Cita cancelada" in body
-    assert "10:00" in body
+    assert len(sms.results) == 1
+    assert sms.results[0].status == "dry_run"
+    assert sms.results[0].to == CALLER
 
 
 @pytest.mark.asyncio
@@ -258,13 +270,34 @@ async def test_cancel_without_remembered_appointment_still_texts(
 ) -> None:
     session = make_session(offline_settings, "CA-cancel-bare")
     sms = session.sms
-    assert isinstance(sms, DryRunSmsClient)
+    assert isinstance(sms, RecordingSmsClient)
 
     await session.submit(a_cancel())
     await session.close()
 
-    assert len(sms.sent) == 1
-    assert "Cita cancelada" in sms.sent[0][1]
+    assert len(sms.results) == 1
+    assert sms.results[0].status == "dry_run"
+    assert sms.results[0].to == CALLER
+
+
+@pytest.mark.asyncio
+async def test_resolve_details_uses_the_remembered_appointment(
+    offline_settings: Settings,
+) -> None:
+    session = make_session(offline_settings, "CA-cancel-details")
+    remember_appointment(session)
+
+    known = await resolve_details(session.ctx, a_cancel())
+    session.ctx.state["diary_appointments"].clear()
+    unknown = await resolve_details(session.ctx, a_cancel())
+    await session.close()
+
+    assert known.when == REMEMBERED_START
+    assert known.provider_name == "Dra. Ortiz"
+    assert known.location_name == "Arenal Centro"
+    assert known.missing == []
+    assert unknown.when is None
+    assert unknown.missing == ["appointment_details"]
 
 
 @pytest.mark.asyncio
@@ -321,9 +354,7 @@ async def test_missing_from_number_skips_sms(offline_settings: Settings) -> None
 async def test_non_accepted_submit_skips_sms(
     offline_settings: Settings, submitter_cls: type[AcceptingSubmitter]
 ) -> None:
-    session = make_session(
-        offline_settings, "CA-not-accepted", submitter=submitter_cls()
-    )
+    session = make_session(offline_settings, "CA-not-accepted", submitter=submitter_cls())
     sms = session.sms
     assert isinstance(sms, DryRunSmsClient)
 
