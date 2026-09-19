@@ -279,6 +279,16 @@ class Settings:
     # ElevenLabs. Empty means the service's own default.
     elevenlabs_base_url: str = field(default_factory=lambda: _env("ELEVENLABS_BASE_URL"))
 
+    # --- Turn-taking (the conversation lane reads this through TurnSettings) ---
+    # Seconds of caller silence before the agent asks whether they are still
+    # there. 0 disables the nudge. The 2026-09-18 run measured the harness
+    # caller answering in a median of 4.5 s, p90 10 s and max 22 s, so 6 s
+    # fired 147 times over 20 calls, mostly while the caller was still
+    # thinking. 10 s clears the p90.
+    user_idle_secs: float = field(
+        default_factory=lambda: float(_env("VORTEX_USER_IDLE_SECS", "10"))
+    )
+
     # Gemini Live (speech-to-speech demo). Opt-in only via VORTEX_VOICE_MODE=
     # gemini-live — never selected by auto. Jury showpiece; the cascade still
     # scores. GOOGLE_API_KEY is the Gemini API key (AI Studio), not the TTS
@@ -536,6 +546,7 @@ class Settings:
             "aic_filter": "on" if self.aic_filter_enabled and self.aic_sdk_license else "off",
             "aic_model": self.aic_model_id,
             "has_aic_license": bool(self.aic_sdk_license),
+            "user_idle_secs": self.user_idle_secs,
             "ws_path": self.ws_path,
             "calls_log_path": str(self.calls_log_path),
             "has_langfuse_keys": bool(self.langfuse_public_key and self.langfuse_secret_key),
