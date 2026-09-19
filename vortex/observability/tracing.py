@@ -12,11 +12,15 @@ latency, errors). Tool calls nest as ``tool`` or ``retriever`` observations.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
-from collections.abc import Iterator
+import sys
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import Any
+
+log = logging.getLogger(__name__)
 
 RETRIEVER_TOOLS = frozenset(
     {
@@ -90,13 +94,77 @@ def _sync_env() -> None:
     os.environ.setdefault("OTEL_SERVICE_NAME", "vortex")
 
 
-def _client() -> Any | None:
-    if not enabled():
+def _quiet(what: str, call: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    """Run one Langfuse call. A trace we lose is never a call we lose."""
+    try:
+        return call(*args, **kwargs)
+    except Exception:
+        log.debug("langfuse %s failed", what, exc_info=True)
         return None
-    _sync_env()
-    from langfuse import get_client
 
-    return get_client()
+
+class _SafeObservation:
+    """An observation whose ``update`` cannot break the code that traces itself.
+
+    ``vortex.tools.call_tool`` updates the observation after the tool has already
+    run, and ``submit_action`` reaches the platform inside that tool. An update
+    that raised there would lose the submission the session must remember.
+    """
+
+    __slots__ = ("_observation",)
+
+    def __init__(self, observation: Any) -> None:
+        self._observation = observation
+
+    def update(self, **fields: Any) -> None:
+        _quiet("observation update", self._observation.update, **fields)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._observation, name)
+
+
+@contextmanager
+def _entered(manager: Any) -> Iterator[Any]:
+    """Enter a Langfuse context manager. Yields ``None`` when it fails to start.
+
+    Exceptions raised by the body are handed to ``__exit__`` and then re-raised:
+    the application keeps its own errors, Langfuse never adds one.
+    """
+    if manager is None:
+        yield None
+        return
+    try:
+        value = manager.__enter__()
+    except Exception:
+        log.debug("langfuse context start failed", exc_info=True)
+        yield None
+        return
+    try:
+        yield value
+    except BaseException:
+        _quiet("context exit", manager.__exit__, *sys.exc_info())
+        raise
+    _quiet("context exit", manager.__exit__, None, None, None)
+
+
+@contextmanager
+def _observation(client: Any, **kwargs: Any) -> Iterator[Any]:
+    manager = _quiet("observation start", client.start_as_current_observation, **kwargs)
+    with _entered(manager) as observation:
+        yield None if observation is None else _SafeObservation(observation)
+
+
+def _client() -> Any | None:
+    try:
+        if not enabled():
+            return None
+        _sync_env()
+        from langfuse import get_client
+
+        return get_client()
+    except Exception:
+        log.debug("langfuse client unavailable", exc_info=True)
+        return None
 
 
 def mask_phone(value: str | None) -> str:
@@ -282,20 +350,17 @@ def _call_output(session: Any) -> dict[str, Any]:
     }
 
 
-@contextmanager
-def trace_call(session: Any) -> Iterator[Any]:
-    client = _client()
-    if client is None:
-        yield None
-        return
-    from langfuse import propagate_attributes
-
+def _call_tags(session: Any) -> list[str]:
     tags = ["voice", session.settings.llm_provider]
     tags.append("pipecat" if session.settings.voice_is_pipecat else "stub")
     problem = _problem_id(session)
     if problem:
         tags.append(problem)
-    metadata = {
+    return tags
+
+
+def _call_metadata(session: Any) -> dict[str, Any]:
+    return {
         "call_id": session.call_id,
         "stream_sid": session.stream_sid,
         "llm_provider": session.settings.llm_provider,
@@ -303,29 +368,53 @@ def trace_call(session: Any) -> Iterator[Any]:
         "voice": "pipecat" if session.settings.voice_is_pipecat else "stub",
         "clinic": "live" if session.settings.clinic_is_live else "fake",
     }
-    with client.start_as_current_observation(
+
+
+def _propagation(session: Any, metadata: dict[str, Any]) -> Any:
+    from langfuse import propagate_attributes
+
+    return propagate_attributes(
+        session_id=session.call_id,
+        user_id=mask_phone(session.start.from_number),
+        tags=_call_tags(session),
+        metadata=metadata,
+        environment=session.settings.langfuse_environment or None,
+    )
+
+
+def _flush(client: Any) -> None:
+    client.flush()
+
+
+def _record_call_output(observation: Any, session: Any) -> None:
+    output = _call_output(session)
+    update: dict[str, Any] = {"output": output}
+    if output.get("reason") == "crashed":
+        update["level"] = "ERROR"
+    if observation is not None:
+        observation.update(**update)
+
+
+@contextmanager
+def trace_call(session: Any) -> Iterator[Any]:
+    client = _client()
+    if client is None:
+        yield None
+        return
+    metadata = _quiet("call metadata", _call_metadata, session) or {}
+    with _observation(
+        client,
         as_type="agent",
         name="handle-inbound-call",
-        input=_call_input(session),
+        input=_quiet("call input", _call_input, session),
         metadata=metadata,
     ) as observation:
-        with propagate_attributes(
-            session_id=session.call_id,
-            user_id=mask_phone(session.start.from_number),
-            tags=tags,
-            metadata=metadata,
-            environment=session.settings.langfuse_environment or None,
-        ):
+        with _entered(_quiet("propagate attributes", _propagation, session, metadata)):
             try:
                 yield observation
             finally:
-                output = _call_output(session)
-                level = "ERROR" if output.get("reason") == "crashed" else None
-                update: dict[str, Any] = {"output": output}
-                if level:
-                    update["level"] = level
-                observation.update(**update)
-                client.flush()
+                _quiet("call output", _record_call_output, observation, session)
+                _quiet("flush", _flush, client)
 
 
 @contextmanager
@@ -334,19 +423,21 @@ def observe_tool(name: str, raw_args: dict[str, Any]) -> Iterator[Any]:
     if client is None:
         yield None
         return
-    with client.start_as_current_observation(
+    with _observation(
+        client,
         as_type=tool_observation_type(name),
         name=tool_observation_name(name),
-        input=redact(raw_args),
+        input=_quiet("redact input", redact, raw_args),
         metadata={"tool": name},
     ) as observation:
         try:
             yield observation
         except Exception as exc:
-            observation.update(
-                output={"error": type(exc).__name__},
-                level="ERROR",
-            )
+            if observation is not None:
+                observation.update(
+                    output={"error": type(exc).__name__},
+                    level="ERROR",
+                )
             raise
 
 
@@ -358,10 +449,11 @@ def observe_span(
     if client is None:
         yield None
         return
-    with client.start_as_current_observation(
+    with _observation(
+        client,
         as_type="span",
         name=name,
-        input=redact(input) if input is not None else None,
+        input=_quiet("redact input", redact, input) if input is not None else None,
         metadata=metadata or {},
     ) as observation:
         yield observation
@@ -370,4 +462,4 @@ def observe_span(
 def flush() -> None:
     client = _client()
     if client is not None:
-        client.flush()
+        _quiet("flush", _flush, client)
