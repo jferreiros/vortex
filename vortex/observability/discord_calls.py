@@ -70,7 +70,10 @@ def enabled() -> bool:
 
 
 def webhook_url() -> str:
-    return os.environ.get("DISCORD_WEBHOOK_URL", "").strip()
+    return (
+        os.environ.get("DISCORD_CALLS_WEBHOOK_URL", "").strip()
+        or os.environ.get("DISCORD_WEBHOOK_URL", "").strip()
+    )
 
 
 def wall_url() -> str:

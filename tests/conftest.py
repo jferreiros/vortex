@@ -27,6 +27,7 @@ def offline_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> setting
         "VERCEL_AI_GATEWAY_KEY",
         "ELEVENLABS_API_KEY",
         "DISCORD_WEBHOOK_URL",
+        "DISCORD_CALLS_WEBHOOK_URL",
         "DISCORD_NOTIFY_IN_TESTS",
     ):
         monkeypatch.delenv(key, raising=False)
@@ -55,6 +56,7 @@ def _unset_dotenv_keys() -> None:
         "VERCEL_AI_GATEWAY_KEY",
         "ELEVENLABS_API_KEY",
         "DISCORD_WEBHOOK_URL",
+        "DISCORD_CALLS_WEBHOOK_URL",
         "DISCORD_NOTIFY_IN_TESTS",
     ):
         os.environ.pop(key, None)
