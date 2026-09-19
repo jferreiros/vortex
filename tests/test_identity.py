@@ -137,22 +137,23 @@ def test_check_national_id_folds_spoken_separators() -> None:
     assert dictated.valid is spelled.valid
 
 
-def test_unique_one_edit_repair_accepts_the_matching_id() -> None:
-    """seis/tres at one position: letter Z uniquely recovers Marta's DNI."""
-    result = check_national_id("12645678Z")  # heard 6, true 3 at position 2
-    assert result.valid is True
+def test_unique_one_edit_repair_is_a_digit_to_re_ask_not_a_valid_id() -> None:
+    """seis/tres at one position fits Z, but only the caller says which digit they meant."""
+    result = check_national_id("12645678Z")  # heard 6, 3 would fit the letter
+    assert result.valid is False
     assert result.kind == "dni"
-    assert result.normalized == "12345678Z"
-    assert result.repaired_from == "12645678Z"
-    assert result.ask_digit_positions == []
+    assert result.normalized == "12645678Z"
+    assert result.repaired_from is None
+    assert result.ask_digit_positions == [2]
 
 
-def test_unique_one_edit_repair_works_for_nie() -> None:
+def test_unique_one_edit_repair_for_nie_is_not_valid_either() -> None:
     result = check_national_id("X1264567L")
-    assert result.valid is True
+    assert result.valid is False
     assert result.kind == "nie"
-    assert result.normalized == "X1234567L"
-    assert result.repaired_from == "X1264567L"
+    assert result.normalized == "X1264567L"
+    assert result.repaired_from is None
+    assert result.ask_digit_positions == [2]
 
 
 def test_ambiguous_one_edit_asks_for_the_differing_digits() -> None:
@@ -191,14 +192,16 @@ async def test_a_wrong_digit_in_the_id_is_a_near_miss_not_a_match(ctx: ToolConte
     assert any(p.patient_id == "P00042" for p in result.candidates)
 
 
-async def test_a_repairable_misheard_id_finds_the_patient(ctx: ToolContext) -> None:
-    """One confusion edit that uniquely fits the letter is applied before /directory."""
+async def test_a_repairable_misheard_id_is_never_searched_for_the_caller(
+    ctx: ToolContext,
+) -> None:
+    """One confusion edit fits the letter; /directory still sees what the caller said."""
     result = await find_patient(
         ctx, FindPatientInput(name="Marta Ruiz López", national_id="12645678Z")
     )
-    assert result.status == "found"
-    assert result.patient is not None
-    assert result.patient.patient_id == "P00042"
+    assert result.status == "not_found"
+    assert result.patient is None
+    assert any(p.patient_id == "P00042" for p in result.candidates)
 
 
 async def test_a_line_shared_by_two_patients_is_still_ambiguous(ctx: ToolContext) -> None:
@@ -382,3 +385,14 @@ async def test_every_other_field_is_still_the_caller_s_to_dictate(ctx: ToolConte
         result = await build_registration(ctx, a_registration(**{field_name: blank}))
         assert result.action is None, field_name
         assert result.rejection is not None and result.rejection.detail.startswith(f"{field_name}:")
+
+
+async def test_a_repairable_id_is_re_asked_never_registered(ctx: ToolContext) -> None:
+    """A 1-edit reading fits the letter; the record still needs the digits from the caller."""
+    result = await build_registration(ctx, a_registration(national_id="12645678Z"))
+
+    assert result.action is None
+    assert result.rejection is not None
+    assert result.rejection.detail.startswith("national_id:")
+    assert "12345678Z" not in result.rejection.detail
+    assert "position" in result.rejection.detail
