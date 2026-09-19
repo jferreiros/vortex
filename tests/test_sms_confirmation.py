@@ -618,7 +618,11 @@ async def test_sms_events_never_persist_the_number_or_the_body(
     await session.close()
 
     logged = sms_events(sms_settings, "CA-sms-privacy")
-    assert [event["kind"] for event in logged] == ["sms.sending", "sms.dry_run"]
+    assert [event["kind"] for event in logged] == [
+        "sms.sending",
+        "sms.dry_run",
+        "sms.reminder_scheduled",
+    ]
     for event in logged:
         assert event["to"] == mask_phone(CALLER)
         assert "body" not in event

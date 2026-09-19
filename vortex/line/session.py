@@ -57,6 +57,11 @@ from vortex.line.sms import (
     render_confirmation_text,
     resolve_details,
 )
+from vortex.line.sms_reminders import (
+    cancel_book_reminders,
+    reminder_store_from_settings,
+    schedule_book_reminder,
+)
 from vortex.line.submit import (
     DryRunSubmitClient,
     SubmitApi,
@@ -751,6 +756,62 @@ class CallSession:
             forced=forced,
             **payload,
         )
+        if self.settings.sms_day_before_reminders:
+            await self._sync_reminders(action, to=to, details=details)
+
+    async def _sync_reminders(self, action: Action, *, to: str, details: object) -> None:
+        """Queue or drop the day-before reminder. Never raises into the call."""
+        try:
+            store = reminder_store_from_settings(self.settings)
+            lead = timedelta(hours=float(self.settings.sms_reminder_lead_hours))
+            if isinstance(action, BookAction):
+                when = getattr(details, "when", None)
+                if when is None:
+                    self.ctx.log.event(
+                        "sms.reminder_skipped",
+                        reason="no_when",
+                        action_kind=action.kind,
+                    )
+                    return
+                reminder = await schedule_book_reminder(
+                    store,
+                    to=to,
+                    when=when,
+                    provider_name=getattr(details, "provider_name", "") or "",
+                    location_name=getattr(details, "location_name", "") or "",
+                    provider_id=getattr(details, "provider_id", "") or "",
+                    location_id=getattr(details, "location_id", "") or "",
+                    patient_id=getattr(action, "patient_id", "") or "",
+                    lead=lead,
+                )
+                if reminder is None:
+                    self.ctx.log.event(
+                        "sms.reminder_skipped",
+                        reason="within_lead_window",
+                        action_kind=action.kind,
+                    )
+                    return
+                self.ctx.log.event(
+                    "sms.reminder_scheduled",
+                    send_at=reminder.send_at,
+                    appointment_at=reminder.appointment_at,
+                    to=mask_phone(to),
+                )
+                return
+            if isinstance(action, CancelAction):
+                count = await cancel_book_reminders(
+                    store,
+                    to=to,
+                    appointment_at=getattr(details, "when", None),
+                    appointment_id=action.appointment_id,
+                )
+                self.ctx.log.event(
+                    "sms.reminder_cancelled",
+                    count=count,
+                    appointment_id=action.appointment_id,
+                )
+        except Exception as exc:  # noqa: BLE001 - reminders must not break the call
+            self.ctx.log.event("sms.reminder_failed", error=repr(exc))
 
     async def _drain_sms(self) -> None:
         if not self._sms_pending:
