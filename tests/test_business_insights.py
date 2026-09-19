@@ -384,6 +384,31 @@ def test_business_insights_bundles_everything_and_lists_data_gaps() -> None:
     assert len(out["data_gaps"]) >= 1
 
 
+def test_is_real_call_excludes_every_offline_artefact() -> None:
+    real = _card("CA-fake-123-00", "book")
+    probe = _card("probe:adversarial.sales_call", "no-action", "out_of_scope")
+    corpus_case = _card("adversarial-082c314b2882", "book")
+    corpus_case.clinic = "synthetic-data"
+    demo = _card("demo-book-1789820978", "book")
+    demo.voice = "demo"
+    assert bi.is_real_call(real) is True
+    assert bi.is_real_call(probe) is False
+    assert bi.is_real_call(corpus_case) is False
+    assert bi.is_real_call(demo) is False
+
+
+def test_business_insights_drops_probes_corpus_cases_and_demo_calls() -> None:
+    real = _card("CA-fake-1", "book")
+    real.action_payload = {"provider_id": "PR01"}
+    probe = _card("probe:x", "no-action", "out_of_scope")
+    corpus_case = _card("the_rules-abc123", "no-action", "no_availability")
+    corpus_case.clinic = "synthetic-data"
+    demo = _card("demo-book-1", "book")
+    demo.voice = "demo"
+    out = bi.business_insights([real, probe, corpus_case, demo])
+    assert out["calls_considered"] == 1
+
+
 # ---------------------------------------------------------------------------
 # 5. Cancellations: reused vs. lost
 # ---------------------------------------------------------------------------
