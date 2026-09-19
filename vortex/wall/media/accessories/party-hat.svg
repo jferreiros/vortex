@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="500" height="500" viewBox="59.87 13.32 125.3 125.3" fill="none">
+  <!-- Vorty accessory: party cone hat sitting on the hairline -->
+  <g id="accessory-party-hat">
+    <path d="m123 14 21 24h-42z" fill="url(#ph-cone)"/>
+    <path d="m110 24.4 26 0.4" stroke="#F2C94C" stroke-width="2.5"/>
+    <path d="m105.5 31 35 0.6" stroke="#F2C94C" stroke-width="2.5"/>
+    <path d="m101.5 38-0.5 0h44" stroke="#F2C94C" stroke-width="2.5"/>
+    <path d="m101 38h44l3 3h-50z" fill="#183828"/>
+    <circle cx="123" cy="19" r="4" fill="url(#ph-pom)"/>
+  </g>
+  <defs>
+    <linearGradient id="ph-cone" x1="123" x2="123" y1="14" y2="38" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#37784B" offset="0"/>
+      <stop stop-color="#183828" offset="1"/>
+    </linearGradient>
+    <radialGradient id="ph-pom" cx="0" cy="0" r="1" gradientTransform="translate(123 19) scale(4)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FEFEFF" offset="0"/>
+      <stop stop-color="#B1B1B1" offset="1"/>
+    </radialGradient>
+  </defs>
+</svg>
