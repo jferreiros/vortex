@@ -520,7 +520,14 @@ class CallSession:
         self._spawn(self.submit_accepted_refusal())
 
     async def submit_accepted_refusal(self) -> SubmitResult | None:
-        """Send the stored refusal once, the moment the caller accepted it."""
+        """Send the stored refusal once, the moment the caller accepted it.
+
+        A refusal the caller has accepted is the whole ending of the call: there
+        is no second action to draw up and no question left to ask. So unlike
+        ``submit_confirmed_prepared`` this arms the hangup as soon as the
+        platform holds it, and the pipeline ends after the goodbye instead of
+        running to the three-minute cap.
+        """
         memory = self.memory
         if self.has_accepted_submission or memory.last_rejection is None:
             return None
@@ -534,7 +541,10 @@ class CallSession:
             reason=memory.last_rejection.reason,
             route=action_route(action),
         )
-        return await self.submit(action)
+        result = await self.submit(action)
+        if result.status in ACCEPTED_STATUSES:
+            self.arm_hangup("submit_accepted")
+        return result
 
     async def submit_confirmed_prepared(self, trigger: str) -> SubmitResult | None:
         """Send the prepared action the caller has agreed to, once.
