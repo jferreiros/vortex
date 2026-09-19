@@ -181,11 +181,13 @@ def preview_config(settings: Any, payload: dict[str, Any] | None) -> VoiceConfig
 # --- the Try button ----------------------------------------------------------
 
 
-def synthesize_preview(settings: Any, cfg: VoiceConfig) -> bytes:
-    """One MP3 of the greeting, straight through Google TTS — no pipeline.
+def synthesize(
+    settings: Any, cfg: VoiceConfig, text: str, *, language_code: str, voice_name: str
+) -> bytes:
+    """One MP3 of ``text``, straight through Google TTS — no pipeline.
 
     Uses the same credentials the pipeline would. Raises when there are none:
-    the endpoint turns that into a 503 the front can show.
+    callers turn that into a 503 or a <Say> fallback.
     """
     from google.cloud import texttospeech
     from google.oauth2 import service_account
@@ -203,13 +205,22 @@ def synthesize_preview(settings: Any, cfg: VoiceConfig) -> bytes:
         client = texttospeech.TextToSpeechClient()
 
     response = client.synthesize_speech(
-        input=texttospeech.SynthesisInput(text=PREVIEW_TEXT),
-        voice=texttospeech.VoiceSelectionParams(
-            language_code="es-ES", name=apply_gender(PREVIEW_VOICE, cfg.voice)
-        ),
+        input=texttospeech.SynthesisInput(text=text),
+        voice=texttospeech.VoiceSelectionParams(language_code=language_code, name=voice_name),
         audio_config=texttospeech.AudioConfig(
             audio_encoding=texttospeech.AudioEncoding.MP3,
             speaking_rate=speaking_rate(cfg),
         ),
     )
     return response.audio_content
+
+
+def synthesize_preview(settings: Any, cfg: VoiceConfig) -> bytes:
+    """One MP3 of the greeting for the wall's Try button."""
+    return synthesize(
+        settings,
+        cfg,
+        PREVIEW_TEXT,
+        language_code="es-ES",
+        voice_name=apply_gender(PREVIEW_VOICE, cfg.voice),
+    )
