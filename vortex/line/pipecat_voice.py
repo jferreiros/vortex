@@ -75,6 +75,7 @@ from vortex.conversation.turns import (
 from vortex.line import voice_config
 from vortex.line.aic_filter import build_audio_in_filter
 from vortex.line.llm_timeout import first_token_guard
+from vortex.line.recording import recording_serializer
 from vortex.line.session import CallSession
 from vortex.observability.tracing import traced_openai_llm_service
 from vortex.settings import GEMINI_TTS_LANGUAGES
@@ -174,7 +175,6 @@ async def run_pipecat_call(
     from pipecat.pipeline.task import PipelineParams, PipelineTask
     from pipecat.processors.aggregators.llm_context import LLMContext
     from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
-    from pipecat.serializers.twilio import TwilioFrameSerializer
     from pipecat.services.llm_service import FunctionCallParams
     from pipecat.services.openai.llm import OpenAILLMService
     from pipecat.services.soniox.stt import SonioxContextObject, SonioxSTTService
@@ -188,11 +188,9 @@ async def run_pipecat_call(
     ctx = session.ctx
     ctx.log.event("voice.mode", mode="pipecat", **_providers(settings))
 
-    serializer = TwilioFrameSerializer(
-        stream_sid=session.stream_sid,
-        call_sid=session.call_id,
-        params=TwilioFrameSerializer.InputParams(auto_hang_up=False),
-    )
+    # The standard Twilio serializer, teeing every inbound media frame into
+    # this call's recording buffer before it decodes for the pipeline.
+    serializer = recording_serializer(session)
     # Optional AICFilter (Quail 8 kHz) before Silero/Soniox. Default off —
     # only enable after entity CER drops on the T54 5 dB bench.
     audio_in_filter = build_audio_in_filter(settings)
@@ -844,10 +842,17 @@ def _CallLogObserver(  # noqa: N802 - factory that returns an observer
     """
     from pipecat.frames.frames import (
         InputAudioRawFrame,
+        InterruptionFrame,
+        LLMFullResponseEndFrame,
+        LLMFullResponseStartFrame,
         MetricsFrame,
         OutputAudioRawFrame,
         TranscriptionFrame,
         TTSTextFrame,
+        UserStartedSpeakingFrame,
+        UserStoppedSpeakingFrame,
+        VADUserStartedSpeakingFrame,
+        VADUserStoppedSpeakingFrame,
     )
     from pipecat.metrics.metrics import (
         LLMUsageMetricsData,
@@ -856,9 +861,14 @@ def _CallLogObserver(  # noqa: N802 - factory that returns an observer
     )
     from pipecat.observers.base_observer import BaseObserver, FramePushed
 
+    from vortex.line.turnclock import TurnClock
+
     policy = confirmations if confirmations is not None else ConfirmationPolicy()
     # Frame ids already counted. Per observer, so per socket.
     metered_frames: set[int] = set()
+    # Wall-clock bounds for ``turn.metrics``: caller speech start, the decided
+    # turn end, and the agent answer's open. One per call.
+    clock = TurnClock()
 
     def record_usage(frame: Any) -> None:
         if frame.id in metered_frames:
@@ -884,7 +894,8 @@ def _CallLogObserver(  # noqa: N802 - factory that returns an observer
             if isinstance(frame, MetricsFrame):
                 record_usage(frame)
             elif isinstance(frame, TranscriptionFrame):
-                session.ctx.log.user_turn(frame.text)
+                started_ts, ended_ts = clock.user_bounds()
+                session.ctx.log.user_turn(frame.text, started_ts=started_ts, ended_ts=ended_ts)
                 decision = policy.on_user_text(
                     frame.text, prepared=session.memory.prepared is not None
                 )
@@ -897,8 +908,19 @@ def _CallLogObserver(  # noqa: N802 - factory that returns an observer
                 ):
                     session.accept_refusal(f"caller accepted the refusal: {frame.text.strip()}")
             elif isinstance(frame, TTSTextFrame):
-                session.ctx.log.assistant_turn(frame.text)
+                started_ts, ended_ts, ttfb_ms = clock.assistant_bounds()
+                session.ctx.log.assistant_turn(
+                    frame.text, started_ts=started_ts, ended_ts=ended_ts, ttfb_ms=ttfb_ms
+                )
                 policy.on_assistant_text(frame.text)
+            elif isinstance(frame, (VADUserStartedSpeakingFrame, UserStartedSpeakingFrame)):
+                clock.on_user_speech_start()
+            elif isinstance(frame, (UserStoppedSpeakingFrame, VADUserStoppedSpeakingFrame)):
+                clock.on_user_turn_end()
+            elif isinstance(frame, LLMFullResponseStartFrame):
+                clock.on_agent_response_start()
+            elif isinstance(frame, (LLMFullResponseEndFrame, InterruptionFrame)):
+                clock.on_agent_response_end()
             elif isinstance(frame, InputAudioRawFrame):
                 session.media_frames_in += 1
             elif isinstance(frame, OutputAudioRawFrame):

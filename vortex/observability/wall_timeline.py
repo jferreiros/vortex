@@ -11,9 +11,78 @@ watching that one field, never by re-fetching a different item.
 from __future__ import annotations
 
 from dataclasses import asdict
+from datetime import UTC, datetime
 from typing import Any
 
 from vortex.observability.view import build_call
+
+#: How long after its last ``turn.assistant`` a call still reads as the agent
+#: speaking rather than listening for the caller. An utterance of a sentence
+#: or two runs a few seconds; past this the line belongs to the caller.
+SPEAKING_FOR_S = 4.0
+
+
+def _parse_ts(value: Any) -> datetime | None:
+    try:
+        stamp = datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
+    return stamp if stamp.tzinfo else stamp.replace(tzinfo=UTC)
+
+
+def call_phase(
+    events: list[dict[str, Any]], call_id: str, *, now: datetime | None = None
+) -> str:
+    """Where the call is right now, for the live scatter's animation states.
+
+    The vocabulary is the one the wall already animates by:
+
+    - ``connecting`` - the socket opened, nothing has happened yet;
+    - ``thinking`` - the caller's turn or a tool result just landed and the
+      model is composing;
+    - ``working`` - a tool call is still open;
+    - ``speaking`` - the agent's last turn is fresh enough to still be playing;
+    - ``listening`` - the agent said its piece, the line is the caller's;
+    - ``ended`` - ``call.ended`` (or the summary that follows it) was seen.
+
+    Derived from the same JSONL events the timeline replays, so the two views
+    never disagree. The last activity wins, with one exception: a tool still
+    open outranks a stale turn, because the caller hears "working on it".
+    """
+    now = now or datetime.now(UTC)
+    open_tools = 0
+    last: str | None = None  # "user" | "assistant" | "tool"
+    last_ts: Any = None
+    for event in events:
+        if str(event.get("call_id") or "") != call_id:
+            continue
+        kind = event.get("kind")
+        if kind in {"call.ended", "call.summary"}:
+            return "ended"
+        if kind == "tool.called":
+            open_tools += 1
+            last, last_ts = "tool", event.get("ts")
+        elif kind in {"tool.returned", "tool.failed"}:
+            open_tools = max(open_tools - 1, 0)
+            last, last_ts = "tool", event.get("ts")
+        elif kind == "turn.user":
+            last, last_ts = "user", event.get("ts")
+        elif kind == "turn.assistant":
+            last, last_ts = "assistant", event.get("ts")
+
+    if last == "assistant":
+        stamp = _parse_ts(last_ts)
+        if stamp is not None and (now - stamp).total_seconds() < SPEAKING_FOR_S:
+            return "speaking"
+        if not open_tools:
+            return "listening"
+    if open_tools:
+        return "working"
+    if last in {"user", "tool"}:
+        return "thinking"
+    if last == "assistant":
+        return "listening"
+    return "connecting"
 
 
 def build_timeline(events: list[dict[str, Any]], call_id: str) -> list[dict[str, Any]]:

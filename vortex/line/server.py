@@ -1,9 +1,10 @@
 """The WebSocket server the platform dials.
 
 Routes:
-- ``GET  /health``   liveness + which modes are active (never the key values)
-- ``GET  /calls``    recent call events grouped by call_id (feeds the live view)
-- ``WS   /ws``       one call per connection, Twilio Media Streams format
+- ``GET  /health``              liveness + which modes are active (never the key values)
+- ``GET  /calls``               recent call events grouped by call_id (feeds the live view)
+- ``GET  /recordings/{call_id}`` the finished call's audio, as a WAV attachment
+- ``WS   /ws``                  one call per connection, Twilio Media Streams format
 
 Per connection: accept -> read ``connected`` and ``start`` -> open a
 ``CallSession`` -> run the voice pipeline (pipecat, Gemini Live demo, or
@@ -22,9 +23,10 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import Body, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, PlainTextResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, Response
 
 from vortex.line import twilio, voice_config
+from vortex.line.recording import safe_call_id, wav_path_for
 from vortex.line.session import CallSession
 from vortex.line.sms_reminders import ReminderWorker, reminder_worker_status
 from vortex.observability.calllog import group_by_call, read_calls, read_recent
@@ -39,6 +41,25 @@ DESIGN_CSS = Path(__file__).resolve().parent.parent / "observability" / "design.
 
 class HandshakeError(RuntimeError):
     pass
+
+
+async def _close_session(session: CallSession, reason: str) -> None:
+    """Run ``session.close()`` to the end even if this task is cancelled.
+
+    A socket dying must not take the end-of-call bookkeeping down with it:
+    ``close`` writes the WAV, submits the fallback inside the 30-second
+    window and logs ``call.summary``. Some hosts cancel the handler task the
+    moment the socket closes (the test client does), and the first await
+    that truly suspends - the WAV write's ``to_thread`` - would otherwise
+    swallow the rest. Shielded and re-awaited, it finishes.
+    """
+    task = asyncio.ensure_future(session.close(reason=reason))
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            continue
+    task.result()  # re-raise whatever close() itself raised
 
 
 async def read_handshake(ws: WebSocket, *, max_messages: int = 5) -> twilio.StartPayload:
@@ -123,6 +144,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         events = await asyncio.to_thread(read_recent, settings.calls_log_path, limit)
         return {"calls": group_by_call(events)}
 
+    @app.get("/recordings/{call_id}")
+    async def call_recording(call_id: str) -> FileResponse:
+        """The finished call's audio: 8 kHz mono WAV, sent as an attachment.
+
+        404 while the call still runs and when no recording was ever written -
+        the WAV only exists once ``call.ended`` has flushed the buffer.
+        """
+        path = wav_path_for(call_id)
+        if path is None:
+            raise HTTPException(404, f"no recording for call {call_id}")
+        return FileResponse(
+            path, media_type="audio/wav", filename=f"{safe_call_id(call_id)}.wav"
+        )
+
     @app.get("/mic", response_class=HTMLResponse)
     async def mic() -> str:
         """Talk to the agent from a browser: mic in, agent audio out, Twilio wire."""
@@ -195,8 +230,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 reason = "crashed"
             finally:
                 # The submission window is still open for 30 s after the socket
-                # closes. close() submits the fallback if nothing went out.
-                await session.close(reason=reason)
+                # closes. close() submits the fallback if nothing went out -
+                # shielded, so a handler cancelled on disconnect cannot stop it.
+                await _close_session(session, reason)
                 log.info("call %s ended (%s)", session.call_id, reason)
                 notify_session(session)
 

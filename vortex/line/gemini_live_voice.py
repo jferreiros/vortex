@@ -27,6 +27,7 @@ from fastapi import WebSocket
 from vortex import tools as registry
 from vortex.conversation.prompt import GREETING, build_system_prompt
 from vortex.conversation.turns import TurnSettings, default_turn_settings
+from vortex.line.recording import recording_serializer
 from vortex.line.session import CallSession
 
 log = logging.getLogger(__name__)
@@ -127,7 +128,6 @@ async def run_gemini_live_call(
     from pipecat.pipeline.task import PipelineParams, PipelineTask
     from pipecat.processors.aggregators.llm_context import LLMContext
     from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
-    from pipecat.serializers.twilio import TwilioFrameSerializer
     from pipecat.transports.websocket.fastapi import (
         FastAPIWebsocketParams,
         FastAPIWebsocketTransport,
@@ -150,11 +150,8 @@ async def run_gemini_live_call(
         log.error("gemini-live mode needs GOOGLE_API_KEY; refusing to dial Google")
         raise RuntimeError("GOOGLE_API_KEY is required for VORTEX_VOICE_MODE=gemini-live")
 
-    serializer = TwilioFrameSerializer(
-        stream_sid=session.stream_sid,
-        call_sid=session.call_id,
-        params=TwilioFrameSerializer.InputParams(auto_hang_up=False),
-    )
+    # The standard Twilio serializer, teeing inbound media into the recording.
+    serializer = recording_serializer(session)
     transport = FastAPIWebsocketTransport(
         websocket=ws,
         params=FastAPIWebsocketParams(
@@ -227,22 +224,46 @@ async def run_gemini_live_call(
 
 
 def _CallLogObserver(session: CallSession):  # noqa: N802 - factory that returns an observer
-    """Log user/assistant text and count media frames from the frame stream."""
+    """Log user/assistant text, bound each turn for ``turn.metrics``, and
+    count media frames from the frame stream."""
     from pipecat.frames.frames import (
         InputAudioRawFrame,
+        InterruptionFrame,
+        LLMFullResponseEndFrame,
+        LLMFullResponseStartFrame,
         OutputAudioRawFrame,
         TranscriptionFrame,
         TTSTextFrame,
+        UserStartedSpeakingFrame,
+        UserStoppedSpeakingFrame,
+        VADUserStartedSpeakingFrame,
+        VADUserStoppedSpeakingFrame,
     )
     from pipecat.observers.base_observer import BaseObserver, FramePushed
+
+    from vortex.line.turnclock import TurnClock
+
+    clock = TurnClock()
 
     class Observer(BaseObserver):
         async def on_push_frame(self, data: FramePushed) -> None:
             frame = data.frame
             if isinstance(frame, TranscriptionFrame):
-                session.ctx.log.user_turn(frame.text)
+                started_ts, ended_ts = clock.user_bounds()
+                session.ctx.log.user_turn(frame.text, started_ts=started_ts, ended_ts=ended_ts)
             elif isinstance(frame, TTSTextFrame):
-                session.ctx.log.assistant_turn(frame.text)
+                started_ts, ended_ts, ttfb_ms = clock.assistant_bounds()
+                session.ctx.log.assistant_turn(
+                    frame.text, started_ts=started_ts, ended_ts=ended_ts, ttfb_ms=ttfb_ms
+                )
+            elif isinstance(frame, (VADUserStartedSpeakingFrame, UserStartedSpeakingFrame)):
+                clock.on_user_speech_start()
+            elif isinstance(frame, (UserStoppedSpeakingFrame, VADUserStoppedSpeakingFrame)):
+                clock.on_user_turn_end()
+            elif isinstance(frame, LLMFullResponseStartFrame):
+                clock.on_agent_response_start()
+            elif isinstance(frame, (LLMFullResponseEndFrame, InterruptionFrame)):
+                clock.on_agent_response_end()
             elif isinstance(frame, InputAudioRawFrame):
                 session.media_frames_in += 1
             elif isinstance(frame, OutputAudioRawFrame):
