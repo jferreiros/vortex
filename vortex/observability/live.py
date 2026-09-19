@@ -1017,17 +1017,7 @@ def _ensure_agenda() -> None:
             records.append(row)
             seen.add(row.patient_id)
     _AGENDA_PATIENTS = cal.patient_index_from_records(records)
-    booked = []
-    for record in records:
-        booked.extend(_sync_clinic(api_client.appointments(record.patient_id, when="all")))
-        if pack_client is not None:
-            booked.extend(_sync_clinic(pack_client.appointments(record.patient_id, when="all")))
-    ehr = cal.bookings_from_appointments(booked)
-    _AGENDA_BOOKINGS = cal.bookings_from_events(
-        cal.load_source_events(),
-        {row.appointment_id: row for row in ehr.values() if row.appointment_id},
-        base=ehr,
-    )
+    _AGENDA_BOOKINGS = cal.load_agenda_bookings(_AGENDA_CATALOGUE)
 
 
 _AGENDA_CATALOGUE = None
@@ -1057,11 +1047,12 @@ def wall_doctor_suggest_api(q: str = "") -> JSONResponse:
 @app.get("/api/wall/doctor-agenda")
 def wall_doctor_agenda_api(
     name: str = "",
+    specialty: str = "",
     week: str | None = None,
     month: str | None = None,
     today: str | None = None,
 ) -> JSONResponse:
-    """One doctor's month grid and today's visits. Login is a name, never a roster."""
+    """Month grid of booked visits. Doctor is optional; specialty is enough."""
     global _AGENDA_CATALOGUE, _AGENDA_PATIENTS, _AGENDA_BOOKINGS
     _ensure_agenda()
     catalogue = _AGENDA_CATALOGUE
@@ -1088,10 +1079,11 @@ def wall_doctor_agenda_api(
         except ValueError:
             month_date = None
     calendars = cal.build_calendars(catalogue, _AGENDA_BOOKINGS or {})
-    payload = cal.doctor_agenda(
+    payload = cal.clinic_agenda(
         calendars,
         _AGENDA_PATIENTS,
         name=name,
+        specialty_id=specialty,
         today=today_date,
         week=week_date,
         month=month_date,
