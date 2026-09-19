@@ -300,41 +300,6 @@ def agent_page(slug: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-@ui.page("/calls/live")
-def calls_live_page() -> None:
-    if not _guard():
-        return
-    ui.page_title("Vortex · Live")
-    cards, health = live._load_cards()
-    with console_page(
-        "/calls/live",
-        "Live",
-        explain.LIVE_SUB,
-        health=health,
-        clinic=live.CLINIC_NAME,
-        who=_who(),
-        controls=lambda: ui.link("Open the wall ↗", "/wall", new_tab=True).classes("pill"),
-    ) as body:
-        stage = body
-        rendered: dict[str, Any] = {"sig": None}
-
-        def redraw() -> None:
-            cards, health = live._load_cards()
-            sig = live._signature(cards, health)
-            if sig == rendered["sig"]:
-                return
-            rendered["sig"] = sig
-            featured = live._feature(cards)
-            stage.clear()
-            with stage:
-                live._live_strip(cards, featured)
-                live._workflow_panel(featured)
-
-        redraw()
-        ui.timer(0.6, redraw)
-        live._footer()
-
-
 # ---------------------------------------------------------------------------
 # Patients
 # ---------------------------------------------------------------------------

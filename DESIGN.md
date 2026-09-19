@@ -372,12 +372,12 @@ only blue in the system and it appears only on keyboard focus.
 
 ## Typography
 
-- **Display**: SF Pro Rounded at weights 500 and 600, for `display-xl`,
-  `display-lg` and `heading-lg`. The CSS stack is `"SF Pro Rounded",
-  ui-rounded, "Nunito", system-ui`. Nunito loads from Google Fonts as the
-  substitute on Windows and Linux.
-- **Body**: `ui-sans-serif` then `system-ui`. Every role from 12px to 20px.
-- **Code**: `ui-monospace` then SFMono, Menlo, Consolas.
+- **One typeface: Geist** (Google Fonts), weights 400 to 700. Display roles
+  use weight 600 with tight tracking (-0.02em on `display-xl`, -0.015em on
+  `display-lg`). Body roles use 400 and 500. The system stack is the
+  fallback, never the face: a system font as the primary face is the "gave
+  up on typography" signal the design audit flags.
+- **Code: Geist Mono**, then `ui-monospace`, SFMono, Menlo, Consolas.
 
 | Token | Size | Weight | Line height | Use |
 | --- | --- | --- | --- | --- |
@@ -545,6 +545,25 @@ The console speaks the clinic's language and the platform's, never the code's.
   `code-sm` chip and `explain.REASON_TEXT` says it in one sentence.
 - Every status is a dot **and** a word. Colour alone never carries meaning.
 - Tool names appear in `code-sm` after their plain description, never alone.
+
+## The Live flow (projector theme)
+
+`/wall` and `/calls/live` are the one place the system goes dark: a
+projector in a lit room needs it. `live.css` redefines the tokens on
+`body.theme-live` (canvas `#0a0a0a`, ink `#f5f5f5`, hairlines at 10% white)
+and adds one accent, `--now` (`#e8fbff` with a cool glow), used only for what
+is happening this second: the speaker's ring, the current stage's knot, the
+running tool card.
+
+Three acts, left to right: **Conversation** (avatars VX and PT, bubbles at
+18-21px, the speaker breathes), **Workflow** (a spine with four stage knots;
+tool cards attach under their stage as they happen), **Outcome** (the light
+verdict card, 44-52px title, it lands once when the call ends). A footer
+strip lists the other lines and four counters.
+
+Rendering is incremental (`liveflow.py`): a turn or a tool card is appended
+once and animates in once; the verdict rebuilds only when its words change.
+Never rebuild the page on a tick.
 
 ## The wall, specifically
 

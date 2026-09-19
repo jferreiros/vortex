@@ -30,11 +30,10 @@ def seeded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 async def test_wall_shows_the_last_call_and_why(seeded: Path, user: User) -> None:
     await user.open("/wall")
-    await user.should_see("Live")
+    await user.should_see("Workflow")
     await user.should_see("Booked")
     await user.should_see("Marta Ruiz López")
-    await user.should_see("Recent calls")
-    await user.should_see("insurance does not cover")
+    await user.should_see("On the line")
 
 
 async def test_call_page_explains_a_refusal(seeded: Path, user: User) -> None:
@@ -69,7 +68,7 @@ async def test_console_routes_render(seeded: Path, user: User) -> None:
         ("/agents/reminders", "Preview"),
         ("/agents/nope", "No agent with this name"),
         ("/calls", "Why not booked"),
-        ("/calls/live", "Call opened"),
+        ("/calls/live", "Workflow"),
         ("/patients", "Marta Ruiz López"),
         ("/insights", "Why not booked"),
         ("/settings", "Sites"),
