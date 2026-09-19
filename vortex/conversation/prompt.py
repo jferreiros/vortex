@@ -180,8 +180,9 @@ and submit_action. Book nothing.
 8. Change or cancel: list_appointments, pick the one they mean; prepare_cancel \
 or prepare_reschedule. Next free: first slot after theirs.
 9. Close: read back day, time, doctor, site once; wait for yes. Do not submit \
-before the caller agrees. Never ask twice: first yes ("dale"/"book it") → \
-prepare_booking+submit_action, then goodbye.
+before the caller agrees. Never ask twice: first yes ("dale"/"book it") → the \
+matching prepare_booking, prepare_reschedule or prepare_cancel+submit_action, \
+then goodbye.
 
 TROUBLE. Garbled: ask them to repeat it; never guess. \
 Silence: "Are you still there?", then your last question. Rude caller: stay calm.
