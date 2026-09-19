@@ -24,7 +24,7 @@
  * no brand colour. Status uses the traffic-light trio and nothing else.
  */
 
-@import url("https://fonts.googleapis.com/css2?family=Nunito:wght@500;600&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap");
 
 /* ------------------------------------------------------------------ */
 /* Tokens                                                              */
@@ -55,13 +55,13 @@
   --terminal-green: #27c93f;
 
   /* font families */
-  --font-display: "SF Pro Rounded", ui-rounded, "Nunito", system-ui, -apple-system, sans-serif;
-  --font-body: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --font-display: "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-body: "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
   /* typography: `font` shorthand values, ready for `font: var(--text-…)` */
-  --text-display-xl: 500 36px/1.11 var(--font-display);
-  --text-display-lg: 500 30px/1.2 var(--font-display);
+  --text-display-xl: 600 36px/1.11 var(--font-display);
+  --text-display-lg: 600 30px/1.2 var(--font-display);
   --text-heading-lg: 600 24px/1.33 var(--font-display);
   --text-heading-md: 500 20px/1.4 var(--font-body);
   --text-heading-sm: 500 18px/1.56 var(--font-body);
@@ -148,10 +148,12 @@ figure {
 
 h1 {
   font: var(--text-display-xl);
+  letter-spacing: -0.02em;
 }
 
 h2 {
   font: var(--text-display-lg);
+  letter-spacing: -0.015em;
 }
 
 h3 {
@@ -278,8 +280,8 @@ svg {
 /* Text roles                                                          */
 /* ------------------------------------------------------------------ */
 
-.display-xl { font: var(--text-display-xl); color: var(--ink); }
-.display-lg { font: var(--text-display-lg); color: var(--ink); }
+.display-xl { font: var(--text-display-xl); color: var(--ink); letter-spacing: -0.02em; }
+.display-lg { font: var(--text-display-lg); color: var(--ink); letter-spacing: -0.015em; }
 .heading-lg { font: var(--text-heading-lg); color: var(--ink); }
 .heading-md { font: var(--text-heading-md); color: var(--ink); }
 .heading-sm { font: var(--text-heading-sm); color: var(--ink); }
@@ -890,6 +892,7 @@ table.ds td.num {
 .page-head .title {
   font: var(--text-heading-lg);
   color: var(--ink);
+  letter-spacing: -0.015em;
 }
 
 .page-head .sub {
@@ -1827,6 +1830,23 @@ table.ds td.num {
   border-radius: var(--rounded-sm);
 }
 
+button.cal-cell,
+.cal-cell.q-btn {
+  height: 18px !important;
+  min-height: 18px !important;
+  min-width: 0 !important;
+  padding: 0 !important;
+  border-radius: var(--rounded-sm) !important;
+  font-size: 0 !important;
+  color: transparent !important;
+}
+
+button.cal-cell .q-btn__content,
+.cal-cell.q-btn .q-btn__content {
+  width: 100%;
+  height: 100%;
+}
+
 .cal-cell.free {
   background: var(--surface-soft);
   border: 1px solid var(--hairline);
@@ -1834,10 +1854,78 @@ table.ds td.num {
 
 .cal-cell.booked {
   background: var(--ink);
+  cursor: pointer;
+}
+
+.cal-cell.booked.on {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
 }
 
 .cal-cell.off {
   background: transparent;
+}
+
+.page-head .button-quiet {
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.cal-grid-week {
+  min-width: 0;
+  width: 100%;
+}
+
+.cal-grid-week .cal-cell,
+.cal-grid-week button.cal-cell,
+.cal-grid-week .cal-cell.q-btn {
+  height: 28px;
+  min-height: 28px !important;
+}
+
+.cal-week {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-md);
+}
+
+.cal-week-label {
+  font: var(--text-body-sm-strong);
+  color: var(--ink);
+  text-align: center;
+  flex: 1 1 auto;
+}
+
+.cal-today-list {
+  display: grid;
+  gap: var(--space-lg);
+}
+
+.cal-brief {
+  margin: 0;
+  max-width: 40rem;
+}
+
+.cal-brief .section-title {
+  margin-bottom: var(--space-md);
+}
+
+.cal-brief-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-md);
+}
+
+.cal-note {
+  max-width: 56ch;
+  margin-top: var(--space-xs);
+}
+
+.cal-brief .kicker {
+  margin-top: var(--space-md);
 }
 </style>
 <style>

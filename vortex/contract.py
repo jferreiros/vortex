@@ -447,6 +447,11 @@ class Appointment(_Record):
     appointment_type_id: str
     start: datetime  # platform: start_time
     duration_minutes: int = 15
+    #: Ours, not the platform's: the wire carries only provider_id, and the
+    #: model speaks names. ``list_appointments`` fills this from the catalogue
+    #: so the doctor on the record is a name the caller's words can be checked
+    #: against - call 096af75d died to a provider name the model invented.
+    provider_name: str = ""
     #: Ours, not the platform's: ``AppointmentOut`` carries no status, so on
     #: live data this is always "scheduled". What can be cancelled or moved is
     #: what ``when=upcoming`` returns, not what this field says.
@@ -625,6 +630,11 @@ class AvailabilityResult(BaseModel):
     slots: list[Slot] = Field(default_factory=list)
     blocked: list[BlockedProvider] = Field(default_factory=list)
     appointment_type: AppointmentTypeRecord | None = None
+    #: Filled only when ``slots`` is empty and no rule blocked anyone: the
+    #: closest free slots outside the asked window that keep every other
+    #: constraint (problem 7). Offer them; book one only if the caller agrees.
+    #: Empty together with ``slots`` and ``blocked`` means the calendar is full.
+    nearest: list[Slot] = Field(default_factory=list)
     rejection: Rejection | None = None
     widened: bool = Field(
         default=False, description="True when widen_days triggered a further search."
