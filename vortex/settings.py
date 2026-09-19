@@ -398,6 +398,23 @@ class Settings:
         default_factory=lambda: _env("TWILIO_MESSAGING_SERVICE_SID")
     )
     twilio_from_number: str = field(default_factory=lambda: _env("TWILIO_FROM_NUMBER"))
+    # When set, every confirmation goes here instead of the caller's from_number.
+    # Hackathon/demo only: leave empty in production so each caller gets their own text.
+    sms_force_to: str = field(default_factory=lambda: _env("VORTEX_SMS_FORCE_TO"))
+    # Also text the day before the slot (same opt-in as confirmations). Default on.
+    sms_day_before_reminders: bool = field(
+        default_factory=lambda: _env_flag("VORTEX_SMS_DAY_BEFORE", "true")
+    )
+    # How far ahead of the slot the reminder fires. 24 = one day before.
+    # Lower it in demos (e.g. 0.01) to exercise the worker without waiting.
+    sms_reminder_lead_hours: float = field(
+        default_factory=lambda: float(_env("VORTEX_SMS_REMINDER_LEAD_HOURS", "24") or "24")
+    )
+    # JSON file for pending day-before reminders. Empty = next to the calls log.
+    sms_reminders_path: str = field(default_factory=lambda: _env("VORTEX_SMS_REMINDERS_PATH"))
+    sms_reminder_poll_secs: float = field(
+        default_factory=lambda: float(_env("VORTEX_SMS_REMINDER_POLL_SECS", "30") or "30")
+    )
 
     @property
     def clinic_is_live(self) -> bool:
@@ -609,6 +626,9 @@ class Settings:
             "langfuse_environment": self.langfuse_environment,
             "geocoder": self.geocoder or ("nominatim" if self.geocoder_url else ""),
             "sms_confirmations": self.sms_confirmations,
+            "sms_force_to_set": bool(self.sms_force_to),
+            "sms_day_before_reminders": self.sms_day_before_reminders,
+            "sms_reminder_lead_hours": self.sms_reminder_lead_hours,
             "has_twilio_sms": bool(
                 self.twilio_account_sid
                 and self.twilio_auth_token
