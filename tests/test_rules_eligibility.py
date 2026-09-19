@@ -17,7 +17,7 @@ from vortex.contract import MADRID, CheckEligibilityInput, FindPatientInput, Too
 from vortex.identity.tools import find_patient
 from vortex.observability.calllog import CallLog
 from vortex.rules import eligibility
-from vortex.rules.tools import NO_RECORD_NOTE, check_eligibility
+from vortex.rules.tools import NO_RECORD_SKIPPED, check_eligibility
 
 
 @pytest.fixture
@@ -244,6 +244,7 @@ async def test_the_reason_submitted_is_the_restriction_id_verbatim(
     assert verdict.rejection.reason == restriction
     assert verdict.rejection.reason == avail.blocked[0].restriction
     assert verdict.note == ""
+    assert verdict.skipped_checks == []
 
 
 @pytest.mark.asyncio
@@ -405,7 +406,8 @@ async def test_a_missing_record_is_logged_and_noted_rather_than_passed_over(tmp_
     assert clinic.directory_calls == [], "there is no legal query to make without a number"
     # Standing down is not a refusal: /availability is the authority when the
     # record is not in hand, and it applies the same rules server-side.
-    assert verdict.note == NO_RECORD_NOTE
+    assert verdict.skipped_checks == NO_RECORD_SKIPPED
+    assert verdict.note == ""
     events = [e for e in logged(ctx) if e["kind"] == "rules.patient_missing"]
     assert events and events[0]["patient_id"] == "P00042"
     assert events[0]["searched_phone"] is False
@@ -422,6 +424,6 @@ async def test_an_id_that_cannot_be_placed_is_looked_up_once(tmp_path):
     calls_after_first = len(clinic.directory_calls)
     second = await check_eligibility(ctx, args)
 
-    assert first.note == NO_RECORD_NOTE
-    assert second.note == NO_RECORD_NOTE
+    assert first.skipped_checks == NO_RECORD_SKIPPED
+    assert second.skipped_checks == NO_RECORD_SKIPPED
     assert len(clinic.directory_calls) == calls_after_first == 1

@@ -227,7 +227,9 @@ and the transport can run a whole call tonight.
 - Live: set `PLATFORM_API_KEY` and `PLATFORM_API_BASE_URL`. `vortex/clinic/client.py`,
   `vortex/contract.py` and the fixtures follow `docs/api/openapi.json`, the
   platform's own spec. `make try-api` hits every read endpoint and saves each
-  raw response under `api_results/`, so a field-name drift shows up in minutes.
+  response under `api_results/` with the patient fields replaced by
+  `[redacted]`, so a field-name drift shows up in minutes and no patient data
+  lands on the disk.
 
 ## Tunnel and endpoint
 

@@ -668,15 +668,23 @@ class CheckEligibilityInput(BaseModel):
     insurer: str | None = None
 
 
+#: Patient-record rules ``check_eligibility`` can stand down when the directory
+#: record is not in hand. Allowance is never in this list: only ``/availability``
+#: names it, with or without a record.
+SkippedEligibilityCheck = Literal["age", "referral"]
+
+
 class EligibilityVerdict(BaseModel):
     allowed: bool
     rejection: Rejection | None = None
     # Providers that can serve the same request when the named one cannot.
     redirect_to: list[ProviderRecord] = Field(default_factory=list)
-    # What the verdict could not be sure of. Set when the directory record was
-    # not in hand, so the rules read off it (age, referral, allowance) stood
-    # down and only /availability answered. Never a refusal on its own.
+    # Spoken-plan resolution hint (insurer id to reuse). Never a refusal.
     note: str = ""
+    # Patient-record rules that stood down because the directory record was not
+    # in hand, so only /availability answered them. Empty when the record was
+    # available. Never a refusal on its own.
+    skipped_checks: list[SkippedEligibilityCheck] = Field(default_factory=list)
 
 
 class TriageInput(BaseModel):

@@ -58,6 +58,7 @@ from vortex.contract import (
     PatientRecord,
     ProviderMatch,
     Rejection,
+    SkippedEligibilityCheck,
     ToolContext,
     TriageInput,
     TriageResult,
@@ -67,6 +68,7 @@ from vortex.contract import (
 from vortex.identity import tools as identity
 from vortex.rules import eligibility, facts, geo
 from vortex.rules import triage as triage_table
+from vortex.settings import Settings
 
 _TITLES = {"dr", "dra", "d", "doctor", "doctora"}
 _TYPO_MATCH_CUTOFF = 0.8
@@ -91,6 +93,14 @@ INSURANCE_REASONS: frozenset[str] = frozenset(
 #: them on whichever provider it was asked about, but no other provider in the
 #: specialty escapes them, so there is nobody to redirect to.
 _PLAN_WIDE_REASONS: frozenset[str] = frozenset({"insurer_referral_required", "allowance_exhausted"})
+
+
+def _settings_of(ctx: ToolContext) -> Settings:
+    """The socket's Settings. ``CallSession.open`` attaches them; bare tests stay offline."""
+    settings = getattr(ctx, "settings", None)
+    if isinstance(settings, Settings):
+        return settings
+    return Settings(geocoder="", geocoder_url="")
 
 
 def _name_tokens(name: str) -> set[str]:
@@ -132,13 +142,10 @@ def _providers_named(catalogue: Catalogue, spoken_name: str, specialty_id: str |
 #: not one per rule. Per call, like everything on ``ToolContext``.
 PATIENT_MISSES_KEY = "rules.patient_misses"
 
-#: What rides on the verdict when the record never turned up. The refusal, if
-#: there is one, still comes from ``/availability``; this says which rules did
-#: not get a chance to speak.
-NO_RECORD_NOTE = (
-    "no directory record for this patient on this call: age and referral "
-    "rules stood down and /availability answered alone"
-)
+#: Patient-record rules that stand down when the directory record is missing.
+#: The refusal, if there is one, still comes from ``/availability``; this list
+#: says which local checks did not get a chance to speak.
+NO_RECORD_SKIPPED: list[SkippedEligibilityCheck] = ["age", "referral"]
 
 
 async def _patient(ctx: ToolContext, patient_id: str) -> PatientRecord | None:
@@ -158,7 +165,7 @@ async def _patient(ctx: ToolContext, patient_id: str) -> PatientRecord | None:
     ``None`` is safe, never fatal: the rules read off the record stand down and
     ``/availability?patient_id=`` answers on its own — it applies the same age
     and referral rules server-side and names them in ``blocked``. It is logged
-    and noted on the verdict so a stood-down rule is visible, not silent.
+    and listed on ``skipped_checks`` so a stood-down rule is visible, not silent.
     """
     record = recall_patient(ctx, patient_id)
     if record is not None:
@@ -242,9 +249,18 @@ def _refuse(reason: DeclineReason, detail: str, redirect_to=None) -> Eligibility
     )
 
 
-def _noted(verdict: EligibilityVerdict, note: str) -> EligibilityVerdict:
-    """Carry what the verdict could not check out to the caller."""
-    return verdict.model_copy(update={"note": note}) if note else verdict
+def _noted(
+    verdict: EligibilityVerdict,
+    note: str = "",
+    skipped_checks: list[SkippedEligibilityCheck] | None = None,
+) -> EligibilityVerdict:
+    """Carry resolution hints and stood-down checks out to the caller."""
+    updates: dict = {}
+    if note:
+        updates["note"] = note
+    if skipped_checks:
+        updates["skipped_checks"] = list(skipped_checks)
+    return verdict.model_copy(update=updates) if updates else verdict
 
 
 async def check_eligibility(ctx: ToolContext, args: CheckEligibilityInput) -> EligibilityVerdict:
@@ -274,9 +290,10 @@ async def check_eligibility(ctx: ToolContext, args: CheckEligibilityInput) -> El
     today = ctx.now.astimezone(MADRID).date()
     catalogue = await ctx.clinic.catalogue()
     patient = await _patient(ctx, args.patient_id)
-    # A missing record is not a refusal — it is a verdict with a hole in it, and
-    # every answer below says so rather than passing quietly.
-    note = "" if patient else NO_RECORD_NOTE
+    # A missing record is not a refusal — it is a verdict with stood-down checks,
+    # and every answer below carries them rather than passing quietly.
+    skipped: list[SkippedEligibilityCheck] = [] if patient else list(NO_RECORD_SKIPPED)
+    note = ""
     # The second policy of problem 17 arrives as whatever the caller said aloud
     # ("Mapfre Salud", "Nueva Mutua Sanitaria"), never as the bare id the
     # platform submits against. Resolve it the same way registration does, so
@@ -290,8 +307,7 @@ async def check_eligibility(ctx: ToolContext, args: CheckEligibilityInput) -> El
         and args.insurer
         and plan.insurer_id.lower() != args.insurer.strip().lower()
     ):
-        hint = f"'{args.insurer}' is {plan.name}; use insurer/policy_id {plan.insurer_id!r} onward"
-        note = f"{note}; {hint}" if note else hint
+        note = f"'{args.insurer}' is {plan.name}; use insurer/policy_id {plan.insurer_id!r} onward"
 
     verdict = eligibility.check_patient_rules(
         catalogue,
@@ -302,7 +318,11 @@ async def check_eligibility(ctx: ToolContext, args: CheckEligibilityInput) -> El
         today=today,
     )
     if verdict:
-        return _noted(_refuse(verdict.reason, verdict.detail, verdict.redirect_to), note)
+        return _noted(
+            _refuse(verdict.reason, verdict.detail, verdict.redirect_to),
+            note,
+            skipped,
+        )
 
     availability = await ctx.clinic.availability(
         date_from=today + timedelta(days=1),
@@ -323,6 +343,7 @@ async def check_eligibility(ctx: ToolContext, args: CheckEligibilityInput) -> El
                 _redirect(catalogue, args, availability, blocked, plan),
             ),
             note,
+            skipped,
         )
 
     provider = next((p for p in catalogue.providers if p.provider_id == args.provider_id), None)
@@ -335,11 +356,19 @@ async def check_eligibility(ctx: ToolContext, args: CheckEligibilityInput) -> El
         today=today,
     )
     if verdict:
-        return _noted(_refuse(verdict.reason, verdict.detail, verdict.redirect_to), note)
+        return _noted(
+            _refuse(verdict.reason, verdict.detail, verdict.redirect_to),
+            note,
+            skipped,
+        )
 
     if availability.slots:
-        return _noted(EligibilityVerdict(allowed=True), note)
-    return _noted(_refuse("no_availability", "nothing free in the window the clinic offers"), note)
+        return _noted(EligibilityVerdict(allowed=True), note, skipped)
+    return _noted(
+        _refuse("no_availability", "nothing free in the window the clinic offers"),
+        note,
+        skipped,
+    )
 
 
 async def triage(ctx: ToolContext, args: TriageInput) -> TriageResult:
@@ -453,7 +482,7 @@ async def nearest_location(ctx: ToolContext, args: NearestLocationInput) -> Near
             )
         )
 
-    point = await geo.locate(args.address)
+    point = await geo.locate(args.address, _settings_of(ctx))
     if point is not None:
         found = geo.nearest(point, sites)
         if found is not None:
