@@ -65,7 +65,7 @@ async def test_signed_in_call_page_shows_the_team_view(
     monkeypatch.delenv("VORTEX_ENV", raising=False)
     ids = [line.split('"call_id": "')[1].split('"')[0] for line in seeded.read_text().splitlines()]
     refused = next(i for i in ids if i.startswith("demo-refuse"))
-    await user.open("/")
+    await user.open("/calls")
     user.find(ui.input).type("team-secret")
     user.find("Sign in").click()
     await user.open(f"/call/{refused}")
