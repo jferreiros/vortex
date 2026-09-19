@@ -8,8 +8,11 @@ of two places, so the parser has to find it in either.
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location(
@@ -28,6 +31,14 @@ LINKED = (
     "  The submit returned 503 and the loop moved on.\n"
 )
 
+# Path only inside the OSC-8 URI; display text has no file:line.
+LINKED_URI_ONLY = (
+    "  major [Data Integrity & Integration]\n"
+    "  → \x1b]8;;vscode://file//home/runner/work/vortex/vortex/"
+    "scripts/ci/coderabbit_issues.py:33\x07\x1b]8;;\x07\n"
+    "  Extract the location before stripping OSC-8 links.\n"
+)
+
 # What the workflow actually hands the script: the escapes are already gone.
 PLAIN = (
     "  major [Stability & Availability]\n"
@@ -41,6 +52,13 @@ def test_the_linked_shape_yields_a_location_and_a_title() -> None:
     (found,) = cr.parse(LINKED)
     assert found["location"] == "vortex/line/session.py:297"
     assert found["title"] == "Retry an unaccepted action instead of skipping it."
+
+
+def test_location_is_read_from_the_osc8_uri_before_stripping() -> None:
+    """ANSI strip removes the URI; location must be taken from the raw line."""
+    (found,) = cr.parse(LINKED_URI_ONLY)
+    assert found["location"] == "scripts/ci/coderabbit_issues.py:33"
+    assert found["title"] == "Extract the location before stripping OSC-8 links."
 
 
 def test_the_plain_shape_yields_the_same_thing() -> None:
@@ -65,3 +83,42 @@ def test_a_minor_finding_is_not_filed() -> None:
 
 def test_the_same_finding_twice_is_filed_once() -> None:
     assert len(cr.parse(PLAIN + PLAIN)) == 1
+
+
+def _gh(monkeypatch: pytest.MonkeyPatch, returncode: int, stdout: str, stderr: str = "") -> list:
+    """Capture the gh argv and answer with a canned result."""
+    calls: list[list[str]] = []
+
+    def fake_run(argv: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, returncode, stdout, stderr)
+
+    monkeypatch.setattr(cr.subprocess, "run", fake_run)
+    return calls
+
+
+def test_the_lookup_reads_every_page(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _gh(monkeypatch, 0, "[CR] one — a.py:1\n[CR] two — b.py:2\n")
+    assert cr.existing_titles("jferreiros/vortex") == {"[CR] one — a.py:1", "[CR] two — b.py:2"}
+    assert "--paginate" in calls[0]
+    assert "--limit" not in calls[0]
+
+
+def test_a_failed_lookup_raises_instead_of_answering_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The regression: an empty answer let a re-review file the same issue twice."""
+    _gh(monkeypatch, 1, "", "HTTP 403")
+    with pytest.raises(cr.LookupFailed, match="HTTP 403"):
+        cr.existing_titles("jferreiros/vortex")
+
+
+def test_a_failed_lookup_creates_nothing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    review = tmp_path / "review.txt"
+    review.write_text(PLAIN)
+    calls = _gh(monkeypatch, 1, "", "HTTP 403")
+    monkeypatch.setattr(sys, "argv", ["coderabbit_issues.py", str(review), "--pr", "85"])
+    with pytest.raises(SystemExit) as exit_code:
+        cr.main()
+    assert exit_code.value.code == 1
+    assert [argv[1] for argv in calls] == ["api"]
