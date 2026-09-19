@@ -113,6 +113,32 @@ def test_unavailability_reasons_empty_when_nothing_unmet() -> None:
     assert out["suggested_action"] is None
 
 
+def test_unavailability_reasons_drops_other_and_renormalises_to_100() -> None:
+    cards = [
+        _card("a", "no-action", "no_availability"),
+        _card("b", "no-action", "no_availability"),
+        _card("c", "no-action", "provider_on_leave"),
+        _card("d", "no-action", "out_of_scope"),  # -> "other", excluded
+        _card("e", "no-action", "medical_emergency"),  # -> "other", excluded
+    ]
+    out = bi.unavailability_reasons(cards)
+    # unmet_total still counts every unmet call, "other" included.
+    assert out["unmet_total"] == 5
+    keys = [b["key"] for b in out["buckets"]]
+    assert "other" not in keys
+    assert keys == ["no_slot_in_window", "provider_unavailable"]
+    # The two shown buckets (2 + 1 = 3 calls) sum their pct to 100%.
+    assert sum(b["pct"] for b in out["buckets"]) == 100.0
+    assert out["buckets"][0]["pct"] == round(200 / 3, 1)
+
+
+def test_unavailability_reasons_empty_buckets_when_only_other() -> None:
+    out = bi.unavailability_reasons([_card("a", "no-action", "out_of_scope")])
+    assert out["unmet_total"] == 1
+    assert out["buckets"] == []
+    assert out["suggested_action"] is None
+
+
 # ---------------------------------------------------------------------------
 # 2. Provider ranking
 # ---------------------------------------------------------------------------
@@ -173,7 +199,91 @@ def test_requested_provider_ids_uses_resolved_name_too() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 3. Demand vs. supply heatmap
+# 3. Service occupancy
+# ---------------------------------------------------------------------------
+
+
+def _occ(out: dict, specialty_id: str) -> dict:
+    return next(r for r in out["all"] if r["id"] == specialty_id)
+
+
+def test_service_occupancy_over_100_when_requests_outrun_slots() -> None:
+    booked_slot = _find_slots(
+        _card("a"),
+        date_from="2026-09-22",
+        specialty_id="dermatology",
+        slots=[{"start": "2026-09-22T10:00:00+02:00", "provider_id": "PR04"}],
+    )
+    declined_1 = _find_slots(
+        _card("b", "no-action", "no_availability"),
+        date_from="2026-09-22",
+        specialty_id="dermatology",
+    )
+    declined_2 = _find_slots(
+        _card("c", "no-action", "no_availability"),
+        date_from="2026-09-22",
+        specialty_id="dermatology",
+    )
+    out = bi.service_occupancy([booked_slot, declined_1, declined_2])
+    row = _occ(out, "dermatology")
+    assert row["requested"] == 3
+    assert row["offered"] == 1
+    assert row["declined_full"] == 2
+    assert row["occupancy_pct"] == 300.0
+    # One provider on staff; occupancy 300% needs three to cover it all.
+    assert row["providers"] == 1
+    assert row["extra_providers_needed"] == 2
+
+
+def test_service_occupancy_zero_when_no_demand_and_no_extra_providers() -> None:
+    out = bi.service_occupancy([])
+    row = _occ(out, "general_practice")
+    assert row["requested"] == 0
+    assert row["occupancy_pct"] == 0.0
+    assert row["extra_providers_needed"] == 0
+
+
+def test_service_occupancy_covers_every_catalogue_specialty() -> None:
+    out = bi.service_occupancy([_card("a", "book")])
+    assert {r["id"] for r in out["all"]} == {
+        "general_practice",
+        "paediatrics",
+        "dermatology",
+        "orthopaedics",
+        "gynaecology",
+        "physiotherapy",
+    }
+    assert all(r["name"] for r in out["all"])
+
+
+def test_service_occupancy_request_without_specialty_or_provider_counts_nowhere() -> None:
+    # No specialty_id and no provider_id: the caller's intent is unknown,
+    # same rule the heatmap applies to an hour-less request.
+    vague = _find_slots(_card("a"), date_from="2026-09-22")
+    out = bi.service_occupancy([vague])
+    assert all(r["requested"] == 0 for r in out["all"])
+
+
+def test_service_occupancy_scopes_demand_and_supply_per_site() -> None:
+    # PR06 (physiotherapy) sits at "sur" only.
+    physio_at_sur = _find_slots(
+        _card("a"),
+        date_from="2026-09-22",
+        specialty_id="physiotherapy",
+        slots=[{"start": "2026-09-22T10:00:00+02:00", "provider_id": "PR06", "location_id": "sur"}],
+    )
+    out = bi.service_occupancy([physio_at_sur])
+    sites = {s["id"]: s for s in out["sites"]}
+    sur_row = next(r for r in sites["sur"]["services"] if r["id"] == "physiotherapy")
+    norte_row = next(r for r in sites["norte"]["services"] if r["id"] == "physiotherapy")
+    assert sur_row["requested"] == 1
+    assert sur_row["offered"] == 1
+    assert norte_row["requested"] == 0
+    assert norte_row["offered"] == 0
+
+
+# ---------------------------------------------------------------------------
+# 4. Demand vs. supply heatmap
 # ---------------------------------------------------------------------------
 
 
@@ -265,6 +375,7 @@ def test_business_insights_bundles_everything_and_lists_data_gaps() -> None:
         "calls_considered",
         "unavailability",
         "providers",
+        "occupancy",
         "heatmap",
         "cancellations",
         "data_gaps",
@@ -274,7 +385,7 @@ def test_business_insights_bundles_everything_and_lists_data_gaps() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 4. Cancellations: reused vs. lost
+# 5. Cancellations: reused vs. lost
 # ---------------------------------------------------------------------------
 
 

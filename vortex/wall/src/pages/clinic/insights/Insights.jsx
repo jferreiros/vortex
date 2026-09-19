@@ -1,8 +1,7 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import SectionHeader from "../../../components/ui/SectionHeader";
 import Card from "../../../components/ui/Card";
 import Placeholder from "../../../components/ui/Placeholder";
-import { MIN_REQUESTS, providerView } from "./providerView";
 import "./insights.css";
 
 const RANGES = [
@@ -103,142 +102,130 @@ function ReasonBars({ unavailability }) {
   );
 }
 
-function ProviderDetail({ row }) {
-  const reasons = row.unmet_reasons ?? [];
-  const elsewhere = row.booked_elsewhere ?? 0;
-  const other = row.other_outcomes ?? 0;
-  const notBooked = row.requests - row.booked;
-  if (!notBooked) {
+// One box per specialty: name, occupancy % (can read over 100% — the
+// platform only offers a slot that exists, so unmatched demand is a real
+// rejection for being full), a capped mini-bar and the volume behind it.
+function ServiceTile({ service, active, onClick }) {
+  const pct = service.occupancy_pct;
+  const known = pct != null;
+  const over = known && pct > 100;
+  return (
+    <button
+      type="button"
+      className={`service-tile ${over ? "over" : ""} ${active ? "active" : ""}`}
+      aria-expanded={active}
+      onClick={onClick}
+    >
+      <div className="service-tile-top">
+        <span className="service-tile-name">{service.name}</span>
+        <span className={`service-tile-pct ${over ? "over" : ""}`}>{known ? `${pct}%` : "—"}</span>
+      </div>
+      <span className="service-tile-track">
+        <span
+          className={`service-tile-fill ${over ? "over" : ""}`}
+          style={{ width: `${known ? Math.min(pct, 100) : 0}%` }}
+        />
+      </span>
+      <span className="service-tile-meta">
+        {service.requested} pet · {service.providers} médico{service.providers === 1 ? "" : "s"}
+      </span>
+    </button>
+  );
+}
+
+// What tapping a tile answers: how many more providers of that specialty
+// would have absorbed every request this period, at today's slots-per-doctor
+// rate — the number business_insights.service_occupancy already computed.
+function ServiceDetail({ service }) {
+  const pct = service.occupancy_pct;
+  const extra = service.extra_providers_needed ?? 0;
+  if (pct == null) {
     return (
-      <p className="provider-detail-empty">
-        Todas las peticiones de {row.name} acabaron en cita en este período.
+      <p className="service-detail-empty">
+        {service.name}: se pidió cita pero no quedó registrado ningún hueco ofrecido — no se
+        puede calcular la ocupación en este período.
+      </p>
+    );
+  }
+  if (extra <= 0) {
+    return (
+      <p className="service-detail-empty">
+        {service.name} tiene margen: {service.providers} médico{service.providers === 1 ? "" : "s"}{" "}
+        cubren la demanda pedida ({pct}%).
       </p>
     );
   }
   return (
-    <div className="provider-detail">
-      <p className="provider-detail-head">
-        {notBooked} de {row.requests} peticiones no acabaron en cita con este médico:
+    <div className="service-detail">
+      <p className="service-detail-head">
+        {service.name}: {service.requested} peticiones contra {service.offered} huecos ofrecidos
+        ({pct}% de ocupación)
+        {service.declined_full > 0
+          ? `, ${service.declined_full} rechazadas por no quedar hueco`
+          : ""}
+        .
       </p>
-      {reasons.map((b) => (
-        <div className="provider-detail-row" key={b.key}>
-          <span>{b.label}</span>
-          <span className="provider-detail-count">{b.count}</span>
-        </div>
-      ))}
-      {elsewhere > 0 && (
-        <div className="provider-detail-row">
-          <span>{elsewhere === 1 ? "Acabó en cita con otro médico" : "Acabaron en cita con otro médico"}</span>
-          <span className="provider-detail-count">{elsewhere}</span>
-        </div>
-      )}
-      {other > 0 && (
-        <div className="provider-detail-row">
-          <span>Otro desenlace (registro, cancelación o llamada cortada)</span>
-          <span className="provider-detail-count">{other}</span>
-        </div>
-      )}
+      <p className="service-detail-calc">
+        Con <strong>{extra} médico{extra === 1 ? "" : "s"} más</strong> de esta especialidad
+        (sobre los {service.providers} actuales) se habría podido atender a todos los que la
+        pidieron.
+      </p>
     </div>
   );
 }
 
-// One compact row: name, a mini bar, the stats line and at most one badge.
-// Both rankings share it — what changes is which number the bar and the
-// stats lead with, and which badge (if any) the row earns.
-function ProviderRankRow({ point, barPct, stats, badge, open, onToggle }) {
-  return (
-    <div className={`provider-row ${open ? "open" : ""}`}>
-      <button type="button" className="provider-compact-head" aria-expanded={open} onClick={onToggle}>
-        <span className="provider-name">{point.name}</span>
-        <span className="provider-compact-bar">
-          <span className="provider-row-track">
-            <span
-              className={`provider-row-fill ${point.flagged ? "low" : ""}`}
-              style={{ width: `${barPct}%` }}
-            />
-          </span>
-        </span>
-        <span className="provider-compact-meta">{stats}</span>
-        {badge}
-        <span className="provider-chevron" aria-hidden="true">›</span>
-      </button>
-      {open && <ProviderDetail row={point.row} />}
-    </div>
-  );
-}
+// Occupancy by service: pick a site (or all of them), see every specialty's
+// demand-vs-capacity in one glance, tap a box for the hiring math behind it.
+function ServiceOccupancy({ occupancy }) {
+  const [site, setSite] = useState("all");
+  const [openId, setOpenId] = useState(null);
+  const sites = occupancy?.sites ?? [];
+  const services = site === "all" ? occupancy?.all ?? [] : sites.find((s) => s.id === site)?.services ?? [];
+  const active = services.find((s) => s.id === openId) ?? null;
 
-function fmtWait(p) {
-  return p.waitDays != null ? ` · ${p.waitDays}d` : "";
-}
-
-// Two rankings, one dataset: who gets asked for the most, and who turns
-// the most of those requests into a kept appointment. A doctor can chart
-// in both — that overlap is the story, not a bug.
-function ProviderRankings({ providers }) {
-  const [openKey, setOpenKey] = useState(null);
-  const view = useMemo(() => providerView(providers), [providers]);
-  if (!view.hasData) {
-    return <Placeholder kind="diagram" ratio="1/1" label="Nadie pidió un médico por nombre en este período." />;
-  }
-  const toggle = (key) => setOpenKey((k) => (k === key ? null : key));
   return (
-    <div className="provider-rankings-wrap">
-      <div className="provider-rankings">
-        <section className="provider-rank">
-          <p className="provider-rank-title">Los más pedidos</p>
-          <p className="provider-rank-sub">Top 5 por peticiones</p>
-          <div className="provider-rank-rows">
-            {view.mostRequested.map((p) => {
-              const key = `req:${p.id}`;
-              return (
-                <ProviderRankRow
-                  key={p.id}
-                  point={p}
-                  barPct={view.maxRequests ? Math.max((p.requests / view.maxRequests) * 100, 6) : 0}
-                  stats={`${p.requests} pet · ${p.successRate}%${fmtWait(p)}`}
-                  badge={p.flagged ? <span className="provider-flag">Baja tasa</span> : null}
-                  open={openKey === key}
-                  onToggle={() => toggle(key)}
-                />
-              );
-            })}
-          </div>
-        </section>
-        <section className="provider-rank">
-          <p className="provider-rank-title">Los que más citan</p>
-          <p className="provider-rank-sub">Top 5 por % de cierre · mín. 2 peticiones</p>
-          {view.topClosers.length > 0 ? (
-            <div className="provider-rank-rows">
-              {view.topClosers.map((p) => {
-                const key = `close:${p.id}`;
-                return (
-                  <ProviderRankRow
-                    key={p.id}
-                    point={p}
-                    barPct={Math.min(Math.max(p.successRate, p.successRate > 0 ? 4 : 0), 100)}
-                    stats={`${p.successRate}% · ${p.requests} pet${fmtWait(p)}`}
-                    badge={
-                      p.id === view.referenciaId ? (
-                        <span className="provider-flag bench">Referencia</span>
-                      ) : null
-                    }
-                    open={openKey === key}
-                    onToggle={() => toggle(key)}
-                  />
-                );
-              })}
-            </div>
-          ) : (
-            <p className="provider-rank-empty">
-              Volumen insuficiente: ningún médico llega a {MIN_REQUESTS} peticiones en este período.
-            </p>
-          )}
-        </section>
+    <div className="service-occupancy">
+      <div className="insights-range">
+        <button
+          type="button"
+          className={`insights-range-pill ${site === "all" ? "on" : ""}`}
+          onClick={() => {
+            setSite("all");
+            setOpenId(null);
+          }}
+        >
+          Todos los centros
+        </button>
+        {sites.map((s) => (
+          <button
+            key={s.id}
+            type="button"
+            className={`insights-range-pill ${site === s.id ? "on" : ""}`}
+            onClick={() => {
+              setSite(s.id);
+              setOpenId(null);
+            }}
+          >
+            {s.name}
+          </button>
+        ))}
       </div>
-      {view.clinicRate != null && (
-        <p className="provider-avg">
-          Media de la clínica: <strong>{view.clinicRate}%</strong> de las peticiones acaban en cita.
-        </p>
+      {services.length ? (
+        <>
+          <div className="service-grid">
+            {services.map((s) => (
+              <ServiceTile
+                key={s.id}
+                service={s}
+                active={openId === s.id}
+                onClick={() => setOpenId(openId === s.id ? null : s.id)}
+              />
+            ))}
+          </div>
+          {active && <ServiceDetail service={active} />}
+        </>
+      ) : (
+        <Placeholder kind="diagram" ratio="21/8" label="Sin peticiones de especialidad en este período." />
       )}
     </div>
   );
@@ -358,59 +345,59 @@ function CancellationStats({ cancellations }) {
           sub={`${c.relocated ?? 0} reubicados de ${(c.relocated ?? 0) + (c.lost ?? 0)} huecos decididos`}
         />
       </div>
-      {lead.buckets?.length > 0 && (
-        <div className="cancel-section">
-          <p className="cancel-section-title">Antelación de la cancelación</p>
-          <div className="cancel-buckets">
-            {lead.buckets.map((b) => {
-              // Each bucket's bar splits by the freed slot's destination —
-              // a per-bucket relocated/lost/pending breakdown in the
-              // payload. Until it carries one, the row falls back to the
-              // plain count fill.
-              const segs = SLOT_DESTINATIONS.map((d) => ({ ...d, n: b[d.key] ?? 0 })).filter(
-                (d) => d.n > 0
-              );
-              const width = Math.max((b.share ?? 0) * 100, b.count ? 4 : 0);
-              return (
-                <div className="cancel-bucket" key={b.key}>
-                  <span className="cancel-bucket-label">{b.label}</span>
-                  <div className="cancel-bucket-track">
-                    {segs.length ? (
-                      <div className="cancel-bucket-stack" style={{ width: `${width}%` }}>
-                        {segs.map((d) => (
-                          <div
-                            className={`cancel-bucket-seg ${d.key}`}
-                            key={d.key}
-                            style={{ flex: d.n }}
-                            title={`${d.legend}: ${d.n}`}
-                          />
-                        ))}
+      {(lead.buckets?.length > 0 || c.reasons?.length > 0) && (
+        <div className="cancel-columns">
+          {lead.buckets?.length > 0 && (
+            <div className="cancel-section">
+              <p className="cancel-section-title">Antelación de la cancelación</p>
+              <div className="cancel-buckets">
+                {lead.buckets.map((b) => {
+                  // Each bucket's bar splits by the freed slot's destination —
+                  // a per-bucket relocated/lost/pending breakdown in the
+                  // payload. Until it carries one, the row falls back to the
+                  // plain count fill.
+                  const segs = SLOT_DESTINATIONS.map((d) => ({ ...d, n: b[d.key] ?? 0 })).filter(
+                    (d) => d.n > 0
+                  );
+                  const width = Math.max((b.share ?? 0) * 100, b.count ? 4 : 0);
+                  return (
+                    <div className="cancel-bucket" key={b.key}>
+                      <span className="cancel-bucket-label">{b.label}</span>
+                      <div className="cancel-bucket-track">
+                        {segs.length ? (
+                          <div className="cancel-bucket-stack" style={{ width: `${width}%` }}>
+                            {segs.map((d) => (
+                              <div
+                                className={`cancel-bucket-seg ${d.key}`}
+                                key={d.key}
+                                style={{ flex: d.n }}
+                                title={`${d.legend}: ${d.n}`}
+                              />
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="cancel-bucket-fill" style={{ width: `${width}%` }} />
+                        )}
                       </div>
-                    ) : (
-                      <div className="cancel-bucket-fill" style={{ width: `${width}%` }} />
-                    )}
-                  </div>
-                  <span className="cancel-bucket-count">{b.count}</span>
+                      <span className="cancel-bucket-count">{b.count}</span>
+                    </div>
+                  );
+                })}
+              </div>
+              {lead.buckets.some((b) => SLOT_DESTINATIONS.some((d) => (b[d.key] ?? 0) > 0)) && (
+                <div className="cancel-legend">
+                  {SLOT_DESTINATIONS.map((d) => (
+                    <span key={d.key}>
+                      <i className={`cancel-swatch ${d.key}`} /> {d.legend}
+                    </span>
+                  ))}
                 </div>
-              );
-            })}
-          </div>
-          {lead.buckets.some((b) => SLOT_DESTINATIONS.some((d) => (b[d.key] ?? 0) > 0)) && (
-            <div className="cancel-legend">
-              {SLOT_DESTINATIONS.map((d) => (
-                <span key={d.key}>
-                  <i className={`cancel-swatch ${d.key}`} /> {d.legend}
-                </span>
-              ))}
+              )}
+              <p className="cancel-hint">
+                Con cuánto aviso se canceló cada hueco, y qué fue de él — las de última hora son las que se pierden.
+              </p>
             </div>
           )}
-          <p className="cancel-hint">
-            Con cuánto aviso se canceló cada hueco, y qué fue de él — las de última hora son las que se pierden.
-          </p>
-        </div>
-      )}
-      {(c.reasons?.length > 0 || c.by_provider?.length > 0) && (
-        <div className="cancel-columns">
           {c.reasons?.length > 0 && (
             <div className="cancel-section">
               <p className="cancel-section-title">Motivo dicho al cancelar</p>
@@ -430,20 +417,6 @@ function CancellationStats({ cancellations }) {
               <p className="cancel-hint">
                 Leído de las palabras del paciente — no es un dato estructurado.
               </p>
-            </div>
-          )}
-          {c.by_provider?.length > 0 && (
-            <div className="cancel-section">
-              <p className="cancel-section-title">Médicos con más huecos liberados</p>
-              {c.by_provider.map((p) => (
-                <div className="cancel-list-row" key={p.id}>
-                  <span>{p.name}</span>
-                  <span className="cancel-list-count">
-                    {p.freed} liberados{p.lost ? ` · ${p.lost} perdidos` : ""}
-                  </span>
-                </div>
-              ))}
-              <p className="cancel-hint">Dónde se concentra la agenda que hay que rescatar.</p>
             </div>
           )}
         </div>
@@ -471,7 +444,7 @@ export default function Insights() {
       <SectionHeader
         eyebrow="Analítica"
         title="Insights"
-        subtitle="Demanda no cubierta, médicos más pedidos y huecos de agenda — derivados de las llamadas reales."
+        subtitle="Demanda no cubierta, ocupación por servicio y huecos de agenda — derivados de las llamadas reales."
         action={
           <div className="insights-range">
             {RANGES.map((r) => (
@@ -504,11 +477,11 @@ export default function Insights() {
 
         <Card padding="lg" className="insights-cell wide">
           <SectionHeader
-            eyebrow="Demanda por doctor"
-            title="Los más pedidos y los que más citan"
-            subtitle="Toca un médico para ver por qué no cerraron sus citas."
+            eyebrow="Agenda"
+            title="Ocupación por servicio"
+            subtitle="Toca un servicio para ver cuántos médicos más harían falta para atender toda la demanda."
           />
-          <ProviderRankings providers={data?.providers} />
+          <ServiceOccupancy occupancy={data?.occupancy} />
         </Card>
 
         <Card padding="lg" className="insights-cell wide">
