@@ -134,15 +134,6 @@ async def test_calendar_page_renders_doctor_grids(seeded: Path, user: User) -> N
     await user.should_see("Dra. Ortiz")
 
 
-async def test_calendar_page_renders_doctor_grids(seeded: Path, user: User) -> None:
-    await user.open("/calendar")
-    await user.should_see("Calendar")
-    await user.should_see("Doctors")
-    # Doctor names come from the catalogue, so the rail renders with or without
-    # the synthetic-data pack present.
-    await user.should_see("Dra. Ortiz")
-
-
 async def test_public_pages_mask_the_phone(seeded: Path, user: User) -> None:
     await user.open("/wall/classic")
     await user.should_not_see("+34612345678")
