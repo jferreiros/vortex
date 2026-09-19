@@ -243,3 +243,24 @@ def test_workflow_beats_fold_repeated_turns() -> None:
         ("agent", "Hello."),
         ("patient", "Hi."),
     ]
+
+
+def test_workflow_beats_only_paint_an_accepted_submission_green() -> None:
+    def submit_dot(status: str) -> str:
+        card = CallCard(call_id=f"CA-{status}", from_number="+34600")
+        card.events = [
+            {"kind": "call.started", "ts": "t0", "from_number": "+34600"},
+            {
+                "kind": "submit.result",
+                "ts": "t1",
+                "route": "/api/v1/submit/book",
+                "result": {"status": status, "http_status": 422},
+            },
+        ]
+        beat = next(beat for beat in workflow_beats(card) if beat.kind == "submit")
+        return beat.dot
+
+    assert submit_dot("accepted") == "ok"
+    assert submit_dot("submitted") == "ok"
+    assert submit_dot("rejected") == "warn"
+    assert submit_dot("error") == "warn"
