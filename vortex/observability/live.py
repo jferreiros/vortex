@@ -27,7 +27,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from nicegui import app, ui
 
 from vortex.line import voice_config
-from vortex.observability import auth, callfeed, explain, insights, pricing
+from vortex.observability import auth, callfeed, explain, insights, pricing, store
 from vortex.observability.business_insights import business_insights
 from vortex.observability.demo import replay_cancellation_demo, write_scripted_call
 from vortex.observability.home_overview import home_overview, load_synthetic_cards, occupancy
@@ -986,6 +986,51 @@ def wall_business_insights_api(days: int = 30) -> JSONResponse:
     return JSONResponse(payload)
 
 
+# ---- Call analytics (SQLite store) ------------------------------------------
+# Everything below in this region is additive for feat/clinic-analytics.
+# logs/calls.jsonl stays the source of truth; ``store.ingest`` keeps a
+# rebuildable SQLite projection (logs/calls.db) tailed up to date — the
+# offset lives in the DB, so this is a few new lines on a poll, a full scan
+# only on first boot.
+
+
+def _analytics_paths() -> tuple[Path, Path]:
+    log_path = _log_path()
+    return log_path, store.default_db_path(log_path)
+
+
+def _ingest_analytics() -> dict[str, Any] | None:
+    """Cheap tail ingest. A failure must never take the board down — the
+    endpoint then serves whatever the DB already holds."""
+    try:
+        log_path, db_path = _analytics_paths()
+        return store.ingest(log_path, db_path)
+    except Exception as exc:
+        log.warning("analytics ingest failed: %s", exc)
+        return None
+
+
+@app.get("/api/wall/analytics")
+def wall_analytics_api(days: int = 30) -> JSONResponse:
+    """Hamming-style call aggregates for the Insights analytics section:
+    status mix, duration histogram, talk ratio, words per turn, TTFB and
+    tool-latency p50/p95, the intent->action funnel and €/call — all read off
+    logs/calls.db after a cheap tail ingest, so the numbers are never stale.
+    Calls without ``turn.metrics`` events degrade to word-count proxies; the
+    payload's ``metrics`` block says how many calls were measured."""
+    days = min((7, 30, 90), key=lambda d: abs(d - days))
+    ingest_stats = _ingest_analytics()
+    _log, db_path = _analytics_paths()
+    payload = store.analytics(db_path, days)
+    payload["range_days"] = days
+    if ingest_stats is not None:
+        payload["ingest"] = ingest_stats
+    return JSONResponse(payload)
+
+
+# ---- end of call analytics region -------------------------------------------
+
+
 #: The Home page's own numbers never come from the live line: the pack is a
 #: fixed corpus of eval calls, cached for the life of the process the same
 #: way the React app's build is.
@@ -1425,6 +1470,7 @@ def main() -> None:
     if auth.is_production() and not auth.ops_password():
         raise SystemExit("VORTEX_OPS_PASSWORD is required in production")
     _precompute_wall_cache()
+    _ingest_analytics()  # warm logs/calls.db once; polls then tail it cheaply
     ui.run(
         host="0.0.0.0",
         port=BOARD_PORT,
