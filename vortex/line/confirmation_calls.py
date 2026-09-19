@@ -676,13 +676,13 @@ class TwilioCallsClient:
         self._url = TWILIO_CALLS_URL.format(account_sid=account_sid)
 
     async def place(self, *, to: str, twiml_url: str, status_callback_url: str) -> CallResult:
+        # No Method/StatusCallbackMethod: Twilio defaults both to POST, and a
+        # trial account rejects the explicit parameter outright.
         data = {
             "To": to,
             "From": self._from_number,
             "Url": twiml_url,
-            "Method": "POST",
             "StatusCallback": status_callback_url,
-            "StatusCallbackMethod": "POST",
             "StatusCallbackEvent": "completed no-answer busy failed canceled",
         }
         try:
