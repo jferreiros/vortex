@@ -522,6 +522,9 @@ The console (`live.py`) is built from these. Reuse them before you draw a new on
 - `.empty-state` with `.t` and `.d`: what will appear here and how to make it.
 - `.section-title` with `.t` and `.m`: a heading and a quiet count at the right.
 - `.facts`: the trust strip. Plain facts, bold values, no icons.
+- `.cal-rail` with `.cal-doc` / `.on`, and `.cal-grid` with `.cal-cell.free` /
+  `.booked` / `.off`: the doctor calendar on `/calendar`. One column per day,
+  one cell per slot. Booked is ink, free is a hairline box, closed is nothing.
 
 ### App shell
 
