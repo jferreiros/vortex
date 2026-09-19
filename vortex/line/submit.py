@@ -22,12 +22,15 @@ import httpx
 
 from vortex.contract import (
     Action,
+    EscalateAction,
+    NoAction,
     SubmitInput,
     SubmitResult,
     ToolContext,
     action_payload,
     action_route,
 )
+from vortex.settings import get_settings
 
 
 class SubmitApi(Protocol):
@@ -83,13 +86,75 @@ class DryRunSubmitClient:
         return None
 
 
+def with_verdict_reason(ctx: ToolContext, action: Action) -> Action:
+    """Refuse with the rule the clinic applied, not with the model's paraphrase.
+
+    ``reason`` is scored against a closed vocabulary, so a near neighbour is
+    worth exactly what silence is worth: on call ``c9f087a0``
+    ``check_eligibility`` answered ``location_not_covered`` (ASISA does not
+    cover physiotherapy at that site) and the model submitted
+    ``specialty_not_covered``, losing the case. Whenever the call holds a
+    verdict from the rules - an eligibility refusal or a blocked provider from
+    ``find_slots`` - it wins.
+
+    Failing one of those, any other tool's typed ``Rejection`` wins: its reason
+    is drawn from the same closed vocabulary, so it is a rule the call heard and
+    the model is paraphrasing it just the same. The rules' verdict still comes
+    first, because a later refusal is often the consequence of it rather than
+    the rule that bit.
+
+    Only NO_ACTION and ESCALATE carry a reason; every other action is returned
+    untouched. The verb is the model's: a stored verdict never turns a refusal
+    into an escalation or back. The swap is pure, so the session can ask what
+    will go out; ``submit_action`` is what logs it.
+    """
+    if not isinstance(action, (NoAction, EscalateAction)):
+        return action
+    from vortex.line.session import CallMemory  # late: session imports this module
+
+    memory = CallMemory.of(ctx)
+    verdict = memory.last_verdict or memory.last_rejection
+    if verdict is None or verdict.reason == action.reason:
+        return action
+    forced = action.model_copy(update={"reason": verdict.reason})
+    assert forced.kind == action.kind
+    return forced
+
+
 async def submit_action(ctx: ToolContext, args: SubmitInput) -> SubmitResult:
     """The ``submit_action`` tool. Sends through the call's own submit client."""
     if ctx.submitter is None:
         return SubmitResult(status="error", detail="no submitter on this call context")
-    route = action_route(args.action)
-    payload = action_payload(args.action, ctx.call_id)
+    action = with_verdict_reason(ctx, args.action)
+    if get_settings().jev_arbiter:
+        from vortex.jev.arbiter import review
+
+        reviewed = await review(ctx, action)
+        if reviewed is not action:
+            ctx.log.event(
+                "submit.jev_override",
+                route=action_route(action),
+                decided=action_route(reviewed),
+            )
+            action = reviewed
+    if action is not args.action:
+        ctx.log.event(
+            "submit.reason_override",
+            route=action_route(action),
+            model_reason=args.action.reason,  # type: ignore[union-attr]
+            reason=action.reason,  # type: ignore[union-attr]
+        )
+    route = action_route(action)
+    payload = action_payload(action, ctx.call_id)
     ctx.log.event("submit.sent", route=route, payload=payload)
-    result = await ctx.submitter.submit(ctx.call_id, args.action)
+    result = await ctx.submitter.submit(ctx.call_id, action)
     ctx.log.action_submitted(route, payload, result)
+    if result.status in {"accepted", "duplicate"} and action.kind in {
+        "book",
+        "cancel",
+        "reschedule",
+    }:
+        invalidate = getattr(ctx.clinic, "invalidate_availability", None)
+        if invalidate is not None:
+            invalidate()
     return result

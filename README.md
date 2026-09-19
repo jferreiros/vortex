@@ -20,6 +20,8 @@ make call N=10              # ... with 10 concurrent fake calls
 make tunnel                 # ngrok http 7860 -> wss://<host>/ws for the dashboard
 make test                   # the whole test suite
 make tail                   # follow logs/calls.jsonl
+make logs-discord           # redacted digest of the call log to Discord
+make langfuse-check         # project URL + whether the live line has keys
 ```
 
 `make smoke` and `make test` need no key and no network.
@@ -34,7 +36,9 @@ The server always starts. Missing keys switch components to fake mode:
 | any of `SONIOX_API_KEY`, the LLM key and base URL the active `LLM_PROVIDER` resolves to, or the credentials of `VORTEX_TTS_PROVIDER` (and of `VORTEX_TTS_PROVIDER_ALT` when it differs) | the stub voice pipeline: beeps out, counts frames in, submits a typed refusal at the end |
 
 `GET /health` says which mode is active. `VORTEX_VOICE_MODE` and
-`VORTEX_CLINIC_MODE` force a mode (see `.env.example`).
+`VORTEX_CLINIC_MODE` force a mode (see `.env.example`). Set
+`VORTEX_VOICE_MODE=gemini-live` with `GOOGLE_API_KEY` for the jury-only
+speech-to-speech demo (`GeminiLiveLLMService`); `auto` never picks it.
 
 ## Providers
 
@@ -113,6 +117,28 @@ make test                   # tests/test_design.py fails when the copy is stale
 ```
 
 Before you add a colour, a font or a shadow, read `DESIGN.md`. The answer is no.
+
+## The explainer — one page for a jury or a new joiner
+
+`docs/didactica.html` explains the whole system in plain Spanish: the vision, the
+architecture end to end, one call step by step, the providers, the decisions and
+what each one cost, security, resilience, the evals, where challenge 1 stands,
+what is ready for challenge 2, the jury's published criteria, and the questions
+we would rather not be asked, with answers. Every claim carries one of three
+marks: fact, inference or pending.
+
+It is **one file that opens with a double click** — no server, no build, no
+network. The design tokens are inlined instead of linked:
+
+```bash
+make didactica              # re-inline design.css after you change the tokens
+open docs/didactica.html    # or just double-click it
+```
+
+`make design-sync` calls it too, and `tests/test_didactica.py` fails when the
+inlined copy is stale, when a nav link points at a missing section or when the
+page grows a second dark surface. Published at
+**https://docs.203.0.113.20.sslip.io/** (`deploy/compose.docs.yaml`).
 
 ## Which model for which job — the bench
 
@@ -226,7 +252,9 @@ and the transport can run a whole call tonight.
 - Live: set `PLATFORM_API_KEY` and `PLATFORM_API_BASE_URL`. `vortex/clinic/client.py`,
   `vortex/contract.py` and the fixtures follow `docs/api/openapi.json`, the
   platform's own spec. `make try-api` hits every read endpoint and saves each
-  raw response under `api_results/`, so a field-name drift shows up in minutes.
+  response under `api_results/` with the patient fields replaced by
+  `[redacted]`, so a field-name drift shows up in minutes and no patient data
+  lands on the disk.
 
 ## Tunnel and endpoint
 

@@ -12,9 +12,12 @@ Keys of ``$earliest_slot``: ``specialty_id`` or ``provider_id`` (one required),
 ``location_id``, ``patient_id``, ``from`` (ISO date, default tomorrow), ``days``
 (window, default 14, split into <=14-day spans), ``part_of_day``
 (``morning`` < 14:00, ``afternoon`` >= 14:00), ``weekday`` (0 = Monday),
-``on`` (an exact ISO date), and ``field``: ``start`` (default, the ISO
-instant), ``provider_id`` (an ``$in`` of every provider tied at that minute),
-``location_id``, ``appointment_type_id``, or ``slot`` (the whole slot object).
+``on`` (an exact ISO date), ``not_before`` (an ISO instant: keep only slots
+strictly after it, for "the next time free, nothing earlier than the
+appointment they already have" — problem 18), and ``field``: ``start``
+(default, the ISO instant), ``provider_id`` (an ``$in`` of every provider
+tied at that minute), ``location_id``, ``appointment_type_id``, or ``slot``
+(the whole slot object).
 
 ``$catalogue`` resolves to the fake catalogue as JSON, for reference checks.
 """
@@ -53,6 +56,9 @@ async def _slots(clinic: ClinicApi, spec: dict[str, Any], now: datetime) -> list
         cursor = span_end + timedelta(days=1)
     today = now.date()
     out = [s for s in out if s.start.astimezone(MADRID).date() > today]
+    if "not_before" in spec:
+        cutoff = datetime.fromisoformat(spec["not_before"])
+        out = [s for s in out if s.start > cutoff]
     part = spec.get("part_of_day")
     if part == "morning":
         out = [s for s in out if s.start.astimezone(MADRID).time() < time(14, 0)]

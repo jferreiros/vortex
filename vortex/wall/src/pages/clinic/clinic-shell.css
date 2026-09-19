@@ -1,0 +1,169 @@
+.clinic-shell {
+  display: flex;
+  min-height: 100vh;
+  background: var(--color-bg);
+}
+
+/* Sidebar ------------------------------------------------------------------*/
+
+.clinic-sidebar {
+  flex: 0 0 var(--sidebar-width);
+  width: var(--sidebar-width);
+  height: 100vh;
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-panel);
+  border-right: 1px solid var(--color-border);
+  padding: var(--space-5) var(--space-4);
+}
+
+.clinic-sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3) var(--space-6);
+}
+
+.clinic-sidebar-mark {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(155deg, var(--color-primary), var(--color-primary-deep));
+}
+
+.clinic-sidebar-brand-text {
+  display: flex;
+  flex-direction: column;
+  font-family: var(--font-display);
+  font-weight: var(--weight-bold);
+  font-size: var(--text-md);
+  color: var(--color-ink);
+}
+
+.clinic-sidebar-brand-text small {
+  font-family: var(--font-body);
+  font-weight: var(--weight-medium);
+  font-size: 11px;
+  color: var(--color-mute);
+}
+
+.clinic-sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.clinic-sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 11px var(--space-3);
+  border-radius: var(--radius-md);
+  color: var(--color-mute);
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-sm);
+  transition: background-color var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
+}
+
+.clinic-sidebar-item:hover {
+  background: var(--color-bg);
+  color: var(--color-ink);
+}
+
+.clinic-sidebar-item.on {
+  background: var(--color-primary-soft);
+  color: var(--color-primary-deep);
+}
+
+.clinic-sidebar-foot {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--color-mute);
+}
+
+.clinic-sidebar-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  box-shadow: 0 0 0 4px var(--color-primary-soft);
+}
+
+/* Content --------------------------------------------------------------------*/
+
+.clinic-shell-content {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: var(--space-7) var(--space-8);
+}
+
+/* Responsive -------------------------------------------------------------------*/
+
+@media (max-width: 1024px) {
+  .clinic-sidebar {
+    flex-basis: var(--sidebar-width-collapsed);
+    width: var(--sidebar-width-collapsed);
+    padding: var(--space-4) var(--space-2);
+    align-items: center;
+  }
+  .clinic-sidebar-brand-text,
+  .clinic-sidebar-item span,
+  .clinic-sidebar-foot span {
+    display: none;
+  }
+  .clinic-sidebar-brand {
+    padding: var(--space-2) 0 var(--space-6);
+    justify-content: center;
+  }
+  .clinic-sidebar-item {
+    justify-content: center;
+    width: 44px;
+  }
+  .clinic-sidebar-foot {
+    justify-content: center;
+  }
+  .clinic-shell-content {
+    padding: var(--space-6) var(--space-5);
+  }
+}
+
+@media (max-width: 680px) {
+  .clinic-shell {
+    flex-direction: column;
+  }
+  .clinic-sidebar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    top: auto;
+    height: auto;
+    width: 100%;
+    flex-basis: auto;
+    flex-direction: row;
+    justify-content: space-around;
+    padding: var(--space-2);
+    border-right: none;
+    border-top: 1px solid var(--color-border);
+    z-index: 100;
+  }
+  .clinic-sidebar-brand,
+  .clinic-sidebar-foot {
+    display: none;
+  }
+  .clinic-sidebar-nav {
+    flex-direction: row;
+    width: 100%;
+    justify-content: space-around;
+  }
+  .clinic-shell-content {
+    padding: var(--space-5) var(--space-4) 88px;
+  }
+}

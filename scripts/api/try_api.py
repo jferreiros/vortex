@@ -1,10 +1,12 @@
 """Hit the live Prosper platform API and dump every response to disk.
 
 Calls every parameter-free catalogue endpoint plus a best-effort
-`/api/v1/availability`, saves each raw JSON body under a fresh timestamped
-folder in `api_results/`, and prints a one-line status per call. Read-only:
-it never touches `/api/v1/submit/*` (those need a live call_id and mutate
-records).
+`/api/v1/availability`, saves each JSON body under a fresh timestamped
+folder in `api_results/`, and prints a one-line status per call. Patient
+fields are replaced by a placeholder before anything is written, so the
+dump keeps every field name without keeping a single person's data.
+Read-only: it never touches `/api/v1/submit/*` (those need a live call_id
+and mutate records).
 
     uv run python scripts/api/try_api.py
     uv run python scripts/api/try_api.py --specialty-id dermatology --location-id sur
@@ -29,9 +31,36 @@ from vortex.settings import get_settings  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
+REDACTED = "[redacted]"
+PATIENT_FIELDS = frozenset(
+    {
+        "date_of_birth",
+        "email",
+        "first_surname",
+        "given_name",
+        "national_id",
+        "note",
+        "phone",
+        "referrals",
+        "second_surname",
+        "sex",
+    }
+)
+
 
 def slugify(method: str, path: str) -> str:
     return f"{method}_{path.strip('/').replace('/', '_')}"
+
+
+def redact(value: Any) -> Any:
+    """Replace every patient field by a placeholder, keeping the shape and the field names."""
+    if isinstance(value, dict):
+        return {
+            key: REDACTED if key in PATIENT_FIELDS else redact(item) for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [redact(item) for item in value]
+    return value
 
 
 def call(
@@ -41,7 +70,7 @@ def call(
     path: str,
     params: dict[str, Any] | None = None,
 ) -> Any:
-    """Make one request, save the raw body, print a status line, return the parsed body."""
+    """Make one request, save the redacted body, print a status line, return the parsed body."""
     clean = {k: v for k, v in (params or {}).items() if v not in (None, "", [])}
     try:
         response = client.request(method, path, params=clean)
@@ -55,7 +84,7 @@ def call(
         body = {"_error": str(exc)}
 
     slug = slugify(method, path)
-    (out_dir / f"{slug}.json").write_text(json.dumps(body, indent=2, ensure_ascii=False))
+    (out_dir / f"{slug}.json").write_text(json.dumps(redact(body), indent=2, ensure_ascii=False))
     query = f"?{clean}" if clean else ""
     print(f"{method} {path}{query} -> {status}")
     return body if status and status < 400 else None

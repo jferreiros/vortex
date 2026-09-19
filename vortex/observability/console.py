@@ -13,7 +13,7 @@ from typing import Any
 from nicegui import ui
 
 from vortex.clinic import make_clinic_client
-from vortex.observability import agents, explain, insights, live
+from vortex.observability import agents, callfeed, explain, insights, live, pricing
 from vortex.observability.shell import (
     bars,
     console_page,
@@ -112,7 +112,7 @@ def _attention(cards: list[CallCard]) -> list[tuple[str, str, str, str, str]]:
 def overview_page() -> None:
     live._apply_chrome()
     if not live._ops_ok():
-        ui.navigate.to("/wall")
+        live._login_form()
         return
     ui.page_title("Vortex · Overview")
     cards, health = live._load_cards()
@@ -300,6 +300,41 @@ def agent_page(slug: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+@ui.page("/calls/live/classic")
+async def calls_live_page() -> None:
+    if not _guard():
+        return
+    ui.page_title("Vortex · Live")
+    cards, health = live._load_cards()
+    with console_page(
+        "/calls/live",
+        "Live",
+        explain.LIVE_SUB,
+        health=health,
+        clinic=live.CLINIC_NAME,
+        who=_who(),
+        controls=lambda: ui.link("Open the wall ↗", "/wall", new_tab=True).classes("pill"),
+    ) as body:
+        stage = body
+        rendered: dict[str, Any] = {"sig": None}
+
+        async def redraw() -> None:
+            cards, health = await live._load_cards_async()
+            sig = live._signature(cards, health)
+            if sig == rendered["sig"]:
+                return
+            rendered["sig"] = sig
+            featured = live._feature(cards)
+            stage.clear()
+            with stage:
+                live._live_strip(cards, featured)
+                live._workflow_panel(featured)
+
+        await redraw()
+        ui.timer(0.6, redraw)
+        live._footer()
+
+
 # ---------------------------------------------------------------------------
 # Patients
 # ---------------------------------------------------------------------------
@@ -383,7 +418,11 @@ def insights_page() -> None:
     ui.page_title("Vortex · Insights")
     cards, health = live._load_cards()
     ended = [c for c in cards if not c.live]
-    med, p90, mx = insights.handle_times(ended)
+    seconds = insights.handle_seconds(ended)
+    p50, p95 = insights.percentiles(seconds, 0.5, 0.95)
+    mx = seconds[-1] if seconds else None
+    cost = insights.cost_per_call(ended)
+    today = insights.cost_per_call(insights.on_day(ended))
     with console_page(
         "/insights",
         "Insights",
@@ -396,9 +435,29 @@ def insights_page() -> None:
         with body:
             with ui.element("div").classes("stat-grid"):
                 live._stat(str(len(ended)), "calls ended")
-                live._stat("—" if med is None else f"{med:.0f} s", "median handle time")
-                live._stat("—" if p90 is None else f"{p90:.0f} s", "p90 handle time")
+                live._stat("—" if p50 is None else f"{p50:.0f} s", "p50 handle time")
+                live._stat("—" if p95 is None else f"{p95:.0f} s", "p95 handle time")
                 live._stat("—" if mx is None else f"{mx:.0f} s", "longest call")
+                live._stat(
+                    pricing.eur(cost.avg_list_eur),
+                    "€/call (list)",
+                    note=live._priced_note(cost),
+                )
+                live._stat(
+                    pricing.eur(cost.avg_paid_eur),
+                    "€/call (we pay)",
+                    note="LLM is a Helmcode perk" if cost.perk else None,
+                )
+                live._stat(
+                    pricing.eur(today.total_list_eur, 2) if today.priced else "—",
+                    "€ today (list)",
+                    note=f"{today.priced} calls" if today.priced else None,
+                )
+            if cost.unpriced:
+                ui.label(
+                    "Not in the price table, so left out of the averages: "
+                    + ", ".join(cost.unpriced)
+                ).classes("caption-sm")
             with ui.element("div").classes("cols-2"):
                 with ui.element("div"):
                     with section("Why not booked", "by typed reason"):
@@ -780,7 +839,7 @@ def integrations_page() -> None:
                     with section("Console"):
                         with ui.element("dl").classes("def"):
                             for k, v in (
-                                ("Reads calls from", live.LINE_URL),
+                                ("Reads calls from", callfeed.LINE_URL),
                                 ("Public pages", "/wall, /call/{id} (phone numbers masked)"),
                             ):
                                 ui.html(f"<dt>{k}</dt><dd>{live._escape(v)}</dd>")

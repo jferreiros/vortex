@@ -141,6 +141,10 @@ def test_prompt_names_every_rule_the_score_depends_on() -> None:
         "patient_id from find_patient",
         "list_appointments",
         "last stated request",
+        "One question per turn",
+        "groups of three",
+        "read back once",
+        "Last value wins",
         "call 112",
         "medical_emergency",
         "Never ask a returning patient whether they have been here before",
@@ -155,6 +159,22 @@ def test_prompt_names_every_rule_the_score_depends_on() -> None:
         "clinic_facts and say only its answer, never memory",
     ):
         assert needle in text, needle
+
+
+def test_prompt_closes_a_cancel_or_reschedule_with_its_own_tool() -> None:
+    """The close is shared by all three verbs, so it must name all three tools."""
+    text = build_system_prompt(NOW)
+    close = text.split("9. Close:", 1)[1].split("\n\nTROUBLE", 1)[0]
+    for tool in ("prepare_booking", "prepare_reschedule", "prepare_cancel"):
+        assert tool in close, tool
+
+
+def test_prompt_never_offers_to_say_part_of_a_protected_id() -> None:
+    """Problem 14 reads our turns: one character of an id is still the id."""
+    text = build_system_prompt(NOW).lower()
+    for forbidden in ("check letter", "last letter", "end in", "ends in"):
+        assert forbidden not in text, forbidden
+    assert "never propose or confirm one character of it" in text
 
 
 def test_prompt_mentions_only_tools_the_model_can_see() -> None:
@@ -221,7 +241,12 @@ def test_turn_settings_are_english_first_and_interruptible() -> None:
     assert turns.enable_interruptions is True
     assert turns.stt_language_hints[0] == "en"
     assert set(turns.stt_language_hints) >= {"en", "es", "ca"}
-    assert 0 < turns.user_idle_secs < 8, "nudge before the caller's 8-second silence ends the call"
+    # The harness caller answered in 4.5 s median / 10 s p90 on 2026-09-18, so
+    # anything under 10 fires inside its thinking pause. The upper bound keeps
+    # the nudge ahead of the platform's own cut-off for a quiet line.
+    assert 10 <= turns.user_idle_secs < 20, "nudge after the caller's p90, before the line is cut"
+    assert turns.idle_mute_secs >= turns.user_idle_secs
+    assert turns.idle_bot_grace_secs > 0
     assert turns.exposed_tools == DEFAULT_EXPOSED_TOOLS
     assert "submit_action" in turns.exposed_tools
     # Frozen: one instance is shared by every call, so nobody may mutate it.
@@ -229,16 +254,45 @@ def test_turn_settings_are_english_first_and_interruptible() -> None:
         turns.enable_interruptions = False  # type: ignore[misc]
 
 
-def test_soniox_mode_leaves_turn_strategies_to_the_stt_service() -> None:
-    # Passing strategies in Soniox mode would override the external ones the
-    # STT installs and break turn endings; the factory says None on purpose.
-    assert user_turn_strategies(TurnSettings(soniox_turn_detection=True)) is None
+def test_soniox_mode_keeps_the_min_words_barge_in_gate() -> None:
+    """Soniox mode must pass our strategies, not leave None for the STT.
+
+    Returning None lets Soniox install ExternalUserTurnStrategies, where any
+    VAD start interrupts and interrupt_min_words never runs.
+    """
+    pytest.importorskip("pipecat")
+    from pipecat.turns.user_start import MinWordsUserTurnStartStrategy
+    from pipecat.turns.user_stop import ExternalUserTurnStopStrategy
+
+    strategies = user_turn_strategies(
+        TurnSettings(soniox_turn_detection=True, interrupt_min_words=2)
+    )
+    assert strategies is not None
+    assert len(strategies.start) == 1
+    assert isinstance(strategies.start[0], MinWordsUserTurnStartStrategy)
+    assert strategies.start[0]._min_words == 2
+    assert strategies.start[0]._use_interim is True
+    assert len(strategies.stop) == 1
+    assert isinstance(strategies.stop[0], ExternalUserTurnStopStrategy)
+    # A turn opened by the word gate still closes on Soniox's stop proposal.
+    assert strategies.stop[0].resolves_proposed_turn_stop_frames is True
+    # And the stop list must be explicit: an empty one sends
+    # ``UserTurnStrategies.__post_init__`` to
+    # ``default_user_turn_stop_strategies()``, which builds a smart-turn
+    # ONNX session per socket that Soniox mode never uses.
+    assert strategies.stop, "an empty stop list loads the smart-turn model"
 
 
 def test_vad_mode_builds_strategies_that_honour_the_settings() -> None:
     pytest.importorskip("pipecat")
+    from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
     from pipecat.turns.user_start import MinWordsUserTurnStartStrategy, VADUserTurnStartStrategy
-    from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
+    from pipecat.turns.user_stop import (
+        SpeechTimeoutUserTurnStopStrategy,
+        TurnAnalyzerUserTurnStopStrategy,
+    )
+
+    from vortex.conversation.turns import effective_vad_stop_secs
 
     strategies = user_turn_strategies(
         TurnSettings(soniox_turn_detection=False, interrupt_min_words=2)
@@ -246,8 +300,17 @@ def test_vad_mode_builds_strategies_that_honour_the_settings() -> None:
     assert strategies is not None
     assert isinstance(strategies.start[0], VADUserTurnStartStrategy)
     assert isinstance(strategies.start[1], MinWordsUserTurnStartStrategy)
-    assert isinstance(strategies.stop[0], SpeechTimeoutUserTurnStopStrategy)
+    assert isinstance(strategies.stop[0], TurnAnalyzerUserTurnStopStrategy)
+    assert isinstance(strategies.stop[0]._turn_analyzer, LocalSmartTurnAnalyzerV3)
+    assert strategies.stop[0]._turn_analyzer.params.stop_secs == 2.0
+    assert effective_vad_stop_secs(TurnSettings(soniox_turn_detection=False)) == 0.2
 
     single = user_turn_strategies(TurnSettings(soniox_turn_detection=False, interrupt_min_words=1))
     assert single is not None
     assert len(single.start) == 1
+
+    timeout = user_turn_strategies(
+        TurnSettings(soniox_turn_detection=False, use_smart_turn=False, interrupt_min_words=2)
+    )
+    assert timeout is not None
+    assert isinstance(timeout.stop[0], SpeechTimeoutUserTurnStopStrategy)
