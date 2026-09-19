@@ -143,9 +143,10 @@ def _providers_named(catalogue: Catalogue, spoken_name: str, specialty_id: str |
 PATIENT_MISSES_KEY = "rules.patient_misses"
 
 #: Patient-record rules that stand down when the directory record is missing.
-#: The refusal, if there is one, still comes from ``/availability``; this list
-#: says which local checks did not get a chance to speak.
-NO_RECORD_SKIPPED: list[SkippedEligibilityCheck] = ["age", "referral"]
+#: The refusal, if there is one, still comes from ``/availability``; this says
+#: which local checks did not get a chance to speak. A tuple, so no importer can
+#: edit what every later call then copies into its verdict.
+NO_RECORD_SKIPPED: tuple[SkippedEligibilityCheck, ...] = ("age", "referral")
 
 
 async def _patient(ctx: ToolContext, patient_id: str) -> PatientRecord | None:
@@ -371,6 +372,19 @@ async def check_eligibility(ctx: ToolContext, args: CheckEligibilityInput) -> El
     )
 
 
+#: Caller turns an earlier ``triage`` in this call already answered. The
+#: transcript fallback below reads only what was said after them. Per call,
+#: like everything on ``ToolContext``.
+TRIAGE_TURN_MARK_KEY = "rules.triage_turn_mark"
+
+
+def _turns_behind_request(ctx: ToolContext, mark: int) -> str:
+    """The caller's turns taken after ``mark``, oldest first, as one string."""
+    said = list(ctx.log.said)
+    fresh = min(len(said), max(0, ctx.log.user_turns - mark))
+    return " ".join(said[len(said) - fresh :]) if fresh else ""
+
+
 async def triage(ctx: ToolContext, args: TriageInput) -> TriageResult:
     """Symptom -> specialty, or emergency.
 
@@ -400,7 +414,13 @@ async def triage(ctx: ToolContext, args: TriageInput) -> TriageResult:
     and the residue it lands on is a guess made from no evidence at all. A
     complaint the table *did* recognise is answered by the table, so a specialty
     the caller only mentioned in passing never outranks a symptom that scored.
+    Only the turns behind *this* request are read: each triage closes the window
+    it was given, so the specialty of a request already answered never decides
+    the next, unrelated one.
     """
+    triaged_through = ctx.state.get(TRIAGE_TURN_MARK_KEY, 0)
+    ctx.state[TRIAGE_TURN_MARK_KEY] = ctx.log.user_turns
+
     flag = triage_table.red_flag(args.complaint)
     if flag:
         ctx.log.event("triage.red_flag", flag=flag, complaint=args.complaint)
@@ -447,8 +467,11 @@ async def triage(ctx: ToolContext, args: TriageInput) -> TriageResult:
         # the live log. Only read them in this branch - a complaint the table
         # did recognise is answered by the table, and a specialty mentioned in
         # passing must never outrank a symptom that scored. The child guard
-        # below then reads the same words the specialty came out of.
-        said = ctx.log.caller_words()
+        # below then reads the same words the specialty came out of. The whole
+        # retained transcript is not evidence for this request: a caller who
+        # asked for dermatology and was triaged for it would send their next,
+        # unrecognised complaint to dermatology too.
+        said = _turns_behind_request(ctx, triaged_through)
         asked_for = triage_table.named_specialty(said)
 
     if asked_for and asked_for != routed and not triage_table.mentions_child(said):

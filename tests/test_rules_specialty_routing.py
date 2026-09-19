@@ -355,6 +355,24 @@ async def test_the_complaint_still_wins_over_the_transcript(tmp_path):
     assert routed.specialty_id == "gynaecology"
 
 
+async def test_a_specialty_already_triaged_never_answers_the_next_request(tmp_path):
+    """Two requests in one call: the dermatology turn belongs to the first.
+
+    The transcript keeps every turn the caller took, so reading all of it sends
+    a later complaint the table does not recognise to the specialty the caller
+    asked for before. Each triage reads only the turns taken since the last one.
+    """
+    ctx = make_ctx(tmp_path)
+    caller_said(ctx, "I need a dermatology appointment, about a mole on my back")
+    first = await triage(ctx, TriageInput(complaint="a mole on my back"))
+
+    caller_said(ctx, "and there is a lump on my arm that has not gone away")
+    second = await triage(ctx, TriageInput(complaint="a lump on my arm"))
+
+    assert first.specialty_id == "dermatology"
+    assert second.specialty_id == "general_practice"
+
+
 async def test_the_transcript_override_says_where_it_came_from(tmp_path):
     ctx = make_ctx(tmp_path)
     caller_said(ctx, "the earliest physiotherapy appointment you have")
