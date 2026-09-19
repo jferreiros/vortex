@@ -37,7 +37,7 @@ import unicodedata
 from functools import lru_cache
 from typing import Any
 
-from vortex.settings import Settings, get_settings
+from vortex.settings import Settings
 
 EARTH_RADIUS_KM = 6371.0088
 
@@ -289,12 +289,9 @@ async def _geocode_nominatim(address: str, url: str) -> tuple[float, float] | No
         return None
 
 
-async def geocode_live(
-    address: str, settings: Settings | None = None
-) -> tuple[float, float] | None:
+async def geocode_live(address: str, settings: Settings) -> tuple[float, float] | None:
     """Ask the configured live geocoder. ``None`` when none is configured."""
-    cfg = settings or get_settings()
-    backend = resolve_geocoder_backend(cfg)
+    backend = resolve_geocoder_backend(settings)
     if not backend:
         return None
     cache_key = (backend, fold(address))
@@ -303,7 +300,7 @@ async def geocode_live(
     if backend == "cartociudad":
         point = await _geocode_cartociudad(address)
     else:
-        point = await _geocode_nominatim(address, cfg.geocoder_url)
+        point = await _geocode_nominatim(address, settings.geocoder_url)
     _geocode_cache[cache_key] = point
     return point
 
@@ -318,7 +315,7 @@ def address_overlap(caller: str, site_address: str) -> int:
     return len(_address_words(caller) & _address_words(site_address))
 
 
-async def locate(address: str, settings: Settings | None = None) -> tuple[float, float] | None:
+async def locate(address: str, settings: Settings) -> tuple[float, float] | None:
     """Coordinates for a spoken address: gazetteer first, then a live geocoder."""
     return gazetteer_lookup(address) or await geocode_live(address, settings)
 

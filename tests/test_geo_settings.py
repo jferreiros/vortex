@@ -47,7 +47,7 @@ def clean_env(monkeypatch: pytest.MonkeyPatch):
 
 
 async def test_geocode_live_is_off_by_default(clean_env) -> None:
-    assert await geo.geocode_live("Calle Mayor 1, Madrid") is None
+    assert await geo.geocode_live("Calle Mayor 1, Madrid", settings_module.Settings()) is None
 
 
 async def test_geocode_live_reads_the_url_from_settings_not_os_environ(
@@ -55,21 +55,27 @@ async def test_geocode_live_reads_the_url_from_settings_not_os_environ(
 ) -> None:
     """A raw os.environ write must not reach geocode_live: only Settings does."""
     monkeypatch.setenv("VORTEX_GEOCODER_URL", "https://nominatim.example.invalid/search")
-    # geo.py no longer reads os.environ directly, so the stale cached Settings
-    # (with no geocoder configured) still wins here.
-    assert await geo.geocode_live("Calle Mayor 1, Madrid") is None
+    # Settings must be passed explicitly; env alone never enables the live path.
+    assert await geo.geocode_live("Calle Mayor 1, Madrid", settings_module.Settings()) is None
 
     settings_module.reset_settings()
     settings = settings_module.get_settings()
     assert settings.geocoder_url == "https://nominatim.example.invalid/search"
-    # An explicit settings argument is honoured without needing get_settings().
     off = settings_module.Settings(geocoder="", geocoder_url="")
     assert await geo.geocode_live("Calle Mayor 1, Madrid", off) is None
 
 
+async def test_locate_and_geocode_live_require_settings(clean_env) -> None:
+    """No get_settings() fallback: callers must pass the socket Settings."""
+    with pytest.raises(TypeError):
+        await geo.geocode_live("Calle Mayor 1, Madrid")  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        await geo.locate("Calle Mayor 3, Madrid")  # type: ignore[call-arg]
+
+
 async def test_locate_prefers_the_offline_gazetteer(clean_env) -> None:
     """A recognised place never needs the geocoder, on or off."""
-    point = await geo.locate("Calle Mayor 3, Madrid")
+    point = await geo.locate("Calle Mayor 3, Madrid", settings_module.Settings())
     assert point is not None
 
 
