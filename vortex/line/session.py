@@ -61,6 +61,7 @@ from vortex.line.submit import (
     SubmitApi,
     SubmitClient,
     submit_action,
+    submitted_action,
     with_verdict_reason,
 )
 from vortex.line.twilio import StartPayload
@@ -495,7 +496,7 @@ class CallSession:
             if result.status in ACCEPTED_STATUSES:
                 self.arm_hangup("submit_accepted")
                 if sent is not None:
-                    self._queue_sms(sent)
+                    self._queue_sms(submitted_action(self.ctx, sent))
         else:
             self.memory.observe(name, result)
             if self.memory.superseded_slot:
@@ -648,7 +649,7 @@ class CallSession:
         self.submitted.append(result)
         self.sent_actions.append(with_verdict_reason(self.ctx, action))
         if result.status in ACCEPTED_STATUSES:
-            self._queue_sms(action)
+            self._queue_sms(submitted_action(self.ctx, action))
         return result
 
     @property

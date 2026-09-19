@@ -21,6 +21,7 @@ from vortex.contract import (
     Appointment,
     BookAction,
     CancelAction,
+    EscalateAction,
     NoAction,
     RegisterAction,
     RescheduleAction,
@@ -28,6 +29,7 @@ from vortex.contract import (
     action_payload,
     action_route,
 )
+from vortex.line import session as session_module
 from vortex.line.session import CallSession
 from vortex.line.sms import (
     DryRunSmsClient,
@@ -39,6 +41,7 @@ from vortex.line.sms import (
     make_sms_client,
     twilio_is_configured,
 )
+from vortex.line.submit import SUBMITTED_ACTION_KEY
 from vortex.line.twilio import StartPayload
 from vortex.observability.tracing import mask_phone
 from vortex.settings import Settings, get_settings, reset_settings
@@ -372,6 +375,52 @@ async def test_submit_action_tool_path_also_sends_sms(offline_settings: Settings
 
     assert len(sms.sent) == 1
     assert sms.sent[0][0] == CALLER
+
+
+@pytest.mark.asyncio
+async def test_submit_records_the_action_the_arbiter_decided(
+    offline_settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("VORTEX_JEV_ARBITER", "true")
+    reset_settings()
+    session = make_session(get_settings(), "CA-arbiter-state")
+    escalation = EscalateAction(reason="medical_emergency")
+
+    async def escalate_instead(ctx: Any, action: Action) -> Action:
+        return escalation
+
+    from vortex.jev import arbiter
+
+    monkeypatch.setattr(arbiter, "review", escalate_instead)
+
+    await session.submit(NoAction(reason="patient_not_found"))
+    await session.close()
+
+    routes = [route for route, _ in session.submitter.sent]  # type: ignore[attr-defined]
+    assert routes == [action_route(escalation)]
+    assert session.ctx.state[SUBMITTED_ACTION_KEY] == escalation
+    reset_settings()
+
+
+@pytest.mark.asyncio
+async def test_a_booking_the_submission_replaced_sends_no_sms(
+    offline_settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The arbiter can turn a booking into an escalation before the POST."""
+    session = make_session(offline_settings, "CA-arbiter-sms")
+    sms = session.sms
+    assert isinstance(sms, DryRunSmsClient)
+
+    async def submit_an_escalation(ctx: Any, args: Any) -> SubmitResult:
+        ctx.state[SUBMITTED_ACTION_KEY] = EscalateAction(reason="medical_emergency")
+        return SubmitResult(status="accepted", http_status=200)
+
+    monkeypatch.setattr(session_module, "submit_action", submit_an_escalation)
+
+    await session.submit(a_booking())
+    await session.close()
+
+    assert sms.sent == []
 
 
 @pytest.mark.asyncio
