@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from vortex.contract import BookAction, EscalateAction, MADRID, NoAction
+from vortex.contract import MADRID, BookAction, EscalateAction, NoAction
 from vortex.jev.policy import decide
 
 SLOT = datetime(2026, 9, 24, 11, 0, tzinfo=MADRID)
