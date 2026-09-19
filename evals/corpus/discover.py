@@ -309,7 +309,10 @@ async def probe_unreportable(
     - location_hours: a single-day window a site is shut for the whole of,
       with and without a patient;
     - type_not_offered: any catalogue gap where a provider lacks the type a
-      record resolves to, queried live if one exists;
+      record resolves to, put to that provider with a harvested patient whose
+      visited-ness resolves to the missing type — another provider of the
+      specialty offers it, and the wrong patient resolves to another type, so
+      either substitution answers a question the gap did not ask;
     - patient_history: harvested patients past every provider and site.
 
     Anything one of these returns lands in ``record`` as a sample, so a clinic
@@ -352,17 +355,23 @@ async def probe_unreportable(
                 )
 
     gaps = _type_gaps(live)
-    stats["type_not_offered"] = {"gaps": len(gaps), "probed": 0, "failed": 0}
+    stats["type_not_offered"] = {"gaps": len(gaps), "probed": 0, "failed": 0, "unprobed": 0}
     by_visited: dict[bool, list[PatientRecord]] = {False: [], True: []}
     for patient in pool:
         by_visited[patient.has_visited_before].append(patient)
     for gap in gaps:
         visited = gap["patient"] == "returning"
-        candidates = by_visited[visited] or pool
-        if not candidates:
+        candidates = by_visited[visited]
+        if not candidates or not gap["provider_id"]:
+            stats["type_not_offered"]["unprobed"] += 1
             continue
+        patient_id = candidates[0].patient_id
         response = await _probe_availability(
-            client, sem, specialty_id=gap["specialty_id"], patient_id=candidates[0].patient_id
+            client,
+            sem,
+            provider_id=gap["provider_id"],
+            specialty_id=gap["specialty_id"],
+            patient_id=patient_id,
         )
         stats["type_not_offered"]["probed"] += 1
         if response is None:
@@ -373,6 +382,7 @@ async def probe_unreportable(
                 blocked.reason,
                 specialty_id=gap["specialty_id"],
                 provider_id=blocked.provider_id,
+                patient_id=patient_id,
                 via="type-gap",
             )
 
@@ -442,10 +452,12 @@ def _unverified_notes(
             "reports no rule; re-run"
         )
     gaps = stats.get("type_not_offered", {})
-    if "type_not_offered" not in found and gaps.get("failed"):
+    if "type_not_offered" not in found and (gaps.get("failed") or gaps.get("unprobed")):
         notes["type_not_offered"] = (
-            f"{gaps['failed']} of {gaps.get('probed', 0)} catalogue-gap queries got no "
-            "answer from the API — the gaps were never put to the clinic; re-run"
+            f"{gaps.get('failed', 0)} of {gaps.get('probed', 0)} catalogue-gap queries got "
+            f"no answer from the API and {gaps.get('unprobed', 0)} gaps had no provider or "
+            "no harvested patient of their own kind to ask with — the gaps were never put "
+            "to the clinic; re-run"
         )
     history = stats.get("patient_history", {})
     if "patient_history" not in found and (history.get("failed") or not history.get("queries")):

@@ -37,8 +37,40 @@ class _DeadClinic(FakeClinicClient):
         raise ClinicApiError(503, "unavailable")
 
 
+class _RecordingClinic(FakeClinicClient):
+    """The fake clinic, keeping every availability query it was asked."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.queries: list[dict] = []
+
+    async def availability(self, **params):
+        self.queries.append(params)
+        return await super().availability(**params)
+
+
 def _discard(reason: str, **sample) -> None:
     return None
+
+
+def _catalogue_with_a_type_gap():
+    """The real catalogue has no gap, so one dermatologist loses the new-patient type."""
+    catalogue = _catalogue()
+    provider = next(p for p in catalogue.providers if p.specialty_id == "dermatology")
+    stripped = provider.model_copy(
+        update={
+            "appointment_type_ids": [t for t in provider.appointment_type_ids if "first" not in t]
+        }
+    )
+    broken = catalogue.model_copy(
+        update={
+            "providers": [
+                stripped if p.provider_id == provider.provider_id else p
+                for p in catalogue.providers
+            ]
+        }
+    )
+    return broken, provider.provider_id
 
 
 # ---- the report ---------------------------------------------------------------
@@ -93,27 +125,49 @@ def test_the_sweep_resolves_the_same_type_the_client_resolves() -> None:
 def test_a_provider_missing_the_resolved_type_is_flagged_as_a_gap() -> None:
     """The gap is what would make type_not_offered producible; the real
     catalogue has none, so the probe must see none offline."""
-    catalogue = _catalogue()
-    assert _type_gaps(catalogue) == []
-    provider = next(p for p in catalogue.providers if p.specialty_id == "dermatology")
-    stripped = provider.model_copy(
-        update={
-            "appointment_type_ids": [t for t in provider.appointment_type_ids if "first" not in t]
-        }
-    )
-    broken = catalogue.model_copy(
-        update={
-            "providers": [
-                stripped if p.provider_id == provider.provider_id else p
-                for p in catalogue.providers
-            ]
-        }
-    )
+    assert _type_gaps(_catalogue()) == []
+    broken, provider_id = _catalogue_with_a_type_gap()
     gaps = _type_gaps(broken)
     assert any(
-        gap["provider_id"] == provider.provider_id and "first" in gap["appointment_type_id"]
-        for gap in gaps
+        gap["provider_id"] == provider_id and "first" in gap["appointment_type_id"] for gap in gaps
     )
+
+
+def test_the_type_gap_probe_asks_the_gap_s_own_provider_and_patient_kind() -> None:
+    """Another provider of the specialty offers the type and a returning
+    patient resolves to another one, so either substitution answers a question
+    the gap did not ask."""
+    broken, provider_id = _catalogue_with_a_type_gap()
+    pool = [
+        PatientRecord(patient_id="P00001", given_name="N", first_surname="Nueva"),
+        PatientRecord(
+            patient_id="P00002", given_name="R", first_surname="Vuelta", has_visited_before=True
+        ),
+    ]
+    client = _RecordingClinic()
+    asyncio.run(probe_unreportable(client, asyncio.Semaphore(4), broken, pool, _discard))
+    gap_queries = [q for q in client.queries if q.get("specialty_id") and not q.get("location_id")]
+    assert gap_queries
+    for query in gap_queries:
+        assert query["provider_id"] == provider_id
+        assert query["patient_id"] == "P00001"
+
+
+def test_a_gap_with_no_patient_of_its_kind_is_unverified_not_impossible() -> None:
+    broken, _ = _catalogue_with_a_type_gap()
+    pool = [
+        PatientRecord(
+            patient_id="P00002", given_name="R", first_surname="Vuelta", has_visited_before=True
+        )
+    ]
+    stats = asyncio.run(
+        probe_unreportable(FakeClinicClient(), asyncio.Semaphore(4), broken, pool, _discard)
+    )
+    assert stats["type_not_offered"]["probed"] == 0
+    assert stats["type_not_offered"]["unprobed"] == 1
+    unverified = _unverified_notes({}, stats)
+    assert "type_not_offered" in unverified
+    assert "type_not_offered" not in _impossible_notes({}, stats, 0, 5, unverified)
 
 
 # ---- the shut-window probe -----------------------------------------------------
