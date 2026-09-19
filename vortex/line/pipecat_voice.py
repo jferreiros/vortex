@@ -821,6 +821,9 @@ def _LanguageWatcher(  # noqa: N802 - factory that returns a processor
                 if vcfg:
                     voice = voice_config.apply_gender(voice, vcfg.voice)
                 previous, self._state.language = self._state.language, language
+                # The session carries it too: the day-before confirmation call
+                # is dialled in the language this caller actually spoke.
+                session.language = language
                 session.ctx.log.event(
                     "voice.language_switch",
                     was=previous,
