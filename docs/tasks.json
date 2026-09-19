@@ -93,6 +93,14 @@
       "deadline": "Sábado, en paralelo a los retos",
       "goal": "Meter en el prompt, el stack y el código lo que la investigación de voz priorizó por puntos por hora.",
       "why": "Los alfanuméricos y el ruido a 5 dB son el fallo número uno del sector, y ocho segundos de silencio cuestan el reto 13 entero. Se hace en paralelo, no en vez de los retos."
+    },
+    {
+      "id": "w7",
+      "label": "Bloque 7",
+      "title": "El producto · el centro de control",
+      "deadline": "Sábado noche, en paralelo a los retos",
+      "goal": "Tres secciones en /clinic: Live (scatter de llamadas en curso), Calls (tabla con grabaciones), Analytics (métricas por llamada).",
+      "why": "La mitad de la nota del jurado es lo que podemos enseñar. Un centro de control con llamadas entrando en vivo es lo que enseñan Retell, Hamming y Hyro."
     }
   ],
   "tasks": [
@@ -1254,6 +1262,113 @@
       ],
       "done": "En on_function_calls_started se habla una frase corta por idioma vía TTSSpeakFrame, menos de 1 s de audio. No dispara la barrera de palabras ni el idle.",
       "why": "deepseek-v4-flash tarda 1,3 s p50. Las muletillas suben la respuesta percibida sin bajar la latencia y pipecat las trata como habla del bot. Ver docs/research/03-turn-detection.md."
+    },
+    {
+      "id": "T67",
+      "wave": "w7",
+      "lane": "todos",
+      "kind": "infra",
+      "title": "Producto · Spec del centro de control en docs/product-control-center.md",
+      "problems": [],
+      "weight": 0,
+      "size": "1 h",
+      "blocked_by": [],
+      "files": [
+        "docs/product-control-center.md"
+      ],
+      "done": "El doc define las tres secciones, los eventos nuevos, los endpoints y los seis worktrees. Sirve de spec para los PRs paralelos.",
+      "why": "Cinco frentes en paralelo necesitan un contrato común o se pisan."
+    },
+    {
+      "id": "T68",
+      "wave": "w7",
+      "lane": "linea",
+      "kind": "infra",
+      "title": "Producto · Datos: call.intent, turn.metrics, /api/wall/calls/active, WAV por llamada",
+      "problems": [],
+      "weight": 0,
+      "size": "medio día",
+      "blocked_by": [],
+      "files": [
+        "vortex/line/",
+        "vortex/observability/"
+      ],
+      "done": "El log emite call.intent y turn.metrics; el board lista llamadas activas; cada llamada deja recordings/{call_id}.wav servido por /recordings/{id}.",
+      "why": "Todo el centro de control lee de aquí. Sin intent no hay scatter; sin WAV no hay play ni descarga."
+    },
+    {
+      "id": "T69",
+      "wave": "w7",
+      "lane": "todos",
+      "kind": "demo",
+      "title": "Producto · Tailwind + shadcn + ElevenLabs UI re-skinneado en el wall",
+      "problems": [],
+      "weight": 0,
+      "size": "2 h",
+      "blocked_by": [],
+      "files": [
+        "vortex/wall/"
+      ],
+      "done": "vortex/wall compila con Tailwind y components.json; bar-visualizer, live-waveform, audio-player, transcript-viewer y message/conversation viven en src/components/elevenlabs/ con nuestros tokens.",
+      "why": "Los componentes de voz ya existen, MIT. Re-skin a design.css cuesta menos que construirlos."
+    },
+    {
+      "id": "T70",
+      "wave": "w7",
+      "lane": "todos",
+      "kind": "demo",
+      "title": "Producto · /clinic/live-calls: scatter en vivo con identidad del paciente",
+      "problems": [],
+      "weight": 0,
+      "size": "medio día",
+      "blocked_by": [
+        "T68"
+      ],
+      "files": [
+        "vortex/wall/src/pages/clinic/",
+        "vortex/wall/src/lib/"
+      ],
+      "done": "Las llamadas activas aparecen como cards que derivan hacia su outcome; el nombre aparece cuando find_patient resuelve; la onda se anima por fase. Funciona con mocks sin backend.",
+      "why": "Es la pieza que el jurado recuerda: el centro con 20 llamadas moviéndose en vivo."
+    },
+    {
+      "id": "T71",
+      "wave": "w7",
+      "lane": "todos",
+      "kind": "demo",
+      "title": "Producto · /clinic/calls: tabla con 'en curso', play y descarga",
+      "problems": [],
+      "weight": 0,
+      "size": "medio día",
+      "blocked_by": [
+        "T68"
+      ],
+      "files": [
+        "vortex/wall/src/pages/clinic/",
+        "vortex/wall/src/lib/"
+      ],
+      "done": "La fila entra animada; 'en curso' muestra onda viva; al cerrar aparece el player y el botón de descarga del WAV.",
+      "why": "El patrón de Retell y la plataforma del sponsor: lista viva + grabación."
+    },
+    {
+      "id": "T72",
+      "wave": "w7",
+      "lane": "todos",
+      "kind": "demo",
+      "title": "Producto · store.py SQLite + /clinic/insights estilo Hamming",
+      "problems": [],
+      "weight": 0,
+      "size": "medio día",
+      "blocked_by": [
+        "T68"
+      ],
+      "files": [
+        "vortex/observability/store.py",
+        "vortex/observability/live.py",
+        "vortex/wall/src/pages/clinic/"
+      ],
+      "done": "logs/calls.db se reingesta del JSONL; /api/wall/analytics devuelve status mix, duración, talk ratio, palabras/turno, TTFB p50/p95 y funnel; Insights lo pinta.",
+      "why": "Las métricas de Hamming sobre nuestros datos: talk ratio, duración, latencia por turno."
     }
   ]
 }

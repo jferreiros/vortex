@@ -429,6 +429,32 @@ class Settings:
         default_factory=lambda: float(_env("VORTEX_SMS_REMINDER_POLL_SECS", "30") or "30")
     )
 
+    # --- Day-before confirmation calls (Twilio Voice) -------------------------
+    # The day before an accepted booking we call the patient, say the
+    # appointment in their language and ask whether they will come; the answer
+    # is stored per appointment (logs/confirmation_calls.json). Opt-in like
+    # SMS, dry-run without Twilio keys or a public URL. The TwiML comes from
+    # this server's /confirmation/* routes, so Twilio needs to reach them:
+    # public_base_url is the https tunnel base (e.g. the `make tunnel` host).
+    confirmation_calls: bool = field(default_factory=lambda: _env_flag("VORTEX_CONFIRMATION_CALLS"))
+    public_base_url: str = field(default_factory=lambda: _env("VORTEX_PUBLIC_BASE_URL"))
+    # How far ahead of the slot the call fires. 24 = one day before.
+    # Lower it in demos (e.g. 0.01) to exercise the worker without waiting.
+    confirmation_lead_hours: float = field(
+        default_factory=lambda: float(_env("VORTEX_CONFIRMATION_LEAD_HOURS", "24") or "24")
+    )
+    # JSON file for pending confirmation calls. Empty = next to the calls log.
+    confirmation_calls_path: str = field(
+        default_factory=lambda: _env("VORTEX_CONFIRMATION_CALLS_PATH")
+    )
+    confirmation_poll_secs: float = field(
+        default_factory=lambda: float(_env("VORTEX_CONFIRMATION_POLL_SECS", "30") or "30")
+    )
+    # When set, every confirmation call goes here instead of the patient's
+    # number. Hackathon/demo only (a Twilio trial can only call verified
+    # numbers anyway). Falls back to sms_force_to, the demo's one demo number.
+    confirmation_force_to: str = field(default_factory=lambda: _env("VORTEX_CONFIRMATION_FORCE_TO"))
+
     @property
     def clinic_is_live(self) -> bool:
         if self.clinic_mode == "live":
@@ -643,6 +669,12 @@ class Settings:
             "sms_confirmations": self.sms_confirmations,
             "sms_force_to_set": bool(self.sms_force_to),
             "sms_day_before_reminders": self.sms_day_before_reminders,
+            "confirmation_calls": self.confirmation_calls,
+            "confirmation_calls_public_url_set": bool(self.public_base_url),
+            "confirmation_force_to_set": bool(self.confirmation_force_to or self.sms_force_to),
+            "has_twilio_voice": bool(
+                self.twilio_account_sid and self.twilio_auth_token and self.twilio_from_number
+            ),
             "sms_reminder_lead_hours": self.sms_reminder_lead_hours,
             "has_twilio_sms": bool(
                 self.twilio_account_sid

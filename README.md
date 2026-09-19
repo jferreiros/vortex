@@ -26,6 +26,28 @@ make langfuse-check         # project URL + whether the live line has keys
 
 `make smoke` and `make test` need no key and no network.
 
+## Day-before confirmation calls
+
+With `VORTEX_CONFIRMATION_CALLS=true` plus the Twilio keys and
+`VORTEX_PUBLIC_BASE_URL` (the tunnel host), an accepted booking also queues a
+voice call for the day before the slot. The worker dials the patient, this
+server's `/confirmation/*` routes serve the TwiML, and `Gather input="speech"`
+captures the answer: confirmed / not_coming / reschedule_requested. The question
+itself offers the move out loud ("Si prefiere cambiarla, dígamelo y la movemos
+ahora mismo"), so the caller learns the option exists without guessing (es, ca, gl,
+eu and en scripts; the call inherits the language the caller used, Spanish by
+default). No answer lands as `no_answer` or `unclear`. A reschedule answer does
+not end the call: when the live voice pipeline runs behind the same server the
+call hands the line to its colleague - "le paso con mi compañero, que es quien
+le agenda las citas" - and `<Connect><Stream>` carries it back to `/ws` with the
+appointment, the already-identified patient and the language on the start
+message, so the booking agent's rebooking flow continues without re-asking any
+data and the patient moves the appointment in the same call. Without the live
+voice pipeline the stored callback promise stands. Every row lives in
+`logs/confirmation_calls.json` — the hooks a waitlist filler or a retry/SMS
+fallback would subscribe to. Try it: `uv run python scripts/try_confirmation_call.py`
+(`--live --to <E.164> --base-url <tunnel>` to dial for real).
+
 ## Modes
 
 The server always starts. Missing keys switch components to fake mode:
@@ -96,8 +118,9 @@ production) sit behind a sidebar:
 | `/insights` | refusal reasons, handle times, tool latency, calls by hour |
 | `/settings`, `/settings/rules`, `/settings/integrations`, `/settings/engineering` | sites, doctors, rules and the insurance matrix from the clinic API; providers; evals |
 
-Public pages for the jury: `/wall` (the projector view) and `/call/<id>` (one
-call, shareable). Phone numbers are masked there. The board reads calls from
+Public pages for the jury: `/wall` (the Live flow: the call in progress as
+conversation, workflow and outcome, on a dark canvas made for a projector) and
+`/call/<id>` (one call, shareable). Phone numbers are masked there. The board reads calls from
 the line at `VORTEX_LINE_URL`. Every screen follows `DESIGN.md`.
 
 ## Design
