@@ -501,6 +501,14 @@
       "files": ["vortex/conversation/prompt.py", "evals/conversation/scenarios/"],
       "done": "El prompt pide un campo por turno, agrupa dígitos de tres en tres, lee el id una sola vez, y aplica 'el último valor gana' en correcciones. Un escenario por regla en evals/conversation.",
       "why": "Los alfanuméricos son el fallo número uno del sector (ServiceNow EVA, mar 2026). Con ruido a 5 dB un nombre o un dígito hay que confirmarlo, y el caller difícil cambia de id a media frase. Ver docs/research/02-stt-landscape.md y 03-turn-detection.md."
+    },
+    {
+      "id": "T66", "wave": "w6", "lane": "todos", "kind": "voz",
+      "title": "Voz · Rama demo con Gemini 3.8 Live (speech-to-speech) y las mismas tools",
+      "problems": [], "weight": 0, "size": "medio día", "blocked_by": [],
+      "files": ["vortex/line/"],
+      "done": "Una rama enseña una llamada por GeminiLiveLLMService con las tools de vortex. Se enseña al jurado; no se puntúa con ella.",
+      "why": "GA el 15 sep 2026, 99 idiomas con ca/gl/eu, tool calling asíncrono. Los modelos S2S siguen por debajo del 52 % en tareas agénticas, así que la cascada se queda para puntuar. Ver docs/research/04-industry-2025-2026.md y 06-google-and-tts.md."
     }
   ]
 }
