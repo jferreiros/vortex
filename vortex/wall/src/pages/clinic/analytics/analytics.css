@@ -492,6 +492,105 @@
   color: var(--color-faint);
 }
 
+/* --- Loading skeleton -----------------------------------------------------
+   Reuses the real section classes (analytics-kpis, analytics-grid,
+   analytics-panel, analytics-kpi) so a skeleton card is the exact size of
+   the card it stands in for — nothing jumps when the payload lands. */
+
+.analytics-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.analytics-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.analytics-skel-line,
+.analytics-skel-block {
+  display: block;
+  border-radius: var(--radius-sm);
+  background-color: var(--color-border);
+  background-image: linear-gradient(
+    100deg,
+    var(--color-border) 30%,
+    var(--color-bg) 50%,
+    var(--color-border) 70%
+  );
+  background-size: 200% 100%;
+  animation: analytics-skel-sweep 1.8s ease-in-out infinite;
+}
+
+.analytics-skel-block {
+  border-radius: var(--radius-md);
+}
+
+.analytics-skel-line-sm {
+  height: 12px;
+}
+.analytics-skel-line-md {
+  height: 16px;
+}
+.analytics-skel-line-lg {
+  height: 18px;
+}
+.analytics-skel-line-xl {
+  height: 28px;
+}
+.analytics-skel-line-row {
+  height: 28px;
+}
+.analytics-skel-line-pill {
+  height: 34px;
+  border-radius: var(--radius-full);
+}
+
+.analytics-skel-gap {
+  margin-top: var(--space-2);
+}
+
+.analytics-skel-sankey {
+  height: 360px;
+}
+
+.analytics-skel-panel-body {
+  height: 220px;
+}
+
+.analytics-skel-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+@keyframes analytics-skel-sweep {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+/* A shimmer is motion for motion's sake — drop it and leave a plain,
+   still block rather than fight the user's OS-level setting. */
+@media (prefers-reduced-motion: reduce) {
+  .analytics-skel-line,
+  .analytics-skel-block {
+    animation: none;
+    background-image: none;
+  }
+}
+
 /* --- Narrow ------------------------------------------------------------- */
 
 @media (max-width: 1180px) {
