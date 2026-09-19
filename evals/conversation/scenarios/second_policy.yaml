@@ -1,0 +1,116 @@
+# Problem 17 (the second policy, weight 4): the plan on file will not cover
+# the request, the caller holds a second plan that is nowhere in the API, and
+# it must be asked for, not assumed. One scenario per published case in
+# evals/corpus/cases/public-cases.json (problem_id == "second_policy"); ids
+# below reference the public case they are modelled on. The fixtures world
+# has no gynaecologist and no general practice provider at Sur, so the two
+# specialties the public cases use for that shape are swapped here for one
+# our world can actually book end to end: ASISA never covers physiotherapy,
+# because the one physiotherapist sits at Sur and ASISA does not cover Sur —
+# same shape as "one gynaecologist, Adeslas does not cover gynaecology":
+# a plan refusal with nowhere to redirect to, so the second policy is the
+# only way through.
+group: second_policy
+problem: 17
+now: "2026-09-18T09:00:00+02:00"
+
+scenarios:
+  # Public case second_policy-fb5f6c66b28e / second_policy-15c3db687da3: asked
+  # directly, the caller answers directly. DKV is refused by name (the one
+  # dermatologist), not by site or specialty, so this keeps the original
+  # provider_not_in_network shape.
+  - id: p17.second_policy_must_be_asked_for
+    caller:
+      - says: "Soy Antonio Pérez Martín, NIE equis uno dos tres cuatro cinco seis siete ele. Tengo volante para dermatología y quiero cita con la doctora Iglesias."
+        means: {identify: {name: "Antonio Pérez Martín", national_id: "X1234567L"}, request: {intent: book, specialty_id: dermatology, provider: "doctora Iglesias"}}
+      - says: "¿Que no acepta DKV? Ah, es que también tengo Sanitas, si eso sirve."
+        means: {policy: sanitas}
+      - says: "Sí, con Sanitas entonces. La primera que tenga."
+        means: {accept: true}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00200
+          provider_id: PR04
+          policy_id: sanitas
+          slot: {$earliest_slot: {provider_id: PR04, patient_id: P00200}}
+      trajectory_contains: [find_patient, check_eligibility, find_slots, prepare_booking]
+      privacy_of: [P00200]
+
+  # Public case second_policy-badb9dd79107: Sarah Wilson Collins, Gynaecology,
+  # Caser refused, Sanitas held through her employer and named only once
+  # asked. No gynaecologist exists in this world, so the same "plan refuses
+  # the specialty at every site that offers it, one provider, nowhere to
+  # redirect" shape is played out on ASISA and physiotherapy instead.
+  - id: p17.asisa_never_covers_physio_switches_on_ask
+    caller:
+      - says: "Hi, I'd like to book the earliest Physiotherapy appointment, please. I'm Laura Gómez Herrera, DNI five five six six seven seven eight eight Z."
+        means: {identify: {name: "Laura Gómez Herrera", national_id: "55667788Z"}, request: {intent: book, specialty_id: physiotherapy}}
+      - says: "ASISA doesn't cover it? Oh — I also have Sanitas through my employer, if that helps."
+        means: {policy: sanitas}
+      - says: "Yes, that time works, thank you."
+        means: {accept: true}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00201
+          provider_id: PR06
+          location_id: sur
+          appointment_type_id: review
+          policy_id: sanitas
+          slot: {$earliest_slot: {specialty_id: physiotherapy, patient_id: P00201}}
+      trajectory_contains: [find_patient, check_eligibility, find_slots, prepare_booking, submit_action]
+      must_not_call: [build_registration]
+      privacy_of: [P00201]
+      max_tool_calls: 14
+
+  # Public case second_policy-30ce6a760ab9: the control. Nueva Mutua already
+  # covers General Practice everywhere, so no second plan exists to ask for.
+  # "Do not invent a second plan" — the booking must go through on the plan
+  # already on file, with no detour through check_eligibility again.
+  - id: p17.control_first_plan_already_works
+    caller:
+      - says: "Hello, I'd like the earliest General Practice appointment, please. My repeat prescription is about to run out and needs renewing. I'm Elvira Castro Molina, born the twentieth of February nineteen ninety-five."
+        means: {identify: {name: "Elvira Castro Molina", date_of_birth: "1995-02-20"}, request: {intent: book, specialty_id: general_practice}}
+      - says: "Yes, that works, thank you."
+        means: {accept: true}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00203
+          appointment_type_id: first_visit
+          policy_id: nueva_mutua
+          slot: {$earliest_slot: {specialty_id: general_practice, patient_id: P00203}}
+      trajectory_contains: [find_patient, check_eligibility, find_slots, prepare_booking, submit_action]
+      must_not_call: [build_registration]
+      privacy_of: [P00203]
+      max_tool_calls: 12
+
+  # Public case second_policy-15c3db687da3 (persona trait) reused for its
+  # distinguishing behaviour: the caller does not just forget to mention the
+  # second policy, they cannot recall its name until asked to check. The call
+  # must not give up, invent a plan or book against the refused one; it must
+  # keep the caller talking until a real plan comes back.
+  - id: p17.asisa_forgets_the_name_until_asked_to_check
+    caller:
+      - says: "Hi, I need to book the earliest Physiotherapy appointment, please. Manuel Torres Domínguez, born the second of November nineteen seventy-nine."
+        means: {identify: {name: "Manuel Torres Domínguez", date_of_birth: "1979-11-02"}, request: {intent: book, specialty_id: physiotherapy}}
+      - says: "Hmm, actually I'm not sure — I know I have something through work, but the name escapes me right now."
+        means: {}
+      - says: "Oh wait, I have my card here — it says Mapfre Salud."
+        means: {policy: mapfre}
+      - says: "Yes, that one, thank you."
+        means: {accept: true}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00202
+          provider_id: PR06
+          location_id: sur
+          appointment_type_id: first_visit
+          policy_id: mapfre
+          slot: {$earliest_slot: {specialty_id: physiotherapy, patient_id: P00202}}
+      trajectory_contains: [find_patient, check_eligibility, find_slots, prepare_booking, submit_action]
+      must_not_call: [build_registration]
+      privacy_of: [P00202]
+      max_tool_calls: 16
