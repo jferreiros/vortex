@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import sys
 import time
@@ -31,6 +32,8 @@ from vortex.observability.icons import icon
 from vortex.observability.view import CallCard, build_calls, flatten_grouped
 from vortex.observability.wall_timeline import build_timeline, call_summary, latest_intent
 from vortex.settings import REPO_ROOT, get_settings
+
+log = logging.getLogger("vortex.observability")
 
 LINE_URL = os.environ.get("VORTEX_LINE_URL", "http://127.0.0.1:7860").rstrip("/")
 BOARD_PORT = int(os.environ.get("VORTEX_BOARD_PORT", "8080"))
@@ -66,20 +69,44 @@ def _log_path() -> Path:
     return get_settings().calls_log_path
 
 
+#: Deliberately generous. The line server answers /health and /calls from a
+#: sync FastAPI route on the same event loop that streams live call audio, so
+#: under real load (a "Run All" holding ten to twenty sockets open) a fetch
+#: that used to time out at 0.35 s / 0.5 s failed constantly and silently fell
+#: back to the board's own, always-empty log — every Insights panel and the
+#: live wall itself would read as "no data" during exactly the calls that
+#: mattered, while a quiet local box with a single call never hit the timeout
+#: and looked fine. Six seconds still comfortably beats the 6 s poll interval
+#: the Insights page itself uses, so one slow fetch does not pile up on the
+#: next.
+_LINE_HEALTH_TIMEOUT_S = 3.0
+_LINE_CALLS_TIMEOUT_S = 6.0
+
+#: Last events successfully fetched from the line, kept so one slow or
+#: dropped request degrades to slightly-stale real data instead of an empty
+#: board. Cleared only by a fresh success; never written to disk.
+_last_good_events: list[dict[str, Any]] = []
+_last_good_health: dict[str, Any] | None = None
+
+
 def _load_events() -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
-    health: dict[str, Any] | None = None
+    global _last_good_events, _last_good_health
     try:
-        health = httpx.get(f"{LINE_URL}/health", timeout=0.35).json()
+        health = httpx.get(f"{LINE_URL}/health", timeout=_LINE_HEALTH_TIMEOUT_S).json()
         grouped = (
-            httpx.get(f"{LINE_URL}/calls", params={"limit": 800}, timeout=0.5)
+            httpx.get(f"{LINE_URL}/calls", params={"limit": 800}, timeout=_LINE_CALLS_TIMEOUT_S)
             .json()
             .get("calls", {})
         )
         if isinstance(grouped, dict):
-            return flatten_grouped(grouped), health
-    except Exception:
-        pass
-    return read_recent(_log_path(), limit=800), health
+            events = flatten_grouped(grouped)
+            _last_good_events, _last_good_health = events, health
+            return events, health
+    except Exception as exc:
+        log.warning("could not reach line at %s (%s); falling back", LINE_URL, exc)
+    if _last_good_events:
+        return _last_good_events, _last_good_health
+    return read_recent(_log_path(), limit=800), None
 
 
 def _parse_ts(value: str | None) -> datetime | None:

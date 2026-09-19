@@ -3,7 +3,6 @@ import SectionHeader from "../../../components/ui/SectionHeader";
 import Card from "../../../components/ui/Card";
 import Switch from "../../../components/ui/Switch";
 import Button from "../../../components/ui/Button";
-import Knob from "../../../components/ui/Knob";
 import "./settings.css";
 
 const DEFAULTS = {
@@ -27,12 +26,12 @@ const DEFAULTS = {
 };
 
 const PERMISSIONS_CONFIG = [
-  { key: "canBook", label: "Reservar citas", desc: "Crear citas nuevas." },
-  { key: "canReschedule", label: "Reprogramar citas", desc: "Mover citas a otro horario." },
-  { key: "canCancel", label: "Cancelar citas", desc: "Anular citas por teléfono." },
-  { key: "canRegister", label: "Registrar pacientes", desc: "Dar de alta pacientes nuevos." },
-  { key: "canInfo", label: "Información de clínica", desc: "Horarios, sedes y requisitos." },
-  { key: "canEscalate", label: "Escalar urgencias", desc: "Derivar a un humano." },
+  { key: "canBook", label: "Reservar citas" },
+  { key: "canReschedule", label: "Reprogramar citas" },
+  { key: "canCancel", label: "Cancelar citas" },
+  { key: "canRegister", label: "Registrar pacientes" },
+  { key: "canInfo", label: "Información de clínica" },
+  { key: "canEscalate", label: "Escalar urgencias" },
 ];
 
 const LEAD_OPTIONS_HOURS = [2, 3, 4, 5, 6, 7, 8, 12, 24, 48, 72, 96];
@@ -49,42 +48,9 @@ const ID_FIELDS_HELP =
 const CAP_HELP = "Fijado por la plataforma.";
 
 const PERSONALIZATION_CONFIG = [
-  {
-    key: "tone",
-    label: "Tono",
-    leftLabel: "Formal",
-    rightLabel: "Cercano",
-    getPreview: (v) =>
-      v <= 33
-        ? "«Buenos días, le atiendo desde la clínica. ¿En qué puedo ayudarle?»"
-        : v <= 66
-        ? "«¡Hola! ¿Qué tal? ¿En qué le echamos una mano hoy?»"
-        : "«¡Buenas! Cuénteme, ¿qué necesita?»",
-  },
-  {
-    key: "friendliness",
-    label: "Amabilidad",
-    leftLabel: "Directo",
-    rightLabel: "Muy amable",
-    getPreview: (v) =>
-      v <= 33
-        ? "«Le informo de su cita. ¿Confirma?»"
-        : v <= 66
-        ? "«Tenemos una cita para usted. ¿Le viene bien confirmarla?»"
-        : "«¡Tenemos una cita genial para usted! ¿Le encaja?»",
-  },
-  {
-    key: "speechRate",
-    label: "Ritmo de habla",
-    leftLabel: "Pausado",
-    rightLabel: "Rápido",
-    getPreview: (v) =>
-      v <= 33
-        ? "«Le... voy... a... dar... la... información... despacio.»"
-        : v <= 66
-        ? "«Le voy a dar la información a ritmo normal.»"
-        : "«Le voy a dar la información rapidito para no hacerle esperar.»",
-  },
+  { key: "tone", label: "Tono", leftLabel: "Formal", rightLabel: "Cercano" },
+  { key: "friendliness", label: "Amabilidad", leftLabel: "Directo", rightLabel: "Muy amable" },
+  { key: "speechRate", label: "Ritmo de habla", leftLabel: "Pausado", rightLabel: "Rápido" },
 ];
 
 const VOICE_OPTIONS = [
@@ -195,31 +161,39 @@ export default function Settings() {
       {saveStatus === "defaulted" && <div className="settings-toast defaulted">Valores por defecto restaurados</div>}
 
       <div className="settings-groups">
-        {/* 1. Voz del agente (roscas) */}
-        <Card padding="lg" className="settings-group">
+        {/* 1. Voz del agente */}
+        <Card padding="lg" className="settings-group settings-group-top">
           <div className="settings-group-head">
             <h3>Voz del agente</h3>
             <p>Cómo suena el agente.</p>
           </div>
-          <div className="settings-knobs">
+          <div className="settings-rows">
             {PERSONALIZATION_CONFIG.map((k) => (
-              <Knob
-                key={k.key}
-                label={k.label}
-                value={settings.personalization[k.key]}
-                min={0}
-                max={100}
-                step={1}
-                leftLabel={k.leftLabel}
-                rightLabel={k.rightLabel}
-                previewText={k.getPreview(settings.personalization[k.key])}
-                onChange={(v) => handlePersonalizationChange(k.key, v)}
-              />
+              <div className="settings-row" key={k.key}>
+                <div>
+                  <span className="settings-row-label">{k.label}</span>
+                </div>
+                <div className="settings-slider">
+                  <span className="settings-slider-end">{k.leftLabel}</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={settings.personalization[k.key]}
+                    onChange={(e) => handlePersonalizationChange(k.key, parseInt(e.target.value))}
+                    aria-label={k.label}
+                  />
+                  <span className="settings-slider-end">{k.rightLabel}</span>
+                </div>
+              </div>
             ))}
-            <div className="ui-knob settings-voice-knob">
-              <div className="ui-knob-label">Voz del agente</div>
+            <div className="settings-row">
+              <div>
+                <span className="settings-row-label">Voz</span>
+              </div>
               <select
-                className="ui-select ui-voice-select"
+                className="ui-select"
                 value={settings.personalization.voice}
                 onChange={(e) => handlePersonalizationChange("voice", e.target.value)}
               >
@@ -227,9 +201,6 @@ export default function Settings() {
                   <option key={o.value} value={o.value}>{o.label}</option>
                 ))}
               </select>
-              <div className="ui-knob-preview">
-                {settings.personalization.voice === "female" ? "Voz femenina seleccionada" : "Voz masculina seleccionada"}
-              </div>
             </div>
           </div>
         </Card>
@@ -341,13 +312,10 @@ export default function Settings() {
             <h3>Permisos</h3>
             <p>Lo que el agente puede hacer por sí solo.</p>
           </div>
-          <div className="settings-rows">
+          <div className="settings-perms">
             {PERMISSIONS_CONFIG.map((p) => (
-              <div className="settings-row" key={p.key}>
-                <div>
-                  <span className="settings-row-label">{p.label}</span>
-                  <span className="settings-row-desc">{p.desc}</span>
-                </div>
+              <div className="settings-perm" key={p.key}>
+                <span className="settings-row-label">{p.label}</span>
                 <Switch
                   checked={settings.permissions[p.key]}
                   onChange={(checked) => handlePermissionChange(p.key, checked)}
