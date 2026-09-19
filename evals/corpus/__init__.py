@@ -12,5 +12,6 @@ the challenge, and it is what the other three layers were written without.
   the private cases are generated from the same templates, so passing the four
   we can see proves little about the four we cannot.
 - ``fetch`` refreshes the roster; ``snapshot`` freezes the real clinic once a
-  key exists.
+  key exists; ``hydrate`` writes ``synthetic-data/`` (patients, diaries,
+  per-problem JSONL logs) in the same payload shape as the fixtures.
 """

@@ -11,23 +11,35 @@ overnight. A stale roster judges yesterday's call correctly and today's wrong.
 The URL carries a content hash and therefore changes whenever the organisers
 publish a correction. ``--discover`` re-reads the Problems page to find the
 current one instead of trusting the constant below.
+
+Every run prints the anchor of the file it saw — the ``reference_time`` the
+published answers were computed against. When that day is not today the fetch
+warns on stderr with ``STALE ANCHOR``: until the organisers re-export, the
+downloaded file cannot be today's truth, and the corpus runner refuses to score
+slot answers for calls dialled today rather than fail the agent for the
+calendar having moved.
 """
 
 from __future__ import annotations
 
 import argparse
+import datetime
 import hashlib
 import json
 import re
 import sys
 import urllib.request
 from pathlib import Path
+from typing import TextIO
+from zoneinfo import ZoneInfo
 
 from evals.corpus.catalogue import CASES_FILE
 
 DOCS_PAGE = "https://hackspain.getprosperapp.com/leaderboard/docs/problems"
 ASSET_URL = "https://hackspain.getprosperapp.com/leaderboard/assets/public-cases-BH3bsRyz.json"
 INDEX_URL = "https://hackspain.getprosperapp.com/leaderboard/"
+
+MADRID = ZoneInfo("Europe/Madrid")
 
 
 def discover_url(timeout: float = 20.0) -> str:
@@ -61,6 +73,30 @@ def download(url: str, timeout: float = 30.0) -> bytes:
         return response.read()
 
 
+def report_anchor(doc: dict, out: TextIO = sys.stderr) -> None:
+    """Print the ``reference_time`` the downloaded answers were computed against.
+
+    The anchor is what makes a booking answer move overnight, so it is the one
+    fact about the file that says whether it can judge today's calls. When it
+    is behind, say so loudly and name what covers it: the runner skips
+    slot-answer scoring instead of failing the agent for the anchor.
+    """
+    try:
+        anchor = datetime.datetime.fromisoformat(str(doc["cases"][0]["reference_time"]))
+    except (KeyError, IndexError, TypeError, ValueError):
+        return
+    today = datetime.datetime.now(MADRID).date()
+    print(f"roster anchor {anchor.isoformat()} ({anchor.date():%A})")
+    if anchor.date() != today:
+        print(
+            f"STALE ANCHOR: the published answers were computed for {anchor.date()}, "
+            f"and today is {today}. Earliest-slot answers have moved with the day; "
+            "the runner skips them for calls dialled today instead of failing the agent. "
+            "Score again once the organisers re-export the roster.",
+            file=out,
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m evals.corpus.fetch", description=__doc__)
     parser.add_argument("--url", default=None, help="override the asset URL")
@@ -87,6 +123,7 @@ def main(argv: list[str] | None = None) -> int:
     new = hashlib.sha256(blob).hexdigest()
     old = hashlib.sha256(args.out.read_bytes()).hexdigest() if args.out.exists() else ""
     print(f"{count} cases · sha256 {new[:12]}")
+    report_anchor(doc)
 
     if new == old:
         print("unchanged")

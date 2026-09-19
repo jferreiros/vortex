@@ -18,8 +18,7 @@ def _encode_sample(sample: int) -> int:
     if sample < 0:
         sign = 0x80
         sample = -sample
-    if sample > _CLIP:
-        sample = _CLIP
+    sample = min(sample, _CLIP)
     sample += _BIAS
     exponent = 7
     mask = 0x4000

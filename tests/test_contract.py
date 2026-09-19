@@ -78,6 +78,15 @@ def test_action_payloads_match_the_routes() -> None:
     assert "kind" not in body
 
 
+def test_insurer_referral_required_goes_out_as_referral_required() -> None:
+    """Call e50c1c96: the clinic said insurer_referral_required; the judge
+    only scores referral_required. The wire collapses the alias."""
+    sent = contract.action_payload(NoAction(reason="insurer_referral_required"), "e50c1c96")
+    assert sent["reason"] == "referral_required"
+    kept = contract.action_payload(NoAction(reason="specialty_not_covered"), "x")
+    assert kept["reason"] == "specialty_not_covered"
+
+
 SAMPLE_ARGS: dict[str, dict] = {
     "find_patient": {"name": "Marta Ruiz"},
     "validate_national_id": {"value": "12345678z"},

@@ -1,3 +1,26 @@
+# syntax=docker/dockerfile:1.7
+#
+# Vortex — the Clinic View board: the NiceGUI ops console plus the React wall
+# it serves as the product.
+#
+# The React app (vortex/wall) is a Vite build whose output (dist/) is
+# git-ignored, so it must be compiled inside this image or /wall silently
+# falls back to the classic NiceGUI view. Two stages: deps first, then the
+# build, so a weekend of rapid deploys stays fast.
+
+# ------------------------------------------------------------------ wall build
+FROM node:20-bookworm-slim AS wall
+
+WORKDIR /app/wall
+
+# Only the lockfile first: this layer changes just when the frontend deps do.
+COPY vortex/wall/package.json vortex/wall/package-lock.json ./
+RUN npm ci
+
+COPY vortex/wall ./
+RUN npm run build
+
+# ------------------------------------------------------------------- runtime
 FROM python:3.12-slim
 
 WORKDIR /app
@@ -9,9 +32,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 RUN apt-get update && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/* \
-    && pip install --no-cache-dir nicegui httpx pydantic python-dotenv
+    && pip install --no-cache-dir nicegui httpx pydantic python-dotenv phonenumbers email-validator
 
 COPY vortex ./vortex
+COPY --from=wall /app/wall/dist ./vortex/wall/dist
 
 RUN useradd --create-home --uid 1001 vortex \
     && mkdir -p /app/logs \

@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from vortex.clinic.client import FakeClinicClient
+from vortex.clinic.client import ClinicApi, FakeClinicClient
 from vortex.contract import MADRID, ToolContext
 from vortex.line.submit import DryRunSubmitClient
 from vortex.observability.calllog import CallLog
@@ -33,6 +33,7 @@ def make_context(
     now: str | None = None,
     from_number: str | None = None,
     log_dir: Path,
+    clinic: ClinicApi | None = None,
 ) -> ToolContext:
     log_dir.mkdir(parents=True, exist_ok=True)
     safe = "".join(ch if ch.isalnum() or ch in "-._" else "_" for ch in call_id)
@@ -40,7 +41,7 @@ def make_context(
         call_id=call_id,
         now=parse_now(now),
         from_number=from_number,
-        clinic=FakeClinicClient(),
+        clinic=clinic or FakeClinicClient(),
         log=CallLog(call_id, log_dir / f"{safe}.jsonl"),
         submitter=DryRunSubmitClient(),
     )

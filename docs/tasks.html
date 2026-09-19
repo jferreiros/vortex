@@ -47,12 +47,8 @@
   .rule .t{font:var(--text-body-strong); color:var(--ink)}
   .rule .d{font:var(--text-body-sm); color:var(--body)}
 
-  /* filters */
+  /* filters — .chip / .dot come from design.css */
   .filters{position:sticky; top:0; z-index:20; background:var(--canvas); border-bottom:1px solid var(--hairline); margin-top:var(--space-xxl); padding-block:var(--space-md); display:flex; gap:6px; flex-wrap:wrap; align-items:center}
-  .chip{display:inline-flex; align-items:center; gap:6px; height:32px; padding:0 14px; border:1px solid var(--hairline-strong); border-radius:var(--rounded-full); background:var(--canvas); color:var(--ink); font:var(--text-body-sm-strong); cursor:pointer; white-space:nowrap; appearance:none}
-  .chip[aria-pressed="true"]{background:var(--primary); border-color:var(--primary); color:var(--on-primary)}
-  .chip .dot{display:inline-block; width:8px; height:8px; border-radius:var(--rounded-full); background:var(--ink)}
-  .chip[aria-pressed="true"] .dot{background:var(--on-primary)}
   .spacer{flex:1 1 auto; min-width:8px}
 
   /* waves */

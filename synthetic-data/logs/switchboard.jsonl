@@ -1,0 +1,4 @@
+{"ts": "2026-09-18T09:00:00+02:00", "call_id": "probe:switchboard.bursts", "kind": "call.started", "from_number": "", "problem_id": "switchboard", "source": "probe", "probe_id": "switchboard.bursts", "clinic": "synthetic-data", "voice": "synthetic", "bursts": [5, 10, 20], "see": "simple_booking"}
+{"ts": "2026-09-18T09:00:00+02:00", "call_id": "probe:switchboard.bursts", "kind": "turn.user", "text": "Problem 1, five, ten or twenty times at once. No cases of its own.", "source": "probe"}
+{"ts": "2026-09-18T09:00:00+02:00", "call_id": "probe:switchboard.bursts", "kind": "call.ended", "reason": "synthetic-probe", "source": "probe"}
+{"ts": "2026-09-18T09:00:00+02:00", "call_id": "probe:switchboard.bursts", "kind": "call.summary", "turns": 1, "tools": 0, "actions": [], "problem_id": "switchboard", "source": "probe", "duration_ms": 0}

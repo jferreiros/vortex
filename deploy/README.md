@@ -61,12 +61,21 @@ the host. Give it ten seconds, then retry.
 
 ## Deploy
 
+A push or merge into `main` is enough. On the VPS a systemd user timer
+(`vortex-deploy.timer`) looks at `origin/main` every minute and, when it
+moved, runs `deploy/deploy-both.sh`: pull, rebuild the call socket and the
+board, check both public endpoints, then post to Discord `#updates` that the
+latest version is live. GitHub Actions cannot do this job: the box does not
+accept SSH from the public internet, and Discord 403s Actions runner IPs.
+
 ```bash
-deploy/deploy.sh
+deploy/deploy-both.sh            # same path the timer runs
+deploy/deploy-both.sh --force    # rebuild even if main did not move
+deploy/deploy.sh                 # call socket only
 ```
 
-That is the whole thing: fetch `main`, rebuild the image, restart the container,
-wait for it to report healthy, check the public endpoint, and dial it with a
+`deploy/deploy.sh` fetches `main`, rebuilds the image, restarts the container,
+waits for it to report healthy, checks the public endpoint, and dials it with a
 fake call. It prints a green line and the endpoint when all five pass, and a red
 line naming the failed step when they do not. Exit code 0 means the endpoint is
 ready for a run.
@@ -106,6 +115,15 @@ voice pipeline. `GET /health` says which mode is live:
 ```bash
 curl -s https://line.167.233.80.47.sslip.io/health
 ```
+
+`has_langfuse_keys` must be true for inbound calls to show up in Langfuse
+Cloud. The keys live only in `deploy/.env` (same file as the platform key).
+The project is already created; `make langfuse-check` prints its URL and
+whether the live line has the keys. A missing pair is a silent no-op: the
+call still completes.
+
+Each finished call also posts a redacted card to Discord when
+`DISCORD_WEBHOOK_URL` is set. `make logs-discord` dumps the whole log.
 
 ---
 
@@ -178,28 +196,44 @@ per-socket, so concurrency is not a deployment concern — but do check
 
 ---
 
-## The board lives somewhere else
+## The board
 
 `deploy/deploy.sh` deploys the call socket only. The jury wall and the ops
-board (`vortex.167.233.80.47.sslip.io`) run from a separate clone that root
-owns, built from `Dockerfile.board` with `deploy/compose.yml`:
+board (`https://vortex.167.233.80.47.sslip.io/wall`) are the same factory
+clone, built from `Dockerfile.board` with `deploy/compose.yml`.
+`deploy/deploy-both.sh` (and the timer) publishes both.
 
-```
-/opt/vortex-board          the clone; deploy/.env holds VORTEX_OPS_PASSWORD
-```
+How the board sees calls, in order:
 
-A merge into `main` does not reach the wall on its own. To redeploy the board:
+1. `GET http://vortex-line:7860/calls` — container-name DNS on the `coolify`
+   network. The wall asks for the newest N *complete* calls (`calls=60`); the
+   Insights API asks by start date (`since=<ISO>`), so a busy day can never
+   push an in-range call out of the read the way the old 800-event tail did.
+2. The last good fetch, so one slow request degrades to stale data.
+3. `VORTEX_CALLS_LOG` (`/app/logs/calls.jsonl`) — which is the *line's* volume
+   (`vortex-line_line-logs`) mounted read-only into the board, not a private
+   empty one. The `external: true` declaration in `deploy/compose.yml` means
+   the board refuses to start if that volume is missing; deploy the line
+   first (deploy-both.sh already does).
+
+Every `/api/wall/business-insights` response carries a `source` block —
+`line_api`, `cache` or `jsonl_fallback`, plus the error that degraded it — so
+an empty Insights page is distinguishable from a broken ingestion path.
+Fetch timeouts: `VORTEX_LINE_HEALTH_TIMEOUT_S` (3), `VORTEX_LINE_CALLS_TIMEOUT_S`
+(6), `VORTEX_LINE_INSIGHTS_TIMEOUT_S` (25).
+
+The Discord line after a successful publish needs
+`DISCORD_UPDATES_WEBHOOK_URL` in `deploy/.env` (or the repo `.env`). That
+post has to leave from this machine: Discord 403s GitHub Actions runner IPs.
+
+To enable the timer on a new box, after the first `deploy/deploy-both.sh`:
 
 ```bash
-ssh vps
-cd /opt/vortex-board
-git fetch origin main && git reset --hard origin/main
-docker compose -f deploy/compose.yml up -d --build
+mkdir -p ~/.config/systemd/user
+cp deploy/systemd/vortex-deploy.* ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now vortex-deploy.timer
 ```
-
-Then open `https://vortex.167.233.80.47.sslip.io/wall`. The container exposes
-no host port, so `curl 127.0.0.1:8080` on the box says nothing: check through
-Traefik.
 
 ## Living next to the other services
 
