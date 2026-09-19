@@ -979,7 +979,13 @@ def test_the_real_llm_service_records_the_tools_as_async() -> None:
 
     from vortex.line.pipecat_voice import register_call_tools
 
-    llm = OpenAILLMService(api_key="test-key-not-real")
+    class OfflineOpenAILLMService(OpenAILLMService):
+        """The registry lives on the service, so no credential and no client."""
+
+        def create_client(self, **kwargs: object) -> None:
+            return None
+
+    llm = OfflineOpenAILLMService()
     exposed = default_turn_settings().exposed_tools
     schemas = register_call_tools(llm, exposed, _noop_handler)
 
