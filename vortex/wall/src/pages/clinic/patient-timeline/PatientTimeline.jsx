@@ -1,12 +1,12 @@
 import { Fragment, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import SectionHeader from "../../../components/ui/SectionHeader";
 import Card from "../../../components/ui/Card";
 import Button from "../../../components/ui/Button";
 import patientTimelines from "../../../data/patientTimelines.json";
 import patternsData from "../../../data/patterns.json";
 import shapeTypesData from "../../../data/shapeTypes.json";
 import { findMatchingPattern } from "../patterns/matchPattern";
+import "../live-calls/live-call-detail.css";
 import "./patient-timeline.css";
 
 // Not linked from anywhere yet — reachable directly at
@@ -138,16 +138,17 @@ function SuggestionNode({ pattern, onAccept, onReject, status, gridColumn }) {
 // only lives once, in the top row, pointing at the suggestion this box sits
 // under.
 function PatternDetectedBox({ pattern, gridColumn }) {
-  const count = pattern.nodes.length;
   return (
     <div className="pt-explain" style={{ gridColumn }}>
       <span className="pt-explain-label">Pattern detected</span>
       <div className="pt-pattern-box">
         <div className="pt-pattern-abstract-row">
-          {Array.from({ length: count }).map((_, i) => (
-            <Fragment key={i}>
+          {pattern.nodes.map((node, i) => (
+            <Fragment key={node.id}>
               {i > 0 && <span className="pt-pattern-plus">+</span>}
-              <span className="pt-pattern-abstract-node" />
+              <span className="pt-pattern-abstract-node" title={node.shape.type}>
+                <ShapeGlyphs family={node.shape.family} type={node.shape.type} subfamily={node.shape.subfamily} />
+              </span>
             </Fragment>
           ))}
         </div>
@@ -261,32 +262,39 @@ export default function PatientTimeline() {
     : `${events.length + 2}`;
 
   return (
-    <div className="pt-page">
-      <SectionHeader
-        eyebrow="Patient history"
-        title={specialtyLabel ? `${patient.name} - ${specialtyLabel}` : patient.name}
-        subtitle="Calls, messages and visits, sorted by time."
-      />
+    <div className="transcript-page">
+      {/* Same shell as the Live Call detail page (transcript-card, tx-head,
+          tx-close) — this opens over whatever page linked here the same
+          way a call opens from Home, and the × returns there via
+          navigate(-1) rather than a hardcoded destination. */}
+      <Card padding="sm" className="transcript-card">
+        <header className="tx-head">
+          <div className="tx-head-left">
+            <div className="tx-head-copy">
+              <h1>{specialtyLabel ? `${patient.name} - ${specialtyLabel}` : patient.name}</h1>
+              <p>Calls, messages and visits, sorted by time.</p>
+            </div>
+          </div>
+          <div className="tx-head-actions">
+            <Button
+              variant="secondary"
+              onClick={() => navigate("/clinic/patterns", { state: { patternId: match?.pattern.id } })}
+            >
+              Manage suggestions
+            </Button>
+            <button type="button" className="tx-close" aria-label="Close" onClick={() => navigate(-1)}>
+              ×
+            </button>
+          </div>
+        </header>
 
-      {/* Always filtered to this call's own specialty (plus any general,
-          specialty-less events) — never a user-picked filter, so no
-          selector here. */}
-      <div className="pt-main">
-        <div className="pt-main-toolbar">
-          <Button
-            variant="secondary"
-            onClick={() => navigate("/clinic/patterns", { state: { patternId: match?.pattern.id } })}
-          >
-            Manage suggestions
-          </Button>
-        </div>
-
-        {/* The whole main pane is one white card, its content centered
-            vertically as a block. The top row itself is centered as a
-            whole; a CSS grid (not flex) so the "why" box below can be
-            placed by column index, centered under the evidence node(s) it
-            explains instead of under the suggestion. */}
-        <Card padding="lg" className="pt-main-card">
+        {/* Always filtered to this call's own specialty (plus any general,
+            specialty-less events) — never a user-picked filter, so no
+            selector here. */}
+        <div className="pt-body">
+          {/* A CSS grid (not flex), centered as a block, so the "why" box
+              below can be placed by column index, centered under the
+              evidence node(s) it explains instead of under the suggestion. */}
           <div className="pt-timeline-track">
             {events.map((event, i) => (
               <EventNode
@@ -310,8 +318,8 @@ export default function PatientTimeline() {
               </Fragment>
             )}
           </div>
-        </Card>
-      </div>
+        </div>
+      </Card>
     </div>
   );
 }
