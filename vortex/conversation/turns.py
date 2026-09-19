@@ -9,15 +9,17 @@ Interruption handling is entirely ours (the platform does no barge-in).
 switch now belongs to the *user turn strategies* the user aggregator runs
 (``pipecat.turns``). Two paths, chosen by ``soniox_turn_detection``:
 
-- ``True`` (default): Soniox's own endpoint detection ends the turn. The STT
-  service is built with ``vad_force_turn_endpoint=False`` and
-  ``should_interrupt=enable_interruptions``; it then installs
-  ``ExternalUserTurnStrategies(enable_interruptions=...)`` on the aggregator
-  itself through its metadata frame. Nothing else to wire.
-- ``False``: pipecat's VAD starts and ends the turn. Then the aggregator must
-  be given ``user_turn_strategies=user_turn_strategies(settings)`` (below), or
-  it falls back to its defaults, which load the smart-turn v3 model and ignore
-  ``enable_interruptions``.
+- ``True`` (default): Soniox's own endpoint detection ends the turn
+  (``vad_force_turn_endpoint=False``). We pass our own strategies so the
+  ``interrupt_min_words`` barge-in gate still runs: ``MinWordsUserTurnStartStrategy``
+  starts the turn, ``ExternalUserTurnStopStrategy`` closes it on Soniox's
+  ``ProposedUserStoppedSpeakingFrame``. Without that override the STT would
+  install ``ExternalUserTurnStrategies`` and every VAD blip would interrupt.
+- ``False``: pipecat's VAD starts the turn. End-of-turn is
+  ``LocalSmartTurnAnalyzerV3`` (bundled v3.2) behind
+  ``TurnAnalyzerUserTurnStopStrategy``, with VAD ``stop_secs`` shortened to
+  ``smart_turn_vad_stop_secs`` (0.2) so the model sees short silence windows.
+  Set ``use_smart_turn=False`` to fall back to a plain speech-timeout stop.
 
 Either way the line lane passes the strategies, never a ``PipelineParams``
 flag. ``LLMUserAggregatorParams(user_turn_strategies=...)`` is the argument.
@@ -28,20 +30,20 @@ the VAD thresholds keep a passing bus from becoming a barge-in, and
 agent can ask "are you still there?" (``prompt.idle_prompt_for``) instead of
 letting the platform cut a quiet call.
 
-**Why Soniox mode passes strategies instead of ``None``.** ``None`` looks free
-but is not: ``LLMUserContextAggregator.__init__`` does
+**Never return ``None`` from :func:`user_turn_strategies`.** ``None`` looks
+free but is not: ``LLMUserContextAggregator.__init__`` does
 ``self._params.user_turn_strategies or UserTurnStrategies()``, and
 ``UserTurnStrategies.__post_init__`` fills an empty ``stop`` from
 ``default_user_turn_stop_strategies()``, which constructs
 ``LocalSmartTurnAnalyzerV3()`` — an ``onnxruntime.InferenceSession`` over
-``smart-turn-v3.2-cpu.onnx``, built eagerly in ``__init__``. The Soniox
-recommendation only lands later, from the STT service's metadata frame, so the
-model was loaded once per socket and then thrown away. Passing
-``ExternalUserTurnStrategies(enable_interruptions=...)`` ourselves is the same
-object Soniox recommends (``services/soniox/stt.py`` builds exactly
-``ExternalUserTurnStrategies(enable_interruptions=self._should_interrupt)``,
-and we pass ``should_interrupt=enable_interruptions``), so behaviour is
-unchanged and nothing loads the ONNX model.
+``smart-turn-v3.2-cpu.onnx``, built eagerly in ``__init__``. In Soniox mode
+that model is then replaced by the strategies the STT service recommends and
+never used, so every socket loaded and threw away an ONNX session. Both
+branches below pass an explicit ``start`` *and* ``stop``, so the fallback never
+runs and the analyzer is built only where ``use_smart_turn`` asks for it.
+
+The offline A/B of VAD+Smart Turn vs Soniox endpointing lives in
+``vortex/line/smart_turn_ab.py``.
 
 **The idle escalation.** :class:`IdlePolicy` decides what an idle event says.
 On the 2026-09-18 scored run the handler spoke the same "are you still there?"
@@ -103,8 +105,9 @@ IDLE_BOT_GRACE_SECS = 2.0
 class TurnSettings:
     # The caller may talk over the agent while it reads options (problem 13).
     enable_interruptions: bool = True
-    # In VAD mode, words the caller must say before a barge-in counts. One
-    # word is "uh-huh" or the television; two is a correction.
+    # Words the caller must say before a barge-in counts while the bot speaks.
+    # One word is "uh-huh" or the television; two is a correction. Applies in
+    # both Soniox and VAD turn modes (via MinWordsUserTurnStartStrategy).
     interrupt_min_words: int = 2
     # Noisy-caller settings (problem 12): a higher bar before Silero calls it
     # speech, so a bus going past does not become a barge-in. No denoiser in
@@ -114,9 +117,16 @@ class TurnSettings:
     vad_start_secs: float = 0.3
     vad_stop_secs: float = 0.4
     vad_min_volume: float = 0.7
-    # In VAD mode, seconds of silence after speech before the turn is over.
-    # Longer than the mid-id pause ("one two, three four ... five six").
+    # In VAD mode without Smart Turn, seconds of silence after speech before
+    # the turn is over. Longer than the mid-id pause ("one two, three four").
     user_speech_timeout_secs: float = 1.2
+    # When soniox_turn_detection is False and use_smart_turn is True, VAD
+    # stop_secs must be short so Smart Turn sees 200 ms silence windows
+    # (pipecat docs). The ML silence fallback is smart_turn_stop_secs.
+    use_smart_turn: bool = True
+    smart_turn_stop_secs: float = 2.0
+    smart_turn_vad_stop_secs: float = 0.2
+    smart_turn_cpu_count: int = 2
     # Seconds of caller silence before the agent prompts again. 0 disables.
     # ``VORTEX_USER_IDLE_SECS`` in .env moves it; the default lives in
     # ``settings.Settings.user_idle_secs``, which is where the measurement that
@@ -149,31 +159,55 @@ def default_turn_settings() -> TurnSettings:
     return TurnSettings()
 
 
-def user_turn_strategies(settings: TurnSettings | None = None) -> Any:
-    """The pipecat ``UserTurnStrategies`` for these settings. Never ``None``.
+def effective_vad_stop_secs(settings: TurnSettings | None = None) -> float:
+    """VAD ``stop_secs`` for these settings.
 
-    In Soniox turn-detection mode it returns the same
-    ``ExternalUserTurnStrategies(enable_interruptions=...)`` the STT service
-    recommends through its metadata frame, so turn endings are unchanged and
-    the aggregator never falls back to ``UserTurnStrategies()`` — whose default
-    stop strategy builds ``LocalSmartTurnAnalyzerV3()`` and loads an ONNX model
-    per socket for nothing. In VAD mode it returns a VAD start strategy gated
-    on ``interrupt_min_words`` while the bot speaks, and a speech-timeout stop
-    strategy. Neither path ever constructs a smart-turn analyzer.
+    Smart Turn wants a short VAD stop (0.2 s) so it can classify each pause;
+    Soniox mode and plain speech-timeout VAD keep ``vad_stop_secs``.
+    """
+    turns = settings or default_turn_settings()
+    if not turns.soniox_turn_detection and turns.use_smart_turn:
+        return turns.smart_turn_vad_stop_secs
+    return turns.vad_stop_secs
+
+
+def user_turn_strategies(settings: TurnSettings | None = None) -> Any | None:
+    """The pipecat ``UserTurnStrategies`` for these settings.
+
+    Soniox mode: word-count start gate plus Soniox's external stop proposal, so
+    noise cannot barge in on a single VAD blip while endpointing still closes
+    the turn. VAD mode: VAD start (optionally gated on ``interrupt_min_words``)
+    and either Smart Turn v3.2 or a speech-timeout stop. Both honour
+    ``enable_interruptions``.
+
+    Never ``None``: both branches pass an explicit ``start`` and ``stop``, so
+    the aggregator never falls back to ``UserTurnStrategies()`` and its
+    smart-turn default. The analyzer is built only when ``use_smart_turn`` is
+    on, which is VAD mode only.
 
     Imports pipecat lazily so the module imports without it.
     """
     turns = settings or default_turn_settings()
-    if turns.soniox_turn_detection:
-        from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
-
-        return ExternalUserTurnStrategies(enable_interruptions=turns.enable_interruptions)
-    from pipecat.turns.user_start import (
-        MinWordsUserTurnStartStrategy,
-        VADUserTurnStartStrategy,
-    )
-    from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
+    from pipecat.turns.user_start import MinWordsUserTurnStartStrategy
     from pipecat.turns.user_turn_strategies import UserTurnStrategies
+
+    if turns.soniox_turn_detection:
+        from pipecat.turns.user_stop import ExternalUserTurnStopStrategy
+
+        return UserTurnStrategies(
+            start=[
+                MinWordsUserTurnStartStrategy(
+                    min_words=turns.interrupt_min_words,
+                    use_interim=True,
+                    enable_interruptions=turns.enable_interruptions,
+                )
+            ],
+            stop=[
+                ExternalUserTurnStopStrategy(timeout=0.5, wait_for_transcript=True),
+            ],
+        )
+
+    from pipecat.turns.user_start import VADUserTurnStartStrategy
 
     start: list[Any] = [
         VADUserTurnStartStrategy(enable_interruptions=turns.enable_interruptions),
@@ -185,7 +219,28 @@ def user_turn_strategies(settings: TurnSettings | None = None) -> Any:
                 enable_interruptions=turns.enable_interruptions,
             )
         )
-    stop = [SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=turns.user_speech_timeout_secs)]
+    if turns.use_smart_turn:
+        from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
+        from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
+        from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
+
+        analyzer = LocalSmartTurnAnalyzerV3(
+            cpu_count=turns.smart_turn_cpu_count,
+            params=SmartTurnParams(stop_secs=turns.smart_turn_stop_secs),
+        )
+        stop: list[Any] = [
+            TurnAnalyzerUserTurnStopStrategy(
+                turn_analyzer=analyzer,
+                wait_for_transcript=True,
+                enable_interruptions=turns.enable_interruptions,
+            )
+        ]
+    else:
+        from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
+
+        stop = [
+            SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=turns.user_speech_timeout_secs)
+        ]
     return UserTurnStrategies(start=start, stop=stop)
 
 

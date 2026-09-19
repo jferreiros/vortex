@@ -60,7 +60,9 @@ TOOLS: dict[str, ToolSpec] = {
         ToolSpec(
             "validate_national_id",
             "identity",
-            "Normalise a spoken DNI/NIE and check its control letter.",
+            "Normalise a spoken DNI/NIE and check its control letter. "
+            "When the letter does not match, a unique 1-edit digit repair is "
+            "accepted; several repairs set ask_digit_positions to re-ask.",
             contract.ValidateNationalIdInput,
             contract.NationalIdCheck,
             identity.validate_national_id,

@@ -30,6 +30,12 @@ VOICE_KEYS = (
     "GOOGLE_APPLICATION_CREDENTIALS",
     "GOOGLE_TTS_CREDENTIALS_JSON",
     "GOOGLE_TTS_VOICE_EN",
+    "GOOGLE_TTS_VOICE_ES",
+    "GOOGLE_TTS_VOICE_CA",
+    "GOOGLE_TTS_VOICE_GL",
+    "GOOGLE_TTS_VOICE_EU",
+    "GOOGLE_TTS_GEMINI_MODEL",
+    "GOOGLE_TTS_STANDARD_FALLBACK",
     "ELEVENLABS_API_KEY",
     "ELEVENLABS_VOICE_ID_ES",
     "ELEVENLABS_MODEL",
@@ -37,6 +43,10 @@ VOICE_KEYS = (
     "VORTEX_TTS_PROVIDER",
     "VORTEX_TTS_PROVIDER_ALT",
     "VORTEX_VOICE_MODE",
+    "VORTEX_AIC_FILTER",
+    "AIC_SDK_LICENSE",
+    "VORTEX_AIC_MODEL",
+    "VORTEX_GEOCODER",
     "VORTEX_GEOCODER_URL",
     "LANGFUSE_PUBLIC_KEY",
     "LANGFUSE_SECRET_KEY",
@@ -312,10 +322,27 @@ def test_google_voice_defaults_cover_the_five_languages(clean_env) -> None:
     s = _settings(clean_env)
     assert s.google_tts_voice_en == "en-GB-Chirp3-HD-Aoede"
     assert s.google_tts_voice_es == "es-ES-Chirp3-HD-Aoede"
+    # Gemini-TTS short names for ca/gl/eu (same identity as Spanish Chirp Aoede).
+    assert s.google_tts_voice_ca == "Aoede"
+    assert s.google_tts_voice_gl == "Aoede"
+    assert s.google_tts_voice_eu == "Aoede"
+    assert s.google_tts_uses_gemini is True
+    assert s.google_tts_gemini_model == "gemini-2.5-flash-tts"
+    assert s.tts_voice == s.google_tts_voice_es
+    assert s.describe()["google_tts_gemini"] is True
+    assert s.describe()["google_tts_gemini_model"] == "gemini-2.5-flash-tts"
+
+
+def test_google_standard_fallback_restores_standard_voices(clean_env) -> None:
+    """GOOGLE_TTS_STANDARD_FALLBACK keeps the old Standard-* path for ca/gl/eu."""
+    s = _settings(clean_env, GOOGLE_TTS_STANDARD_FALLBACK="true")
+    assert s.google_tts_standard_fallback is True
+    assert s.google_tts_uses_gemini is False
     assert s.google_tts_voice_ca == "ca-ES-Standard-B"
     assert s.google_tts_voice_gl == "gl-ES-Standard-A"
     assert s.google_tts_voice_eu == "eu-ES-Standard-A"
-    assert s.tts_voice == s.google_tts_voice_es
+    assert s.describe()["google_tts_gemini"] is False
+    assert s.describe()["google_tts_gemini_model"] == ""
 
 
 def test_google_speaks_english_and_it_can_be_overridden(clean_env) -> None:
@@ -343,10 +370,23 @@ def test_elevenlabs_has_no_default_voice(clean_env) -> None:
 # --- geocoder ----------------------------------------------------------------
 
 
-def test_geocoder_url_is_off_by_default(clean_env) -> None:
+def test_geocoder_is_off_by_default(clean_env) -> None:
     """Off by default: evals and offline work never depend on a network call."""
     s = _settings(clean_env)
+    assert s.geocoder == ""
     assert s.geocoder_url == ""
+
+
+def test_geocoder_reads_cartociudad_and_nominatim_url(clean_env) -> None:
+    s = _settings(clean_env, VORTEX_GEOCODER="cartociudad")
+    assert s.geocoder == "cartociudad"
+    s = _settings(
+        clean_env,
+        VORTEX_GEOCODER="nominatim",
+        VORTEX_GEOCODER_URL="https://nominatim.example.invalid/search",
+    )
+    assert s.geocoder == "nominatim"
+    assert s.geocoder_url == "https://nominatim.example.invalid/search"
 
 
 def test_geocoder_url_reads_the_env_var(clean_env) -> None:

@@ -10,11 +10,19 @@ Two layers, in order:
 1. **A gazetteer**, below: the municipalities of the Madrid area and the city's
    main streets and districts. No network, deterministic, and enough for a
    margin measured in kilometres.
-2. **A live geocoder**, when ``Settings.geocoder_url`` (``VORTEX_GEOCODER_URL``)
-   names a Nominatim-compatible endpoint. Off by default so that evals and
-   offline work never depend on a network call, and so nothing leaks a
-   caller's address to a third party unless the team turned it on
-   deliberately.
+2. **A live geocoder**, when ``Settings.geocoder`` (``VORTEX_GEOCODER``) is set:
+
+   - ``cartociudad`` — IGN CartoCiudad candidates API (free, no key). Portal-
+     level hits, tolerant of street misspellings such as ``alcla`` for Alcalá.
+   - ``nominatim`` — Nominatim-compatible search at ``Settings.geocoder_url``
+     (``VORTEX_GEOCODER_URL``). Kept as the fallback.
+
+   A bare ``VORTEX_GEOCODER_URL`` with no backend still selects Nominatim, so
+   older ``.env`` files keep working. Off by default so evals and offline work
+   never depend on a network call, and so nothing leaks a caller's address to a
+   third party unless the team turned it on deliberately.
+
+Live results are cached by ``(backend, fold(query))`` for the process lifetime.
 
 If neither places the address, the site whose own published address shares the
 most words with it answers. A caller who gives an address we cannot place is
@@ -34,6 +42,13 @@ from vortex.settings import Settings, get_settings
 EARTH_RADIUS_KM = 6371.0088
 
 GEOCODER_TIMEOUT_SECS = 3.0
+
+CARTOCIUDAD_CANDIDATES_URL = "https://www.cartociudad.es/geocoder/api/geocoder/candidates"
+CARTOCIUDAD_HIT_TYPES = frozenset({"portal", "callejero"})
+CARTOCIUDAD_PROVINCE = "Madrid"
+
+#: Process-wide cache: (backend, folded query) -> coordinates or a miss.
+_geocode_cache: dict[tuple[str, str], tuple[float, float] | None] = {}
 
 
 def fold(text: str) -> str:
@@ -197,32 +212,100 @@ def gazetteer_lookup(address: str) -> tuple[float, float] | None:
     return best[1] if best else None
 
 
+def clear_geocode_cache() -> None:
+    """Drop every cached live geocode hit. Tests call this between cases."""
+    _geocode_cache.clear()
+
+
+def resolve_geocoder_backend(settings: Settings) -> str:
+    """``cartociudad``, ``nominatim``, or empty when live geocoding is off."""
+    backend = (settings.geocoder or "").strip().lower()
+    if backend in {"cartociudad", "nominatim"}:
+        return backend
+    if settings.geocoder_url:
+        return "nominatim"
+    return ""
+
+
+def pick_cartociudad_point(hits: list[dict[str, Any]]) -> tuple[float, float] | None:
+    """First Madrid portal/callejero hit, preferring ``portal`` over street."""
+    chosen: list[dict[str, Any]] = [
+        h
+        for h in hits
+        if h.get("type") in CARTOCIUDAD_HIT_TYPES and h.get("province") == CARTOCIUDAD_PROVINCE
+    ]
+    chosen.sort(key=lambda h: 0 if h.get("type") == "portal" else 1)
+    if not chosen:
+        return None
+    try:
+        return float(chosen[0]["lat"]), float(chosen[0]["lng"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+async def _http_get_json(
+    url: str, *, params: dict[str, Any], headers: dict[str, str] | None = None
+) -> Any | None:
+    """GET JSON from a geocoder. ``None`` on any transport or HTTP failure."""
+    import httpx  # local: the offline path must not need it
+
+    try:
+        async with httpx.AsyncClient(timeout=GEOCODER_TIMEOUT_SECS) as http:
+            response = await http.get(url, params=params, headers=headers or {})
+            if response.status_code >= 400:
+                return None
+            return response.json()
+    except Exception:  # noqa: BLE001 - a geocoder outage must not lose the call
+        return None
+
+
+async def _geocode_cartociudad(address: str) -> tuple[float, float] | None:
+    payload = await _http_get_json(
+        CARTOCIUDAD_CANDIDATES_URL,
+        params={
+            "q": address,
+            "limit": 5,
+            "no_process": "municipio,provincia,toponimo",
+        },
+    )
+    if not isinstance(payload, list):
+        return None
+    return pick_cartociudad_point(payload)
+
+
+async def _geocode_nominatim(address: str, url: str) -> tuple[float, float] | None:
+    if not url:
+        return None
+    payload = await _http_get_json(
+        url,
+        params={"q": address, "format": "json", "limit": 1, "countrycodes": "es"},
+        headers={"User-Agent": "vortex-clinic-agent/1.0"},
+    )
+    if not isinstance(payload, list) or not payload:
+        return None
+    try:
+        return float(payload[0]["lat"]), float(payload[0]["lon"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 async def geocode_live(
     address: str, settings: Settings | None = None
 ) -> tuple[float, float] | None:
-    """Ask a Nominatim-compatible endpoint. ``None`` unless one is configured."""
-    url = (settings or get_settings()).geocoder_url
-    if not url:
+    """Ask the configured live geocoder. ``None`` when none is configured."""
+    cfg = settings or get_settings()
+    backend = resolve_geocoder_backend(cfg)
+    if not backend:
         return None
-    import httpx  # local: the offline path must not need it
-
-    params = {"q": address, "format": "json", "limit": 1, "countrycodes": "es"}
-    try:
-        async with httpx.AsyncClient(timeout=GEOCODER_TIMEOUT_SECS) as http:
-            response = await http.get(
-                url, params=params, headers={"User-Agent": "vortex-clinic-agent/1.0"}
-            )
-            if response.status_code >= 400:
-                return None
-            hits = response.json()
-    except Exception:  # noqa: BLE001 - a geocoder outage must not lose the call
-        return None
-    if not hits:
-        return None
-    try:
-        return float(hits[0]["lat"]), float(hits[0]["lon"])
-    except (KeyError, TypeError, ValueError):
-        return None
+    cache_key = (backend, fold(address))
+    if cache_key in _geocode_cache:
+        return _geocode_cache[cache_key]
+    if backend == "cartociudad":
+        point = await _geocode_cartociudad(address)
+    else:
+        point = await _geocode_nominatim(address, cfg.geocoder_url)
+    _geocode_cache[cache_key] = point
+    return point
 
 
 @lru_cache(maxsize=512)

@@ -141,6 +141,10 @@ def test_prompt_names_every_rule_the_score_depends_on() -> None:
         "patient_id from find_patient",
         "list_appointments",
         "last stated request",
+        "One field per turn",
+        "groups of three",
+        "read back once",
+        "Last value wins",
         "call 112",
         "medical_emergency",
         "Never ask a returning patient whether they have been here before",
@@ -234,37 +238,45 @@ def test_turn_settings_are_english_first_and_interruptible() -> None:
         turns.enable_interruptions = False  # type: ignore[misc]
 
 
-def test_soniox_mode_passes_the_strategies_the_stt_would_have_recommended() -> None:
-    """Same object Soniox recommends, but built before the aggregator's default.
+def test_soniox_mode_keeps_the_min_words_barge_in_gate() -> None:
+    """Soniox mode must pass our strategies, not leave None for the STT.
 
-    Returning ``None`` let ``LLMUserContextAggregator.__init__`` build
-    ``UserTurnStrategies()``, whose default stop strategy constructs
-    ``LocalSmartTurnAnalyzerV3()`` and loads an ONNX model per socket. The
-    Soniox recommendation only arrived later, so the model was pure waste.
+    Returning None lets Soniox install ExternalUserTurnStrategies, where any
+    VAD start interrupts and interrupt_min_words never runs.
     """
     pytest.importorskip("pipecat")
-    from pipecat.turns.user_start import ExternalUserTurnStartStrategy
+    from pipecat.turns.user_start import MinWordsUserTurnStartStrategy
     from pipecat.turns.user_stop import ExternalUserTurnStopStrategy
-    from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 
-    strategies = user_turn_strategies(TurnSettings(soniox_turn_detection=True))
-    assert isinstance(strategies, ExternalUserTurnStrategies)
-    assert strategies.enable_interruptions is True
-    assert [type(s) for s in strategies.start] == [ExternalUserTurnStartStrategy]
-    assert [type(s) for s in strategies.stop] == [ExternalUserTurnStopStrategy]
-
-    # ``should_interrupt`` on the STT service is the same flag, so the
-    # recommendation we replace is byte-for-byte the one we pass.
-    quiet = user_turn_strategies(
-        TurnSettings(soniox_turn_detection=True, enable_interruptions=False)
+    strategies = user_turn_strategies(
+        TurnSettings(soniox_turn_detection=True, interrupt_min_words=2)
     )
-    assert quiet.enable_interruptions is False
+    assert strategies is not None
+    assert len(strategies.start) == 1
+    assert isinstance(strategies.start[0], MinWordsUserTurnStartStrategy)
+    assert strategies.start[0]._min_words == 2
+    assert strategies.start[0]._use_interim is True
+    assert len(strategies.stop) == 1
+    assert isinstance(strategies.stop[0], ExternalUserTurnStopStrategy)
+    # A turn opened by the word gate still closes on Soniox's stop proposal.
+    assert strategies.stop[0].resolves_proposed_turn_stop_frames is True
+    # And the stop list must be explicit: an empty one sends
+    # ``UserTurnStrategies.__post_init__`` to
+    # ``default_user_turn_stop_strategies()``, which builds a smart-turn
+    # ONNX session per socket that Soniox mode never uses.
+    assert strategies.stop, "an empty stop list loads the smart-turn model"
 
 
 def test_vad_mode_builds_strategies_that_honour_the_settings() -> None:
     pytest.importorskip("pipecat")
+    from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
     from pipecat.turns.user_start import MinWordsUserTurnStartStrategy, VADUserTurnStartStrategy
-    from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
+    from pipecat.turns.user_stop import (
+        SpeechTimeoutUserTurnStopStrategy,
+        TurnAnalyzerUserTurnStopStrategy,
+    )
+
+    from vortex.conversation.turns import effective_vad_stop_secs
 
     strategies = user_turn_strategies(
         TurnSettings(soniox_turn_detection=False, interrupt_min_words=2)
@@ -272,8 +284,17 @@ def test_vad_mode_builds_strategies_that_honour_the_settings() -> None:
     assert strategies is not None
     assert isinstance(strategies.start[0], VADUserTurnStartStrategy)
     assert isinstance(strategies.start[1], MinWordsUserTurnStartStrategy)
-    assert isinstance(strategies.stop[0], SpeechTimeoutUserTurnStopStrategy)
+    assert isinstance(strategies.stop[0], TurnAnalyzerUserTurnStopStrategy)
+    assert isinstance(strategies.stop[0]._turn_analyzer, LocalSmartTurnAnalyzerV3)
+    assert strategies.stop[0]._turn_analyzer.params.stop_secs == 2.0
+    assert effective_vad_stop_secs(TurnSettings(soniox_turn_detection=False)) == 0.2
 
     single = user_turn_strategies(TurnSettings(soniox_turn_detection=False, interrupt_min_words=1))
     assert single is not None
     assert len(single.start) == 1
+
+    timeout = user_turn_strategies(
+        TurnSettings(soniox_turn_detection=False, use_smart_turn=False, interrupt_min_words=2)
+    )
+    assert timeout is not None
+    assert isinstance(timeout.stop[0], SpeechTimeoutUserTurnStopStrategy)
