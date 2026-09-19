@@ -24,6 +24,8 @@ from fastapi.responses import HTMLResponse, PlainTextResponse
 from vortex.line import twilio
 from vortex.line.session import CallSession
 from vortex.observability.calllog import group_by_call, read_recent
+from vortex.observability.discord_calls import enabled as discord_calls_on
+from vortex.observability.discord_calls import notify_session
 from vortex.observability.tracing import trace_call
 from vortex.settings import Settings, get_settings
 
@@ -50,6 +52,11 @@ async def read_handshake(ws: WebSocket, *, max_messages: int = 5) -> twilio.Star
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
+    log.info(
+        "langfuse %s · discord calls %s",
+        "on" if settings.langfuse_public_key and settings.langfuse_secret_key else "off",
+        "on" if discord_calls_on() else "off",
+    )
     app = FastAPI(title="Vortex", version="0.1.0")
 
     @app.get("/health")
@@ -109,6 +116,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 # closes. close() submits the fallback if nothing went out.
                 await session.close(reason=reason)
                 log.info("call %s ended (%s)", session.call_id, reason)
+                notify_session(session)
 
     return app
 

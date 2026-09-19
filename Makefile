@@ -1,4 +1,4 @@
-.PHONY: install run smoke test call replay try-api tunnel tail lint fmt board design-sync rehearse evals evals-logic evals-conversation evals-voice evals-replay evals-report evals-accept evals-selftest evals-discord
+.PHONY: install run smoke test call replay try-api tunnel tail lint fmt board design-sync rehearse evals evals-logic evals-conversation evals-voice evals-replay evals-report evals-accept evals-selftest evals-discord logs-discord langfuse-check
 
 PORT ?= 7860
 BOARD_PORT ?= 8080
@@ -100,6 +100,12 @@ evals-selftest:   ## the harness tests itself
 
 evals-discord:    ## post the latest summary.json to #github (needs DISCORD_WEBHOOK_URL)
 	scripts/notify-discord.sh --evals
+
+logs-discord:     ## post a redacted digest of the call log (LOG= path, default live log)
+	scripts/notify-discord.sh --calls $(LOG)
+
+langfuse-check:   ## project, keys on the line, recent traces
+	uv run python -m vortex.observability.langfuse_status
 
 # ---- bench (layer 5, see docs/evals.md) ------------------------------------
 .PHONY: bench bench-publish bench-discord
