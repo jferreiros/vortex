@@ -92,9 +92,12 @@ def with_verdict_reason(ctx: ToolContext, action: Action) -> Action:
     worth exactly what silence is worth: on call ``c9f087a0``
     ``check_eligibility`` answered ``location_not_covered`` (ASISA does not
     cover physiotherapy at that site) and the model submitted
-    ``specialty_not_covered``, losing the case. Whenever the call holds a
-    verdict from the rules - an eligibility refusal or a blocked provider from
-    ``find_slots`` - it wins.
+    ``specialty_not_covered``, losing the case. Whenever the call holds a typed
+    ``Rejection`` its reason wins: the rules' verdict first - an eligibility
+    refusal or a blocked provider from ``find_slots``, which outranks whoever
+    spoke last - and failing that the last rejection any tool returned, because
+    triage, ``nearest_location`` and ``find_provider`` name their rule in the
+    same scored vocabulary.
 
     Only NO_ACTION and ESCALATE carry a reason; every other action is returned
     untouched. The verb is the model's: a stored verdict never turns a refusal
@@ -105,7 +108,8 @@ def with_verdict_reason(ctx: ToolContext, action: Action) -> Action:
         return action
     from vortex.line.session import CallMemory  # late: session imports this module
 
-    verdict = CallMemory.of(ctx).last_verdict
+    memory = CallMemory.of(ctx)
+    verdict = memory.last_verdict or memory.last_rejection
     if verdict is None or verdict.reason == action.reason:
         return action
     forced = action.model_copy(update={"reason": verdict.reason})
