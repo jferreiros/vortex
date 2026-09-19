@@ -27,11 +27,17 @@ from __future__ import annotations
 import json
 import threading
 import time
+from collections import deque
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 _WRITE_LOCK = threading.Lock()
+
+#: How many of the caller's own turns ``CallLog.said`` keeps. A three-minute
+#: call runs to about twenty of them, and what a tool needs from the transcript
+#: is what was asked for, which is said early and repeated when it is not heard.
+CALLER_WORDS_KEPT = 24
 
 
 def _json_default(value: Any) -> Any:
@@ -55,6 +61,11 @@ class CallLog:
         # Turns the caller took. The end-of-call fallback reads it to tell a
         # call that said nothing from one that talked and resolved nothing.
         self.user_turns = 0
+        # What the caller themselves said, most recent last, capped at
+        # ``CALLER_WORDS_KEPT``. A tool that must not depend on the model's
+        # summary of a turn reads this instead: ``triage`` takes the specialty
+        # out of it when the model paraphrased it away. Per call, never shared.
+        self.said: deque[str] = deque(maxlen=CALLER_WORDS_KEPT)
         self.tool_calls = 0
         self.actions: list[dict[str, Any]] = []
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -75,7 +86,12 @@ class CallLog:
     def user_turn(self, text: str) -> None:
         self.turns += 1
         self.user_turns += 1
+        self.said.append(text)
         self.event("turn.user", text=text)
+
+    def caller_words(self) -> str:
+        """The caller's own recent turns, oldest first, as one string to match on."""
+        return " ".join(self.said)
 
     def assistant_turn(self, text: str) -> None:
         self.turns += 1
