@@ -27,6 +27,7 @@ from fastapi import WebSocket
 from vortex import tools as registry
 from vortex.conversation.prompt import GREETING, build_system_prompt
 from vortex.conversation.turns import TurnSettings, default_turn_settings
+from vortex.line.recording import recording_serializer
 from vortex.line.session import CallSession
 
 log = logging.getLogger(__name__)
@@ -127,7 +128,6 @@ async def run_gemini_live_call(
     from pipecat.pipeline.task import PipelineParams, PipelineTask
     from pipecat.processors.aggregators.llm_context import LLMContext
     from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
-    from pipecat.serializers.twilio import TwilioFrameSerializer
     from pipecat.transports.websocket.fastapi import (
         FastAPIWebsocketParams,
         FastAPIWebsocketTransport,
@@ -150,11 +150,8 @@ async def run_gemini_live_call(
         log.error("gemini-live mode needs GOOGLE_API_KEY; refusing to dial Google")
         raise RuntimeError("GOOGLE_API_KEY is required for VORTEX_VOICE_MODE=gemini-live")
 
-    serializer = TwilioFrameSerializer(
-        stream_sid=session.stream_sid,
-        call_sid=session.call_id,
-        params=TwilioFrameSerializer.InputParams(auto_hang_up=False),
-    )
+    # The standard Twilio serializer, teeing inbound media into the recording.
+    serializer = recording_serializer(session)
     transport = FastAPIWebsocketTransport(
         websocket=ws,
         params=FastAPIWebsocketParams(

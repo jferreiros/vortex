@@ -52,6 +52,7 @@ async def run_stub_call(ws: WebSocket, session: CallSession) -> str:
             msg = twilio.parse_inbound(text)
             if isinstance(msg, twilio.MediaMessage):
                 session.media_frames_in += 1
+                session.record_frame(msg.media.audio_bytes())
                 if session.media_frames_in % ACK_EVERY_FRAMES == 0:
                     session.ctx.log.user_turn(f"[stub] {session.media_frames_in} frames heard")
                     await _send_ulaw(ws, session, ulaw.tone(880, 120), paced=False)
