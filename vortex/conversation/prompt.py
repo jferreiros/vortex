@@ -216,12 +216,25 @@ GREETINGS: dict[str, str] = {
     "eu": "Clínica Arenal, egun on. Zertan lagun zaitzaket?",
 }
 
+# The first nudge, at ``TurnSettings.user_idle_secs`` of silence.
 IDLE_PROMPTS: dict[str, str] = {
     "en": "Are you still there?",
     "es": "¿Sigue ahí?",
     "ca": "Encara hi és?",
     "gl": "Segue aí?",
     "eu": "Hor zaude oraindik?",
+}
+
+# The second nudge, and the last one for a while. Asking "are you still there?"
+# twice makes the caller restart the sentence they were already saying, which
+# is what cost the 2026-09-18 run ~10 s a nudge; this line gives them the
+# silence instead. See ``conversation.turns.IdlePolicy``.
+IDLE_PATIENCE_PROMPTS: dict[str, str] = {
+    "en": "No rush. Take your time.",
+    "es": "Sin prisa. Tómese el tiempo que necesite.",
+    "ca": "Sense pressa. Prengui's el temps que necessiti.",
+    "gl": "Sen presa. Tome o tempo que precise.",
+    "eu": "Lasai. Hartu behar duzun denbora.",
 }
 
 # Said the moment triage flags a red flag. "112" is the check the harness runs.
@@ -262,7 +275,13 @@ def greeting_for(language: str | None = None) -> str:
 
 
 def idle_prompt_for(language: str | None = None) -> str:
+    """The first "are you still there?", in the language the call is in."""
     return _line(IDLE_PROMPTS, language)
+
+
+def idle_patience_for(language: str | None = None) -> str:
+    """The second nudge: tell the caller to take their time, then go quiet."""
+    return _line(IDLE_PATIENCE_PROMPTS, language)
 
 
 def emergency_line_for(language: str | None = None) -> str:
