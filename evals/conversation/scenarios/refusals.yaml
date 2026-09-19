@@ -1,5 +1,4 @@
-# Problems 4, 6, 7, 10, 14: calls that must not end in the obvious booking.
-# Problem 17 (the second policy) has its own file: second_policy.yaml.
+# Problems 4, 6, 7, 10, 14, 17: calls that must not end in the obvious booking.
 group: refusals
 now: "2026-09-18T09:00:00+02:00"
 
@@ -145,6 +144,25 @@ scenarios:
       actions:
         - {kind: no-action, reason: out_of_scope}
       must_not_call: [prepare_booking]
+
+  - id: p17.second_policy_must_be_asked_for
+    problem: 17
+    caller:
+      - says: "Soy Antonio Pérez Martín, NIE equis uno dos tres cuatro cinco seis siete ele. Tengo volante para dermatología y quiero cita con la doctora Iglesias."
+        means: {identify: {name: "Antonio Pérez Martín", national_id: "X1234567L"}, request: {intent: book, specialty_id: dermatology, provider: "doctora Iglesias"}}
+      - says: "¿Que no acepta DKV? Ah, es que también tengo Sanitas, si eso sirve."
+        means: {policy: sanitas}
+      - says: "Sí, con Sanitas entonces. La primera que tenga."
+        means: {accept: true}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00200
+          provider_id: PR04
+          policy_id: sanitas
+          slot: {$earliest_slot: {provider_id: PR04, patient_id: P00200}}
+      trajectory_contains: [find_patient, check_eligibility, find_slots, prepare_booking]
+      privacy_of: [P00200]
 
   # ---- problem 14, the public case shapes, in English -------------------------
 

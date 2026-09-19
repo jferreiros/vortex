@@ -99,6 +99,8 @@ class CallMemory:
         self.confirmed = False
 
     def remember_prepared(self, tool: str, action: Action) -> None:
+        if self.prepared is not None and self.prepared != action:
+            self.confirmed = False
         self.prepared = action
         self.prepared_tool = tool
         self.forget_rejection()
@@ -148,9 +150,13 @@ class CallSession:
     media_frames_out: int = 0
     submitted: list[SubmitResult] = field(default_factory=list)
     # Every action this call sent, in order, whatever the platform answered.
-    # The fallback reads it so it never repeats an action already on its way.
+    # The fallback reads it to log whether a silent-call retry is a re-send.
     sent_actions: list[Action] = field(default_factory=list)
     end_reason: str = ""
+    # Set the moment the platform accepts an action the model itself sent.
+    # The pipeline reads it to hang up after the farewell instead of letting
+    # the harness cut the call at three minutes. See ``arm_hangup``.
+    hangup_reason: str = ""
     _closed: bool = False
 
     @property
@@ -213,6 +219,9 @@ class CallSession:
           through ``ctx.submitter`` without passing ``CallSession.submit``, so
           without this the session would end a booked call believing it had
           submitted nothing and send a refusal on top of the booking.
+
+        An accepted submission also arms the hangup: the call has nothing left
+        to do, so the pipeline ends it after the farewell.
         """
         result = await registry.call_tool(name, self.ctx, raw_args)
         if name == SUBMIT_TOOL and isinstance(result, SubmitResult):
@@ -221,9 +230,27 @@ class CallSession:
                 self.sent_actions.append(SubmitInput.model_validate(raw_args).action)
             except ValidationError:  # pragma: no cover - the registry validated it already
                 pass
+            if result.status in ACCEPTED_STATUSES:
+                self.arm_hangup("submit_accepted")
         else:
             self.memory.observe(name, result)
         return result
+
+    def arm_hangup(self, reason: str) -> None:
+        """The call is done: let the pipeline end it once the agent stops talking.
+
+        Only an action the platform *holds* arms this. A rejection, a late
+        submission or a dry run leaves the call running, because the model may
+        still fix what it sent and the end-of-call fallback is still the last
+        word. Armed once, it stays armed: the first reason is the true one.
+        """
+        if not self.hangup_reason:
+            self.hangup_reason = reason
+
+    @property
+    def hangup_armed(self) -> bool:
+        """Has the call earned the right to hang up from our side?"""
+        return bool(self.hangup_reason)
 
     async def submit(self, action: Action) -> SubmitResult:
         result = await submit_action(self.ctx, SubmitInput(action=action))
@@ -287,21 +314,21 @@ class CallSession:
             await self._send_fallback(branch, action, why, span)
 
     async def _send_fallback(self, branch: str, action: Action, why: str, span: Any = None) -> None:
-        # The call already sent this exact action (a dry run, or a send the
-        # platform never acknowledged). Repeating it buys a 409 at best.
-        repeat = action in self.sent_actions
+        # An earlier send of this action may have returned error / dry_run /
+        # rejected: the platform holds nothing. Retry so an ambiguous first
+        # request can still land as accepted or duplicate (409).
+        retrying = action in self.sent_actions
         self.ctx.log.event(
             "submit.fallback",
             branch=branch,
             why=why,
             route=action_route(action),
-            skipped=repeat,
+            skipped=False,
+            retrying=retrying,
             sent_so_far=len(self.submitted),
         )
         if span is not None:
-            span.update(output={"skipped": repeat, "branch": branch})
-        if repeat:
-            return
+            span.update(output={"skipped": False, "retrying": retrying, "branch": branch})
         await self.submit(action)
 
     def fallback_action(self) -> tuple[str, Action, str]:
