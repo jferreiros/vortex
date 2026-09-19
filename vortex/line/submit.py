@@ -149,4 +149,12 @@ async def submit_action(ctx: ToolContext, args: SubmitInput) -> SubmitResult:
     ctx.log.event("submit.sent", route=route, payload=payload)
     result = await ctx.submitter.submit(ctx.call_id, action)
     ctx.log.action_submitted(route, payload, result)
+    if result.status in {"accepted", "duplicate"} and action.kind in {
+        "book",
+        "cancel",
+        "reschedule",
+    }:
+        invalidate = getattr(ctx.clinic, "invalidate_availability", None)
+        if invalidate is not None:
+            invalidate()
     return result

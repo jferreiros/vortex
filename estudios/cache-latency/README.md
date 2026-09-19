@@ -1,139 +1,133 @@
 # Cache vs. no-cache: latency study of the tool layer
 
-Date: 2026-09-19. Scope: every tool in `vortex/tools.py`, measured three ways,
-plus the cost of building a full local snapshot and a bake-off of where that
-snapshot can live. Reproduce everything here with:
+Date: 2026-09-19. Scope: every tool in `vortex/tools.py`, measured across the
+current client, a fresh client, and an in-memory snapshot. The live runs use the
+real production API; the API key is supplied only through the environment and
+is never written to the repository.
 
 ```bash
-uv run python estudios/cache-latency/bench.py                 # offline study (this file's numbers)
-PLATFORM_API_KEY=... uv run python estudios/cache-latency/bench.py --live   # swap in live API numbers
+uv run python estudios/cache-latency/bench.py
+PLATFORM_API_KEY=... uv run python estudios/cache-latency/bench.py --live
 ```
 
-All numbers below come from `results.json` (60 timed repetitions per tool per
-scenario, this machine, 2026-09-19). `bench.py` regenerates both files.
+The committed `results.json` is the output of the second command with the
+script default of **25 timed repetitions per tool per scenario**.
 
-## The three caching strategies compared
+## Caching strategies
 
-- **no_cache** - a fresh HTTP client per call: every call pays TCP+TLS, HTTP
-  and JSON parse, and even the catalogue is re-fetched. The worst case.
-- **current** - what production does today: one shared `ClinicClient`, the
-  catalogue cached in-process, every directory/availability/appointments
-  query still goes out over HTTP.
-- **full_memory** - everything already local (`FakeClinicClient`): the lower
-  bound a warm snapshot cache buys.
+- **live_no_cache** - real production API, fresh `ClinicClient` for each call.
+  It pays connection setup and fetches the catalogue again when needed.
+- **live_current** - real production API with today's shared `ClinicClient`.
+  The catalogue is cached; directory, availability, and appointments stay live.
+- **full_memory** - the lower bound with clinic data already local.
 
-The API side is a local server that speaks the platform's routes and serves the
-repo's own raw fixtures, so HTTP, serialization and adaptation costs are real;
-what it cannot include is the wide-area network and the organisers' server-side
-work. The WAN part is measured separately (network floor, below) and the sum
-`full_memory + requests x floor` is the honest estimate for production.
+The benchmark is read-only against production. Submit routes are never called.
 
 ## Headline numbers
 
-Network floor to the production host (measured, real HTTPS):
+Real HTTPS floor to the production host:
 
-| path | p50 | p95 |
-|---|---|---|
-| `GET /api/v1/health`, warm keep-alive connection | 145 ms | 355 ms |
-| same, fresh connection (TCP+TLS each time) | 435 ms | 461 ms |
-| `GET /api/v1/clinic` unauthenticated (403 - lower bound for an authed call) | 145 ms | 174 ms |
+| request | p50 | p95 |
+|---|---:|---:|
+| `/api/v1/health`, warm keep-alive | 145.8 ms | 249.2 ms |
+| `/api/v1/health`, fresh connection | 436.8 ms | 459.1 ms |
+| unauthenticated `/api/v1/clinic` (403 floor) | 146.4 ms | 436.2 ms |
 
-Tool latency, p50 ms (p95 in brackets), 60 runs each:
+Measured p50 latency, 25 runs per tool:
 
-| tool | API requests per call (current) | no_cache | current | full_memory | estimated live today* |
-|---|---|---|---|---|---|
-| find_patient | 1.98 (directory + appointments prefetch) | 3.5 (11.8) | 5.1 (6.3) | 0.04 | ~290 ms |
-| validate_national_id | 0 | 0.19 | 0.005 | 0.005 | ~0 ms |
-| build_registration | ~0 | 3.4 (17.4) | 0.21 | 0.20 | ~0 ms |
-| resolve_date | 0 | 3.0 (15.6) | 0.03 | 0.03 | ~0 ms |
-| find_slots | 1 (availability) | 7.8 (10.9) | 4.0 (5.6) | 0.86 | ~146 ms |
-| list_appointments | 1 (appointments) | 3.2 (5.9) | 2.6 (3.2) | 0.02 | ~145 ms |
-| prepare_booking | 1 (availability re-check) | 5.8 (14.7) | 2.5 (3.1) | 0.11 | ~145 ms |
-| prepare_reschedule | 2 (directory + appointments) | 4.7 (18.9) | 5.5 (6.2) | 0.06 | ~290 ms |
-| prepare_cancel | 2 (directory + appointments) | 4.8 (21.3) | 5.3 (6.2) | 0.05 | ~290 ms |
-| check_eligibility | 2 (directory + availability) | 10.5 (15.9) | 8.1 (10.0) | 1.77 | ~292 ms |
-| triage | 0 | 0.33 | 0.09 | 0.09 | ~0 ms |
-| nearest_location | 0 (catalogue) | 3.4 (15.1) | 0.17 | 0.17 | ~0 ms |
-| find_provider | 0 (catalogue) | 3.2 (13.3) | 0.02 | 0.02 | ~0 ms |
-| clinic_facts | 0 (catalogue) | 3.3 (16.4) | 0.02 | 0.02 | ~0 ms |
+| tool | live no-cache | live current | warm in-memory |
+|---|---:|---:|---:|
+| find_patient | 458.2 ms | 167.2 ms | 0.038 ms |
+| validate_national_id | 0.169 ms | 0.005 ms | 0.005 ms |
+| build_registration | 618.9 ms | 0.229 ms | 0.204 ms |
+| resolve_date | 657.0 ms | 0.034 ms | 0.033 ms |
+| find_slots | 835.0 ms | 217.3 ms | 0.859 ms |
+| list_appointments | 507.9 ms | 211.3 ms | 0.021 ms |
+| prepare_booking | 823.2 ms | 212.7 ms | 0.112 ms |
+| prepare_reschedule | 673.4 ms | 375.0 ms | 0.063 ms |
+| prepare_cancel | 881.1 ms | 603.0 ms | 0.046 ms |
+| check_eligibility | 1152.1 ms | 391.6 ms | 1.787 ms |
+| triage | 0.472 ms | 0.089 ms | 0.087 ms |
+| nearest_location | 608.1 ms | 0.206 ms | 0.177 ms |
+| find_provider | 607.7 ms | 0.038 ms | 0.021 ms |
+| clinic_facts | 609.2 ms | 0.045 ms | 0.018 ms |
 
-\* `full_memory p50 + requests x 145 ms keep-alive floor`. Rerun with `--live`
-to replace these estimates with measured live numbers.
+The catalogue cache is already effective: catalogue-only tools drop from about
+609 ms with a fresh client to below 0.25 ms with the shared client. The largest
+remaining costs are the routes that still query patients, availability, or
+appointments.
 
-Read: the catalogue cache already works - catalogue-only tools are free after
-warm-up. Everything that touches a *patient* still pays 1-2 WAN round trips per
-tool call. A normal booking call chains find_patient + check_eligibility +
-find_slots + prepare_booking: about **0.9 s of dead air** today that a snapshot
-cache turns into ~3 ms. reschedule/cancel paths pay ~290 ms per tool on top.
+A normal booking chain (`find_patient` + `check_eligibility` + `find_slots` +
+`prepare_booking`) is **988.7 ms p50** against the real API today versus **2.8
+ms** with a warm snapshot. That is a measured saving of **985.9 ms** per chain.
 
-## What it costs to cache everything (build time)
+## Cache build cost
 
-Full local pull of the fixture clinic: **48 requests, 713 KB, 0.23 s** wall
-(1 catalogue + 6 specialties x 3 fourteen-day spans of availability + 15
-directory lookups + their appointments; 2,775 slots). The platform calendar is
-fixed for the event (2026-09-07 to 2026-10-16) and the docs say to cache the
-catalogue freely, so at production scale this stays a one-off cost of a few
-seconds at process start. The directory and per-patient appointments **cannot
-be prefetched by design**: `/directory` rejects parameter-less queries (422)
-and appointments are per-patient only. Those two caches can only be
-populated as calls see patients (write-through when we register someone).
+The real live snapshot pass took **8.713 s** and pulled **762 slots**, **4
+matched patients**, and **10 appointments** over the production calendar
+2026-09-07 to 2026-10-16. The production API does not expose response byte or
+request counters to the client, so those fields remain `null` in
+`cache_build_live`.
 
-## Where the snapshot can live (storage bake-off)
+For a controlled count of the algorithm itself, the equivalent fixture run is
+**48 requests**, **712,736 response bytes**, and **0.156 s**, yielding 2,775
+fixture slots. This makes clear what is network/server time versus local work.
 
-At the documented scale (~3,000 patients; synthetic rows, real bytes and
-queries; plus the real 2,775-slot pull):
+Directory and appointments cannot be globally prefetched: directory requires a
+search key and appointments require a patient ID. Those caches must fill as
+patients are seen, with write-through updates after registrations and bookings.
 
-| backend | build | size | hot query | notes |
-|---|---|---|---|---|
-| in-memory dicts | 2 ms | ~3 MB JSON floor (2-4x as live objects) | 0.1 µs by phone | fastest; dies with the process; one process = all sockets share it |
-| single JSON snapshot | 27 ms | 3.1 MB | 0.18 ms full scan | survives restarts, trivially inspectable; scan is already fast enough at 3k patients |
-| SQLite | 115 ms | 3.9 MB | 8 µs by phone, 58 µs slots-by-day | survives restarts, multi-process safe; overkill at this size |
-| Redis / external | - | - | - | adds infra and a network hop to beat 0.1 µs - rejected outright |
+## Storage bake-off
 
-## What we gain, what we lose
+At the documented scale of about 3,000 patients (synthetic rows with the real
+schema, plus 6,000 appointments and 2,775 fixture slots):
 
-Gain: ~0.9 s less dead air per booking call, ~290 ms less on
-reschedule/cancel/eligibility; near-zero marginal cost per call after a
-sub-second startup pull; evals and tests are untouched (they already run on
-the fake client).
+| backend | build/load | size | hot query |
+|---|---|---:|---:|
+| in-memory indexes | 1.9 ms build | ~3.06 MB serialized floor | 0.19 µs by phone |
+| JSON snapshot | 19.9 ms build / 24.8 ms load | 3.06 MB | 0.241 ms full scan |
+| SQLite | 81.2 ms build | 3.88 MB | 10.1 µs by phone; 61.6 µs slots/day |
+| Redis | external service + network hop | - | cannot beat the local lookup enough to justify itself |
 
-Lose / risks, with the mitigation this study supports:
+## Gains, losses, and safety
 
-1. **Availability goes stale on our own writes.** The platform stops offering
-   a slot the moment we book it; a snapshot would keep offering it. Mitigate:
-   write-through invalidation on book/cancel/reschedule, and keep
-   `prepare_booking`'s existing live availability re-check as the safety gate
-   (it is 1 request, ~145 ms, exactly where correctness matters).
-2. **Directory/appointments change when we register or book.** Cache-as-seen
-   with write-through on `submit/register`; keep `list_appointments` live or
-   on a short TTL - it is the most volatile route.
-3. **Concurrent calls.** Two sockets can see the same cached free slot. The
-   live re-check in `prepare_booking` is the guard; the snapshot only narrows
-   the search.
-4. **Memory.** A few MB per process. Not a constraint.
+1. **Availability freshness.** Snapshot availability at startup and invalidate
+   slots on the process's own book/cancel/reschedule writes. Keep
+   `prepare_booking`'s live availability re-check as the correctness gate.
+2. **Directory and appointments.** Cache patients as they are seen and update on
+   registration. Keep appointments live or use a short TTL because they change
+   often and cannot be bulk-listed.
+3. **Concurrent calls.** Two calls may see the same cached slot. The live
+   `prepare_booking` re-check remains the guard against double-booking.
+4. **Storage.** The dataset is only a few MB. One JSON snapshot is enough for
+   persistence; SQLite becomes useful only for multi-process sharing or richer
+   queries. Redis is unnecessary at this scale.
 
 ## Recommendation
 
-1. Keep the catalogue cache (done).
-2. Build an availability snapshot at process start (48 requests, sub-second)
-   with write-through invalidation on our own bookings; keep the live
-   re-check inside `prepare_booking`.
-3. Extend the per-call patient record stash to process lifetime,
-   write-through on register.
-4. Keep appointments live (or TTL <= 30 s).
-5. Persist the snapshot as one JSON file; move to SQLite only if the line
-   ever runs multi-process.
+Keep the working catalogue cache. Add a startup availability snapshot with
+write-through invalidation, extend the patient stash to process lifetime, keep
+appointments live or at TTL <= 30 seconds, and preserve the live
+`prepare_booking` re-check. Persist the snapshot as JSON; move to SQLite only
+if the service becomes multi-process.
 
-## How this was produced / limitations
+## Method and limits
 
-- Script: `bench.py` (this folder). Local platform server serves the repo's
-  raw fixtures over HTTP; tools run through their real production code paths;
-  WAN floor measured against the production host (200 on `/health`, 403 floor
-  on data routes, no key needed for either).
-- Not measured without a team API key: the organisers' server-side time per
-  route and real production payload sizes. `PLATFORM_API_KEY=... --live`
-  fills both in; every `estimated live today` cell above is the place those
-  numbers land.
-- Fixture scale is 15 patients; the 3,000-patient storage numbers use
-  synthetic rows of the real shape and are labeled synthetic in
-  `results.json`.
+`bench.py` runs every registered tool through its production code path. Local
+scenarios use an HTTP server backed by the repository fixtures, which isolates
+HTTP/serialization and produces deterministic request and byte counts. Live
+scenarios call the production API with the supplied key and report real
+end-to-end timings. The storage study uses 3,000 synthetic patients in the real
+payload shape. Exact WAN and server timings naturally vary by run and host.
+
+Every clinic-side identifier a recipe needs (slot, `patient_id`,
+`appointment_id`, specialty, location, provider, insurance plan) is resolved
+against the client the scenario runs against, so a live run times production
+ids. `/directory` only answers an exact field, so a live run can only reuse a
+fixture patient production also knows: when it knows none, the recipes that
+need a patient or an appointment are reported as `SKIPPED` rather than timed on
+an id the platform would reject. The patient and the appointment are resolved
+first, then the booking and the reschedule recipes each get their own slot,
+warmed under the patient and plan that operation carries — availability answers
+differently per patient, so a slot warmed without one is rejected by
+`prepare_booking`'s re-check instead of timing a booking.

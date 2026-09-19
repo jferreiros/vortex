@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from vortex.observability.calllog import CallLog
+from vortex.observability.replay import replay_call
+from vortex.settings import REPO_ROOT
 
 MADRID = ZoneInfo("Europe/Madrid")
 
@@ -256,13 +259,20 @@ async def _turns(log: CallLog, turns: list[tuple[str, str]], delay_s: float) -> 
 # ---------------------------------------------------------------------------
 
 
+#: The pack file the "Replay cancellations" button drips into the live log —
+#: one CallLog-shaped call per line, exactly like ``synthetic-data/logs/*``.
+#: Regenerate with ``scripts/make_cancellation_pack.py``: the slot dates are
+#: relative to generation time, so a stale file flips "pending" to "lost".
+CANCELLATION_PACK = REPO_ROOT / "synthetic-data" / "logs" / "cancellation_demo.jsonl"
+
+
 #: Five scripted callers free five slots spread across the week, then two more
 #: book into two of those exact (provider, minute) pairs — which is precisely
 #: what business_insights.cancellation_slots counts as "relocated". The other
 #: three stay freed: two whose appointment day already passed ("lost") and one
 #: still ahead ("pending"). Five freed slots also unlock the per-day chart.
-async def write_cancellation_demo(path: Path, *, delay_s: float = 0.12) -> list[str]:
-    """The cancellation panel's whole vocabulary in one replayable batch."""
+async def write_cancellation_pack(path: Path, *, delay_s: float = 0.0) -> list[str]:
+    """Write the demo batch to ``path`` — the synthetic-data pack file."""
     now = datetime.now(MADRID)
 
     def at(days: int, hour: int, minute: int = 0) -> datetime:
@@ -549,3 +559,38 @@ async def _book_into(
     log.event("call.ended", reason="hangup", media_frames_in=0, media_frames_out=0)
     log.summary(reason="hangup")
     return call_id
+
+
+async def write_cancellation_demo(path: Path, *, delay_s: float = 0.0) -> list[str]:
+    """Deprecated name kept for callers that still generate straight into the
+    log; the pack-file path is ``write_cancellation_pack`` + ``replay_cancellation_demo``."""
+    return await write_cancellation_pack(path, delay_s=delay_s)
+
+
+def load_cancellation_pack(pack_path: Path = CANCELLATION_PACK) -> list[list[dict]]:
+    """Read the pack file and group its events into whole calls, file order."""
+    grouped: dict[str, list[dict]] = {}
+    for raw in pack_path.read_text(encoding="utf-8").splitlines():
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            event = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        grouped.setdefault(str(event.get("call_id") or ""), []).append(event)
+    return list(grouped.values())
+
+
+async def replay_cancellation_demo(
+    log_path: Path,
+    *,
+    pack_path: Path = CANCELLATION_PACK,
+    run_tag: str | None = None,
+) -> list[str]:
+    """Drip the pack's seven calls into the live log — fresh timestamps and
+    fresh call_ids via ``replay_call``, so every replay lands inside the
+    Insights window and repeated clicks never collide."""
+    calls = load_cancellation_pack(pack_path)
+    tag = run_tag or f"r{int(time.time())}"
+    return [await replay_call(log_path, events, speed=0, run_tag=tag) for events in calls]
