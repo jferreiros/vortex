@@ -7,6 +7,7 @@ import Settings from "../pages/clinic/settings/Settings";
 import Insights from "../pages/clinic/insights/Insights";
 import LiveCalls from "../pages/clinic/live-calls/LiveCalls";
 import LiveCallDetail from "../pages/clinic/live-calls/LiveCallDetail";
+import UiKit from "../pages/clinic/ui-kit/UiKit";
 
 // Hash-based on purpose: this SPA is served by FastAPI from a single
 // registered path (/call/{call_id}/zoom — see vortex/observability/live.py)
@@ -32,6 +33,9 @@ export default function AppRouter() {
           <Route path="settings" element={<Settings />} />
           <Route path="insights" element={<Insights />} />
           <Route path="live-calls" element={<LiveCalls />} />
+          {/* Hidden visual-review gallery for the adopted ElevenLabs UI
+              kit — deliberately absent from the sidebar nav. */}
+          <Route path="ui-kit" element={<UiKit />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

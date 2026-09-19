@@ -1,0 +1,108 @@
+/* Hidden UI-kit gallery — layout only. The adopted components style
+   themselves through Tailwind utilities mapped to theme/tokens.css, so this
+   file just arranges the demos; no colour or radius values of its own. */
+
+.ui-kit-page {
+  max-width: var(--content-max-width);
+}
+
+.ui-kit-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-6);
+}
+
+.ui-kit-cell.wide {
+  grid-column: 1 / -1;
+}
+
+.ui-kit-cell > .ui-section-header {
+  margin-bottom: var(--space-4);
+}
+
+@media (max-width: 900px) {
+  .ui-kit-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Demo controls — same pill pattern as the Insights range switcher ------- */
+
+.ui-kit-demo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.ui-kit-pills {
+  display: inline-flex;
+  gap: var(--space-1);
+  background: var(--color-panel);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  padding: 3px;
+  align-self: flex-start;
+}
+
+.ui-kit-pill {
+  appearance: none;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 7px 14px;
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--color-mute);
+}
+
+.ui-kit-pill.on {
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+.ui-kit-note {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--color-faint);
+}
+
+/* audio-player demo row --------------------------------------------------- */
+
+.ui-kit-player {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.ui-kit-player-progress {
+  flex: 1 1 auto;
+}
+
+/* transcript-viewer demo --------------------------------------------------- */
+
+.ui-kit-transcript {
+  padding: 0;
+}
+
+.ui-kit-transcript-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.ui-kit-transcript-words {
+  font-family: var(--font-body);
+}
+
+/* conversation demo --------------------------------------------------------- */
+
+.ui-kit-conversation {
+  height: 360px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--color-bg);
+}
