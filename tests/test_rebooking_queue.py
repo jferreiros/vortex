@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
 from vortex.clinic.client import FakeClinicClient
-from vortex.contract import AvailabilityResponse, BookAction, RescheduleAction
+from vortex.contract import MADRID, AvailabilityResponse, BookAction, RescheduleAction
 from vortex.diary.rebooking import (
     RebookingStore,
     RebookingWatcher,
@@ -16,6 +16,8 @@ from vortex.diary.rebooking import (
 
 CALL_ID = "CA-no-slot"
 PATIENT_ID = "P00042"
+#: The day before the window every queued call in this module asked for.
+NOW = datetime(2026, 9, 18, 9, 0, tzinfo=MADRID)
 
 
 class ReopeningClinic(FakeClinicClient):
@@ -30,6 +32,18 @@ class ReopeningClinic(FakeClinicClient):
         if self.reopened:
             return answer
         return answer.model_copy(update={"slots": []})
+
+
+class RecordingClinic(FakeClinicClient):
+    """A fake diary that remembers every window it was asked about."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.windows: list[tuple[date, date]] = []
+
+    async def availability(self, **kwargs: Any) -> AvailabilityResponse:
+        self.windows.append((kwargs["date_from"], kwargs["date_to"]))
+        return await super().availability(**kwargs)
 
 
 def _patient_result() -> dict[str, Any]:
@@ -209,10 +223,10 @@ async def test_reopened_slot_creates_draft_booking(tmp_path: Path) -> None:
     clinic = ReopeningClinic()
     watcher = RebookingWatcher(clinic, store)
 
-    assert await watcher.check_once() == []
+    assert await watcher.check_once(now=NOW) == []
 
     clinic.reopened = True
-    [matched] = await watcher.check_once()
+    [matched] = await watcher.check_once(now=NOW)
 
     assert matched.status == "matched"
     assert matched.matched_slot is not None
@@ -231,8 +245,39 @@ async def test_reopened_slot_can_draft_a_reschedule(tmp_path: Path) -> None:
     clinic = ReopeningClinic()
     clinic.reopened = True
 
-    [matched] = await RebookingWatcher(clinic, store).check_once()
+    [matched] = await RebookingWatcher(clinic, store).check_once(now=NOW)
 
     assert isinstance(matched.draft_action, RescheduleAction)
     assert matched.draft_action.appointment_id == "A0001"
     assert matched.draft_action.provider_id == "PR01"
+
+
+async def test_a_window_that_ended_today_is_never_queried_again(tmp_path: Path) -> None:
+    store = RebookingStore(tmp_path / "rebooking.sqlite3")
+    request = analyze_call(_book_events())
+    assert request is not None
+    store.add(request)
+    clinic = RecordingClinic()
+
+    matched = await RebookingWatcher(clinic, store).check_once(
+        now=datetime(2026, 9, 19, 9, 0, tzinfo=MADRID)
+    )
+
+    assert matched == []
+    assert clinic.windows == []
+
+
+async def test_the_queried_window_starts_the_day_after_the_check(tmp_path: Path) -> None:
+    store = RebookingStore(tmp_path / "rebooking.sqlite3")
+    events = _book_events()
+    events[3]["args"] |= {"date_from": "2026-09-16", "date_to": "2026-09-20"}
+    request = analyze_call(events)
+    assert request is not None
+    store.add(request)
+    clinic = RecordingClinic()
+
+    [matched] = await RebookingWatcher(clinic, store).check_once(now=NOW)
+
+    assert clinic.windows == [(date(2026, 9, 19), date(2026, 9, 20))]
+    assert matched.matched_slot is not None
+    assert matched.matched_slot.start.astimezone(MADRID).date() > NOW.date()
