@@ -190,7 +190,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if call is None:
             return Response(status_code=404)
         base = settings.public_base_url.rstrip("/")
-        return Response(content=confirmations.twiml_ask(call, base), media_type="application/xml")
+        job = confirmations.job_for(call.job)
+        return Response(
+            content=job.ask_twiml(call, base, attempt=1, reprompt=False),
+            media_type="application/xml",
+        )
 
     @app.post("/confirmation/result")
     async def confirmation_result(request: Request, cid: str = "", attempt: int = 1) -> Response:
@@ -201,10 +205,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return Response(status_code=404)
         form = await _form(request)
         transcript = (form.get("SpeechResult") or "").strip()
-        outcome = confirmations.classify_reply(transcript, call.language)
+        job = confirmations.job_for(call.job)
+        outcome = job.classify(transcript, call.language)
         if outcome == "unknown" and attempt < 2:
             base = settings.public_base_url.rstrip("/")
-            xml = confirmations.twiml_ask(call, base, attempt=attempt + 1, reprompt=True)
+            xml = job.ask_twiml(call, base, attempt=attempt + 1, reprompt=True)
             return Response(content=xml, media_type="application/xml")
         status: confirmations.ConfirmationStatus = outcome if outcome != "unknown" else "unclear"
         detail = "answered" if outcome != "unknown" else "unclear_response"
@@ -217,9 +222,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         log.info("confirmation %s -> %s (%r)", call.confirmation_id, status, transcript[:80])
         text = (
-            confirmations.ack_text(outcome, call.language)
+            job.ack(outcome, call.language)
             if outcome != "unknown"
-            else confirmations.final_unclear_text(call.language)
+            else job.final_unclear(call.language)
         )
         return Response(
             content=confirmations.twiml_say(text, call.language),
@@ -240,7 +245,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         return Response(
             content=confirmations.twiml_say(
-                confirmations.no_speech_text(call.language), call.language
+                confirmations.job_for(call.job).no_speech(call.language), call.language
             ),
             media_type="application/xml",
         )
