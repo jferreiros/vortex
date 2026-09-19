@@ -53,6 +53,14 @@ if [[ "${HAVE}" != "${WANT}" ]]; then
   git pull --ff-only origin main
 fi
 
+# Do not rebuild/restart while Prosper is mid-run (kills in-flight scored calls).
+if [[ "${FORCE}" -eq 0 ]]; then
+  if ! "${REPO_ROOT}/scripts/prosper-deploy-guard.sh"; then
+    echo "REFUSE: Prosper active_run — leaving previous image up; retry next tick" >&2
+    exit 0
+  fi
+fi
+
 SUBJECT="$(git log -1 --pretty=%s)"
 SHA="$(git rev-parse --short HEAD)"
 PR=""
