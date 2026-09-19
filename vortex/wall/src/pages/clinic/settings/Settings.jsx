@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import SectionHeader from "../../../components/ui/SectionHeader";
 import Card from "../../../components/ui/Card";
 import Button from "../../../components/ui/Button";
+import PermissionsCard from "./PermissionsCard";
 import "./settings.css";
 
 const DEFAULTS = {
@@ -77,7 +78,7 @@ export default function Settings() {
       <SectionHeader
         eyebrow="Ajustes"
         title="Llamadas"
-        subtitle="Reglas de la clínica. Quién atiende, cómo suena y qué puede hacer está en IA."
+        subtitle="Reglas de la clínica. Quién atiende y cómo suena está en Personalizar agente."
         action={
           <>
             <Button
@@ -176,6 +177,8 @@ export default function Settings() {
             </div>
           </Card>
         </div>
+
+        <PermissionsCard />
       </div>
 
       {showDefaultConfirm && (
