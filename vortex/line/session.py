@@ -26,13 +26,17 @@ from vortex import tools as registry
 from vortex.clinic import make_clinic_client
 from vortex.clinic.client import ClinicApi
 from vortex.contract import (
+    INSURERS,
     MADRID,
     Action,
+    BookAction,
     DeclineReason,
     EscalateAction,
     FindPatientResult,
     NoAction,
+    PatientRecord,
     Rejection,
+    Slot,
     SubmitInput,
     SubmitResult,
     ToolContext,
@@ -70,12 +74,26 @@ ACCEPTED_STATUSES: tuple[str, ...] = ("accepted", "duplicate")
 # ``CallMemory.last_verdict`` and the override in ``vortex/line/submit.py``.
 VERDICT_TOOLS: frozenset[str] = frozenset({"check_eligibility", "find_slots"})
 
+# The plan a booking is billed to when neither the patient's record nor the slot
+# names one. The platform validates ``policy_id`` against ``INSURERS``, so a
+# draft has to pick something the schema knows; self-pay is the one that claims
+# no cover we have not seen.
+SELF_PAY_POLICY = "privado"
+
 
 def refusal_for(reason: DeclineReason) -> Action:
     """The action a named reason ends on. A red flag goes to /escalate, the rest refuse."""
     if reason == "medical_emergency":
         return EscalateAction(reason=reason)
     return NoAction(reason=reason)
+
+
+def policy_for(patient: PatientRecord, slot: Slot) -> str:
+    """The plan to bill a drafted booking to: the record's, then the slot's, then self-pay."""
+    candidates = (patient.insurer, *slot.payable_with, SELF_PAY_POLICY)
+    policy = next(candidate for candidate in candidates if candidate in INSURERS)
+    assert policy in INSURERS
+    return policy
 
 
 @dataclass
@@ -114,6 +132,11 @@ class CallMemory:
     # ``patient_not_found``, which says what happened; ``out_of_scope`` claims
     # we could not serve the request at all, which is a different call.
     identity_pending: bool = False
+    # The two halves of a booking the call had in hand: who is calling, and a
+    # slot the platform offered. Kept apart from ``prepared`` because a call can
+    # learn both and die before any tool draws the action up.
+    identified_patient: PatientRecord | None = None
+    free_slot: Slot | None = None
     prepared: Action | None = None
     prepared_tool: str = ""
     # Set by the conversation lane when the caller agrees to ``prepared``. It
@@ -164,6 +187,27 @@ class CallMemory:
         self.stored_reason = None
         self.stored_reason_tool = ""
 
+    def draft_booking(self) -> BookAction | None:
+        """The booking the call had every part of and nobody drew up.
+
+        ``None`` unless the directory identified the caller and the platform
+        offered a slot: a booking is only ours to draft off ids the API gave us.
+        The slot is the most recent search's first, which is the one the caller
+        was being read back when the line died.
+        """
+        patient, slot = self.identified_patient, self.free_slot
+        if patient is None or slot is None or self.identity_pending:
+            return None
+        assert patient.patient_id, "the directory never returns a match without an id"
+        return BookAction(
+            patient_id=patient.patient_id,
+            provider_id=slot.provider_id,
+            location_id=slot.location_id,
+            appointment_type_id=slot.appointment_type_id,
+            slot=slot.start,
+            policy_id=policy_for(patient, slot),
+        )
+
     def observe(self, tool: str, result: Any) -> None:
         """Remember whatever a tool result says about where the call stands.
 
@@ -174,6 +218,8 @@ class CallMemory:
         """
         if isinstance(result, FindPatientResult):
             self.identity_pending = result.status != "found"
+            if result.patient is not None and result.status == "found":
+                self.identified_patient = result.patient
 
         rejection = getattr(result, "rejection", None)
         if isinstance(rejection, Rejection):
@@ -190,6 +236,7 @@ class CallMemory:
         # At the end of a dead call it is the only reason we have.
         blocked = getattr(result, "blocked", None) or []
         if slots:
+            self.free_slot = slots[0]
             self.forget_rejection()
             self.forget_stored_reason()
         elif blocked and rejection is None:
@@ -479,9 +526,8 @@ class CallSession:
         """The action a silent call ends on: (branch, action, why)."""
         memory = self.memory
 
-        # (a) Something was drawn up and never sent. Only with the caller's yes:
-        #     a booking nobody agreed to is a wrong write, which is worse than
-        #     a named refusal.
+        # (a) Something was drawn up, agreed to, and never sent. The caller's
+        #     yes outranks every reason below it, a named rule included.
         if memory.prepared is not None and memory.confirmed:
             return (
                 "prepared",
@@ -518,7 +564,32 @@ class CallSession:
                 f"{memory.stored_reason_tool} refused: {reason}, before a plan nobody confirmed",
             )
 
-        # (d) Nobody said anything we could act on: a dropped or silent call.
+        # (d) A plan the caller never got to agree to, with no rule against it.
+        #     Scoring is binary per case, so an action the case does not accept
+        #     costs exactly what a refusal it does not accept costs - and of the
+        #     23 published cases every single one ends on BOOK, REGISTER or one
+        #     of three named refusals, never on the out_of_scope this used to
+        #     fall through to. A call that got as far as drawing an action up is
+        #     a call whose ending we already know.
+        if memory.prepared is not None:
+            return (
+                "prepared_unconfirmed",
+                memory.prepared,
+                f"{memory.prepared_tool} prepared an action nobody confirmed",
+            )
+
+        # (e) No plan, but the call holds both halves of one: the patient the
+        #     directory identified and a slot the platform offered. Both ids
+        #     come from the API, so the draft is exact where it is right.
+        draft = memory.draft_booking()
+        if draft is not None:
+            return (
+                "draft_booking",
+                draft,
+                "the call identified a patient and held a free slot, and drew nothing up",
+            )
+
+        # (f) Nobody said anything we could act on: a dropped or silent call.
         if self.ctx.log.user_turns == 0:
             return (
                 "no_turns",
@@ -526,7 +597,7 @@ class CallSession:
                 "the caller never said anything we could act on",
             )
 
-        # (e) The line died with the lookup still open: a patient was searched
+        # (g) The line died with the lookup still open: a patient was searched
         #     for and none was identified. That is patient_not_found, and it is
         #     the one thing out_of_scope certainly is not - the request was ours
         #     to serve, we just never learned whose it was.
@@ -537,7 +608,7 @@ class CallSession:
                 "a lookup ran and identified nobody",
             )
 
-        # (f) A real conversation that resolved nothing, and no rule to name.
+        # (h) A real conversation that resolved nothing, and no rule to name.
         #     NO_ACTION, not ESCALATE. The problem set pairs ESCALATE with one
         #     ending only - a red flag, with medical_emergency - and branch (b)
         #     already covers it from triage's own rejection. An ESCALATE
