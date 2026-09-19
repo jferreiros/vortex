@@ -1214,6 +1214,22 @@
       ],
       "done": "Con soniox_turn_detection=False, LocalSmartTurnAnalyzerV3 (stop_secs=2.0, VAD stop_secs=0.2) frente al modo Soniox sobre los clips de id y corrección. Gana el que corte menos turnos a medias.",
       "why": "Smart Turn v3.2 viene con pipecat 1.11, soporta español, remuestrea 8 kHz solo y es más robusto al ruido. Espera a #128. Ver docs/research/03-turn-detection.md."
+    },
+    {
+      "id": "T66",
+      "wave": "w6",
+      "lane": "todos",
+      "kind": "voz",
+      "title": "Voz · Rama demo con Gemini 3.8 Live (speech-to-speech) y las mismas tools",
+      "problems": [],
+      "weight": 0,
+      "size": "medio día",
+      "blocked_by": [],
+      "files": [
+        "vortex/line/"
+      ],
+      "done": "Una rama enseña una llamada por GeminiLiveLLMService con las tools de vortex. Se enseña al jurado; no se puntúa con ella.",
+      "why": "GA el 15 sep 2026, 99 idiomas con ca/gl/eu, tool calling asíncrono. Los modelos S2S siguen por debajo del 52 % en tareas agénticas, así que la cascada se queda para puntuar. Ver docs/research/04-industry-2025-2026.md y 06-google-and-tts.md."
     }
   ]
 }
