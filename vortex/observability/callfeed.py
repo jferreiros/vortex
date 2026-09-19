@@ -114,11 +114,17 @@ def load_events(
     *,
     since: datetime | None = None,
     cache_ttl: float = 0.0,
+    max_calls: int | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any] | None, dict]:
     """The events a screen draws, and where they came from.
 
     ``scope`` names the reader ("recent" for the wall, "insights:<days>" for
     the range pills) so the last-good and TTL caches never mix windows.
+
+    ``max_calls`` caps a date-bounded read at the most recent N calls. The
+    whole log is far more than any aggregate needs, and asking the hosted
+    project for all of it exceeds its statement timeout — the read then
+    fails and the caller silently drops to the container's local file.
     """
     if cache_ttl:
         cached = _scope_cache.get(scope)
@@ -135,7 +141,7 @@ def load_events(
     # the line already dual-writes, so a board without the line volume
     # still paints real cards.
     if since is not None:
-        hosted = _from_hosted(scope, log_path, since=since, max_calls=None)
+        hosted = _from_hosted(scope, log_path, since=since, max_calls=max_calls)
         if hosted is not None:
             if cache_ttl:
                 _scope_cache[scope] = (time.monotonic(), *hosted)
@@ -163,7 +169,7 @@ def load_events(
                 scope,
                 log_path,
                 since=since,
-                max_calls=None if since is not None else WALL_CALLS,
+                max_calls=max_calls if since is not None else WALL_CALLS,
             )
             if hosted is not None:
                 result = hosted
@@ -171,7 +177,7 @@ def load_events(
                 grouped = {}
                 if log_path is not None:
                     grouped, _meta = (
-                        read_calls(log_path, since=since)
+                        read_calls(log_path, since=since, max_calls=max_calls)
                         if since is not None
                         else read_calls(log_path, max_calls=WALL_CALLS)
                     )
