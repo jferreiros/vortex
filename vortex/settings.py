@@ -361,6 +361,10 @@ class Settings:
     langfuse_environment: str = field(
         default_factory=lambda: _env("LANGFUSE_TRACING_ENVIRONMENT") or _env("VORTEX_ENV")
     )
+    # HuggingFace Inference token: the Clinic View summarises a visit note when
+    # it is set (vortex/observability/calendar.py ``summarize_note``). Empty =
+    # the note is shown raw.
+    hf_token: str = field(default_factory=lambda: _env("HF_TOKEN"))
 
     # Live geocoder for problem 15 (vortex/rules/geo.py). Empty = gazetteer only.
     # VORTEX_GEOCODER: cartociudad | nominatim | "" (off).
@@ -624,6 +628,7 @@ class Settings:
             "has_langfuse_keys": bool(self.langfuse_public_key and self.langfuse_secret_key),
             "langfuse_base_url": self.langfuse_base_url,
             "langfuse_environment": self.langfuse_environment,
+            "has_hf_token": bool(self.hf_token),
             "geocoder": self.geocoder or ("nominatim" if self.geocoder_url else ""),
             "sms_confirmations": self.sms_confirmations,
             "sms_force_to_set": bool(self.sms_force_to),
