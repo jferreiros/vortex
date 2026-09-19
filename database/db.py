@@ -141,12 +141,8 @@ def get_call_by_call_id(conn: sqlite3.Connection, call_id: str) -> CallRecord | 
     return CallRecord.from_row(row) if row else None
 
 
-def link_call_to_appointment(
-    conn: sqlite3.Connection, call_pk: int, appointment_id: str
-) -> None:
-    conn.execute(
-        "UPDATE calls SET appointment_id = ? WHERE id = ?", (appointment_id, call_pk)
-    )
+def link_call_to_appointment(conn: sqlite3.Connection, call_pk: int, appointment_id: str) -> None:
+    conn.execute("UPDATE calls SET appointment_id = ? WHERE id = ?", (appointment_id, call_pk))
 
 
 # ---------------------------------------------------------------------------
@@ -221,9 +217,7 @@ def insert_appointment(
 
 
 def get_appointment(conn: sqlite3.Connection, appointment_id: str) -> AppointmentRecord | None:
-    row = conn.execute(
-        "SELECT * FROM appointments WHERE id = ?", (appointment_id,)
-    ).fetchone()
+    row = conn.execute("SELECT * FROM appointments WHERE id = ?", (appointment_id,)).fetchone()
     return AppointmentRecord.from_row(row) if row else None
 
 
@@ -244,9 +238,7 @@ def update_appointment(
     return AppointmentRecord.from_row(row)
 
 
-def set_confirmation_call(
-    conn: sqlite3.Connection, appointment_id: str, call_pk: int
-) -> None:
+def set_confirmation_call(conn: sqlite3.Connection, appointment_id: str, call_pk: int) -> None:
     conn.execute(
         "UPDATE appointments SET confirmation_call_id = ?, updated_at = ? WHERE id = ?",
         (call_pk, now_iso(), appointment_id),

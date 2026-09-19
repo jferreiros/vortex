@@ -38,9 +38,7 @@ ConfirmationOutcome = Literal["confirmed", "cancel", "no_answer"]
 #: What the simulated caller says and, when it isn't a no-answer, what the
 #: patient replies — enough to leave a readable transcript behind, not a
 #: real conversation.
-_SCRIPT_PROMPT = (
-    "Llamamos de Clínica Arenal para confirmar su cita del {when}. ¿Podrá acudir?"
-)
+_SCRIPT_PROMPT = "Llamamos de Clínica Arenal para confirmar su cita del {when}. ¿Podrá acudir?"
 _SCRIPT_REPLY: dict[ConfirmationOutcome, str] = {
     "confirmed": "Sí, allí estaré.",
     "cancel": "No voy a poder ir, cancele la cita por favor.",

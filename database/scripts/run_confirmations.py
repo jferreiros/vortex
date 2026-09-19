@@ -67,9 +67,7 @@ async def main() -> None:
     )
     conn = db.connect(settings.product_db_path)
     try:
-        results = await confirmations.run_confirmations(
-            conn, caller=caller, today=args.for_date
-        )
+        results = await confirmations.run_confirmations(conn, caller=caller, today=args.for_date)
     finally:
         conn.close()
 
@@ -77,8 +75,10 @@ async def main() -> None:
         print("No appointments due for confirmation.")
         return
     for appt, result in results:
-        print(f"{appt.id}  {appt.slot_start}  {appt.patient_name or appt.patient_id}"
-              f"  -> {result.outcome}  (call {result.call_id})")
+        print(
+            f"{appt.id}  {appt.slot_start}  {appt.patient_name or appt.patient_id}"
+            f"  -> {result.outcome}  (call {result.call_id})"
+        )
 
 
 if __name__ == "__main__":

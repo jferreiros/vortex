@@ -44,6 +44,8 @@ async def test_wall_shows_the_last_call_and_why(seeded: Path, user: User) -> Non
     await user.should_see("Marta Ruiz López")
     await user.should_see("Recent calls")
     await user.should_see("insurance does not cover")
+    await user.open("/wall/flow")
+    await user.should_see("Workflow")
 
 
 def test_the_seeded_log_does_not_outlive_the_fixture(
@@ -114,7 +116,7 @@ async def test_console_routes_render(seeded: Path, user: User) -> None:
         ("/agents/reminders", "Preview"),
         ("/agents/nope", "No agent with this name"),
         ("/calls", "Why not booked"),
-        ("/calls/live", "Call opened"),
+        ("/calls/live", "Workflow"),
         ("/patients", "Marta Ruiz López"),
         ("/insights", "Why not booked"),
         ("/settings", "Sites"),

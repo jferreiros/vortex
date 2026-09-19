@@ -1090,8 +1090,7 @@ def wall_doctor_agenda_api(
         location_names={loc.location_id: loc.name for loc in catalogue.locations},
         type_names={item.appointment_type_id: item.name for item in catalogue.appointment_types},
         type_durations={
-            item.appointment_type_id: item.duration_minutes
-            for item in catalogue.appointment_types
+            item.appointment_type_id: item.duration_minutes for item in catalogue.appointment_types
         },
         plan_names={plan.insurer_id: plan.name for plan in catalogue.insurance_plans},
     )
@@ -1806,7 +1805,10 @@ def main() -> None:
 
 # The clinic console (Overview, Agents, Patients, Insights, Settings) registers
 # its pages on import. It imports this module, so it must come last.
-from vortex.observability import calendar_view, console  # noqa: E402, F401
+# The doctor calendar (/calendar) registers its page on import; it reuses this
+# module's chrome, so it comes after everything above is defined. liveflow is
+# the workflow projector page (/wall/flow public, /calls/live for the team).
+from vortex.observability import calendar_view, console, liveflow  # noqa: E402, F401
 
 if __name__ in {"__main__", "__mp_main__"}:
     main()

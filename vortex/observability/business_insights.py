@@ -124,6 +124,7 @@ def site_catalogue() -> Catalogue:
         _CATALOGUE = fixtures_catalogue()
     return _CATALOGUE
 
+
 # ---------------------------------------------------------------------------
 # Reading a call's own words
 # ---------------------------------------------------------------------------
@@ -375,10 +376,7 @@ def _request_scope(catalogue: Catalogue, args: dict[str, Any]) -> frozenset[str]
             return frozenset(rec.location_ids)
     if sid := args.get("specialty_id"):
         sites = {
-            loc
-            for p in catalogue.providers
-            if p.specialty_id == str(sid)
-            for loc in p.location_ids
+            loc for p in catalogue.providers if p.specialty_id == str(sid) for loc in p.location_ids
         }
         if sites:
             return frozenset(sites)
@@ -742,8 +740,7 @@ def _service_occupancy_rows(
             [
                 p
                 for p in catalogue.providers
-                if p.specialty_id == specialty_id
-                and (site_id is None or site_id in p.location_ids)
+                if p.specialty_id == specialty_id and (site_id is None or site_id in p.location_ids)
             ]
         )
         req, off = requested.get(specialty_id, 0), offered.get(specialty_id, 0)
@@ -849,9 +846,7 @@ def _band_is_open(loc: LocationRecord, weekday: int, band_start: int, band_end: 
 
 def _open_matrix(loc: LocationRecord) -> list[list[bool]]:
     """7 weekdays x 4 bands, True where the site takes appointments."""
-    return [
-        [_band_is_open(loc, wd, start, end) for _label, start, end in BANDS] for wd in range(7)
-    ]
+    return [[_band_is_open(loc, wd, start, end) for _label, start, end in BANDS] for wd in range(7)]
 
 
 _DAY_SHORT = ("L", "M", "X", "J", "V", "S", "D")
@@ -1378,9 +1373,7 @@ def cancellation_slots(
         c.call_id: {
             "providers": requested_provider_ids(c),
             "bands": {
-                (weekday, band)
-                for weekday, band, _scope in _requested_bands(c, catalogue)
-                if band
+                (weekday, band) for weekday, band, _scope in _requested_bands(c, catalogue) if band
             },
         }
         for c in cards
