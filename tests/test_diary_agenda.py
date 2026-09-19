@@ -3,13 +3,15 @@
 
 The eval harness covers the published English vocabulary case by case
 (``evals/logic/cases/diary.yaml`` and the problem-5 probes). What lives here is
-what the harness does not reach: the non-English phrases, and the reason each
-guard returns when it refuses.
+what the harness does not reach: the non-English phrases, the reason each
+guard returns when it refuses, and the shape of ``nearest`` when a window is
+empty (problem 7).
 """
 
 from __future__ import annotations
 
 import copy
+from dataclasses import replace
 from datetime import date, datetime, time
 from pathlib import Path
 from typing import Any
@@ -153,6 +155,44 @@ async def test_a_phrase_outside_the_vocabulary_returns_a_typed_reason(
     ctx: ToolContext, phrase: str
 ) -> None:
     window = await _window(ctx, phrase)
+    assert window.rejection is not None
+    assert window.rejection.reason == "out_of_scope"
+
+
+async def test_a_later_than_phrase_opens_on_the_day_it_names(ctx: ToolContext) -> None:
+    """ "later than <day>" is a lower bound, not a day: the window opens on the
+    named day - a later slot that same day is still an answer - and runs wide,
+    so one find_slots call covers 'the first one after theirs'. Call 096af75d
+    lost the change_and_cancel case to this phrase returning out_of_scope."""
+    window = await _window(ctx, "later than my Friday 02 October appointment")
+    assert window.rejection is None
+    assert window.date_from == date(2026, 10, 2)
+    assert window.date_to > window.date_from
+    assert window.moved_from_closed_day is False
+
+
+@pytest.mark.parametrize(
+    ("phrase", "expected", "moved"),
+    [
+        ("after my appointment on Friday 2 October", date(2026, 10, 2), False),
+        ("the next one after October 5", date(2026, 10, 5), False),
+        ("later than the second of October", date(2026, 10, 2), False),
+        # Fiesta Nacional shuts the network; the bound moves to the next open day.
+        ("after the twelfth of October", date(2026, 10, 13), True),
+        ("despues de mi cita del viernes 2 de octubre", date(2026, 10, 2), False),
+    ],
+)
+async def test_after_phrases_in_every_voice(
+    ctx: ToolContext, phrase: str, expected: date, moved: bool
+) -> None:
+    window = await _window(ctx, phrase)
+    assert window.rejection is None, phrase
+    assert window.date_from == expected
+    assert window.moved_from_closed_day is moved
+
+
+async def test_an_after_phrase_that_names_no_day_is_still_refused(ctx: ToolContext) -> None:
+    window = await _window(ctx, "the next one after the weekend")
     assert window.rejection is not None
     assert window.rejection.reason == "out_of_scope"
 
@@ -337,6 +377,119 @@ async def test_a_site_closed_that_afternoon_simply_has_nothing(ctx: ToolContext)
     assert answer.rejection.reason == "no_availability"  # the site opened that morning
 
 
+# ---- find_slots: the nearest alternative to an empty window (problem 7) ----
+
+
+def _bucket(slot: Slot) -> tuple[date, bool]:
+    local = slot.start.astimezone(MADRID)
+    return local.date(), local.time() < time(14, 0)
+
+
+async def test_an_empty_window_offers_the_nearest_slots_that_keep_the_request(
+    ctx: ToolContext,
+) -> None:
+    """Sur shuts Friday lunchtime: a Friday afternoon there is empty and nobody is
+    blocked. The nearest thing that still works is that Friday morning, at Sur."""
+    answer = await find_slots(
+        ctx,
+        FindSlotsInput(
+            location_id="sur",
+            specialty_id="orthopaedics",
+            date_from=date(2026, 9, 25),
+            date_to=date(2026, 9, 25),
+            time_from=time(14, 0),
+        ),
+    )
+    assert answer.slots == []
+    assert answer.rejection is not None
+    assert answer.rejection.reason == "no_availability"  # what gets submitted if they decline
+    assert answer.nearest, "an empty window with nobody blocked must offer alternatives"
+    first_day, first_is_morning = _bucket(answer.nearest[0])
+    assert first_day == date(2026, 9, 25) and first_is_morning
+    # Every alternative keeps the rest of the request.
+    assert {s.location_id for s in answer.nearest} == {"sur"}
+    assert {s.specialty_id for s in answer.nearest} == {"orthopaedics"}
+    # One per day and part of the day, at most four: distinct choices to read out.
+    buckets = [_bucket(s) for s in answer.nearest]
+    assert len(buckets) == len(set(buckets))
+    assert len(answer.nearest) <= 4
+
+
+async def test_nearest_looks_both_ways_but_never_at_the_call_day(ctx: ToolContext) -> None:
+    """Tomorrow is Saturday, and Sur never opens Saturday. The day before is the
+    call's own day, so the nearest is Monday - still Dr. Iglesia, still at Sur."""
+    answer = await find_slots(
+        ctx,
+        FindSlotsInput(
+            provider_id="PR05",
+            location_id="sur",
+            date_from=date(2026, 9, 19),
+            date_to=date(2026, 9, 19),
+        ),
+    )
+    assert answer.rejection is not None
+    assert answer.rejection.reason == "clinic_closed"
+    assert answer.nearest
+    assert all(s.start.astimezone(MADRID).date() > date(2026, 9, 18) for s in answer.nearest)
+    assert answer.nearest[0].start.astimezone(MADRID).date() == date(2026, 9, 21)
+    assert {s.provider_id for s in answer.nearest} == {"PR05"}
+
+
+async def test_a_full_calendar_is_no_availability_and_nothing_else(ctx: ToolContext) -> None:
+    """Empty slots with empty blocked, on the asked days and all around them: the
+    calendar is full. Nothing is invented; the answer is no_availability alone."""
+
+    class FullDiary(FakeClinicClient):
+        async def availability(self, **kwargs):  # type: ignore[override]
+            answer = await super().availability(**kwargs)
+            return answer.model_copy(update={"slots": []})
+
+    full = replace(ctx, clinic=FullDiary())
+    answer = await find_slots(
+        full,
+        FindSlotsInput(
+            specialty_id="orthopaedics",
+            date_from=date(2026, 9, 21),
+            date_to=date(2026, 9, 25),
+        ),
+    )
+    assert answer.slots == []
+    assert answer.blocked == []
+    assert answer.nearest == []
+    assert answer.rejection is not None
+    assert answer.rejection.reason == "no_availability"
+
+
+async def test_a_blocked_provider_is_not_negotiated_around(ctx: ToolContext) -> None:
+    """Dr. Requena is on leave. That rule is the answer, and whether it becomes a
+    redirect or a refusal is the rules lane's call - the diary offers nothing."""
+    answer = await find_slots(
+        ctx,
+        FindSlotsInput(
+            provider_id="PR07",
+            date_from=date(2026, 9, 21),
+            date_to=date(2026, 9, 25),
+        ),
+    )
+    assert answer.slots == []
+    assert [b.provider_id for b in answer.blocked] == ["PR07"]
+    assert answer.nearest == []
+    assert answer.rejection is None
+
+
+async def test_a_window_with_slots_offers_nothing_beyond_itself(ctx: ToolContext) -> None:
+    answer = await find_slots(
+        ctx,
+        FindSlotsInput(
+            specialty_id="general_practice",
+            date_from=date(2026, 9, 21),
+            date_to=date(2026, 9, 25),
+        ),
+    )
+    assert answer.slots
+    assert answer.nearest == []
+
+
 # ---- widen_days: problem 7, no slot free -----------------------------------
 
 
@@ -486,6 +639,15 @@ async def test_upcoming_is_split_against_the_call_not_the_machine(ctx: ToolConte
     assert {a.appointment_id for a in past.appointments} == {"A9001", "A9002"}
     assert all(a.start > ctx.now for a in upcoming.appointments)
     assert all(a.start <= ctx.now for a in past.appointments)
+
+
+async def test_the_appointment_record_names_its_own_doctor(ctx: ToolContext) -> None:
+    """The wire carries only ``provider_id``. The name is filled from the
+    catalogue so the model checks the caller's words against the record instead
+    of inventing one - call 096af75d died on an invented doctor's name."""
+    upcoming = await list_appointments(ctx, ListAppointmentsInput(patient_id=PATIENT))
+    assert upcoming.appointments[0].provider_id == "PR01"
+    assert upcoming.appointments[0].provider_name == "Dra. Ortiz"
 
 
 async def test_a_past_visit_cannot_be_cancelled(ctx: ToolContext) -> None:
