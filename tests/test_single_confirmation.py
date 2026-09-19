@@ -117,6 +117,9 @@ async def an_offered_slot(session: CallSession) -> Slot:
         "de acuerdo",
         "d'acord",
         "bai",
+        "yes please",
+        "ok, thank you",
+        "sí, por favor",
     ],
 )
 def test_a_plain_yes_is_an_affirmation(said: str) -> None:
@@ -138,6 +141,22 @@ def test_a_plain_yes_is_an_affirmation(said: str) -> None:
     ],
 )
 def test_anything_that_takes_it_back_is_not_an_affirmation(said: str) -> None:
+    assert not is_affirmation(said)
+
+
+@pytest.mark.parametrize(
+    "said",
+    [
+        "yes, Friday please",
+        "yes, at five",
+        "ok, with Doctor Cid",
+        "sure, in Norte",
+        "vale, a las cinco",
+        "sí, el jueves",
+    ],
+)
+def test_a_yes_that_names_something_new_is_not_an_affirmation(said: str) -> None:
+    """A yes carrying a detail we never read back is a request, not agreement."""
     assert not is_affirmation(said)
 
 
