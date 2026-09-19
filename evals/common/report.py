@@ -76,6 +76,11 @@ def _wer(stack: dict[str, Any], key: str) -> str:
     return "n/a" if v is None else f"{v * 100:.0f}%"
 
 
+def _entity_cer(stack: dict[str, Any], key: str) -> str:
+    v = (stack.get("entity_cer_noisy") or stack.get("entity_cer") or {}).get(key)
+    return "n/a" if v is None else f"{v * 100:.0f}%"
+
+
 def _fmt_eur(value: float) -> str:
     return f"{value:.4f} €" if value < 0.01 else f"{value:.2f} €"
 
@@ -207,17 +212,21 @@ def _md_voice_table(run: RunResult) -> list[str]:
     stacks = run.summary["stacks"]
     lines = [
         "| stack | e2e p50 | e2e p95 | STT final p50 | LLM TTFT p50 | TTS TTFB p50 "
-        "| WER es | WER ca | WER gl | WER eu | WER noisy | €/call | € / 68 calls |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: "
-        "| ---: |",
+        "| WER es | WER ca | WER gl | WER eu | WER noisy "
+        "| CER name@5dB | CER dni@5dB | CER phone@5dB | CER email@5dB "
+        "| €/call | € / 68 calls |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: "
+        "| ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for s in stacks:
         w = functools.partial(_wer, s)
+        e = functools.partial(_entity_cer, s)
         lines.append(
             f"| {s['name']} | {s['e2e_p50_ms']:.0f} ms | {s['e2e_p95_ms']:.0f} ms "
             f"| {s['stt_p50_ms']:.0f} ms | {s['llm_ttft_p50_ms']:.0f} ms "
             f"| {s['tts_ttfb_p50_ms']:.0f} ms "
             f"| {w('es')} | {w('ca')} | {w('gl')} | {w('eu')} | {w('noisy')} "
+            f"| {e('name')} | {e('dni')} | {e('phone')} | {e('email')} "
             f"| {s['cost_per_call_eur']:.3f} | {s['cost_68_calls_eur']:.2f} |"
         )
     if run.summary.get("simulated"):
@@ -537,11 +546,14 @@ def _html_voice(run: RunResult) -> str:
     head = (
         "<tr><th>stack</th><th>e2e p50</th><th>e2e p95</th><th>STT final</th><th>LLM TTFT</th>"
         "<th>TTS TTFB</th><th>WER es</th><th>WER ca</th><th>WER gl</th><th>WER eu</th>"
-        "<th>WER noisy</th><th>€/call</th><th>€/68 calls</th><th>€/weekend*</th></tr>"
+        "<th>WER noisy</th><th>CER name@5dB</th><th>CER dni@5dB</th>"
+        "<th>CER phone@5dB</th><th>CER email@5dB</th>"
+        "<th>€/call</th><th>€/68 calls</th><th>€/weekend*</th></tr>"
     )
     rows = []
     for s in stacks:
         w = functools.partial(_wer, s)
+        e = functools.partial(_entity_cer, s)
         rows.append(
             f"<tr><td><b>{_h(s['name'])}</b><br>"
             f"<span class='detail'>{_h(s.get('describe', ''))}</span></td>"
@@ -553,6 +565,8 @@ def _html_voice(run: RunResult) -> str:
             f"<td class='num'>{w('es')}</td><td class='num'>{w('ca')}</td>"
             f"<td class='num'>{w('gl')}</td>"
             f"<td class='num'>{w('eu')}</td><td class='num'>{w('noisy')}</td>"
+            f"<td class='num'>{e('name')}</td><td class='num'>{e('dni')}</td>"
+            f"<td class='num'>{e('phone')}</td><td class='num'>{e('email')}</td>"
             f"<td class='num'>{s['cost_per_call_eur']:.3f}</td>"
             f"<td class='num'>{s['cost_68_calls_eur']:.2f}</td>"
             f"<td class='num'>{s.get('cost_weekend_eur', 0):.2f}</td></tr>"
@@ -561,7 +575,8 @@ def _html_voice(run: RunResult) -> str:
         "<p class='detail'>* weekend = the run-all count in evals/voice/pricing.yaml "
         "(full 68-call runs plus practice calls). Latencies are per turn: STT final = end of "
         "caller audio → final transcript; e2e = STT final + LLM TTFT + TTS TTFB, the delay the "
-        "caller perceives before the agent starts to speak.</p>"
+        "caller perceives before the agent starts to speak. Entity CER columns are averages "
+        "over the 5 dB (noisy) mixtures for name, DNI, phone and email spans.</p>"
     )
     sim = (
         "<div class='note'><b>SIMULATED.</b> These numbers come from the fake provider. "
