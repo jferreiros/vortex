@@ -14,7 +14,7 @@ import json
 import os
 import sys
 import time
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -23,7 +23,9 @@ import httpx
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from nicegui import app, ui
 
+from vortex.clinic.client import FakeClinicClient
 from vortex.observability import auth, explain, insights
+from vortex.observability import calendar as cal
 from vortex.observability.business_insights import business_insights
 from vortex.observability.calllog import read_recent
 from vortex.observability.demo import write_scripted_call
@@ -911,6 +913,124 @@ def wall_business_insights_api(days: int = 30) -> JSONResponse:
     return JSONResponse(payload)
 
 
+def _sync_clinic(coro: Any) -> Any:
+    try:
+        coro.send(None)
+    except StopIteration as stop:
+        return stop.value
+    raise RuntimeError("clinic client did not complete synchronously")
+
+
+def _sync_catalogue() -> Any:
+    return _sync_clinic(FakeClinicClient().catalogue())
+
+
+def _ensure_agenda() -> None:
+    """Load catalogue, directory and appointments through the clinic client."""
+    global _AGENDA_CATALOGUE, _AGENDA_PATIENTS, _AGENDA_BOOKINGS
+    if _AGENDA_CATALOGUE is not None and _AGENDA_PATIENTS is not None:
+        return
+    pack = cal.SYNTHETIC_DATA_DIR
+    data_dir = pack if (pack / "patients.json").exists() else None
+    pack_client = FakeClinicClient(data_dir=data_dir) if data_dir is not None else None
+    api_client = FakeClinicClient()
+    _AGENDA_CATALOGUE = _sync_clinic(api_client.catalogue())
+    records = _sync_clinic((pack_client or api_client).directory())
+    seen = {row.patient_id for row in records}
+    for row in _sync_clinic(api_client.directory()):
+        if row.patient_id not in seen:
+            records.append(row)
+            seen.add(row.patient_id)
+    _AGENDA_PATIENTS = cal.patient_index_from_records(records)
+    booked = []
+    for record in records:
+        booked.extend(_sync_clinic(api_client.appointments(record.patient_id, when="all")))
+        if pack_client is not None:
+            booked.extend(_sync_clinic(pack_client.appointments(record.patient_id, when="all")))
+    ehr = cal.bookings_from_appointments(booked)
+    _AGENDA_BOOKINGS = cal.bookings_from_events(
+        cal.load_source_events(),
+        {row.appointment_id: row for row in ehr.values() if row.appointment_id},
+        base=ehr,
+    )
+
+
+_AGENDA_CATALOGUE = None
+_AGENDA_PATIENTS: dict[str, Any] | None = None
+_AGENDA_BOOKINGS: dict[Any, Any] | None = None
+
+
+@app.get("/api/wall/agenda-options")
+def wall_agenda_options_api() -> JSONResponse:
+    """Doctors, sites, specialties and appointment types for the diary dropdowns."""
+    global _AGENDA_CATALOGUE
+    if _AGENDA_CATALOGUE is None:
+        _ensure_agenda()
+    return JSONResponse(cal.agenda_options(_AGENDA_CATALOGUE))
+
+
+@app.get("/api/wall/doctor-suggest")
+def wall_doctor_suggest_api(q: str = "") -> JSONResponse:
+    """Name typeahead. Empty query returns an empty list, never the full roster."""
+    global _AGENDA_CATALOGUE
+    if _AGENDA_CATALOGUE is None:
+        _ensure_agenda()
+    calendars = cal.build_calendars(_AGENDA_CATALOGUE, {})
+    return JSONResponse(cal.suggest_doctors(calendars, q))
+
+
+@app.get("/api/wall/doctor-agenda")
+def wall_doctor_agenda_api(
+    name: str = "",
+    week: str | None = None,
+    month: str | None = None,
+    today: str | None = None,
+) -> JSONResponse:
+    """One doctor's month grid and today's visits. Login is a name, never a roster."""
+    global _AGENDA_CATALOGUE, _AGENDA_PATIENTS, _AGENDA_BOOKINGS
+    _ensure_agenda()
+    catalogue = _AGENDA_CATALOGUE
+    if today:
+        try:
+            today_date = date.fromisoformat(today)
+        except ValueError:
+            today_date = datetime.now(ZoneInfo("Europe/Madrid")).date()
+    else:
+        today_date = datetime.now(ZoneInfo("Europe/Madrid")).date()
+    week_date = None
+    if week:
+        try:
+            week_date = date.fromisoformat(week)
+        except ValueError:
+            week_date = None
+    month_date = None
+    if month:
+        raw = month.strip()
+        if len(raw) == 7:
+            raw = f"{raw}-01"
+        try:
+            month_date = date.fromisoformat(raw)
+        except ValueError:
+            month_date = None
+    calendars = cal.build_calendars(catalogue, _AGENDA_BOOKINGS or {})
+    payload = cal.doctor_agenda(
+        calendars,
+        _AGENDA_PATIENTS,
+        name=name,
+        today=today_date,
+        week=week_date,
+        month=month_date,
+        location_names={loc.location_id: loc.name for loc in catalogue.locations},
+        type_names={item.appointment_type_id: item.name for item in catalogue.appointment_types},
+        type_durations={
+            item.appointment_type_id: item.duration_minutes
+            for item in catalogue.appointment_types
+        },
+        plan_names={plan.insurer_id: plan.name for plan in catalogue.insurance_plans},
+    )
+    return JSONResponse(payload)
+
+
 @app.get("/wall/avatar2d")
 def wall_avatar2d() -> FileResponse:
     """The 2D avatar art, served as a plain image — not wrapped in a page —
@@ -1264,11 +1384,11 @@ def main() -> None:
 
 # The clinic console (Overview, Agents, Patients, Insights, Settings) registers
 # its pages on import. It imports this module, so it must come last.
-from vortex.observability import console  # noqa: E402, F401
+from vortex.observability import console  # noqa: E402, F401, I001
 
 # The doctor calendar (/calendar) registers its page on import; it reuses this
 # module's chrome, so it comes after everything above is defined.
-from vortex.observability import calendar_view  # noqa: E402, F401
+from vortex.observability import calendar_view  # noqa: E402, F401, I001
 
 if __name__ in {"__main__", "__mp_main__"}:
     main()
