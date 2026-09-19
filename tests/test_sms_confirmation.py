@@ -6,6 +6,7 @@ an accepted book/cancel texts the calling number; everything else stays quiet.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import date, datetime
 from pathlib import Path
@@ -30,8 +31,11 @@ from vortex.contract import (
     action_route,
 )
 from vortex.line import session as session_module
+from vortex.line import sms as sms_module
 from vortex.line.session import CallSession
 from vortex.line.sms import (
+    SMS_DETAILS_BUDGET_SECS,
+    SMS_SEND_TIMEOUT_SECS,
     DryRunSmsClient,
     SmsResult,
     TwilioSmsClient,
@@ -244,6 +248,16 @@ async def test_twilio_client_reports_http_errors() -> None:
     await client.aclose()
 
 
+@pytest.mark.asyncio
+async def test_the_drain_outlasts_the_whole_send_budget() -> None:
+    """close() must not cancel a POST that is still inside the client's own timeout."""
+    client = TwilioSmsClient("ACxxx", "token", from_number="+34600999888")
+
+    assert client._http.timeout.read == SMS_SEND_TIMEOUT_SECS
+    assert SMS_DETAILS_BUDGET_SECS + SMS_SEND_TIMEOUT_SECS <= session_module.SMS_DRAIN_TIMEOUT_SECS
+    await client.aclose()
+
+
 # ---- session hook -----------------------------------------------------------
 
 
@@ -310,6 +324,27 @@ async def test_resolve_details_uses_the_remembered_appointment(
     assert known.missing == []
     assert unknown.when is None
     assert unknown.missing == ["appointment_details"]
+
+
+@pytest.mark.asyncio
+async def test_a_hung_catalogue_cannot_spend_the_whole_budget(
+    offline_settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The lookup has its own share, so what is left of the budget stays the POST's."""
+    session = make_session(offline_settings, "CA-slow-catalogue")
+    monkeypatch.setattr(sms_module, "SMS_DETAILS_BUDGET_SECS", 0.01)
+
+    async def never_answers() -> Any:
+        await asyncio.sleep(SMS_SEND_TIMEOUT_SECS)
+        raise AssertionError("the detail budget should have cut the lookup")
+
+    monkeypatch.setattr(session.ctx.clinic, "catalogue", never_answers)
+
+    details = await resolve_details(session.ctx, a_booking())
+    await session.close()
+
+    assert details.when == SLOT
+    assert details.missing == ["catalogue:TimeoutError"]
 
 
 @pytest.mark.asyncio
