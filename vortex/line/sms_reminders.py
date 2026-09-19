@@ -60,10 +60,7 @@ def reminder_text(
 ) -> str:
     stamp = format_slot_es(when)
     if provider_name and location_name:
-        head = (
-            f"Recordatorio: mañana tienes cita con {provider_name} "
-            f"en {location_name}: {stamp}."
-        )
+        head = f"Recordatorio: mañana tienes cita con {provider_name} en {location_name}: {stamp}."
     elif provider_name:
         head = f"Recordatorio: mañana tienes cita con {provider_name}: {stamp}."
     elif location_name:
@@ -182,9 +179,7 @@ class ReminderStore:
                 self._write(rows)
             return due
 
-    async def update_detail(
-        self, reminder_id: str, *, detail: str, status: ReminderStatus
-    ) -> None:
+    async def update_detail(self, reminder_id: str, *, detail: str, status: ReminderStatus) -> None:
         async with self._lock:
             rows = self._read()
             for row in rows:
@@ -299,9 +294,7 @@ class ReminderWorker:
         self.store = store or reminder_store_from_settings(settings)
         self.sms = sms or make_sms_client(settings)
         self.poll_secs = (
-            poll_secs
-            if poll_secs is not None
-            else float(settings.sms_reminder_poll_secs or 30.0)
+            poll_secs if poll_secs is not None else float(settings.sms_reminder_poll_secs or 30.0)
         )
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()

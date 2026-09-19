@@ -16,6 +16,7 @@ once the socket is gone. ``close()`` runs the 30-second-window logic.
 from __future__ import annotations
 
 import asyncio
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
@@ -29,6 +30,8 @@ from vortex.contract import (
     INSURERS,
     MADRID,
     Action,
+    Appointment,
+    AppointmentList,
     BookAction,
     CallerLineMatch,
     CancelAction,
@@ -40,13 +43,14 @@ from vortex.contract import (
     NoAction,
     PatientRecord,
     Rejection,
+    RescheduleAction,
     Slot,
     SubmitInput,
     SubmitResult,
     ToolContext,
     action_route,
 )
-from vortex.diary.tools import find_slots
+from vortex.diary.tools import _is_dead, find_slots
 from vortex.identity.tools import PATIENT_PREFERENCES_KEY, resolve_caller_line
 from vortex.line.sms import (
     SMS_BUDGET_SECS,
@@ -121,6 +125,46 @@ COLD_BOOKING_HORIZON_DAYS = 14
 # would cancel a POST that is still inside the client's own timeout and throw
 # away a valid Twilio response.
 SMS_DRAIN_TIMEOUT_SECS = SMS_BUDGET_SECS
+
+# What a caller asks for when the conversation never resolves it. The last word
+# wins: "move it — actually, cancel it" ends on cancel. Spanish and Catalan come
+# through Soniox's transcript, which lower-cases, so case does not matter.
+_CANCEL_INTENT = re.compile(r"\bcancel\w*\b|\banul\w*\b", re.IGNORECASE)
+_MOVE_INTENT = re.compile(
+    r"\b(?:move|moved|moving|reschedul\w*|rebook|postpon\w*|"
+    r"put (?:it )?back|bring (?:it )?forward|push (?:it )?back|"
+    r"mover|mueva|movedlo|moverla|moverlo|traslad\w*|aplaz\w*|pospon\w*|"
+    r"adelant\w*|cambi\w*|canviar|canvi|endarrer\w*|avan\w*|"
+    r"chang\w*)\b",
+    re.IGNORECASE,
+)
+#: Words that take an intent back: "I don't want to cancel" is not a cancel ask.
+#: A plain ``nt`` suffix is not here on purpose - "want" and "appointment" end
+#: in it, and both are words a cancel or move ask uses.
+_NEGATION = re.compile(
+    r"\b(?:not|no|never|don't|dont|didn't|didnt|can't|cant|cannot|won't|wont|"
+    r"sin|sense|ni|tampoco)\b",
+    re.IGNORECASE,
+)
+
+
+def _last_intent(words: str) -> str | None:
+    """``"cancel"`` or ``"move"``: the caller's last un-negated ask, if any.
+
+    A clause is negated only inside its own segment - "no, that's not right,
+    cancel it" still counts, because punctuation cuts the segment before the
+    ask. The last surviving match wins, so a changed mind submits what the
+    caller settled on.
+    """
+    best: tuple[int, str] | None = None
+    for kind, pattern in (("cancel", _CANCEL_INTENT), ("move", _MOVE_INTENT)):
+        for match in pattern.finditer(words):
+            segment = re.split(r"[.!?;,\u2014\u2013]", words[: match.start()])[-1]
+            if _NEGATION.search(segment):
+                continue
+            if best is None or match.start() > best[0]:
+                best = (match.start(), kind)
+    return best[1] if best else None
 
 
 def refusal_for(reason: DeclineReason) -> Action:
@@ -205,6 +249,10 @@ class CallMemory:
     # conversation makes always wins; this is only what the call started with.
     caller_line: CallerLineMatch | None = None
     free_slot: Slot | None = None
+    # What ``list_appointments`` read, for the caller-intent fallback: a caller
+    # who asked to cancel or move a visit the conversation never resolved is
+    # better served by acting on it than by a booking nobody asked for.
+    diary: list[Appointment] = field(default_factory=list)
     prepared: Action | None = None
     prepared_tool: str = ""
     # Set by the conversation lane when the caller agrees to ``prepared``. It
@@ -324,6 +372,9 @@ class CallMemory:
             self.identity_pending = result.status != "found"
             if result.patient is not None and result.status == "found":
                 self.identified_patient = result.patient
+
+        if isinstance(result, AppointmentList):
+            self.diary = result.appointments
 
         # A recheck the rules allow proves the earlier refusal gone, exactly as
         # free slots do. Left standing, its verdict would rewrite the reason of
@@ -841,11 +892,17 @@ class CallSession:
             return
         branch, action, why = self.fallback_action()
         if action == UNSCORED_REFUSAL:
-            booking = await self.cold_booking()
-            if booking is not None:
-                branch = "cold_booking"
-                why = f"{why}, and out_of_scope wins no case: booked what the line points at"
-                action = booking
+            intent_action = await self._caller_intent_action()
+            if intent_action is not None:
+                branch = "caller_intent"
+                why = f"{why}; the caller's own words asked to change or cancel a known visit"
+                action = intent_action
+            else:
+                booking = await self.cold_booking()
+                if booking is not None:
+                    branch = "cold_booking"
+                    why = f"{why}, and out_of_scope wins no case: booked what the line points at"
+                    action = booking
         with observe_span(
             "submit-fallback",
             input={"branch": branch, "why": why, "route": action_route(action)},
@@ -944,6 +1001,89 @@ class CallSession:
             if result.slots:
                 return result.slots[0]
         return None
+
+    async def _caller_intent_action(self) -> Action | None:
+        """The cancel or reschedule the caller asked for and never got.
+
+        Reached where the fallback would send ``out_of_scope`` - a certain
+        zero, so a wrong guess here costs nothing the refusal was keeping. The
+        record comes from ``list_appointments``, filtered to the caller's own
+        visits that are still live, and it acts only on exactly one: with two
+        or more the visit to act on is the caller's to say, and guessing there
+        loses the same zero anyway.
+        """
+        patient = self.memory.patient_on_record
+        if patient is None:
+            return None
+        live = [
+            appointment
+            for appointment in self.memory.diary
+            if appointment.patient_id == patient.patient_id
+            and appointment.start > self.ctx.now
+            and not _is_dead(appointment)
+        ]
+        if len(live) != 1:
+            return None
+        intent = _last_intent(self.ctx.log.caller_words())
+        if intent is None:
+            return None
+        appointment = live[0]
+        if intent == "cancel":
+            action: Action = CancelAction(appointment_id=appointment.appointment_id)
+        else:
+            action = await self._reschedule_guess(appointment)
+            if action is None:
+                return None
+        self.ctx.log.event(
+            "submit.caller_intent",
+            intent=intent,
+            appointment_id=appointment.appointment_id,
+            route=action_route(action),
+        )
+        return action
+
+    async def _reschedule_guess(self, appointment: Appointment) -> RescheduleAction | None:
+        """First slot after theirs, same doctor and site - the move the case asks for.
+
+        The search runs through the diary lane's ``find_slots`` so closures and
+        the same-day rule stay in one place; the floor is the visit's own day
+        because a later hour that same day is still "after it". No slot found
+        is ``None``, not a different guess: the refusal already chosen stands.
+        """
+        day = appointment.start.astimezone(MADRID).date()
+        patient = self.memory.patient_on_record
+        assert patient is not None  # the caller checked before this was reached
+        try:
+            result = await asyncio.wait_for(
+                find_slots(
+                    self.ctx,
+                    FindSlotsInput(
+                        provider_id=appointment.provider_id,
+                        location_id=appointment.location_id,
+                        patient_id=patient.patient_id,
+                        insurer=patient.insurer or None,
+                        date_from=day,
+                        date_to=day + timedelta(days=COLD_BOOKING_HORIZON_DAYS),
+                    ),
+                ),
+                timeout=self.settings.cold_booking_timeout_secs,
+            )
+        except TimeoutError:
+            self.ctx.log.event("submit.caller_intent_timed_out")
+            return None
+        except Exception as exc:
+            self.ctx.log.event("submit.caller_intent_failed", detail=f"{type(exc).__name__}: {exc}")
+            return None
+        later = next((slot for slot in result.slots if slot.start > appointment.start), None)
+        if later is None:
+            return None
+        return RescheduleAction(
+            appointment_id=appointment.appointment_id,
+            provider_id=later.provider_id,
+            location_id=later.location_id,
+            slot=later.start,
+            policy_id=policy_for(patient, later),
+        )
 
     def _habits_of(self, patient: PatientRecord) -> tuple[str | None, str | None]:
         """The doctor and site this patient has always used, or ``(None, None)``.
