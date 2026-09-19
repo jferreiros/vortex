@@ -238,11 +238,10 @@ def _providers(settings: Any) -> dict[str, object]:
 def _user_aggregator_params(turns: TurnSettings) -> Any:
     """The user aggregator's params: VAD, idle timeout and the turn strategies.
 
-    In VAD mode the turn strategies must come from the conversation lane, or
-    the aggregator falls back to its defaults, which load the smart-turn v3
-    model and ignore ``enable_interruptions``. In Soniox mode they stay
-    ``None``: the STT service installs ``ExternalUserTurnStrategies`` itself,
-    and a value here would override it and break turn endings.
+    Strategies always come from the conversation lane. In VAD mode that keeps
+    the aggregator off its smart-turn v3 defaults. In Soniox mode it overrides
+    the STT's ``ExternalUserTurnStrategies`` with a word-count start gate plus
+    an external stop, so ``interrupt_min_words`` actually runs.
 
     Imports pipecat lazily so the server starts without the keys.
     """
