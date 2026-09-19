@@ -14,7 +14,7 @@ import json
 import os
 import sys
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -24,6 +24,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from nicegui import app, ui
 
 from vortex.observability import auth, explain, insights
+from vortex.observability.business_insights import business_insights
 from vortex.observability.calllog import read_recent
 from vortex.observability.demo import write_scripted_call
 from vortex.observability.icons import icon
@@ -201,7 +202,7 @@ def _turn_time(card: CallCard, ts: str | None) -> str:
     stamp = _parse_ts(ts)
     if stamp is None:
         return ""
-    label = stamp.astimezone().strftime("%H:%M:%S")
+    label = stamp.astimezone(MADRID).strftime("%H:%M:%S")
     start = _parse_ts(card.started_at)
     if start is not None:
         delta = (stamp - start).total_seconds()
@@ -836,6 +837,33 @@ def wall_timeline_api(call_id: str) -> JSONResponse:
             "line_up": health is not None,
         }
     )
+
+
+def _card_started(card: CallCard) -> datetime | None:
+    if not card.started_at:
+        return None
+    try:
+        stamp = datetime.fromisoformat(card.started_at)
+    except ValueError:
+        return None
+    return stamp if stamp.tzinfo else stamp.replace(tzinfo=UTC)
+
+
+@app.get("/api/wall/business-insights")
+def wall_business_insights_api(days: int = 30) -> JSONResponse:
+    """Unavailability reasons, doctor ranking, the demand/supply heatmap and
+    cancellation recovery for the Insights page's "7 / 30 / 90 días" pills.
+    ``days`` is one of those three; anything else is clamped to the nearest.
+    """
+    days = min((7, 30, 90), key=lambda d: abs(d - days))
+    now = datetime.now(UTC)
+    events, _health = _load_events()
+    cards = build_calls(events)
+    cutoff = now - timedelta(days=days)
+    in_range = [c for c in cards if (started := _card_started(c)) and started >= cutoff]
+    payload = business_insights(in_range, now=now)
+    payload["range_days"] = days
+    return JSONResponse(payload)
 
 
 @app.get("/wall/avatar2d")
