@@ -12,8 +12,8 @@ typed rejection, which the loop would have timed as if it were a booking.
 from __future__ import annotations
 
 import importlib.util
+import socket
 import sys
-from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -63,14 +63,26 @@ class UnknownPatientsClinic(RenamingClinic):
         return []
 
 
+LOCAL_PLATFORM_URL = "http://local-platform.invalid"
+
+
 @pytest.fixture
-def local_platform() -> Iterator[tuple[object, str]]:
-    """The study's own server, speaking the platform routes over the fixtures."""
-    server, state, base_url = bench.start_server()
-    try:
-        yield state, base_url
-    finally:
-        server.shutdown()
+def local_platform(monkeypatch: pytest.MonkeyPatch) -> tuple[object, str]:
+    """The study's platform routes over the fixtures, answered in process.
+
+    The bench's own server binds a socket, which the suite may not do. Every
+    ``ClinicClient`` the bench builds gets the in-process transport instead, so
+    the routes, the JSON and the request counts stay the study's own.
+    """
+    state = bench.PlatformState()
+    transport = bench.in_process_transport(state)
+    real_client = bench.ClinicClient
+
+    def offline_client(base_url: str, api_key: str, **kwargs) -> ClinicClient:
+        return real_client(base_url, api_key, transport=transport, **kwargs)
+
+    monkeypatch.setattr(bench, "ClinicClient", offline_client)
+    return state, LOCAL_PLATFORM_URL
 
 
 @pytest.fixture
@@ -111,6 +123,21 @@ async def test_the_fresh_client_scenario_closes_the_client_it_warmed_with(
     (warm_client,) = warmups
     assert isinstance(warm_client, ClinicClient)
     assert warm_client._http.is_closed
+
+
+async def test_a_scenario_runs_where_no_socket_may_be_opened(
+    local_platform: tuple[object, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The suite must pass on a runner that denies network access."""
+    state, base_url = local_platform
+
+    def denied(*args: object, **kwargs: object) -> None:
+        raise AssertionError("a test opened a socket")
+
+    monkeypatch.setattr(socket, "socket", denied)
+    tools = await _scenario("current", base_url, state, share_client=True, in_memory=False)
+    assert "error" not in tools["find_slots"]
+    assert sum(state.requests.values()) > 0
 
 
 async def test_the_in_memory_scenario_warms_on_the_fake_client(

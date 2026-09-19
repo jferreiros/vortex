@@ -126,7 +126,7 @@ class PlatformState:
         self._raw_patients = {p["patient_id"]: p for p in fixtures.PATIENTS}
         self._raw_appointments = {a["appointment_id"]: a for a in fixtures.APPOINTMENTS}
 
-    def directory(self, params: dict) -> list[dict]:
+    async def directory(self, params: dict) -> list[dict]:
         query = {
             k: v
             for k, v in params.items()
@@ -134,10 +134,10 @@ class PlatformState:
         }
         if "date_of_birth" in query:
             query["date_of_birth"] = date.fromisoformat(query["date_of_birth"])
-        found = asyncio.run(self.fake.directory(**query))
+        found = await self.fake.directory(**query)
         return [self._raw_patients[p.patient_id] for p in found]
 
-    def availability(self, params: dict) -> dict:
+    async def availability(self, params: dict) -> dict:
         key = tuple(sorted((k, json.dumps(v, sort_keys=True)) for k, v in params.items()))
         if key not in self._avail_cache:
             query = {
@@ -149,7 +149,7 @@ class PlatformState:
                 "patient_id": params.get("patient_id") or None,
                 "insurer": params.get("insurer") or None,
             }
-            response = asyncio.run(self.fake.availability(**query))
+            response = await self.fake.availability(**query)
             self._avail_cache[key] = {
                 "providers": [raw_availability_provider(p) for p in response.providers],
                 "slots": [raw_slot(s) for s in response.slots],
@@ -158,14 +158,46 @@ class PlatformState:
             }
         return self._avail_cache[key]
 
-    def appointments(self, patient_id: str, when: str) -> list[dict]:
-        found = asyncio.run(self.fake.appointments(patient_id, when=when))
+    async def appointments(self, patient_id: str, when: str) -> list[dict]:
+        found = await self.fake.appointments(patient_id, when=when)
         return [self._raw_appointments[a.appointment_id] for a in found]
+
+
+def query_params(query: str) -> dict:
+    return {k: v[0] if len(v) == 1 else v for k, v in parse_qs(query).items()}
+
+
+async def route(state: PlatformState, method: str, path: str, params: dict) -> tuple[int, object]:
+    """One platform request answered off the fixtures, counted in ``state``.
+
+    The only routing table: the socket server and the in-process transport
+    both answer through here, so both serve the same JSON and the same
+    request accounting.
+    """
+    state.requests[f"{method} {path}"] += 1
+    if method == "GET":
+        if path == "/api/v1/health":
+            return 200, {"status": "ok"}
+        if path == "/api/v1/clinic":
+            return 200, fixtures.CLINIC
+        if path == "/api/v1/directory":
+            return 200, {"matches": await state.directory(params)}
+        if path == "/api/v1/availability":
+            return 200, await state.availability(params)
+        if path.startswith("/api/v1/patients/"):
+            patient_id = path.split("/")[4]
+            when = params.get("when", "upcoming")
+            return 200, {"appointments": await state.appointments(patient_id, when)}
+    elif method == "POST" and path.startswith("/api/v1/submit/"):
+        return 200, {"status": "ok"}
+    return 404, {"detail": "not found"}
 
 
 def make_handler(state: PlatformState):
     class Handler(BaseHTTPRequestHandler):
-        def _reply(self, payload, status: int = 200) -> None:
+        def _serve(self, method: str) -> None:
+            url = urlparse(self.path)
+            status, payload = asyncio.run(route(state, method, url.path, query_params(url.query)))
             body = json.dumps(payload).encode()
             state.bytes_out += len(body)
             self.send_response(status)
@@ -178,34 +210,26 @@ def make_handler(state: PlatformState):
             return
 
         def do_GET(self) -> None:
-            url = urlparse(self.path)
-            params = {k: v[0] if len(v) == 1 else v for k, v in parse_qs(url.query).items()}
-            state.requests[f"GET {url.path}"] += 1
-            if url.path == "/api/v1/health":
-                self._reply({"status": "ok"})
-            elif url.path == "/api/v1/clinic":
-                self._reply(fixtures.CLINIC)
-            elif url.path == "/api/v1/directory":
-                self._reply({"matches": state.directory(params)})
-            elif url.path == "/api/v1/availability":
-                self._reply(state.availability(params))
-            elif url.path.startswith("/api/v1/patients/"):
-                patient_id = url.path.split("/")[4]
-                self._reply(
-                    {"appointments": state.appointments(patient_id, params.get("when", "upcoming"))}
-                )
-            else:
-                self._reply({"detail": "not found"}, 404)
+            self._serve("GET")
 
         def do_POST(self) -> None:
-            url = urlparse(self.path)
-            state.requests[f"POST {url.path}"] += 1
-            if url.path.startswith("/api/v1/submit/"):
-                self._reply({"status": "ok"})
-            else:
-                self._reply({"detail": "not found"}, 404)
+            self._serve("POST")
 
     return Handler
+
+
+def in_process_transport(state: PlatformState) -> httpx.MockTransport:
+    """The server's routes without the socket, for a ``ClinicClient`` that must
+    run where no listener may be bound."""
+
+    async def respond(request: httpx.Request) -> httpx.Response:
+        params = query_params(request.url.query.decode())
+        status, payload = await route(state, request.method, request.url.path, params)
+        body = json.dumps(payload).encode()
+        state.bytes_out += len(body)
+        return httpx.Response(status, content=body, headers={"Content-Type": "application/json"})
+
+    return httpx.MockTransport(respond)
 
 
 def start_server() -> tuple[ThreadingHTTPServer, PlatformState, str]:
