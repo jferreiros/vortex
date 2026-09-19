@@ -195,8 +195,11 @@ Three reasons no query reaches — `location_hours`, `type_not_offered` and
 - History enters the API only as `has_visited_before`, which picks the type,
   and referrals, which satisfy `referral_required` — never as a block.
 
-The sweep still probes all three shapes on every run — shut windows with and
-without a patient, any catalogue type gap, harvested patients past every
-provider and site — and prints one line per reason it cannot reach. If the
+The sweep still probes all three shapes on every run — shut windows asked
+about a provider who sits at that site, with and without a patient; any
+catalogue type gap asked of the gap's own provider and a patient of its kind;
+harvested patients past every provider and site — and prints one line per
+reason it cannot reach. A shape whose probes did not all come back is held as
+unverified rather than impossible: a lost query is not an answer. If the
 clinic ever starts reporting one, the same probe records it as a sample
 instead. They are never quietly dropped.

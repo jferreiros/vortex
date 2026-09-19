@@ -25,9 +25,11 @@ The sweep runs the live API five ways and records what it finds in
    `type_not_offered`, `patient_history`. Every query the endpoint accepts was
    probed against the live clinic on 19 Sep 2026 and none of the three ever
    came back: the engine implements seven of the eleven rules and no query
-   names the others. Each still gets a one-line note — under ``impossible``
-   in the JSON, and printed with the report — so the board says *why*, not
-   just what. A shape whose probes did not all come back is held under
+   names the others. That run asked each site about one fixed specialty, which
+   a site need not serve; the probe now names a provider who sits there, so the
+   verdict is the next live run's to confirm. Each still gets a one-line note
+   — under ``impossible`` in the JSON, and printed with the report — so the
+   board says *why*, not just what. A shape whose probes did not all come back is held under
    ``unverified`` instead: a lost query is not a clinic that reports nothing.
    If the clinic ever starts reporting one, the same probe records it as a
    sample instead.
@@ -180,6 +182,26 @@ def _shut_windows(catalogue: Catalogue) -> list[dict[str, Any]]:
     return windows
 
 
+def _site_specialists(catalogue: Catalogue) -> dict[str, list[tuple[str, str]]]:
+    """One provider per specialty each site actually serves, by the API's own ids.
+
+    ``/availability`` answers a specialty no provider serves at the site with
+    zero slots and an empty ``blocked`` — the same answer a shut window gives.
+    Asking about a provider who sits there is what makes the window the only
+    thing the empty answer can be about.
+    """
+    by_site: dict[str, dict[str, str]] = defaultdict(dict)
+    for provider in sorted(catalogue.providers, key=lambda p: p.provider_id):
+        for location_id in provider.location_ids:
+            by_site[location_id].setdefault(provider.specialty_id, provider.provider_id)
+    return {
+        location_id: sorted(
+            (provider_id, specialty_id) for specialty_id, provider_id in specialists.items()
+        )
+        for location_id, specialists in by_site.items()
+    }
+
+
 def _specialty_type(catalogue: Catalogue, specialty_id: str, visited: bool) -> str | None:
     """The type /availability resolves for this record: the specialty's own
     pair wins over the universal one, matching the patient's visited-ness."""
@@ -307,7 +329,8 @@ async def probe_unreportable(
     `patient_history`, probed so the report's impossibility notes are earned.
 
     - location_hours: a single-day window a site is shut for the whole of,
-      with and without a patient;
+      asked about a provider who sits there and their own specialty, with and
+      without a patient;
     - type_not_offered: any catalogue gap where a provider lacks the type a
       record resolves to, put to that provider with a harvested patient whose
       visited-ness resolves to the missing type — another provider of the
@@ -323,36 +346,45 @@ async def probe_unreportable(
     reported as unverified rather than impossible.
     """
     stats: dict[str, dict[str, int]] = {
-        "location_hours": {"windows": 0, "blocked": 0, "failed": 0},
+        "location_hours": {"windows": 0, "blocked": 0, "failed": 0, "unprobed": 0},
         "patient_history": {"queries": 0, "failed": 0},
     }
 
     windows = _shut_windows(live)
+    specialists = _site_specialists(live)
     roster_ids = _roster_patients()
     roster_patient = roster_ids[0] if roster_ids else (pool[0].patient_id if pool else None)
     for window in windows:
-        for patient_id in (None, roster_patient):
-            params: dict[str, Any] = {
-                "specialty_id": "general_practice",
-                "location_id": window["location_id"],
-            }
-            if patient_id:
-                params["patient_id"] = patient_id
-            response = await _probe_availability(client, sem, day=window["day"], **params)
-            stats["location_hours"]["windows"] += 1
-            if response is None:
-                stats["location_hours"]["failed"] += 1
-                continue
-            for blocked in response.blocked or []:
-                stats["location_hours"]["blocked"] += 1
-                record(
-                    blocked.reason,
-                    location_id=window["location_id"],
-                    day=str(window["day"]),
-                    why=window["why"],
-                    patient_id=patient_id,
-                    via="shut-window",
-                )
+        serving = specialists.get(window["location_id"], [])
+        if not serving:
+            stats["location_hours"]["unprobed"] += 1
+            continue
+        for provider_id, specialty_id in serving:
+            for patient_id in (None, roster_patient):
+                params: dict[str, Any] = {
+                    "provider_id": provider_id,
+                    "specialty_id": specialty_id,
+                    "location_id": window["location_id"],
+                }
+                if patient_id:
+                    params["patient_id"] = patient_id
+                response = await _probe_availability(client, sem, day=window["day"], **params)
+                stats["location_hours"]["windows"] += 1
+                if response is None:
+                    stats["location_hours"]["failed"] += 1
+                    continue
+                for blocked in response.blocked or []:
+                    stats["location_hours"]["blocked"] += 1
+                    record(
+                        blocked.reason,
+                        location_id=window["location_id"],
+                        day=str(window["day"]),
+                        why=window["why"],
+                        provider_id=provider_id,
+                        specialty_id=specialty_id,
+                        patient_id=patient_id,
+                        via="shut-window",
+                    )
 
     gaps = _type_gaps(live)
     stats["type_not_offered"] = {"gaps": len(gaps), "probed": 0, "failed": 0, "unprobed": 0}
@@ -445,11 +477,14 @@ def _unverified_notes(
             "re-run before calling the reason unreachable"
         )
     location = stats.get("location_hours", {})
-    if "location_hours" not in found and (location.get("failed") or not location.get("windows")):
+    if "location_hours" not in found and (
+        location.get("failed") or location.get("unprobed") or not location.get("windows")
+    ):
         notes["location_hours"] = (
             f"{location.get('failed', 0)} of {location.get('windows', 0)} shut-window "
-            "queries got no answer from the API — a lost probe is not a clinic that "
-            "reports no rule; re-run"
+            f"queries got no answer from the API and {location.get('unprobed', 0)} windows "
+            "had no provider sitting at the site to ask about — a lost probe is not a "
+            "clinic that reports no rule; re-run"
         )
     gaps = stats.get("type_not_offered", {})
     if "type_not_offered" not in found and (gaps.get("failed") or gaps.get("unprobed")):
@@ -490,11 +525,13 @@ def _impossible_notes(
         )
     if "location_hours" not in found and "location_hours" not in unverified:
         notes["location_hours"] = (
-            f"the engine reports no rule: {stats['location_hours']['windows']} windows "
-            "shut for the whole site (each site's last closed Sunday and Saturday, the "
-            "published closure day; with and without a patient) all returned zero slots "
-            "with blocked: [] — site hours live only in the catalogue, so this refusal "
-            "is the agent's to derive"
+            f"the engine names no rule for a shut site: {stats['location_hours']['windows']} "
+            "queries over windows shut for the whole of it (each site's last closed Sunday "
+            "and Saturday, the published closure day; one provider per specialty the site "
+            "serves, with and without a patient) returned zero slots, and the "
+            f"{stats['location_hours']['blocked']} blocked entries they did return named "
+            "other rules — site hours live only in the catalogue, so this refusal is the "
+            "agent's to derive"
         )
     if "type_not_offered" not in found and "type_not_offered" not in unverified:
         gaps = stats["type_not_offered"]["gaps"]
