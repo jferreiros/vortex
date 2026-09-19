@@ -64,6 +64,7 @@ from vortex.contract import (
     recall_patient,
     remember_patient,
 )
+from vortex.identity import tools as identity
 from vortex.rules import eligibility, facts, geo
 from vortex.rules import triage as triage_table
 
@@ -98,6 +99,33 @@ def _name_tokens(name: str) -> set[str]:
     folded = "".join(ch for ch in folded if not unicodedata.combining(ch))
     tokens = {t.strip(".,").lower() for t in folded.split()}
     return tokens - _TITLES
+
+
+def _fuzzy_subset(wanted: set[str], have: set[str]) -> bool:
+    """Every spoken token fuzzy-matches one of the provider's — for a mis-heard name."""
+    return all(
+        any(SequenceMatcher(None, w, h).ratio() >= _TYPO_MATCH_CUTOFF for h in have) for w in wanted
+    )
+
+
+def _providers_named(catalogue: Catalogue, spoken_name: str, specialty_id: str | None) -> list:
+    """Everyone in the catalogue the spoken name can mean, within a specialty if given.
+
+    Every token the caller said (surname alone is enough) must be one of the
+    provider's tokens — deterministic, and never confuses Sáez with Sáenz,
+    since "saez" and "saenz" are different tokens even after accent-folding.
+    Only when nothing matches at all is the mis-heard-name fallback tried.
+    """
+    pool = catalogue.providers
+    if specialty_id:
+        pool = [p for p in pool if p.specialty_id == specialty_id]
+    target = _name_tokens(spoken_name)
+    if not target:
+        return []
+    matches = [p for p in pool if target <= _name_tokens(p.name)]
+    if not matches:
+        matches = [p for p in pool if _fuzzy_subset(target, _name_tokens(p.name))]
+    return matches
 
 
 #: Ids this call has already failed to place, so one miss costs one query and
@@ -249,7 +277,21 @@ async def check_eligibility(ctx: ToolContext, args: CheckEligibilityInput) -> El
     # A missing record is not a refusal — it is a verdict with a hole in it, and
     # every answer below says so rather than passing quietly.
     note = "" if patient else NO_RECORD_NOTE
-    plan = eligibility.resolve_plan(catalogue, patient, args.insurer)
+    # The second policy of problem 17 arrives as whatever the caller said aloud
+    # ("Mapfre Salud", "Nueva Mutua Sanitaria"), never as the bare id the
+    # platform submits against. Resolve it the same way registration does, so
+    # a plan named by its full name is not mistaken for an unknown one — and
+    # tell the caller-facing side which id to reuse for find_slots/policy_id,
+    # since nothing downstream re-derives it from what was said here.
+    resolved_insurer = identity.resolve_insurer(args.insurer, catalogue) if args.insurer else None
+    plan = eligibility.resolve_plan(catalogue, patient, resolved_insurer or args.insurer)
+    if (
+        plan is not None
+        and args.insurer
+        and plan.insurer_id.lower() != args.insurer.strip().lower()
+    ):
+        hint = f"'{args.insurer}' is {plan.name}; use insurer/policy_id {plan.insurer_id!r} onward"
+        note = f"{note}; {hint}" if note else hint
 
     verdict = eligibility.check_patient_rules(
         catalogue,
@@ -306,6 +348,29 @@ async def triage(ctx: ToolContext, args: TriageInput) -> TriageResult:
     A lookup on the table problem 10 publishes, never a clinical judgement. The
     five red flags are checked first and book nothing: they return no specialty
     at all, so there is no agenda for the call to fall back onto.
+
+    A doctor the caller named outranks the table. General practice is the
+    table's residue for anything it does not recognise, and booking it for a
+    caller who asked for Dr. Iglesia sends an orthopaedic wrist to a GP. So
+    when ``provider_name`` resolves in the catalogue, the specialty is the one
+    that doctor actually consults in — the only specialty they can be booked
+    for. The complaint answers alone when the name resolves to nobody, or to
+    people in more than one specialty (Sáez/Sáenz), which the table can split.
+
+    A specialty the caller named outranks the table for the same reason. The
+    table holds symptoms, so it scores nothing for the word "gynaecology" and
+    sends a caller who asked for it to the residue — which is the wrong agenda,
+    the wrong ``appointment_type_id`` and a lost case. A child marker still wins
+    over a named specialty: nothing published sends a child anywhere but
+    paediatrics, and the age rule agrees.
+
+    Where the table recognises nothing in ``complaint``, the caller's own turns
+    are read for that name instead. The model paraphrases the complaint down to
+    the symptom — "I need a dermatology appointment, about a mole on my back"
+    arrives as the mole alone in every one of the six live calls that said it —
+    and the residue it lands on is a guess made from no evidence at all. A
+    complaint the table *did* recognise is answered by the table, so a specialty
+    the caller only mentioned in passing never outranks a symptom that scored.
     """
     flag = triage_table.red_flag(args.complaint)
     if flag:
@@ -315,7 +380,59 @@ async def triage(ctx: ToolContext, args: TriageInput) -> TriageResult:
             emergency=True,
             rejection=Rejection(reason="medical_emergency", detail=f"published red flag: {flag}"),
         )
-    return TriageResult(specialty_id=triage_table.route(args.complaint), emergency=False)
+
+    routed = triage_table.route(args.complaint)
+    if args.provider_name:
+        catalogue = await ctx.clinic.catalogue()
+        named = _providers_named(catalogue, args.provider_name, None)
+        specialties = {p.specialty_id for p in named}
+        if len(specialties) == 1:
+            specialty_id = named[0].specialty_id
+            assert specialty_id, "a catalogue provider always carries a specialty"
+            if specialty_id != routed:
+                ctx.log.event(
+                    "triage.specialty_from_provider",
+                    provider_name=args.provider_name,
+                    specialty_id=specialty_id,
+                    table_said=routed,
+                )
+            return TriageResult(
+                specialty_id=specialty_id,
+                emergency=False,
+                provider_id=named[0].provider_id if len(named) == 1 else None,
+            )
+        ctx.log.event(
+            "triage.provider_unresolved",
+            provider_name=args.provider_name,
+            candidates=len(named),
+            specialty_id=routed,
+        )
+
+    said = args.complaint
+    asked_for = triage_table.named_specialty(said)
+    if asked_for is None and not triage_table.score(said):
+        # The table matched nothing at all, so general practice here is a guess
+        # made from no evidence. The caller's own turns are better evidence than
+        # a summary of them: "I need a dermatology appointment, about a mole on
+        # my back" reaches this tool as the mole alone, six times out of six in
+        # the live log. Only read them in this branch - a complaint the table
+        # did recognise is answered by the table, and a specialty mentioned in
+        # passing must never outrank a symptom that scored. The child guard
+        # below then reads the same words the specialty came out of.
+        said = ctx.log.caller_words()
+        asked_for = triage_table.named_specialty(said)
+
+    if asked_for and asked_for != routed and not triage_table.mentions_child(said):
+        ctx.log.event(
+            "triage.specialty_named_by_caller",
+            complaint=args.complaint,
+            specialty_id=asked_for,
+            table_said=routed,
+            from_transcript=said is not args.complaint,
+        )
+        return TriageResult(specialty_id=asked_for, emergency=False)
+
+    return TriageResult(specialty_id=routed, emergency=False)
 
 
 async def nearest_location(ctx: ToolContext, args: NearestLocationInput) -> NearestLocationResult:
@@ -367,26 +484,24 @@ async def find_provider(ctx: ToolContext, args: FindProviderInput) -> ProviderMa
     with both candidates when ``specialty_id`` isn't given to tell them apart;
     passing it filters the pool first, so the same spoken name resolves
     cleanly once the specialty is known.
+
+    A ``specialty_id`` that matches nobody of that name is a guess, not a
+    fact: the caller named a doctor, and the specialty was most often inferred
+    from a complaint the table did not recognise. Rather than report a doctor
+    who exists as ``provider_not_found``, the whole catalogue answers and the
+    match carries the specialty that doctor really consults in.
     """
     catalogue = await ctx.clinic.catalogue()
-    pool = catalogue.providers
-    if args.specialty_id:
-        pool = [p for p in pool if p.specialty_id == args.specialty_id]
-
-    # Every token the caller said (surname alone is enough) must be one of the
-    # provider's tokens — deterministic, and never confuses Sáez with Sáenz,
-    # since "saez" and "saenz" are different tokens even after accent-folding.
-    target = _name_tokens(args.spoken_name)
-    matches = [p for p in pool if target <= _name_tokens(p.name)]
-    if not matches:
-        # Typo-tolerant fallback: each target token fuzzy-matches some provider token.
-        def _fuzzy_subset(wanted: set[str], have: set[str]) -> bool:
-            return all(
-                any(SequenceMatcher(None, w, h).ratio() >= _TYPO_MATCH_CUTOFF for h in have)
-                for w in wanted
+    matches = _providers_named(catalogue, args.spoken_name, args.specialty_id)
+    if not matches and args.specialty_id:
+        matches = _providers_named(catalogue, args.spoken_name, None)
+        if len(matches) == 1:
+            ctx.log.event(
+                "find_provider.specialty_corrected",
+                spoken_name=args.spoken_name,
+                asked_for=args.specialty_id,
+                specialty_id=matches[0].specialty_id,
             )
-
-        matches = [p for p in pool if _fuzzy_subset(target, _name_tokens(p.name))]
 
     if not matches:
         return ProviderMatch(status="not_found", rejection=Rejection(reason="provider_not_found"))

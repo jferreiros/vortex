@@ -191,6 +191,23 @@ SYMPTOM_PATTERNS: tuple[tuple[str, int, str], ...] = (
 #: published sends a child anywhere but paediatrics.
 _CHILD_SPECIALTY = "paediatrics"
 
+#: The agenda a caller asks for by name, in the three languages they call in.
+#: Deliberately not rows of ``SYMPTOM_PATTERNS``: a named specialty is not a
+#: symptom to be weighed against other symptoms, it is the caller telling us
+#: which agenda they want. The table scores nothing for any of these words, so
+#: without this list "I need a gynaecology appointment" lands on the
+#: general-practice residue. Accent-free, because ``normalise`` folds accents
+#: before matching. ``general_practice`` is absent on purpose: it is already the
+#: residue, so naming it changes no answer, and listing it would make "a
+#: gynaecologist, not my usual GP" name two specialties and resolve to neither.
+SPECIALTY_NAMES: tuple[tuple[str, str], ...] = (
+    ("gynaecology", r"gynaecolog|gynecolog|ginecolog|ginecoleg|\bmatrona\b"),
+    ("dermatology", r"dermatolog|dermatoleg|skin (doctor|specialist)"),
+    ("orthopaedics", r"orthopaedic|orthopedic|ortoped|traumatolog|traumatoleg"),
+    ("physiotherapy", r"physiotherap|\bphysio\b|fisioterap|\bfisio\b"),
+    ("paediatrics", r"paediatric|pediatric|\bpediatr[ae]\b|pediatria"),
+)
+
 
 def red_flag(complaint: str) -> str | None:
     """The id of the published red flag this complaint is, or ``None``."""
@@ -216,6 +233,18 @@ def score(complaint: str) -> dict[str, int]:
     if any(re.search(p, text) for p in CHILD_MARKERS):
         totals[_CHILD_SPECIALTY] = totals.get(_CHILD_SPECIALTY, 0) + CHILD_WEIGHT
     return totals
+
+
+def named_specialty(complaint: str) -> str | None:
+    """The specialty the caller asked for by name, or ``None``.
+
+    ``None`` when they named none, and also when they named two: "a
+    gynaecologist or a dermatologist" is not a request that resolves, so the
+    table answers instead of us picking one of the pair.
+    """
+    text = normalise(complaint)
+    named = {specialty for specialty, pattern in SPECIALTY_NAMES if re.search(pattern, text)}
+    return named.pop() if len(named) == 1 else None
 
 
 def route(complaint: str) -> str:

@@ -18,7 +18,8 @@ Two ideas make every provider swappable from ``.env`` alone:
   Each preset reads its *own* key variable, so several can sit in one ``.env``.
 - **A primary and an alternate TTS.** ``VORTEX_TTS_PROVIDER`` speaks Spanish;
   ``VORTEX_TTS_PROVIDER_ALT`` speaks whatever the primary cannot. With both on
-  ``google`` (the default) it is one service and the old single-voice path.
+  ``google`` (the default) English/Spanish ride Chirp 3 HD and ca/gl/eu ride
+  Gemini-TTS, unless ``GOOGLE_TTS_STANDARD_FALLBACK`` restores Standard-*.
 
 UNVERIFIED markers below flag base URLs and model ids nobody has called yet.
 """
@@ -115,6 +116,29 @@ def _tts_provider(var: str = "VORTEX_TTS_PROVIDER") -> str:
     return name if name in TTS_PROVIDERS else DEFAULT_TTS_PROVIDER
 
 
+def _env_flag(name: str, default: str = "false") -> bool:
+    """Truthy for 1/true/yes/on; everything else is false."""
+    return _env(name, default).lower() in ("1", "true", "yes", "on")
+
+
+# Chirp 3 HD has no ca/gl/eu. Gemini-TTS does (Preview). Short names match the
+# Spanish Chirp identity (Aoede). Standard-* only when the fallback flag is on.
+DEFAULT_GEMINI_TTS_MODEL = "gemini-2.5-flash-tts"
+DEFAULT_GEMINI_TTS_VOICE = "Aoede"
+GOOGLE_TTS_STANDARD_CA = "ca-ES-Standard-B"
+GOOGLE_TTS_STANDARD_GL = "gl-ES-Standard-A"
+GOOGLE_TTS_STANDARD_EU = "eu-ES-Standard-A"
+# Languages that leave Chirp and speak through GeminiTTSService.
+GEMINI_TTS_LANGUAGES: frozenset[str] = frozenset({"ca", "gl", "eu"})
+
+
+def _google_tts_voice_coofficial(env_var: str, standard_default: str) -> str:
+    """Gemini short name by default; Standard-* when GOOGLE_TTS_STANDARD_FALLBACK."""
+    if _env_flag("GOOGLE_TTS_STANDARD_FALLBACK"):
+        return _env(env_var, standard_default)
+    return _env(env_var, DEFAULT_GEMINI_TTS_VOICE)
+
+
 @dataclass(frozen=True)
 class Settings:
     # Platform (the organisers' API: clinic reads + submit routes)
@@ -167,6 +191,20 @@ class Settings:
     llm_reasoning_effort: str = field(
         default_factory=lambda: _env("LLM_REASONING_EFFORT", "none").lower()
     )
+    # How long one completion may go without producing its *first* token before
+    # the line gives up on it and re-issues it. On 2026-09-18 two scored calls
+    # sat mute for 36 s on a request the provider accepted and never streamed,
+    # and the harness cut them. Only the first token is on the clock: once the
+    # answer is flowing it is allowed to take as long as it takes. 0 disables
+    # the guard. See vortex/line/llm_timeout.py.
+    llm_first_token_timeout_secs: float = field(
+        default_factory=lambda: float(_env("LLM_FIRST_TOKEN_TIMEOUT_SECS", "8.0"))
+    )
+    # How many times a request that produced no first token is re-issued. One
+    # retry costs at most another LLM_FIRST_TOKEN_TIMEOUT_SECS of the call's
+    # three minutes; after the last one the agent speaks a short holding line
+    # rather than saying nothing.
+    llm_retries: int = field(default_factory=lambda: int(_env("LLM_RETRIES", "1")))
 
     # --- Arbiter: the post-hangup submission judge ----------------------------
     # Nothing consumes this yet. It is here so the key and the model id can be
@@ -199,18 +237,34 @@ class Settings:
     google_tts_voice_en: str = field(
         default_factory=lambda: _env("GOOGLE_TTS_VOICE_EN", "en-GB-Chirp3-HD-Aoede")
     )
-    # Spanish gets a Chirp 3 HD voice; ca/gl/eu only exist as Standard voices.
+    # Spanish stays on Chirp 3 HD. ca/gl/eu speak through Gemini-TTS
+    # (gemini-2.5-flash-tts) with the same short voice name as Spanish Chirp
+    # (Aoede), unless GOOGLE_TTS_STANDARD_FALLBACK turns Standard-* back on.
     google_tts_voice_es: str = field(
         default_factory=lambda: _env("GOOGLE_TTS_VOICE_ES", "es-ES-Chirp3-HD-Aoede")
     )
     google_tts_voice_ca: str = field(
-        default_factory=lambda: _env("GOOGLE_TTS_VOICE_CA", "ca-ES-Standard-B")
+        default_factory=lambda: _google_tts_voice_coofficial(
+            "GOOGLE_TTS_VOICE_CA", GOOGLE_TTS_STANDARD_CA
+        )
     )
     google_tts_voice_gl: str = field(
-        default_factory=lambda: _env("GOOGLE_TTS_VOICE_GL", "gl-ES-Standard-A")
+        default_factory=lambda: _google_tts_voice_coofficial(
+            "GOOGLE_TTS_VOICE_GL", GOOGLE_TTS_STANDARD_GL
+        )
     )
     google_tts_voice_eu: str = field(
-        default_factory=lambda: _env("GOOGLE_TTS_VOICE_EU", "eu-ES-Standard-A")
+        default_factory=lambda: _google_tts_voice_coofficial(
+            "GOOGLE_TTS_VOICE_EU", GOOGLE_TTS_STANDARD_EU
+        )
+    )
+    # Off by default: GeminiTTSService for ca/gl/eu. Set true to keep the old
+    # GoogleHttpTTSService + Standard-B path (research 06 fallback).
+    google_tts_standard_fallback: bool = field(
+        default_factory=lambda: _env_flag("GOOGLE_TTS_STANDARD_FALLBACK")
+    )
+    google_tts_gemini_model: str = field(
+        default_factory=lambda: _env("GOOGLE_TTS_GEMINI_MODEL", DEFAULT_GEMINI_TTS_MODEL)
     )
 
     # ElevenLabs. Spanish only here: it has no Catalan, Galician or Basque
@@ -225,16 +279,48 @@ class Settings:
     # ElevenLabs. Empty means the service's own default.
     elevenlabs_base_url: str = field(default_factory=lambda: _env("ELEVENLABS_BASE_URL"))
 
+    # --- Turn-taking (the conversation lane reads this through TurnSettings) ---
+    # Seconds of caller silence before the agent asks whether they are still
+    # there. 0 disables the nudge. The 2026-09-18 run measured the harness
+    # caller answering in a median of 4.5 s, p90 10 s and max 22 s, so 6 s
+    # fired 147 times over 20 calls, mostly while the caller was still
+    # thinking. 10 s clears the p90.
+    user_idle_secs: float = field(
+        default_factory=lambda: float(_env("VORTEX_USER_IDLE_SECS", "10"))
+    )
+
+    # Gemini Live (speech-to-speech demo). Opt-in only via VORTEX_VOICE_MODE=
+    # gemini-live — never selected by auto. Jury showpiece; the cascade still
+    # scores. GOOGLE_API_KEY is the Gemini API key (AI Studio), not the TTS
+    # service-account JSON.
+    google_api_key: str = field(default_factory=lambda: _env("GOOGLE_API_KEY"))
+    gemini_live_model: str = field(
+        default_factory=lambda: _env("GEMINI_LIVE_MODEL", "models/gemini-3.8-live")
+    )
+    gemini_live_voice: str = field(default_factory=lambda: _env("GEMINI_LIVE_VOICE", "Aoede"))
+
     # Server
     host: str = field(default_factory=lambda: _env("VORTEX_HOST", "0.0.0.0"))
     port: int = field(default_factory=lambda: int(_env("VORTEX_PORT", "7860")))
     ws_path: str = field(default_factory=lambda: _env("VORTEX_WS_PATH", "/ws"))
 
     # Forced modes. "auto" derives the mode from the keys above.
-    # VORTEX_VOICE_MODE: auto | stub | pipecat
+    # VORTEX_VOICE_MODE: auto | stub | pipecat | gemini-live
     voice_mode: str = field(default_factory=lambda: _env("VORTEX_VOICE_MODE", "auto"))
     # VORTEX_CLINIC_MODE: auto | fake | live
     clinic_mode: str = field(default_factory=lambda: _env("VORTEX_CLINIC_MODE", "auto"))
+
+    # Optional ai-coustics AICFilter on the Twilio input (8 kHz Quail).
+    # Default off: only flip on after the T54 entity-CER bench shows a drop
+    # with the filter. License from developers.ai-coustics.com.
+    # VORTEX_AIC_FILTER: off | on   (unknown / empty -> off)
+    aic_filter_enabled: bool = field(
+        default_factory=lambda: (
+            _env("VORTEX_AIC_FILTER", "off").lower() in ("1", "true", "yes", "on")
+        )
+    )
+    aic_sdk_license: str = field(default_factory=lambda: _env("AIC_SDK_LICENSE"))
+    aic_model_id: str = field(default_factory=lambda: _env("VORTEX_AIC_MODEL", "quail-ms-l-8khz"))
 
     # Observability
     calls_log_path: Path = field(
@@ -249,15 +335,29 @@ class Settings:
         default_factory=lambda: _env("LANGFUSE_TRACING_ENVIRONMENT") or _env("VORTEX_ENV")
     )
 
-    # Optional Nominatim-compatible endpoint for problem 15's address lookup
-    # (vortex/rules/geo.py). Empty means the offline Madrid gazetteer only, so
-    # evals and offline work never depend on a network call by default.
+    # Live geocoder for problem 15 (vortex/rules/geo.py). Empty = gazetteer only.
+    # VORTEX_GEOCODER: cartociudad | nominatim | "" (off).
+    # cartociudad = IGN free candidates API, no key. nominatim needs a URL.
+    geocoder: str = field(default_factory=lambda: _env("VORTEX_GEOCODER"))
+    # Nominatim-compatible search URL when geocoder is nominatim (or when this
+    # is set alone, for older .env files that never set VORTEX_GEOCODER).
     geocoder_url: str = field(default_factory=lambda: _env("VORTEX_GEOCODER_URL"))
 
     # Submission window: the platform closes it 30 s after the socket closes.
     # We keep a margin so a late retry still lands inside it.
     submit_window_secs: float = 30.0
     submit_deadline_margin_secs: float = 5.0
+
+    # How long the caller-id lookup may hold up the pipeline before the call
+    # starts without it. The directory answers in ~0.3 s; past this the note is
+    # worth less than the silence it costs, and the model just asks as before.
+    caller_id_lookup_timeout_secs: float = 2.0
+
+    # How long the last-resort booking may spend asking for a slot once the line
+    # is dead. It has to stay well inside the submit window above: the refusal it
+    # would replace is already decided, and a booking that misses the window is
+    # worth less than a refusal that makes it.
+    cold_booking_timeout_secs: float = 6.0
 
     @property
     def clinic_is_live(self) -> bool:
@@ -366,6 +466,11 @@ class Settings:
         return self.google_tts_voice_es
 
     @property
+    def google_tts_uses_gemini(self) -> bool:
+        """True when ca/gl/eu ride GeminiTTSService instead of Standard-*."""
+        return not self.google_tts_standard_fallback
+
+    @property
     def tts_voice(self) -> str:
         """The voice the primary provider starts the call with (Spanish)."""
         return self.tts_voice_es(self.tts_provider)
@@ -386,30 +491,52 @@ class Settings:
         return [name for name in self.tts_providers_in_use if not self.tts_voice_es(name)]
 
     @property
+    def voice_is_gemini_live(self) -> bool:
+        """Jury demo path: speech-to-speech via GeminiLiveLLMService.
+
+        Opt-in only. ``auto`` never picks it — S2S stays off the scoring line.
+        """
+        return self.voice_mode == "gemini-live"
+
+    @property
     def voice_is_pipecat(self) -> bool:
         if self.voice_mode == "pipecat":
             return True
-        if self.voice_mode == "stub":
+        if self.voice_mode in ("stub", "gemini-live"):
             return False
         return bool(
             self.soniox_api_key and self.llm_api_key and self.llm_base_url and self.has_tts_key
         )
 
+    @property
+    def voice_label(self) -> str:
+        """What ``/health`` reports under ``voice``."""
+        if self.voice_is_gemini_live:
+            return "gemini-live"
+        if self.voice_is_pipecat:
+            return "pipecat"
+        return "stub"
+
     def describe(self) -> dict[str, object]:
         """A safe summary for logs and /health. Never includes key values."""
         return {
             "clinic": "live" if self.clinic_is_live else "fake",
-            "voice": "pipecat" if self.voice_is_pipecat else "stub",
+            "voice": self.voice_label,
             "platform_api_base_url": self.platform_api_base_url,
             "has_platform_key": bool(self.platform_api_key),
             "has_soniox_key": bool(self.soniox_api_key),
             "has_llm_key": bool(self.llm_api_key),
+            "has_google_api_key": bool(self.google_api_key),
             "has_google_tts_credentials": self.has_google_tts_credentials,
             "has_elevenlabs_key": bool(self.elevenlabs_api_key),
             "stt_model": self.soniox_stt_model,
             "llm_provider": self.llm_provider,
             "llm_model": self.llm_model,
             "llm_base_url": self.llm_base_url,
+            "gemini_live_model": self.gemini_live_model,
+            "gemini_live_voice": self.gemini_live_voice,
+            "llm_first_token_timeout_secs": self.llm_first_token_timeout_secs,
+            "llm_retries": self.llm_retries,
             "arbiter_provider": self.arbiter_provider,
             "arbiter_model": self.arbiter_model,
             "arbiter_base_url": self.arbiter_base_url,
@@ -420,14 +547,23 @@ class Settings:
             "tts_voice": self.tts_voice,
             "tts_languages": sorted(self.tts_covered_languages),
             "tts_language_switch": self.tts_supports_language_switch,
+            "google_tts_gemini": self.google_tts_uses_gemini,
+            "google_tts_gemini_model": self.google_tts_gemini_model
+            if self.google_tts_uses_gemini
+            else "",
             # A provider with a key but no voice id builds and then fails on
             # every utterance, so say so before the first call.
             "tts_voices_missing": self.tts_voices_missing,
+            "aic_filter": "on" if self.aic_filter_enabled and self.aic_sdk_license else "off",
+            "aic_model": self.aic_model_id,
+            "has_aic_license": bool(self.aic_sdk_license),
+            "user_idle_secs": self.user_idle_secs,
             "ws_path": self.ws_path,
             "calls_log_path": str(self.calls_log_path),
             "has_langfuse_keys": bool(self.langfuse_public_key and self.langfuse_secret_key),
             "langfuse_base_url": self.langfuse_base_url,
             "langfuse_environment": self.langfuse_environment,
+            "geocoder": self.geocoder or ("nominatim" if self.geocoder_url else ""),
         }
 
 

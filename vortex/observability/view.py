@@ -82,6 +82,41 @@ class CallCard:
         return self.status == "live"
 
 
+def _norm_text(text: str) -> str:
+    return " ".join(text.split())
+
+
+def _extends(short: str, long: str) -> bool:
+    if not long.startswith(short):
+        return False
+    if len(long) == len(short):
+        return True
+    return long[len(short)] in " \t.,;:!?…"
+
+
+def fold_turns(turns: list[Turn]) -> list[Turn]:
+    out: list[Turn] = []
+    for turn in turns:
+        text = _norm_text(turn.text)
+        if not text:
+            continue
+        if out:
+            last = out[-1]
+            last_text = _norm_text(last.text)
+            if last.role == turn.role:
+                if text == last_text:
+                    continue
+                if _extends(last_text, text):
+                    out[-1] = Turn(turn.role, text, turn.ts)
+                    continue
+                if _extends(text, last_text):
+                    continue
+            if any(item.role == turn.role and _norm_text(item.text) == text for item in out[-8:]):
+                continue
+        out.append(Turn(turn.role, text, turn.ts))
+    return out
+
+
 def _as_dict(value: Any) -> dict[str, Any]:
     if value is None:
         return {}
@@ -263,6 +298,12 @@ def build_call(call_id: str, events: list[dict[str, Any]]) -> CallCard:
                         card.action_payload = payload
                         if payload.get("reason"):
                             card.decline_reason = str(payload["reason"])
+    card.turns = fold_turns(card.turns)
+    if card.action_kind in {"book", "register", "reschedule", "cancel"}:
+        payload_reason = None
+        if isinstance(card.action_payload, dict) and card.action_payload.get("reason"):
+            payload_reason = str(card.action_payload["reason"])
+        card.decline_reason = payload_reason
     return card
 
 
