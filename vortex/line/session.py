@@ -32,6 +32,7 @@ from vortex.contract import (
     BookAction,
     CallerLineMatch,
     DeclineReason,
+    EligibilityVerdict,
     EscalateAction,
     FindPatientResult,
     FindSlotsInput,
@@ -152,9 +153,10 @@ class CallMemory:
 
     last_rejection: Rejection | None = None
     last_rejection_tool: str = ""
-    # The subset of ``last_rejection`` that came from a rule, not from prose:
-    # an eligibility verdict or a provider ``find_slots`` reported as blocked.
-    # It is the reason a refusal must carry, so ``submit_action`` forces it.
+    # The subset of ``last_rejection`` the rules themselves answered: an
+    # eligibility refusal or a provider ``find_slots`` reported as blocked. Both
+    # are the reason a refusal must carry, so ``submit_action`` forces them; this
+    # one goes first, because a later rejection is often its consequence.
     last_verdict: Rejection | None = None
     last_verdict_tool: str = ""
     # The same reason, kept across the action a tool later prepares around it.
@@ -291,12 +293,20 @@ class CallMemory:
         Reads the contract's own field names, so no lane tool has to know this
         exists: ``rejection`` on every result that can refuse, ``action`` on the
         ``prepare_*`` and ``build_registration`` results, ``slots``/``blocked``
-        on availability, ``status`` on the identity lookup.
+        on availability, ``status`` on the identity lookup, ``allowed`` on the
+        eligibility verdict.
         """
         if isinstance(result, FindPatientResult):
             self.identity_pending = result.status != "found"
             if result.patient is not None and result.status == "found":
                 self.identified_patient = result.patient
+
+        # A recheck the rules allow proves the earlier refusal gone, exactly as
+        # free slots do. Left standing, its verdict would rewrite the reason of
+        # every later refusal with a rule that no longer bites.
+        if isinstance(result, EligibilityVerdict) and result.allowed:
+            self.forget_rejection()
+            self.forget_stored_reason()
 
         rejection = getattr(result, "rejection", None)
         if isinstance(rejection, Rejection):

@@ -14,8 +14,9 @@ What the docs say this lane must get right (clinic docs, "Six things worth knowi
 - DNI: 8 digits + letter. NIE: X/Y/Z + 7 digits + letter. The letter is
   ``"TRWAGMYFPDXBNJZSQVHLCKE"[number % 23]`` where a NIE's leading X/Y/Z
   counts as 0/1/2. A wrong letter is a 422 at submit time. When the letter
-  does not match, a unique 1-edit digit repair (spoken confusions) is kept;
-  several repairs mean re-ask those digit positions.
+  does not match, the 1-edit digit readings (spoken confusions) that fit it
+  say which digit positions were misheard; the id stays invalid until the
+  caller repeats them.
 
 How the conversation should read what comes back:
 
@@ -155,7 +156,7 @@ def _one_edit_bodies(body: str) -> list[str]:
 
 
 def _ambiguous_positions(bodies: list[str]) -> list[int]:
-    """Digit indexes that are not unanimous across matching 1-edit bodies."""
+    """Digit indexes that are not unanimous across the heard body and its 1-edit fits."""
     if not bodies:
         return []
     length = len(bodies[0])
@@ -163,12 +164,14 @@ def _ambiguous_positions(bodies: list[str]) -> list[int]:
 
 
 def check_national_id(value: str) -> NationalIdCheck:
-    """Normalise, classify, re-derive the letter; repair a unique 1-edit mishear.
+    """Normalise, classify, re-derive the letter; name the digits to ask again.
 
     When the heard letter does not match the digits, try every single-digit
-    confusion (seis/tres, seis/siete, …). Keep the repair only when exactly one
-    candidate's check letter matches the heard letter. Several matches →
-    ``ask_digit_positions`` names the digits to re-ask; zero → leave invalid.
+    confusion (seis/tres, seis/siete, …) and keep the readings whose check
+    letter matches. None of them is adopted: the letter proves the id as heard
+    is inconsistent, it does not say which digits the caller meant, and an
+    inferred id registers or identifies the wrong person. The id stays invalid
+    and ``ask_digit_positions`` names the digits for the caller to repeat.
     """
     normalized = normalize_national_id(value)
     if _DNI_RE.fullmatch(normalized):
@@ -194,31 +197,17 @@ def check_national_id(value: str) -> NationalIdCheck:
             matching_bodies.append(edited)
     unique_bodies = list(dict.fromkeys(matching_bodies))
 
-    if len(unique_bodies) == 1:
-        repaired_body = unique_bodies[0]
-        repaired = repaired_body + letter if prefix is None else prefix + repaired_body + letter
-        return NationalIdCheck(
-            normalized=repaired,
-            kind=kind,
-            valid=True,
-            expected_letter=letter,
-            repaired_from=normalized,
-        )
-
-    if len(unique_bodies) > 1:
-        return NationalIdCheck(
-            normalized=normalized,
-            kind=kind,
-            valid=False,
-            expected_letter=expected,
-            ask_digit_positions=_ambiguous_positions(unique_bodies),
-        )
-
-    return NationalIdCheck(normalized=normalized, kind=kind, valid=False, expected_letter=expected)
+    return NationalIdCheck(
+        normalized=normalized,
+        kind=kind,
+        valid=False,
+        expected_letter=expected,
+        ask_digit_positions=_ambiguous_positions([body, *unique_bodies]),
+    )
 
 
 async def validate_national_id(ctx: ToolContext, args: ValidateNationalIdInput) -> NationalIdCheck:
-    """Normalise a spoken DNI/NIE and check its letter (mod-23), with 1-edit repair."""
+    """Normalise a spoken DNI/NIE and check its letter (mod-23); never repair it silently."""
     return check_national_id(args.value)
 
 
@@ -311,12 +300,12 @@ async def build_registration(ctx: ToolContext, args: BuildRegistrationInput) -> 
         return RegistrationResult(rejection=rejection)
     if not check.valid:
         if check.ask_digit_positions:
-            pair = ", ".join(str(i + 1) for i in check.ask_digit_positions)
+            positions = ", ".join(str(i + 1) for i in check.ask_digit_positions)
             rejection = ask_again(
                 "national_id",
-                f"check letter of {check.normalized} matches more than one 1-edit "
-                f"reading of the digits; ask the caller to repeat digit positions "
-                f"{pair} (1-based in the digit body)",
+                f"check letter of {check.normalized} fits a 1-edit reading of the "
+                f"digits but not the digits as heard; ask the caller to repeat digit "
+                f"positions {positions} (1-based in the digit body) before registering",
             )
         else:
             rejection = ask_again(
@@ -539,13 +528,7 @@ async def find_patient(ctx: ToolContext, args: FindPatientInput) -> FindPatientR
     finds the line's owner, not necessarily the patient being booked for.
     """
     name = _person_field(args.name) if args.name else None
-    if args.national_id:
-        id_check = check_national_id(args.national_id)
-        national_id = (
-            id_check.normalized if id_check.valid else normalize_national_id(args.national_id)
-        )
-    else:
-        national_id = None
+    national_id = normalize_national_id(args.national_id) if args.national_id else None
     phone = args.phone.strip() if args.phone else None
     dob = args.date_of_birth
     given = _fields_given(args)

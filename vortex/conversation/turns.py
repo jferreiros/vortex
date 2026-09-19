@@ -440,6 +440,27 @@ CONFIRMATION_CUES: tuple[str, ...] = (
     "hitzordu",
 )
 
+# Politeness asks for nothing, so a yes wearing it is still only a yes. Any
+# other word is something we did not read back, and the turn is not a plain yes.
+COURTESY_WORDS: frozenset[str] = frozenset(
+    {
+        "please",
+        "thanks",
+        "thank",
+        "you",
+        "por",
+        "favor",
+        "gracias",
+        "us",
+        "plau",
+        "gracies",
+        "gràcies",
+        "mesedez",
+        "eskerrik",
+        "asko",
+    }
+)
+
 _WORDS = re.compile(r"[\w'’]+")
 
 
@@ -447,11 +468,45 @@ def _words(text: str) -> list[str]:
     return _WORDS.findall(text.casefold().replace("’", "'"))
 
 
+_AFFIRMATION_PHRASES_AS_WORDS: tuple[tuple[str, ...], ...] = tuple(
+    tuple(_words(phrase)) for phrase in AFFIRMATION_PHRASES
+)
+
+
+def _affirmation_phrase_length_at(words: list[str], index: int) -> int:
+    """How many words an affirmative phrase takes up here, 0 if none starts here."""
+    for phrase in _AFFIRMATION_PHRASES_AS_WORDS:
+        if tuple(words[index : index + len(phrase)]) == phrase:
+            return len(phrase)
+    return 0
+
+
+def _is_only_affirmative(words: list[str]) -> bool:
+    """Does the whole turn say yes, with no word the read-back did not cover?"""
+    index = 0
+    affirmed = False
+    while index < len(words):
+        phrase_length = _affirmation_phrase_length_at(words, index)
+        if phrase_length:
+            affirmed = True
+            index += phrase_length
+            continue
+        word = words[index]
+        if word in AFFIRMATION_WORDS:
+            affirmed = True
+        elif word not in COURTESY_WORDS:
+            return False
+        index += 1
+    return affirmed
+
+
 def is_affirmation(text: str) -> bool:
     """Is this caller turn a plain yes, and nothing else?
 
-    Short, carrying one of the yes words or phrases, and free of any negation or
-    correction. "yes" and "dale" pass; "yes, but Friday instead" does not.
+    Short, free of any negation or correction, and made of nothing but yes words,
+    yes phrases and politeness. "yes" and "yes, book it please" pass; "yes, but
+    Friday instead" and "yes, Friday please" do not: a yes carrying a detail we
+    never read back is a new request, not an agreement to the prepared action.
     """
     words = _words(text)
     if not words or len(words) > AFFIRMATION_MAX_WORDS:
@@ -461,9 +516,7 @@ def is_affirmation(text: str) -> bool:
     joined = " ".join(words)
     if any(stem in joined for stem in CORRECTION_STEMS):
         return False
-    if any(word in AFFIRMATION_WORDS for word in words):
-        return True
-    return any(phrase in joined for phrase in AFFIRMATION_PHRASES)
+    return _is_only_affirmative(words)
 
 
 def looks_like_confirmation_question(text: str, *, prepared: bool = False) -> bool:

@@ -586,8 +586,22 @@ def _PrivacyGuard(  # noqa: N802 - factory that returns a processor
     national ids and phones this call has already seen (directory records on
     the session, plus ``from_number``). A match replaces the phrase with a
     safe refusal and logs ``voice.privacy_block``. The call stays open.
+
+    The LLM streams its answer in chunks, and a phone split over "612 ",
+    "345 " and "678" matches nothing chunk by chunk while the TTS glues the
+    chunks back into one spoken sentence. So the chunks of one response are
+    held here and scanned as a single text when ``LLMFullResponseEndFrame``
+    closes it; an interruption drops what is still held. The prompt asks for
+    one or two short sentences, so what is held is one turn of speech.
     """
-    from pipecat.frames.frames import Frame, TextFrame, TTSSpeakFrame
+    from pipecat.frames.frames import (
+        Frame,
+        InterruptionFrame,
+        LLMFullResponseEndFrame,
+        LLMTextFrame,
+        TextFrame,
+        TTSSpeakFrame,
+    )
     from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
     from vortex.conversation.prompt import refusal_line_for
@@ -596,13 +610,32 @@ def _PrivacyGuard(  # noqa: N802 - factory that returns a processor
     language_state = state if state is not None else _LanguageState()
 
     class PrivacyGuard(FrameProcessor):
+        def __init__(self) -> None:
+            super().__init__()
+            self._held: list[LLMTextFrame] = []
+
         async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
             await super().process_frame(frame, direction)
-            if direction == FrameDirection.DOWNSTREAM and isinstance(
-                frame, (TextFrame, TTSSpeakFrame)
-            ):
-                await self._scrub(frame)
+            if direction == FrameDirection.DOWNSTREAM:
+                if isinstance(frame, LLMTextFrame):
+                    self._held.append(frame)
+                    return
+                if isinstance(frame, InterruptionFrame):
+                    self._held.clear()
+                elif isinstance(frame, LLMFullResponseEndFrame):
+                    await self._release(direction)
+                elif isinstance(frame, (TextFrame, TTSSpeakFrame)):
+                    await self._scrub(frame)
             await self.push_frame(frame, direction)
+
+        async def _release(self, direction: FrameDirection) -> None:
+            held, self._held = self._held, []
+            if not held:
+                return
+            response = held[0]
+            response.text = "".join(chunk.text or "" for chunk in held)
+            await self._scrub(response)
+            await self.push_frame(response, direction)
 
         async def _scrub(self, frame: TextFrame | TTSSpeakFrame) -> None:
             text = frame.text or ""

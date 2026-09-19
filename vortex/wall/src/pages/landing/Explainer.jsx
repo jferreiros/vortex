@@ -27,7 +27,7 @@ export default function Explainer() {
   const navigate = useNavigate();
 
   return (
-    <section className="landing-explainer">
+    <section className="landing-explainer" id="explainer">
       <div className="landing-explainer-inner">
         <Reveal className="landing-explainer-head">
           <span className="landing-explainer-eyebrow">Cómo funciona</span>
