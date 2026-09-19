@@ -1,158 +1,239 @@
-import { Link } from "react-router-dom";
-import { useMemo, useState } from "react";
-import SectionHeader from "../../../components/ui/SectionHeader";
+import { useNavigate } from "react-router-dom";
+import { useLayoutEffect, useRef, useState } from "react";
 import Card from "../../../components/ui/Card";
-import StatTile from "../../../components/ui/StatTile";
-import Modal from "../../../components/ui/Modal";
-import Placeholder from "../../../components/ui/Placeholder";
-import HourlyStackedChart from "./charts/HourlyStackedChart";
-import VolumeTrendChart from "./charts/VolumeTrendChart";
-import OccupancyCalendar from "./charts/OccupancyCalendar";
-import { useHomeOverview, useOccupancy, withDate, formatDuration } from "./useHomeData";
+import { MOCK_OVERVIEW, useHomeOverview } from "./useHomeOverview";
+import { PLACEHOLDER_CALLS } from "../live-calls/placeholderCalls";
 import "./home.css";
 
-// Every number on this page is read from synthetic-data/ through
-// /api/wall/home-overview and /api/wall/occupancy (see
-// vortex/observability/home_overview.py) — nothing here is generated
-// client-side. "Llamadas hoy" has no drill-down button, so it takes the
-// `large` treatment to fill the vertical space the others spend on a button.
-function statsFor(overview) {
-  const s = overview?.stats;
-  return [
-    { key: "calls", label: "Llamadas hoy", value: s ? s.calls_today : "—", large: true },
-    {
-      key: "resolved",
-      label: "Resueltas por el agente",
-      value: s?.resolved_pct != null ? s.resolved_pct : "—",
-      unit: s?.resolved_pct != null ? "%" : "",
-      button: "Ver desglose",
-    },
-    {
-      key: "escalated",
-      label: "Escaladas a un médico",
-      value: s?.escalated_pct != null ? s.escalated_pct : "—",
-      unit: s?.escalated_pct != null ? "%" : "",
-      button: "Ver motivos",
-    },
-    { key: "duration", label: "Duración media", value: formatDuration(s?.median_duration_s), button: "Ver uso de tiempo" },
-  ];
+const MANAGER_NAME = "Ricardo";
+
+function dayGreeting(now = new Date()) {
+  const hour = Number(
+    new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Madrid", hour: "numeric", hourCycle: "h23" }).format(now),
+  );
+  if (hour < 12) return "Good morning";
+  if (hour < 19) return "Good afternoon";
+  return "Good evening";
 }
 
-function OccupancyCard({ sites, specialties }) {
-  const [site, setSite] = useState("");
-  const [specialty, setSpecialty] = useState("");
-  const occ = useOccupancy({ site, specialty });
-  const week = useMemo(() => withDate(occ?.week), [occ]);
+function FitTitle({ children }) {
+  const ref = useRef(null);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    const row = el?.parentElement;
+    if (!el || !row) return;
+
+    const fit = () => {
+      const toolbar = row.querySelector(".home-toolbar");
+      const available = row.clientWidth - (toolbar ? toolbar.offsetWidth + 32 : 0);
+      if (available <= 0) return;
+      let low = 28;
+      let high = 72;
+      el.style.fontSize = `${high}px`;
+      if (el.scrollWidth <= available) return;
+      while (high - low > 0.4) {
+        const mid = (low + high) / 2;
+        el.style.fontSize = `${mid}px`;
+        if (el.scrollWidth <= available) low = mid;
+        else high = mid;
+      }
+      el.style.fontSize = `${low}px`;
+    };
+
+    fit();
+    const observer = new ResizeObserver(fit);
+    observer.observe(row);
+    return () => observer.disconnect();
+  }, [children]);
 
   return (
-    <Card padding="lg">
-      <SectionHeader
-        eyebrow="Agenda"
-        title="Tasa de ocupación"
-        subtitle="Huecos ocupados frente a disponibles, por centro y especialidad."
-        action={
-          <div className="occupancy-filters">
-            <select className="ui-select" value={site} onChange={(e) => setSite(e.target.value)}>
-              <option value="">Todos los centros</option>
-              {sites.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
-            <select className="ui-select" value={specialty} onChange={(e) => setSpecialty(e.target.value)}>
-              <option value="">Todas las especialidades</option>
-              {specialties.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
-          </div>
-        }
-      />
+    <h1 ref={ref} className="home-title">
+      {children}
+    </h1>
+  );
+}
 
-      {!occ ? (
-        <Placeholder kind="chart" ratio="21/9" label="Calculando ocupación…" />
-      ) : (
-        <div className="occupancy-body">
-          <div className="occupancy-left">
-            <OccupancyCalendar week={week} />
-            <div className="occupancy-headline">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 5v14M5 12l7 7 7-7" />
-              </svg>
-              <span className="occupancy-headline-value">{occ.weekAvgPct}%</span>
-              <span className="occupancy-headline-label">de ocupación media esta semana</span>
-            </div>
-          </div>
+function sparkPath(values, width, height) {
+  if (!values.length) return "";
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = max - min || 1;
+  return values
+    .map((value, i) => {
+      const x = (i / Math.max(values.length - 1, 1)) * width;
+      const y = height - ((value - min) / span) * (height - 4) - 2;
+      return `${i === 0 ? "M" : "L"}${x.toFixed(1)} ${y.toFixed(1)}`;
+    })
+    .join(" ");
+}
 
-          <div className="occupancy-divider" />
+function Sparkline({ values, tone = "ok" }) {
+  const width = 96;
+  const height = 48;
+  const d = sparkPath(values, width, height);
+  return (
+    <svg className={`home-spark home-spark-${tone}`} viewBox={`0 0 ${width} ${height}`} aria-hidden="true">
+      <path d={d} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
 
-          <div className="occupancy-right">
-            <span className="occupancy-month-kicker">Próximos 30 días</span>
-            <span className="occupancy-month-value">{occ.monthPct}%</span>
-            <span className="occupancy-month-label">ocupación media prevista</span>
+function KpiCard({ label, value, unit, delta, hint, spark, tone }) {
+  const up = !delta?.startsWith("−") && !delta?.startsWith("-");
+  return (
+    <Card padding="md" className="home-kpi">
+      <div className="home-kpi-top">
+        <span className="home-kpi-label">{label}</span>
+        {delta && (
+          <span className={`home-kpi-delta ${up ? "up" : "down"}`}>
+            {delta}
+          </span>
+        )}
+      </div>
+      <div className="home-kpi-body">
+        <div className="home-kpi-copy">
+          <div className="home-kpi-value">
+            {value}
+            {unit ? <span className="home-kpi-unit">{unit}</span> : null}
           </div>
-          <Link to="/clinic/doctor" className="occupancy-diary-link">
-            Horarios
-          </Link>
+          {hint && <p className="home-kpi-hint">{hint}</p>}
         </div>
-      )}
+        <Sparkline values={spark} tone={tone} />
+      </div>
     </Card>
   );
 }
 
+function DirectionGlyph({ direction }) {
+  const inbound = direction === "inbound";
+  return (
+    <svg className={`home-call-glyph ${direction}`} viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+      {inbound ? (
+        <path d="M4 5.5v6.5h6.5M4 12 12 4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      ) : (
+        <path d="M12 10.5V4H5.5M12 4 4 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      )}
+    </svg>
+  );
+}
+
+function initials(name) {
+  if (!name || name === "Sin identificar") return "?";
+  return name
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase();
+}
+
 export default function Home() {
-  const overview = useHomeOverview();
-  const stats = useMemo(() => statsFor(overview), [overview]);
-  const daily = useMemo(() => withDate(overview?.daily_call_volume), [overview]);
-  const hourly = overview?.hourly_action_volume ?? [];
-  const newClients = overview?.stats?.new_patients_registered ?? 0;
-  const sites = overview?.sites ?? [];
-  const specialties = overview?.specialties ?? [];
-  const [openStat, setOpenStat] = useState(null);
-  const activeStat = stats.find((s) => s.key === openStat) || null;
+  const navigate = useNavigate();
+  const [liveFilter, setLiveFilter] = useState("all");
+  const data = useHomeOverview() ?? MOCK_OVERVIEW;
+  const today = data.today ?? MOCK_OVERVIEW.today;
+  const moved = today.rescheduled + today.cancelled;
+  const liveCalls =
+    liveFilter === "all" ? PLACEHOLDER_CALLS : PLACEHOLDER_CALLS.filter((c) => c.direction === liveFilter);
+
+  const kpis = [
+    {
+      label: "Citas concertadas",
+      value: today.booked,
+      hint: today.calls ? `${today.calls} llamadas hoy` : "Sin llamadas",
+      delta: "+12%",
+      spark: [18, 20, 19, 22, 24, 23, 28],
+      tone: "ok",
+    },
+    {
+      label: "Huecos movidos",
+      value: moved,
+      hint: `${today.rescheduled} cambiadas · ${today.cancelled} canceladas`,
+      delta: "−3%",
+      spark: [11, 10, 12, 9, 8, 10, moved],
+      tone: "neutral",
+    },
+    {
+      label: "Nuevos pacientes",
+      value: today.registered,
+      hint: "Altas en la línea",
+      delta: "+2",
+      spark: [3, 4, 3, 5, 4, 5, today.registered],
+      tone: "ok",
+    },
+    {
+      label: "Cerradas en la línea",
+      value: today.contained_pct == null ? "—" : today.contained_pct,
+      unit: today.contained_pct == null ? "" : "%",
+      hint: "Sin pasar a una persona",
+      delta: "+1.4%",
+      spark: [78, 80, 81, 79, 84, 85, today.contained_pct || 86],
+      tone: "ok",
+    },
+  ];
 
   return (
     <div className="home-page">
-      <SectionHeader
-        eyebrow="Resumen"
-        title="Hola de nuevo"
-        subtitle="Esto es lo que ha hecho el agente hoy en Clínica Arenal."
-        action={
-          <div className="home-header-stat">
-            <span className="home-header-stat-value">+{newClients}</span>
-            <span className="home-header-stat-label">Nuevos pacientes registrados</span>
-          </div>
-        }
-      />
+      <header className="home-hero">
+        <p className="home-crumb">Clínica Arenal / Admisión</p>
+        <div className="home-hero-row">
+          <FitTitle>
+            {dayGreeting()}, {MANAGER_NAME}
+          </FitTitle>
+        </div>
+        <p className="home-lead">Look at what your agent has done today.</p>
+      </header>
 
-      <Card padding="lg" className="home-stats">
-        {stats.map((s) => (
-          <StatTile key={s.key} {...s} onOpenDetail={() => setOpenStat(s.key)} />
+      <div className="home-kpis">
+        {kpis.map((kpi) => (
+          <KpiCard key={kpi.label} {...kpi} />
         ))}
-      </Card>
-
-      <Modal open={Boolean(activeStat)} title={activeStat?.label} onClose={() => setOpenStat(null)} />
-
-      <OccupancyCard sites={sites} specialties={specialties} />
-
-      <div className="home-grid">
-        <Card padding="lg" className="home-grid-main">
-          <SectionHeader eyebrow="Actividad" title="Volumen de llamadas por hora" subtitle="Última semana, por tipo de acción." />
-          {overview ? <HourlyStackedChart data={hourly} /> : <Placeholder kind="chart" ratio="21/8" label="Calculando volumen por hora…" />}
-        </Card>
-
-        <Card padding="lg" className="home-grid-side">
-          <SectionHeader eyebrow="Tendencia" title="Volumen total de llamadas" subtitle="Todos los días con datos." />
-          {daily.length > 1 ? (
-            <VolumeTrendChart data={daily} />
-          ) : (
-            <Placeholder kind="chart" ratio="21/8" label="Calculando tendencia diaria…" />
-          )}
-        </Card>
       </div>
+
+      <section className="home-live">
+        <div className="home-live-head">
+          <h2>Live</h2>
+          <div className="home-toolbar" role="tablist" aria-label="Call direction">
+            {["all", "inbound", "outbound"].map((id) => (
+              <button
+                key={id}
+                type="button"
+                className={`home-chip ${liveFilter === id ? "on" : ""}`}
+                onClick={() => setLiveFilter(id)}
+              >
+                {id === "all" ? "All" : id === "inbound" ? "Inbound" : "Outbound"}
+              </button>
+            ))}
+          </div>
+        </div>
+        <Card padding="sm" className="home-live-card">
+          <ul className="home-call-list">
+            {liveCalls.map((call) => (
+              <li key={call.id}>
+                <button
+                  type="button"
+                  className="home-call-row"
+                  onClick={() => navigate(`/clinic/live-calls/${call.id}`)}
+                >
+                  <span className={`home-call-avatar ${call.status}`}>{initials(call.patient)}</span>
+                  <span className="home-call-main">
+                    <span className="home-call-name">{call.patient}</span>
+                    <span className="home-call-meta">
+                      <DirectionGlyph direction={call.direction} />
+                      {call.phase}
+                      <span className="dot">·</span>
+                      {call.phone}
+                    </span>
+                  </span>
+                  <span className="home-call-time">{call.duration}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      </section>
     </div>
   );
 }

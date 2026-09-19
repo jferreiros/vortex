@@ -1,550 +1,146 @@
 .insights-page {
-  max-width: var(--content-max-width);
-}
-
-.insights-range {
   display: flex;
-  gap: var(--space-1);
-  background: var(--color-panel);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-full);
-  padding: 3px;
-}
-
-.insights-range-pill {
-  appearance: none;
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  padding: 7px 14px;
-  border-radius: var(--radius-full);
-  font-size: var(--text-xs);
-  font-weight: var(--weight-semibold);
-  color: var(--color-mute);
-}
-
-.insights-range-pill.on {
-  background: var(--color-primary);
-  color: var(--color-on-primary);
-}
-
-.insights-bento {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  flex-direction: column;
   gap: var(--space-6);
+  max-width: var(--content-max-width);
+  padding-bottom: var(--space-8);
 }
 
-.insights-cell.wide {
-  grid-column: 1 / -1;
+.insights-page .ui-card {
+  box-shadow: none;
 }
 
-.insights-cell > .ui-section-header {
+.insights-title {
+  font-size: var(--text-3xl);
+}
+
+.insights-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.insights-panel h2 {
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  letter-spacing: -0.02em;
   margin-bottom: var(--space-4);
 }
 
-@media (max-width: 900px) {
-  .insights-bento {
-    grid-template-columns: 1fr;
-  }
-}
-
-/* Data-source notice: the endpoint could not serve fresh live events -------*/
-
-.insights-notice {
-  margin-bottom: var(--space-5);
-  padding: var(--space-3) var(--space-4);
-  border-radius: var(--radius-md);
-  background: var(--color-warn-soft);
-  color: var(--color-ink);
-  font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
-}
-
-/* 1. Unavailability reasons — horizontal bars ------------------------------*/
-
-.reason-bars {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-}
-
-.reason-bar-top {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-3);
-  margin-bottom: var(--space-1);
-}
-
-.reason-bar-label {
-  font-size: var(--text-sm);
-  font-weight: var(--weight-semibold);
-  color: var(--color-ink);
-}
-
-.reason-bar-value {
-  font-family: var(--font-mono);
+.insights-empty,
+.insights-footnote {
+  margin: 0;
   font-size: var(--text-xs);
   color: var(--color-mute);
-  flex: 0 0 auto;
+  line-height: var(--leading-normal);
 }
 
-.reason-bar-track {
-  height: 10px;
-  border-radius: var(--radius-full);
-  background: var(--color-primary-soft);
-  overflow: hidden;
+.insights-footnote {
+  margin-top: var(--space-4);
 }
 
-.reason-bar-fill {
-  height: 100%;
-  border-radius: var(--radius-full);
-  background: var(--color-primary);
-  transition: width var(--duration-slow) var(--ease-standard);
+.insights-table {
+  width: 100%;
+  border-collapse: collapse;
 }
 
-/* 2. Service occupancy: demand vs. capacity by specialty -------------------*/
-
-.service-occupancy {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-}
-
-.service-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: var(--space-3);
-}
-
-.service-tile {
-  appearance: none;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-bg);
-  font: inherit;
-  color: inherit;
+.insights-table th {
   text-align: left;
-  cursor: pointer;
-}
-
-.service-tile:hover {
-  border-color: var(--color-border-strong);
-}
-
-.service-tile.active {
-  border-color: var(--color-ink);
-}
-
-.service-tile.over {
-  border-color: var(--color-warn-soft);
-  box-shadow: inset 0 0 0 1px var(--color-warn-soft);
-}
-
-.service-tile-top {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-2);
-}
-
-.service-tile-name {
-  font-size: var(--text-sm);
+  font-size: 11px;
   font-weight: var(--weight-semibold);
-  color: var(--color-ink);
-}
-
-.service-tile-pct {
-  font-family: var(--font-mono);
-  font-size: var(--text-lg);
-  font-weight: var(--weight-bold);
-  color: var(--color-ink);
-  flex: 0 0 auto;
-}
-
-.service-tile-pct.over {
-  color: var(--color-warn);
-}
-
-.service-tile-track {
-  height: 6px;
-  border-radius: var(--radius-full);
-  background: var(--color-border);
-  overflow: hidden;
-}
-
-.service-tile-fill {
-  display: block;
-  height: 100%;
-  border-radius: var(--radius-full);
-  background: var(--color-primary);
-  transition: width var(--duration-slow) var(--ease-standard);
-}
-
-.service-tile-fill.over {
-  background: var(--color-warn);
-}
-
-.service-tile-meta {
-  font-size: var(--text-xs);
   color: var(--color-faint);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0 0 var(--space-3);
+  border-bottom: 1px solid var(--color-border);
 }
 
-.service-detail {
-  padding: var(--space-4);
-  border-radius: var(--radius-md);
-  background: var(--color-warn-soft);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-
-.service-detail-head,
-.service-detail-calc {
-  margin: 0;
+.insights-table td {
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--color-border);
   font-size: var(--text-sm);
   color: var(--color-ink);
 }
 
-.service-detail-empty {
-  margin: 0;
-  padding: var(--space-4);
-  border-radius: var(--radius-md);
-  background: var(--color-bg);
-  border: 1px solid var(--color-border);
-  font-size: var(--text-sm);
-  color: var(--color-mute);
+.insights-table tr:last-child td {
+  border-bottom: none;
 }
 
-/* 3. Cancellations: reused vs. lost ----------------------------------------*/
-
-.cancel-tile {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  padding: var(--space-4);
-  border-radius: var(--radius-md);
-  background: var(--color-bg);
-  border: 1px solid var(--color-border);
+.insights-table th + th,
+.insights-table td + td {
+  padding-left: var(--space-4);
 }
 
-.cancel-tile.rate {
-  background: var(--color-primary-soft);
-  border-color: transparent;
+.insights-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
-
-.cancel-value {
-  font-family: var(--font-display);
-  font-size: var(--text-2xl);
-  font-weight: var(--weight-bold);
-  color: var(--color-ink);
-}
-
-.cancel-label {
-  font-size: var(--text-xs);
-  font-weight: var(--weight-medium);
-  color: var(--color-mute);
-}
-
-.cancel-sub {
-  font-size: 10px;
-  color: var(--color-faint);
-}
-
-/* The two headline rates as a pair, atop the lead-time chart. */
-.cancel-rates {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: var(--space-4);
-}
-
-.cancel-section {
-  margin-top: var(--space-5);
-  padding-top: var(--space-3);
-  border-top: 1px solid var(--color-border);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-
-.cancel-section-title {
-  margin: 0;
-  font-size: var(--text-xs);
-  font-weight: var(--weight-semibold);
-  color: var(--color-ink);
-}
-
-.cancel-hint {
-  margin: 0;
-  font-size: 10px;
-  color: var(--color-faint);
-}
-
-.cancel-buckets {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-
-.cancel-bucket {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-}
-
-.cancel-bucket-label {
-  flex: 0 0 64px;
-  font-size: var(--text-xs);
-  font-weight: var(--weight-medium);
-  color: var(--color-mute);
-  font-family: var(--font-mono);
-}
-
-.cancel-bucket-track {
-  flex: 1 1 auto;
-  height: 8px;
-  border-radius: var(--radius-full);
-  background: var(--color-border);
-  overflow: hidden;
-}
-
-.cancel-bucket-fill {
-  height: 100%;
-  border-radius: var(--radius-full);
-  background: var(--color-primary);
-  transition: width var(--duration-slow) var(--ease-standard);
-}
-
-/* Stacked variant: the same bar, split by where the freed slot ended up.
-   flex-grow keeps each segment proportional to its count. */
-.cancel-bucket-stack {
-  display: flex;
-  height: 100%;
-  border-radius: var(--radius-full);
-  overflow: hidden;
-  transition: width var(--duration-slow) var(--ease-standard);
-}
-
-.cancel-bucket-seg {
-  min-width: 4px;
-  height: 100%;
-}
-
-.cancel-bucket-seg.relocated {
-  background: var(--color-primary);
-}
-
-.cancel-bucket-seg.lost {
-  background: var(--color-warn);
-}
-
-.cancel-bucket-seg.pending {
-  background: var(--color-faint);
-}
-
-.cancel-legend {
-  display: flex;
-  gap: var(--space-4);
-  font-size: var(--text-xs);
-  color: var(--color-mute);
-}
-
-.cancel-legend span {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.cancel-swatch {
-  display: inline-block;
-  width: 10px;
-  height: 10px;
-  border-radius: 3px;
-}
-
-.cancel-swatch.relocated {
-  background: var(--color-primary);
-}
-
-.cancel-swatch.lost {
-  background: var(--color-warn);
-}
-
-.cancel-swatch.pending {
-  background: var(--color-faint);
-}
-
-.cancel-bucket-count {
-  flex: 0 0 auto;
-  font-size: var(--text-xs);
-  font-family: var(--font-mono);
-  color: var(--color-mute);
-}
-
-.cancel-columns {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--space-5);
-}
-
-.cancel-list-row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-3);
-  font-size: var(--text-xs);
-  color: var(--color-mute);
-}
-
-.cancel-list-count {
-  font-family: var(--font-mono);
-  flex: 0 0 auto;
-}
-
-/* Residual buckets ("Otro motivo", "Sin motivo dicho") always sort last;
-   this keeps them visually secondary even when their count is the tallest. */
-.cancel-list-row-residual {
-  color: var(--color-faint);
-}
-
-/* 4. Demand vs. supply heatmap -----------------------------------------------*/
 
 .heatmap-grid {
   display: grid;
-  gap: 4px;
+  gap: 6px;
   align-items: stretch;
 }
 
-.heatmap-corner {
-  grid-column: 1;
-}
-
-.heatmap-col-label,
-.heatmap-row-label {
+.heatmap-band-label,
+.heatmap-weekday {
   display: flex;
   align-items: center;
   font-size: var(--text-xs);
-  font-weight: var(--weight-medium);
   color: var(--color-mute);
 }
 
-.heatmap-col-label {
+.heatmap-band-label {
   justify-content: center;
-  padding-bottom: var(--space-2);
-}
-
-.heatmap-row-label {
-  padding-right: var(--space-2);
 }
 
 .heatmap-cell {
   position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  min-height: 52px;
+  min-height: 36px;
   border-radius: var(--radius-sm);
   background: var(--color-primary-soft);
-  overflow: hidden;
+  color: var(--color-ink);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--weight-semibold);
 }
 
 .heatmap-cell::before {
   content: "";
   position: absolute;
   inset: 0;
+  border-radius: inherit;
   background: var(--color-primary);
-  opacity: calc(var(--intensity, 0) * 0.85);
+  opacity: calc(0.08 + var(--intensity, 0) * 0.45);
+}
+
+.heatmap-cell span {
+  position: relative;
+}
+
+.heatmap-cell span em {
+  font-style: normal;
+  font-weight: var(--weight-regular);
+  color: var(--color-mute);
 }
 
 .heatmap-cell.gap {
-  box-shadow: inset 0 0 0 2px var(--color-warn);
+  box-shadow: inset 0 0 0 1.5px var(--color-warn);
+  background: var(--color-warn-soft);
 }
 
-/* A (weekday, band) the selected clinic does not open — the red "Cerrado" box
-   the site picker exists to show. Urgent, not warn: a shut door is harder
-   than demand without supply. */
-.heatmap-cell.closed {
-  background: var(--color-urgent-soft);
-  box-shadow: inset 0 0 0 2px var(--color-urgent);
-}
-
-.heatmap-cell.closed::before {
+.heatmap-cell.gap::before {
   display: none;
 }
 
-.heatmap-closed-label {
-  position: relative;
-  z-index: 1;
-  font-size: var(--text-xs);
-  font-weight: var(--weight-semibold);
-  color: var(--color-urgent);
-}
-
-.heatmap-hours {
-  margin: 0 0 var(--space-4);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  color: var(--color-mute);
-}
-
-.heatmap-demand,
-.heatmap-availability {
-  position: relative;
-  z-index: 1;
-  font-family: var(--font-mono);
-}
-
-.heatmap-demand {
-  font-size: var(--text-sm);
-  font-weight: var(--weight-bold);
-  color: var(--color-ink);
-}
-
-.heatmap-availability {
-  font-size: 10px;
-  color: var(--color-mute);
-}
-
-.heatmap-legend {
-  display: flex;
-  gap: var(--space-5);
-  margin-top: var(--space-4);
-  font-size: var(--text-xs);
-  color: var(--color-mute);
-}
-
-.heatmap-legend span {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.heatmap-swatch {
-  display: inline-block;
-  width: 10px;
-  height: 10px;
-  border-radius: 3px;
-  background: var(--color-primary);
-}
-
-.heatmap-swatch.gap {
-  background: transparent;
-  box-shadow: inset 0 0 0 2px var(--color-warn);
-}
-
-.heatmap-swatch.closed {
-  background: var(--color-urgent-soft);
-  box-shadow: inset 0 0 0 2px var(--color-urgent);
-}
-
-@media (max-width: 700px) {
-  .cancel-columns {
+@media (max-width: 900px) {
+  .insights-grid {
     grid-template-columns: 1fr;
   }
 }

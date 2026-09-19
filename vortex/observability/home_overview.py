@@ -1,304 +1,161 @@
-"""Real numbers for the Clinic View's Home page — no per-render mock. See
-``business_insights.py`` for the sibling module the Insights page uses; this
-one answers the Home page's four questions: how many calls, how many the
-agent resolved on its own, when they land in the day, and how full the
-diary already is.
+"""Today's briefing for the Clinic Home page.
 
-Calls, resolution rate and volume come from ``synthetic-data/``.
-``synthetic-data/logs/*.jsonl`` is CallLog-shaped exactly like the live
-``logs/calls.jsonl`` (see ``synthetic-data/README.md``), so it is read with
-the same ``calllog.read_recent`` + ``view.build_calls`` pipeline the console
-uses for a real call, one file at a time, concatenated. ``probe:`` calls
-(tool-shape smoke tests, empty ``from_number``, no real caller) are excluded
-from every count here — they are not a patient call.
+A clinic manager's morning page answers four questions from ``calls.jsonl``,
+not occupancy (that is the HIS) and not handle time (that is a contact centre):
 
-Occupancy is different: a call log never carries the capacity a booking was
-made against, only the booking itself, so it can't be read the same way.
-That number is precomputed straight off the clinic API's own GETs by
-``scripts/precompute_wall_cache.py`` (run at every board start-up) into
-``wall-cache/occupancy.json`` — see that script and ``wall-cache/README.md``
-for how. This module just reads the file.
+1. What did the inbound line do to the diary today — booked, moved, cancelled, registered.
+2. How much of that stayed off the desk — ended without escalate.
+3. Who still needs a person — live calls and escalations, grouped by reason.
+4. Where access was lost — unmet demand and cancelled slots not recovered,
+   over the last seven days so a quiet morning is not an empty page.
+
+Same ``list[CallCard]`` as ``business_insights``. Spanish labels live here
+because this payload is the Clinic View, not the jury wall.
 """
 
 from __future__ import annotations
 
-import json
 from collections import Counter
-from dataclasses import dataclass
-from datetime import date as date_cls
-from datetime import datetime, timedelta
-from statistics import median
+from datetime import UTC, datetime, timedelta
 from typing import Any
-from zoneinfo import ZoneInfo
 
-from vortex.observability.calllog import read_recent
-from vortex.observability.view import CallCard, build_calls
-from vortex.settings import REPO_ROOT
+from vortex.observability.business_insights import (
+    MADRID,
+    cancellation_slots,
+    unavailability_reasons,
+)
+from vortex.observability.view import CallCard
 
-MADRID = ZoneInfo("Europe/Madrid")
+WINDOW_DAYS = 7
 
-SYNTHETIC_LOG_DIR = REPO_ROOT / "synthetic-data" / "logs"
-
-#: Business hours the hourly chart buckets into — the clinic's published
-#: opening window, one bar per hour.
-CHART_HOURS: tuple[int, ...] = tuple(range(9, 20))
-
-#: Spanish display names for the specialty ids — the catalogue itself is in
-#: English (it mirrors the platform's own field values). Site names need no
-#: such map: "Arenal Centro" etc. are already proper nouns, identical in
-#: both languages.
-SPECIALTY_ES: dict[str, str] = {
-    "general_practice": "Medicina general",
-    "paediatrics": "Pediatría",
-    "dermatology": "Dermatología",
-    "orthopaedics": "Traumatología",
-    "gynaecology": "Ginecología",
-    "physiotherapy": "Fisioterapia",
+DIARY_LABELS: dict[str, str] = {
+    "book": "Concertadas",
+    "register": "Altas",
+    "reschedule": "Cambiadas",
+    "cancel": "Canceladas",
+    "no-action": "Sin cita",
+    "escalate": "A una persona",
+    "live": "En curso",
+    "ended": "Sin acción enviada",
 }
 
-DAY_LABEL_ES = ("lun", "mar", "mié", "jue", "vie", "sáb", "dom")
+HUMAN_REASON_ES: dict[str, str] = {
+    "medical_emergency": "Urgencia médica",
+    "patient_not_found": "Paciente no identificado",
+    "caller_not_authorised": "Tercero no autorizado",
+    "out_of_scope": "Fuera de la línea",
+    "en_curso": "En curso",
+}
 
 
-# ---------------------------------------------------------------------------
-# Loading the pack
-# ---------------------------------------------------------------------------
-
-
-def load_synthetic_cards() -> list[CallCard]:
-    """Every real (non-probe) call in ``synthetic-data/logs/``, newest first."""
-    events: list[dict[str, Any]] = []
-    for path in sorted(SYNTHETIC_LOG_DIR.glob("*.jsonl")):
-        events.extend(read_recent(path, limit=100_000))
-    cards = build_calls(events)
-    return [c for c in cards if not c.call_id.startswith("probe:")]
-
-
-def _card_date(card: CallCard) -> date_cls | None:
+def _started_madrid(card: CallCard) -> datetime | None:
     if not card.started_at:
         return None
     try:
         stamp = datetime.fromisoformat(card.started_at)
     except ValueError:
         return None
-    return stamp.astimezone(MADRID).date() if stamp.tzinfo else stamp.date()
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=UTC)
+    return stamp.astimezone(MADRID)
 
 
-def _card_hour(card: CallCard) -> int | None:
-    if not card.started_at:
-        return None
-    try:
-        stamp = datetime.fromisoformat(card.started_at)
-    except ValueError:
-        return None
-    local = stamp.astimezone(MADRID) if stamp.tzinfo else stamp
-    return local.hour
+def _mix_key(card: CallCard) -> str:
+    if card.live:
+        return "live"
+    kind = card.action_kind
+    if kind in DIARY_LABELS:
+        return kind
+    return "ended"
 
 
-def reference_date(cards: list[CallCard]) -> date_cls:
-    """The pack has no wall clock of its own: "today" is the most recent
-    calendar day any call actually landed on."""
-    dates = [d for c in cards if (d := _card_date(c))]
-    return max(dates) if dates else date_cls.today()
+def _human_reason(card: CallCard) -> tuple[str, str]:
+    if card.live:
+        return "en_curso", HUMAN_REASON_ES["en_curso"]
+    raw = card.decline_reason or card.reason or "escalate"
+    return raw, HUMAN_REASON_ES.get(raw, "Revisar en mostrador")
 
 
-# ---------------------------------------------------------------------------
-# 1. Headline stats
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class HomeStats:
-    calls_today: int = 0
-    resolved_pct: float | None = None
-    escalated_pct: float | None = None
-    median_duration_s: float | None = None
-    new_patients_registered: int = 0
-
-
-def home_stats(cards: list[CallCard], today: date_cls) -> HomeStats:
-    todays = [c for c in cards if _card_date(c) == today]
-    stats = HomeStats(calls_today=len(todays))
-    if not todays:
-        return stats
-    resolved = sum(
-        1 for c in todays if c.status in {"booked", "registered", "rescheduled", "cancelled"}
-    )
-    escalated = sum(1 for c in todays if c.status == "escalated")
-    stats.resolved_pct = round(100 * resolved / len(todays), 1)
-    stats.escalated_pct = round(100 * escalated / len(todays), 1)
-    stats.new_patients_registered = sum(1 for c in todays if c.action_kind == "register")
-    durations = [c.duration_ms / 1000 for c in todays if c.duration_ms]
-    if durations:
-        stats.median_duration_s = median(durations)
-    return stats
-
-
-# ---------------------------------------------------------------------------
-# 2. Hourly action volume (last 7 days, by the call's own clock)
-# ---------------------------------------------------------------------------
-
-#: How many days back "última semana" covers, today included.
-HOURLY_WINDOW_DAYS = 7
-
-
-def hourly_action_volume(cards: list[CallCard], today: date_cls) -> list[dict[str, Any]]:
-    since = today - timedelta(days=HOURLY_WINDOW_DAYS - 1)
-    booking: Counter[int] = Counter()
-    reschedule: Counter[int] = Counter()
-    cancel: Counter[int] = Counter()
-    for card in cards:
-        day = _card_date(card)
-        if day is None or not (since <= day <= today):
-            continue
-        hour = _card_hour(card)
-        if hour is None:
-            continue
-        if card.action_kind == "book":
-            booking[hour] += 1
-        elif card.action_kind == "reschedule":
-            reschedule[hour] += 1
-        elif card.action_kind == "cancel":
-            cancel[hour] += 1
-    return [
+def _today_snapshot(today: list[CallCard]) -> dict[str, Any]:
+    mix_counts: Counter[str] = Counter(_mix_key(c) for c in today)
+    mix = [
         {
-            "hour": h,
-            "booking": booking.get(h, 0),
-            "reschedule": reschedule.get(h, 0),
-            "cancel": cancel.get(h, 0),
+            "key": key,
+            "label": DIARY_LABELS[key],
+            "count": mix_counts.get(key, 0),
         }
-        for h in CHART_HOURS
+        for key in (
+            "book",
+            "register",
+            "reschedule",
+            "cancel",
+            "no-action",
+            "escalate",
+            "live",
+            "ended",
+        )
+        if mix_counts.get(key, 0)
     ]
 
+    ended = [c for c in today if not c.live]
+    escalated = [c for c in today if c.status == "escalated"]
+    contained = [c for c in ended if c.status != "escalated"]
+    contained_pct = round(100 * len(contained) / len(ended), 1) if ended else None
 
-# ---------------------------------------------------------------------------
-# 3. Daily call volume trend, every day the pack has
-# ---------------------------------------------------------------------------
-
-
-def daily_call_volume(cards: list[CallCard]) -> list[dict[str, Any]]:
-    counts: Counter[date_cls] = Counter()
-    for card in cards:
-        d = _card_date(card)
-        if d:
-            counts[d] += 1
-    if not counts:
-        return []
-    days = sorted(counts)
-    return [{"date": d.isoformat(), "total": counts[d]} for d in days]
-
-
-# ---------------------------------------------------------------------------
-# 4. Occupancy: read straight off wall-cache/occupancy.json
-# ---------------------------------------------------------------------------
-#
-# Capacity and busy-slot counts are no longer computed here: they come
-# precomputed from the clinic API's own GETs (GET /clinic once, GET
-# /availability per specialty) by scripts/precompute_wall_cache.py, run at
-# every board start-up (see live.py's main()) and by hand any other time.
-# See wall-cache/README.md for the file shape and why occupancy needs a
-# separate fetch+postprocess pass instead of a straight log read: a
-# booking's payload names a provider and a slot, never the capacity it was
-# booked against.
-
-OCCUPANCY_CACHE_PATH = REPO_ROOT / "wall-cache" / "occupancy.json"
-
-_occupancy_cache_value: dict[str, Any] | None = None
-
-
-def _occupancy_cache() -> dict[str, Any]:
-    """Loaded once per process — the file only changes across a board
-    restart (or a manual rerun of the precompute script), never mid-run."""
-    global _occupancy_cache_value
-    if _occupancy_cache_value is None:
-        try:
-            _occupancy_cache_value = json.loads(OCCUPANCY_CACHE_PATH.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            _occupancy_cache_value = {}
-    return _occupancy_cache_value
-
-
-def _matching_cells(
-    cells: list[dict[str, Any]], *, location_id: str, specialty_id: str
-) -> list[dict[str, Any]]:
-    return [
-        c
-        for c in cells
-        if (not location_id or c["location_id"] == location_id)
-        and (not specialty_id or c["specialty_id"] == specialty_id)
+    needs_human = [c for c in today if c.live or c.status == "escalated"]
+    reason_counts: Counter[tuple[str, str]] = Counter(_human_reason(c) for c in needs_human)
+    human_reasons = [
+        {"key": key, "label": label, "count": count}
+        for (key, label), count in reason_counts.most_common()
     ]
 
+    booked = mix_counts.get("book", 0)
+    registered = mix_counts.get("register", 0)
+    rescheduled = mix_counts.get("reschedule", 0)
+    cancelled = mix_counts.get("cancel", 0)
 
-def _day_pct(
-    by_date: dict[str, list[dict[str, Any]]], day: date_cls, *, location_id: str, specialty_id: str
-) -> int:
-    cells = _matching_cells(
-        by_date.get(day.isoformat(), []), location_id=location_id, specialty_id=specialty_id
-    )
-    capacity = sum(c["capacity_slots"] for c in cells)
-    if capacity <= 0:
-        return 0
-    busy = sum(c["busy_slots"] for c in cells)
-    return max(0, min(100, round(100 * busy / capacity)))
-
-
-def occupancy(*, site: str = "", specialty: str = "") -> dict[str, Any]:
-    cache = _occupancy_cache()
-    if not cache:
-        return {"week": [], "weekAvgPct": 0, "monthPct": 0}
-
-    site_name_to_id = {s["name"]: s["id"] for s in cache.get("sites", [])}
-    specialty_name_to_id = {
-        SPECIALTY_ES.get(s["id"], s["name"]): s["id"] for s in cache.get("specialties", [])
-    }
-    location_id = site_name_to_id.get(site, site)
-    specialty_id = specialty_name_to_id.get(specialty, specialty)
-    by_date = {d["date"]: d["cells"] for d in cache.get("days", [])}
-
-    today = datetime.now(MADRID).date()
-    week = []
-    for i in range(7):
-        day = today + timedelta(days=i)
-        pct = _day_pct(by_date, day, location_id=location_id, specialty_id=specialty_id)
-        week.append({"date": day.isoformat(), "label": DAY_LABEL_ES[day.weekday()], "pct": pct})
-    week_avg = round(sum(d["pct"] for d in week) / len(week)) if week else 0
-
-    month_days = [today + timedelta(days=i) for i in range(1, 31)]
-    month_pcts = [
-        _day_pct(by_date, d, location_id=location_id, specialty_id=specialty_id) for d in month_days
-    ]
-    month_pct = round(sum(month_pcts) / len(month_pcts)) if month_pcts else 0
-
-    return {"week": week, "weekAvgPct": week_avg, "monthPct": month_pct}
-
-
-def sites_catalogue() -> list[str]:
-    return [s["name"] for s in _occupancy_cache().get("sites", [])]
-
-
-def specialties_catalogue() -> list[str]:
-    return [SPECIALTY_ES.get(s["id"], s["name"]) for s in _occupancy_cache().get("specialties", [])]
-
-
-# ---------------------------------------------------------------------------
-# Everything together
-# ---------------------------------------------------------------------------
-
-
-def home_overview(cards: list[CallCard] | None = None) -> dict[str, Any]:
-    cards = cards if cards is not None else load_synthetic_cards()
-    today = reference_date(cards)
-    stats = home_stats(cards, today)
     return {
-        "reference_date": today.isoformat(),
-        "stats": {
-            "calls_today": stats.calls_today,
-            "resolved_pct": stats.resolved_pct,
-            "escalated_pct": stats.escalated_pct,
-            "median_duration_s": stats.median_duration_s,
-            "new_patients_registered": stats.new_patients_registered,
-        },
-        "hourly_action_volume": hourly_action_volume(cards, today),
-        "daily_call_volume": daily_call_volume(cards),
-        "sites": sites_catalogue(),
-        "specialties": specialties_catalogue(),
+        "calls": len(today),
+        "ended": len(ended),
+        "booked": booked,
+        "registered": registered,
+        "rescheduled": rescheduled,
+        "cancelled": cancelled,
+        "diary_touched": booked + rescheduled + cancelled,
+        "contained_pct": contained_pct,
+        "escalated": len(escalated),
+        "live": mix_counts.get("live", 0),
+        "needs_human": len(needs_human),
+        "human_reasons": human_reasons,
+        "mix": mix,
+    }
+
+
+def home_overview(cards: list[CallCard], *, now: datetime | None = None) -> dict[str, Any]:
+    """Payload for GET /api/wall/home-overview."""
+    now = now or datetime.now(UTC)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=UTC)
+    local_now = now.astimezone(MADRID)
+    today_date = local_now.date()
+    week_cut = local_now - timedelta(days=WINDOW_DAYS)
+
+    today: list[CallCard] = []
+    week: list[CallCard] = []
+    for card in cards:
+        started = _started_madrid(card)
+        if started is None:
+            continue
+        if started.date() == today_date:
+            today.append(card)
+        if started >= week_cut:
+            week.append(card)
+
+    return {
+        "as_of": local_now.isoformat(),
+        "window_days": WINDOW_DAYS,
+        "today": _today_snapshot(today),
+        "unavailability": unavailability_reasons(week),
+        "cancellations": cancellation_slots(week, now=now),
+        "calls_in_window": len(week),
     }

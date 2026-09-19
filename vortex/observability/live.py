@@ -32,7 +32,8 @@ from vortex.observability import auth, callfeed, explain, insights, pricing
 from vortex.observability import calendar as cal
 from vortex.observability.business_insights import business_insights
 from vortex.observability.demo import replay_cancellation_demo, write_scripted_call
-from vortex.observability.home_overview import home_overview, load_synthetic_cards, occupancy
+from vortex.observability.home_overview import home_overview
+from vortex.observability.home_pack import load_synthetic_cards, occupancy
 from vortex.observability.icons import icon
 from vortex.observability.view import CallCard, build_calls
 from vortex.observability.wall_timeline import build_timeline, call_summary, latest_intent
@@ -1372,7 +1373,7 @@ def _home_cards() -> list[CallCard]:
 def wall_home_overview_api() -> JSONResponse:
     """Stats, hourly and daily volume for the Home page — read straight off
     ``synthetic-data/`` (see ``home_overview.py``), never a per-render mock."""
-    return JSONResponse(home_overview(_home_cards()))
+    return JSONResponse(home_overview(_home_cards(), now=datetime.now(UTC)))
 
 
 @app.get("/api/wall/occupancy")
