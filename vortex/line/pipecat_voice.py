@@ -2,7 +2,7 @@
 
     transport.input -> STT (Soniox stt-rt-v5) -> language watcher
                     -> user aggregator -> LLM (OpenAI-compatible, EU)
-                    -> TTS (Google Cloud, Azure Neural or Deepgram Aura-2)
+                    -> TTS (Google Chirp / Gemini-TTS, or ElevenLabs)
                     -> transport.output -> assistant aggregator
 
 Soniox transcribes, an OpenAI-compatible endpoint named by ``LLM_PROVIDER``
@@ -13,7 +13,10 @@ Two TTS services can run at once. ``VORTEX_TTS_PROVIDER`` speaks Spanish and
 ``VORTEX_TTS_PROVIDER_ALT`` speaks what the primary cannot, so
 ``VORTEX_TTS_PROVIDER=elevenlabs`` with the default ``_ALT=google`` gives
 ElevenLabs Spanish and Google ca/gl/eu. When the two are the same (the
-default, google/google) there is one service and one voice-swap path.
+default, google/google) English and Spanish stay on Chirp 3 HD
+(``GoogleHttpTTSService``) and ca/gl/eu speak through ``GeminiTTSService``
+(``gemini-2.5-flash-tts``). ``GOOGLE_TTS_STANDARD_FALLBACK`` restores the old
+single ``GoogleHttpTTSService`` with Standard-* voices.
 
 One pipeline per socket. The serializer takes the ``stream_sid`` of this call,
 the context takes this call's prompt, and every tool handler closes over this
@@ -29,7 +32,8 @@ TODO(line):
 - Run one real call end to end once the four keys exist.
 - Confirm the 8 kHz µ-law path: serializer ``twilio_sample_rate=8000`` in, and
   the TTS asked for 8 kHz PCM out (Google LINEAR16 @ 8000, ElevenLabs
-  ``pcm_8000``). Check for choppy audio.
+  ``pcm_8000``; Gemini-TTS stays at 24 kHz and the transport resamples).
+  Check for choppy audio.
 - Hang up from our side when the agent says goodbye (send EndFrame, let the
   platform close the socket). auto_hang_up stays False: no Twilio account.
 """
@@ -43,16 +47,24 @@ from fastapi import WebSocket
 
 from vortex import tools as registry
 from vortex.conversation.language import DEFAULT_LANGUAGE, detect_language, tts_voice_for
-from vortex.conversation.prompt import GREETING, idle_prompt_for, initial_messages
+from vortex.conversation.prompt import (
+    GREETING,
+    idle_prompt_for,
+    initial_messages,
+    wait_prompt_for,
+)
 from vortex.conversation.stt_context import stt_context_text, stt_terms
 from vortex.conversation.turns import (
     TurnSettings,
     default_turn_settings,
+    effective_vad_stop_secs,
     user_turn_strategies,
 )
 from vortex.line.aic_filter import build_audio_in_filter
+from vortex.line.llm_timeout import first_token_guard
 from vortex.line.session import CallSession
 from vortex.observability.tracing import traced_openai_llm_service
+from vortex.settings import GEMINI_TTS_LANGUAGES
 
 log = logging.getLogger(__name__)
 
@@ -142,6 +154,10 @@ async def run_pipecat_call(
         should_interrupt=turns.enable_interruptions,
     )
 
+    # The language this call is in, shared by the watcher that updates it and
+    # the router that reads it. Per call: a closure, never a module global.
+    language_state = _LanguageState()
+
     # ---- LLM: any OpenAI-compatible endpoint, as long as it is in the EU. ----
     llm_settings = OpenAILLMService.Settings(
         model=settings.llm_model,
@@ -150,15 +166,22 @@ async def run_pipecat_call(
         extra=_llm_extra_body(settings),
     )
     llm = traced_openai_llm_service(
-        OpenAILLMService,
+        # The guard goes underneath the tracing subclass, which only overrides
+        # ``create_client``: a request that never streams a first token is
+        # abandoned, re-issued, and in the worst case answered with a short
+        # spoken line. See vortex/line/llm_timeout.py for the post-mortem.
+        first_token_guard(OpenAILLMService),
         api_key=settings.llm_api_key,
         base_url=settings.llm_base_url or None,
         settings=llm_settings,
+        first_token_timeout_secs=settings.llm_first_token_timeout_secs,
+        llm_retries=settings.llm_retries,
+        # Read at fire time, so a mid-call language switch moves the line and
+        # the TTS router sends it down the branch that can say it.
+        timeout_fallback_text=lambda: wait_prompt_for(language_state.language),
+        timeout_log_event=ctx.log.event,
     )
 
-    # The language this call is in, shared by the watcher that updates it and
-    # the router that reads it. Per call: a closure, never a module global.
-    language_state = _LanguageState()
     tts = _make_tts_stage(settings, language_state)
 
     # ---- tools: every registry entry becomes a function the model can call ----
@@ -251,10 +274,11 @@ def _providers(settings: Any) -> dict[str, object]:
 def _user_aggregator_params(turns: TurnSettings) -> Any:
     """The user aggregator's params: VAD, idle timeout and the turn strategies.
 
-    Strategies always come from the conversation lane. In VAD mode that keeps
-    the aggregator off its smart-turn v3 defaults. In Soniox mode it overrides
-    the STT's ``ExternalUserTurnStrategies`` with a word-count start gate plus
-    an external stop, so ``interrupt_min_words`` actually runs.
+    Strategies always come from the conversation lane. In VAD+Smart Turn mode
+    that installs ``LocalSmartTurnAnalyzerV3`` and shortens VAD ``stop_secs``
+    to 0.2 s. In Soniox mode it overrides the STT's
+    ``ExternalUserTurnStrategies`` with a word-count start gate plus an
+    external stop, so ``interrupt_min_words`` actually runs.
 
     Imports pipecat lazily so the server starts without the keys.
     """
@@ -267,7 +291,7 @@ def _user_aggregator_params(turns: TurnSettings) -> Any:
             params=VADParams(
                 confidence=turns.vad_confidence,
                 start_secs=turns.vad_start_secs,
-                stop_secs=turns.vad_stop_secs,
+                stop_secs=effective_vad_stop_secs(turns),
                 min_volume=turns.vad_min_volume,
             )
         ),
@@ -293,10 +317,12 @@ class _LanguageState:
 
 def _make_tts_stage(settings: Any, state: _LanguageState) -> Any:
     """One TTS service, or a router over two when primary and alternate differ."""
-    primary = _make_tts(settings, settings.tts_provider)
+    primary = _make_tts(settings, settings.tts_provider, state)
     if not settings.tts_is_routed:
         return primary
-    return _TTSRouter(settings, state, primary, _make_tts(settings, settings.tts_provider_alt))
+    return _TTSRouter(
+        settings, state, primary, _make_tts(settings, settings.tts_provider_alt, state)
+    )
 
 
 def _llm_extra_body(settings: Any) -> dict[str, Any]:
@@ -318,13 +344,14 @@ def _llm_extra_body(settings: Any) -> dict[str, Any]:
     return extra
 
 
-def _make_tts(settings: Any, provider: str | None = None) -> Any:
-    """Build one TTS service, asked for 8 kHz PCM.
+def _make_tts(
+    settings: Any, provider: str | None = None, state: _LanguageState | None = None
+) -> Any:
+    """Build one TTS service (or a Chirp|Gemini pair for Google).
 
-    Google encodes LINEAR16 at 8000; ElevenLabs maps the same rate to its
-    ``pcm_8000`` output format. The Twilio serializer does the µ-law companding
-    on the way out either way, so the wire format never changes with the
-    provider.
+    Google Chirp / ElevenLabs are asked for 8 kHz PCM. Gemini-TTS only emits
+    24 kHz; the Twilio serializer resamples on the way out. The wire format
+    never changes with the provider.
     """
     name = provider or settings.tts_provider
     voice, language = tts_voice_for(DEFAULT_LANGUAGE, settings, name)
@@ -348,19 +375,69 @@ def _make_tts(settings: Any, provider: str | None = None) -> Any:
             ),
         )
 
-    # The HTTP service, not the streaming ``GoogleTTSService``: streaming only
-    # speaks Chirp 3 HD / Journey, and ca/gl/eu exist solely as Standard
-    # voices. The HTTP one takes both families, so a single service covers
-    # every language through a voice swap.
+    return _make_google_tts(settings, voice, language, state)
+
+
+def _make_google_tts(
+    settings: Any,
+    voice: str,
+    language: Any,
+    state: _LanguageState | None,
+) -> Any:
+    """Chirp HTTP for en/es; Gemini-TTS for ca/gl/eu unless Standard fallback."""
     from pipecat.services.google.tts import GoogleHttpTTSService
 
-    return GoogleHttpTTSService(
+    chirp = GoogleHttpTTSService(
         # Inline JSON wins when both are set, matching pipecat's own order.
         credentials=settings.google_tts_credentials_json or None,
         credentials_path=settings.google_application_credentials or None,
         sample_rate=LINE_SAMPLE_RATE,
         settings=GoogleHttpTTSService.Settings(voice=voice, language=language),
     )
+    if not settings.google_tts_uses_gemini:
+        # Research 06 fallback: one HTTP service, Standard-* for ca/gl/eu.
+        return chirp
+
+    from pipecat.services.google.tts import GeminiTTSService
+
+    gemini_voice, gemini_language = tts_voice_for("ca", settings, "google")
+    gemini = GeminiTTSService(
+        credentials=settings.google_tts_credentials_json or None,
+        credentials_path=settings.google_application_credentials or None,
+        # Gemini-TTS is fixed at 24 kHz; the transport resamples to 8 kHz.
+        settings=GeminiTTSService.Settings(
+            model=settings.google_tts_gemini_model,
+            voice=gemini_voice,
+            language=gemini_language,
+        ),
+    )
+    language_state = state if state is not None else _LanguageState()
+    return _language_gate_router(language_state, GEMINI_TTS_LANGUAGES, gemini, chirp)
+
+
+def _language_gate_router(
+    state: _LanguageState,
+    primary_languages: frozenset[str],
+    primary: Any,
+    alternate: Any,
+) -> Any:
+    """ParallelPipeline that feeds ``primary`` only when ``state.language`` matches."""
+    from pipecat.pipeline.parallel_pipeline import ParallelPipeline
+    from pipecat.processors.filters.function_filter import FunctionFilter
+    from pipecat.processors.frame_processor import FrameDirection
+
+    async def to_primary(_frame: Any) -> bool:
+        return state.language in primary_languages
+
+    async def to_alternate(_frame: Any) -> bool:
+        return state.language not in primary_languages
+
+    def gate(fn: Any) -> Any:
+        return FunctionFilter(
+            filter=fn, direction=FrameDirection.DOWNSTREAM, enable_direct_mode=True
+        )
+
+    return ParallelPipeline([gate(to_primary), primary], [gate(to_alternate), alternate])
 
 
 def _TTSRouter(  # noqa: N802 - factory that returns a processor
@@ -396,25 +473,9 @@ def _TTSRouter(  # noqa: N802 - factory that returns a processor
     so a second source of truth about which service is "active" would only be
     something else to keep in sync.
     """
-    from pipecat.pipeline.parallel_pipeline import ParallelPipeline
-    from pipecat.processors.filters.function_filter import FunctionFilter
-    from pipecat.processors.frame_processor import FrameDirection
-
-    primary_languages = settings.tts_languages(settings.tts_provider)
-
-    async def to_primary(_frame: Any) -> bool:
-        return state.language in primary_languages
-
-    async def to_alternate(_frame: Any) -> bool:
-        return state.language not in primary_languages
-
-    def gate(fn: Any) -> Any:
-        # enable_direct_mode: the predicate is a set lookup, not worth a task.
-        return FunctionFilter(
-            filter=fn, direction=FrameDirection.DOWNSTREAM, enable_direct_mode=True
-        )
-
-    return ParallelPipeline([gate(to_primary), primary], [gate(to_alternate), alternate])
+    return _language_gate_router(
+        state, settings.tts_languages(settings.tts_provider), primary, alternate
+    )
 
 
 def _PrivacyGuard(  # noqa: N802 - factory that returns a processor

@@ -18,7 +18,8 @@ Two ideas make every provider swappable from ``.env`` alone:
   Each preset reads its *own* key variable, so several can sit in one ``.env``.
 - **A primary and an alternate TTS.** ``VORTEX_TTS_PROVIDER`` speaks Spanish;
   ``VORTEX_TTS_PROVIDER_ALT`` speaks whatever the primary cannot. With both on
-  ``google`` (the default) it is one service and the old single-voice path.
+  ``google`` (the default) English/Spanish ride Chirp 3 HD and ca/gl/eu ride
+  Gemini-TTS, unless ``GOOGLE_TTS_STANDARD_FALLBACK`` restores Standard-*.
 
 UNVERIFIED markers below flag base URLs and model ids nobody has called yet.
 """
@@ -115,6 +116,29 @@ def _tts_provider(var: str = "VORTEX_TTS_PROVIDER") -> str:
     return name if name in TTS_PROVIDERS else DEFAULT_TTS_PROVIDER
 
 
+def _env_flag(name: str, default: str = "false") -> bool:
+    """Truthy for 1/true/yes/on; everything else is false."""
+    return _env(name, default).lower() in ("1", "true", "yes", "on")
+
+
+# Chirp 3 HD has no ca/gl/eu. Gemini-TTS does (Preview). Short names match the
+# Spanish Chirp identity (Aoede). Standard-* only when the fallback flag is on.
+DEFAULT_GEMINI_TTS_MODEL = "gemini-2.5-flash-tts"
+DEFAULT_GEMINI_TTS_VOICE = "Aoede"
+GOOGLE_TTS_STANDARD_CA = "ca-ES-Standard-B"
+GOOGLE_TTS_STANDARD_GL = "gl-ES-Standard-A"
+GOOGLE_TTS_STANDARD_EU = "eu-ES-Standard-A"
+# Languages that leave Chirp and speak through GeminiTTSService.
+GEMINI_TTS_LANGUAGES: frozenset[str] = frozenset({"ca", "gl", "eu"})
+
+
+def _google_tts_voice_coofficial(env_var: str, standard_default: str) -> str:
+    """Gemini short name by default; Standard-* when GOOGLE_TTS_STANDARD_FALLBACK."""
+    if _env_flag("GOOGLE_TTS_STANDARD_FALLBACK"):
+        return _env(env_var, standard_default)
+    return _env(env_var, DEFAULT_GEMINI_TTS_VOICE)
+
+
 @dataclass(frozen=True)
 class Settings:
     # Platform (the organisers' API: clinic reads + submit routes)
@@ -167,6 +191,20 @@ class Settings:
     llm_reasoning_effort: str = field(
         default_factory=lambda: _env("LLM_REASONING_EFFORT", "none").lower()
     )
+    # How long one completion may go without producing its *first* token before
+    # the line gives up on it and re-issues it. On 2026-09-18 two scored calls
+    # sat mute for 36 s on a request the provider accepted and never streamed,
+    # and the harness cut them. Only the first token is on the clock: once the
+    # answer is flowing it is allowed to take as long as it takes. 0 disables
+    # the guard. See vortex/line/llm_timeout.py.
+    llm_first_token_timeout_secs: float = field(
+        default_factory=lambda: float(_env("LLM_FIRST_TOKEN_TIMEOUT_SECS", "8.0"))
+    )
+    # How many times a request that produced no first token is re-issued. One
+    # retry costs at most another LLM_FIRST_TOKEN_TIMEOUT_SECS of the call's
+    # three minutes; after the last one the agent speaks a short holding line
+    # rather than saying nothing.
+    llm_retries: int = field(default_factory=lambda: int(_env("LLM_RETRIES", "1")))
 
     # --- Arbiter: the post-hangup submission judge ----------------------------
     # Nothing consumes this yet. It is here so the key and the model id can be
@@ -199,18 +237,34 @@ class Settings:
     google_tts_voice_en: str = field(
         default_factory=lambda: _env("GOOGLE_TTS_VOICE_EN", "en-GB-Chirp3-HD-Aoede")
     )
-    # Spanish gets a Chirp 3 HD voice; ca/gl/eu only exist as Standard voices.
+    # Spanish stays on Chirp 3 HD. ca/gl/eu speak through Gemini-TTS
+    # (gemini-2.5-flash-tts) with the same short voice name as Spanish Chirp
+    # (Aoede), unless GOOGLE_TTS_STANDARD_FALLBACK turns Standard-* back on.
     google_tts_voice_es: str = field(
         default_factory=lambda: _env("GOOGLE_TTS_VOICE_ES", "es-ES-Chirp3-HD-Aoede")
     )
     google_tts_voice_ca: str = field(
-        default_factory=lambda: _env("GOOGLE_TTS_VOICE_CA", "ca-ES-Standard-B")
+        default_factory=lambda: _google_tts_voice_coofficial(
+            "GOOGLE_TTS_VOICE_CA", GOOGLE_TTS_STANDARD_CA
+        )
     )
     google_tts_voice_gl: str = field(
-        default_factory=lambda: _env("GOOGLE_TTS_VOICE_GL", "gl-ES-Standard-A")
+        default_factory=lambda: _google_tts_voice_coofficial(
+            "GOOGLE_TTS_VOICE_GL", GOOGLE_TTS_STANDARD_GL
+        )
     )
     google_tts_voice_eu: str = field(
-        default_factory=lambda: _env("GOOGLE_TTS_VOICE_EU", "eu-ES-Standard-A")
+        default_factory=lambda: _google_tts_voice_coofficial(
+            "GOOGLE_TTS_VOICE_EU", GOOGLE_TTS_STANDARD_EU
+        )
+    )
+    # Off by default: GeminiTTSService for ca/gl/eu. Set true to keep the old
+    # GoogleHttpTTSService + Standard-B path (research 06 fallback).
+    google_tts_standard_fallback: bool = field(
+        default_factory=lambda: _env_flag("GOOGLE_TTS_STANDARD_FALLBACK")
+    )
+    google_tts_gemini_model: str = field(
+        default_factory=lambda: _env("GOOGLE_TTS_GEMINI_MODEL", DEFAULT_GEMINI_TTS_MODEL)
     )
 
     # ElevenLabs. Spanish only here: it has no Catalan, Galician or Basque
@@ -381,6 +435,11 @@ class Settings:
         return self.google_tts_voice_es
 
     @property
+    def google_tts_uses_gemini(self) -> bool:
+        """True when ca/gl/eu ride GeminiTTSService instead of Standard-*."""
+        return not self.google_tts_standard_fallback
+
+    @property
     def tts_voice(self) -> str:
         """The voice the primary provider starts the call with (Spanish)."""
         return self.tts_voice_es(self.tts_provider)
@@ -425,6 +484,8 @@ class Settings:
             "llm_provider": self.llm_provider,
             "llm_model": self.llm_model,
             "llm_base_url": self.llm_base_url,
+            "llm_first_token_timeout_secs": self.llm_first_token_timeout_secs,
+            "llm_retries": self.llm_retries,
             "arbiter_provider": self.arbiter_provider,
             "arbiter_model": self.arbiter_model,
             "arbiter_base_url": self.arbiter_base_url,
@@ -435,6 +496,10 @@ class Settings:
             "tts_voice": self.tts_voice,
             "tts_languages": sorted(self.tts_covered_languages),
             "tts_language_switch": self.tts_supports_language_switch,
+            "google_tts_gemini": self.google_tts_uses_gemini,
+            "google_tts_gemini_model": self.google_tts_gemini_model
+            if self.google_tts_uses_gemini
+            else "",
             # A provider with a key but no voice id builds and then fails on
             # every utterance, so say so before the first call.
             "tts_voices_missing": self.tts_voices_missing,
