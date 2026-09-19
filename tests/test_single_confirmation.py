@@ -18,6 +18,7 @@ assertion in the file. Everything runs offline: the submit client is a fake.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -65,6 +66,24 @@ class AcceptingSubmitter:
 
     async def aclose(self) -> None:
         return None
+
+
+class GatedSubmitter(AcceptingSubmitter):
+    """The same client, with the POST held open until the test lets it answer.
+
+    A real POST is in flight for as long as the platform takes to answer, and
+    that is the window the next caller turn arrives in.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.in_flight = asyncio.Event()
+        self.answer = asyncio.Event()
+
+    async def submit(self, call_id: str, action: Action) -> SubmitResult:
+        self.in_flight.set()
+        await self.answer.wait()
+        return await super().submit(call_id, action)
 
 
 def make_session(settings, call_id: str) -> CallSession:
@@ -345,6 +364,30 @@ async def test_accepting_the_refusal_submits_it_at_once(offline_settings) -> Non
     assert route == "/api/v1/submit/no-action"
     assert payload["reason"] == "specialty_not_covered"
     assert len(sent(session)) == 1
+
+
+async def test_a_second_acceptance_never_sends_the_refusal_twice(offline_settings) -> None:
+    """Two acceptance turns in a row, with the platform answering after both."""
+    session = make_session(offline_settings, "CA-ah-i-see-twice")
+    submitter = GatedSubmitter()
+    session.submitter = submitter
+    session.ctx.submitter = submitter
+    session.memory.observe(
+        "check_eligibility",
+        EligibilityVerdict(
+            allowed=False,
+            rejection=Rejection(reason="specialty_not_covered"),
+        ),
+    )
+
+    session.accept_refusal("caller accepted the refusal: Ah, I see.")
+    await submitter.in_flight.wait()
+    session.accept_refusal("caller accepted the refusal: Right, thanks.")
+    await asyncio.sleep(0)  # let the second task reach the POST it must not make
+    submitter.answer.set()
+    await session.close()
+
+    assert [route for route, _ in sent(session)] == ["/api/v1/submit/no-action"]
 
 
 async def test_a_yes_to_another_policy_does_not_submit_the_refusal(offline_settings) -> None:
