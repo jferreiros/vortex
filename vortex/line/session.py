@@ -34,7 +34,13 @@ from vortex.contract import (
     ToolContext,
     action_route,
 )
-from vortex.line.submit import DryRunSubmitClient, SubmitApi, SubmitClient, submit_action
+from vortex.line.submit import (
+    DryRunSubmitClient,
+    SubmitApi,
+    SubmitClient,
+    submit_action,
+    with_verdict_reason,
+)
 from vortex.line.twilio import StartPayload
 from vortex.observability.calllog import CallLog
 from vortex.observability.tracing import observe_span
@@ -48,6 +54,12 @@ SUBMIT_TOOL = "submit_action"
 # (the same action twice) is a record; everything else is not, ``dry_run``
 # included - see ``CallSession.has_accepted_submission``.
 ACCEPTED_STATUSES: tuple[str, ...] = ("accepted", "duplicate")
+
+# The tools that answer with the rule the clinic applied, named in the closed
+# vocabulary the platform scores. Their reason is the call's verdict: a refusal
+# has to carry it verbatim, whatever the model remembered. See
+# ``CallMemory.last_verdict`` and the override in ``vortex/line/submit.py``.
+VERDICT_TOOLS: frozenset[str] = frozenset({"check_eligibility", "find_slots"})
 
 
 @dataclass
@@ -71,6 +83,11 @@ class CallMemory:
 
     last_rejection: Rejection | None = None
     last_rejection_tool: str = ""
+    # The subset of ``last_rejection`` that came from a rule, not from prose:
+    # an eligibility verdict or a provider ``find_slots`` reported as blocked.
+    # It is the reason a refusal must carry, so ``submit_action`` forces it.
+    last_verdict: Rejection | None = None
+    last_verdict_tool: str = ""
     prepared: Action | None = None
     prepared_tool: str = ""
     # Set by the conversation lane when the caller agrees to ``prepared``. It
@@ -94,6 +111,9 @@ class CallMemory:
     def remember_rejection(self, tool: str, rejection: Rejection) -> None:
         self.last_rejection = rejection
         self.last_rejection_tool = tool
+        if tool in VERDICT_TOOLS:
+            self.last_verdict = rejection
+            self.last_verdict_tool = tool
         self.prepared = None
         self.prepared_tool = ""
         self.confirmed = False
@@ -108,6 +128,8 @@ class CallMemory:
     def forget_rejection(self) -> None:
         self.last_rejection = None
         self.last_rejection_tool = ""
+        self.last_verdict = None
+        self.last_verdict_tool = ""
 
     def observe(self, tool: str, result: Any) -> None:
         """Remember whatever a tool result says about where the call stands.
@@ -227,9 +249,13 @@ class CallSession:
         if name == SUBMIT_TOOL and isinstance(result, SubmitResult):
             self.submitted.append(result)
             try:
-                self.sent_actions.append(SubmitInput.model_validate(raw_args).action)
+                sent = SubmitInput.model_validate(raw_args).action
             except ValidationError:  # pragma: no cover - the registry validated it already
                 pass
+            else:
+                # What left the process, reason override included, so the
+                # fallback can tell a re-send from a first try.
+                self.sent_actions.append(with_verdict_reason(self.ctx, sent))
             if result.status in ACCEPTED_STATUSES:
                 self.arm_hangup("submit_accepted")
         else:
@@ -255,7 +281,7 @@ class CallSession:
     async def submit(self, action: Action) -> SubmitResult:
         result = await submit_action(self.ctx, SubmitInput(action=action))
         self.submitted.append(result)
-        self.sent_actions.append(action)
+        self.sent_actions.append(with_verdict_reason(self.ctx, action))
         return result
 
     @property
