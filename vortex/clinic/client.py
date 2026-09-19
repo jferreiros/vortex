@@ -459,6 +459,7 @@ class ClinicClient:
         self._catalogue: Catalogue | None = None
         self._catalogue_lock = asyncio.Lock()
         self._availability_cache: dict[tuple[Any, ...], AvailabilityResponse] = {}
+        self._availability_generation = 0
         self._availability_lock = asyncio.Lock()
         self._directory_cache: OrderedDict[tuple[Any, ...], list[PatientRecord]] = OrderedDict()
         self._directory_lock = asyncio.Lock()
@@ -544,6 +545,7 @@ class ClinicClient:
             cached = self._availability_cache.get(key)
             if cached is not None:
                 return cached.model_copy(deep=True)
+            generation = self._availability_generation
             answer = await self._fetch_availability(
                 date_from=date_from,
                 date_to=date_to,
@@ -553,7 +555,8 @@ class ClinicClient:
                 patient_id=patient_id,
                 insurer=insurer,
             )
-            self._availability_cache[key] = answer
+            if generation == self._availability_generation:
+                self._availability_cache[key] = answer
             return answer.model_copy(deep=True)
 
     async def _fetch_availability(
@@ -607,8 +610,12 @@ class ClinicClient:
             query.get("insurer"),
         )
         key = _availability_key(
-            query["date_from"], query["date_to"], query.get("provider_id"),
-            query.get("specialty_id"), query.get("location_id"), query.get("patient_id"),
+            query["date_from"],
+            query["date_to"],
+            query.get("provider_id"),
+            query.get("specialty_id"),
+            query.get("location_id"),
+            query.get("patient_id"),
             query.get("insurer"),
         )
         async with self._availability_lock:
@@ -616,7 +623,12 @@ class ClinicClient:
         return answer.model_copy(deep=True)
 
     def invalidate_availability(self) -> None:
-        """Drop availability derived before one of our writes was accepted."""
+        """Drop availability derived before one of our writes was accepted.
+
+        The generation bump also disowns fetches already in flight, so a
+        response read before the write cannot be stored after this clear.
+        """
+        self._availability_generation += 1
         self._availability_cache.clear()
 
     async def appointments(
@@ -895,8 +907,12 @@ class FakeClinicClient:
             insurer=query.get("insurer"),
         )
         key = _availability_key(
-            query["date_from"], query["date_to"], query.get("provider_id"),
-            query.get("specialty_id"), query.get("location_id"), query.get("patient_id"),
+            query["date_from"],
+            query["date_to"],
+            query.get("provider_id"),
+            query.get("specialty_id"),
+            query.get("location_id"),
+            query.get("patient_id"),
             query.get("insurer"),
         )
         self._availability_cache[key] = answer
