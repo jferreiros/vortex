@@ -1,183 +1,245 @@
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTransition, animated } from "@react-spring/web";
 import SectionHeader from "../../../components/ui/SectionHeader";
 import Card from "../../../components/ui/Card";
-import { PhaseIcon, ToolIcon } from "../../../lib/icons";
+import StatTile from "../../../components/ui/StatTile";
+import { useActiveCalls } from "../../../lib/useActiveCalls";
+import { INTENT_LABEL } from "../../../lib/labels";
+import { formatClock } from "../../../lib/dates";
 import { toolMeta } from "../../../lib/tools";
-import { LANGUAGE_LABEL, REASON_LABEL } from "../../../lib/labels";
+import { springs } from "../../../theme/theme";
 import "./live-calls.css";
 
-// PLACEHOLDER: live call feed. There is no "list every active call" endpoint
-// yet — vortex/observability's API exposes one call's timeline at a time
-// (GET /api/wall/timeline/{call_id}). Only the first row uses the real
-// scripted demo (call_id "demo") so clicking through actually works end to
-// end; the rest are illustrative cards with no live data behind them yet,
-// which is exactly what they should look like until that endpoint exists.
-// Only calls still in progress belong here — a call that has ended is either
-// rejected or escalated, and moves to the review panel on the right.
-const ACTIVE_CALLS = [
-  { id: "demo", patient: "Lucía Ruiz López", site: "Arenal Centro", phaseKey: "speaking", phaseLabel: "Hablando", duration: "00:32", language: "es" },
-  { id: "call-2", patient: "Sin identificar", site: "Arenal Norte", phaseKey: "listening", phaseLabel: "Escuchando", duration: "00:08", language: "ca" },
-  { id: "call-3", patient: "Antonio Pérez Gil", site: "Arenal Centro", phaseKey: "working", tool: "find_slots", duration: "01:14", language: "es" },
-  { id: "call-5", patient: "María Torres Vidal", site: "Arenal Sur", phaseKey: "speaking", phaseLabel: "Hablando", duration: "00:51", language: "es" },
-];
+// Every active call is one small card on a field. Where the card drifts to
+// is the point: each outcome owns a spot around the edge, calls with no
+// classified intent sit in the middle, and a re-classification shows up as
+// the card physically crossing the field. Anchors are fractions of the
+// canvas so the layout survives any panel width.
+const ANCHORS = {
+  book: { x: 0.13, y: 0.15 },
+  register: { x: 0.09, y: 0.55 },
+  "no-action": { x: 0.2, y: 0.87 },
+  unclassified: { x: 0.5, y: 0.5 },
+  escalate: { x: 0.8, y: 0.87 },
+  cancel: { x: 0.91, y: 0.55 },
+  reschedule: { x: 0.87, y: 0.15 },
+};
 
-// "Rechazada" = the agent submitted NO_ACTION. `reason` is one of the closed
-// 18-value vocabulary (see .claude/skills/submit-action) — the exact rule
-// that bit — plus the moment it happened and a way to ring the caller back.
-const REJECTED_CALLS = [
-  { id: "rej-1", patient: "Sin identificar", phone: "+34 611 224 578", time: "11:42:07", reason: "no_availability" },
-  { id: "rej-2", patient: "Marcos Iglesias Peña", phone: "+34 699 015 332", time: "11:26:51", reason: "location_hours" },
-  { id: "rej-3", patient: "Sin identificar", phone: "+34 622 887 140", time: "10:58:19", reason: "out_of_scope" },
-];
+const ZONE_ORDER = ["book", "register", "no-action", "unclassified", "escalate", "cancel", "reschedule"];
 
-// "Escalada" = handed off to a human. The reason is the thing worth showing.
-const ESCALATED_CALLS = [
-  { id: "call-4", patient: "Ana Salas Ferrer", time: "11:39:22", reason: "Síntomas que requieren triaje clínico" },
-  { id: "esc-2", patient: "Jorge Nieto Campos", time: "11:15:40", reason: "Solicita cambio fuera de la ventana permitida" },
-];
+const CARD_W = 152;
+const CARD_H = 96;
 
-function PhoneIcon() {
+function anchorKey(intent) {
+  return ANCHORS[intent] ? intent : "unclassified";
+}
+
+// Cards sharing an intent fan out around their anchor on a golden-angle
+// spiral — deterministic per position in the cluster, so a steady board
+// doesn't shuffle itself every poll.
+function clusterOffset(index) {
+  if (index === 0) return { dx: 0, dy: 0 };
+  const angle = index * 2.39996;
+  const radius = 62 + Math.sqrt(index) * 36;
+  return { dx: Math.cos(angle) * radius, dy: Math.sin(angle) * radius * 0.62 };
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function layoutCalls(calls, size) {
+  const groups = new Map();
+  for (const call of calls) {
+    const key = anchorKey(call.intent);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(call);
+  }
+  const targets = new Map();
+  for (const [key, group] of groups) {
+    group.sort((a, b) => (a.call_id < b.call_id ? -1 : 1));
+    const anchor = ANCHORS[key];
+    group.forEach((call, index) => {
+      const { dx, dy } = clusterOffset(index);
+      targets.set(call.call_id, {
+        x: clamp(anchor.x * size.w - CARD_W / 2 + dx, 6, Math.max(6, size.w - CARD_W - 6)),
+        y: clamp(anchor.y * size.h - CARD_H / 2 + dy, 6, Math.max(6, size.h - CARD_H - 6)),
+      });
+    });
+  }
+  return targets;
+}
+
+function useElementSize() {
+  const ref = useRef(null);
+  const [size, setSize] = useState({ w: 0, h: 0 });
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    const measure = () => setSize({ w: el.clientWidth, h: el.clientHeight });
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  return [ref, size];
+}
+
+// The poll keeps durations honest, but a stalled request shouldn't freeze
+// the ticking clocks on screen.
+function useNow(intervalMs = 1000) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(id);
+  }, [intervalMs]);
+  return now;
+}
+
+// Phase-driven waveform — simulated, no audio ever leaves the server. Each
+// phase gets a different rhythm and amplitude through CSS variables; the
+// bars themselves are five identical <i> elements with staggered delays.
+function Wave({ phase }) {
   return (
-    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M6.5 3.5h3l1.4 4.2-2.1 1.8a13.5 13.5 0 0 0 5.7 5.7l1.8-2.1 4.2 1.4v3a1.5 1.5 0 0 1-1.6 1.5A16 16 0 0 1 5 5.1a1.5 1.5 0 0 1 1.5-1.6z" />
-    </svg>
+    <span className={`lc-wave lc-wave-${phase || "listening"}`} aria-hidden="true">
+      <i />
+      <i />
+      <i />
+      <i />
+      <i />
+    </span>
   );
 }
 
-function AlertIcon() {
+function CallCard({ call, now, onOpen }) {
+  const name = call.name;
+  const duration = call.started_ms ? formatClock((now - call.started_ms) / 1000) : "--:--";
+  const intent = call.intent && INTENT_LABEL[call.intent] ? call.intent : null;
+  const lastTool = call.tools_run[call.tools_run.length - 1];
+  const working = call.phase === "working" && lastTool;
+
   return (
-    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M12 3.5L21.5 20h-19z" />
-      <line x1="12" y1="9.5" x2="12" y2="14" />
-      <circle cx="12" cy="17" r="0.9" fill="currentColor" stroke="none" />
-    </svg>
+    <button type="button" className="lc-card" onClick={onOpen} title={name || call.from || "Llamada"}>
+      <span className="lc-card-top">
+        <span className="lc-dot" />
+        <span className="lc-duration">{duration}</span>
+      </span>
+      {/* key={name} re-mounts the label the moment find_patient resolves, so
+          the identity flip animates once and never again. */}
+      <span key={name || "unknown"} className={`lc-name ${name ? "" : "unknown"}`}>
+        {name || call.from || "Llamada entrante"}
+      </span>
+      <span className="lc-sub">{name ? call.from : "Identificando…"}</span>
+      <span className="lc-card-bottom">
+        <span className={`lc-intent ${intent || "pending"}`}>{intent ? INTENT_LABEL[intent] : "…"}</span>
+        <Wave phase={call.phase} />
+      </span>
+      {working && <span className="lc-tool">{toolMeta(lastTool).label}…</span>}
+    </button>
   );
 }
 
-function EscalateIcon() {
+function OutcomeTally({ outcomes }) {
+  const entries = ZONE_ORDER.filter((k) => k !== "unclassified" && outcomes[k] > 0);
   return (
-    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M5 19L19 5" />
-      <path d="M9 5h10v10" />
-    </svg>
-  );
-}
-
-function ActiveCallCard({ call, onOpen }) {
-  const step = call.phaseKey === "working" && call.tool ? toolMeta(call.tool) : null;
-
-  return (
-    <Card
-      padding="lg"
-      className="live-call-card"
-      role="button"
-      tabIndex={0}
-      onClick={onOpen}
-      onKeyDown={(e) => e.key === "Enter" && onOpen()}
-    >
-      <div className="live-call-card-top">
-        <span className="live-call-status-dot live" />
-        <span className="live-call-status-label">En llamada</span>
-        <span className="live-call-duration mono">{call.duration}</span>
-      </div>
-      <span className="live-call-patient">{call.patient}</span>
-      <span className="live-call-site">{call.site}</span>
-      <div className="live-call-card-bottom">
-        <span className="live-call-chip">{LANGUAGE_LABEL[call.language] || call.language}</span>
-        <span className="live-call-phase">
-          {step ? <ToolIcon name={call.tool} size={16} /> : <PhaseIcon phase={call.phaseKey} size={16} />}
-          {step ? step.label : call.phaseLabel}
+    <div className="ui-stat-tile lc-tally">
+      <span className="ui-stat-label">Resultados de hoy</span>
+      {entries.length === 0 ? (
+        <span className="lc-tally-empty">Sin llamadas cerradas aún</span>
+      ) : (
+        <span className="lc-tally-chips">
+          {entries.map((key) => (
+            <span key={key} className="lc-tally-chip">
+              {INTENT_LABEL[key]}
+              <b>{outcomes[key]}</b>
+            </span>
+          ))}
         </span>
-      </div>
-    </Card>
-  );
-}
-
-function RejectedRow({ call }) {
-  return (
-    <li className="feed-row">
-      <span className="feed-row-dot urgent" />
-      <div className="feed-row-grid">
-        <span className="feed-row-name">{call.patient}</span>
-        <span className="feed-row-time mono">{call.time}</span>
-        <span className="feed-row-reason">{REASON_LABEL[call.reason] || call.reason}</span>
-        <a
-          className="feed-row-call"
-          href={`tel:${call.phone.replace(/\s+/g, "")}`}
-          title={`Devolver llamada a ${call.phone}`}
-          aria-label={`Devolver llamada a ${call.phone}`}
-        >
-          <PhoneIcon />
-        </a>
-      </div>
-    </li>
-  );
-}
-
-function EscalatedRow({ call }) {
-  return (
-    <li className="feed-row">
-      <span className="feed-row-dot muted" />
-      <div className="feed-row-grid">
-        <span className="feed-row-name">{call.patient}</span>
-        <span className="feed-row-time mono">{call.time}</span>
-        <span className="feed-row-reason">{call.reason}</span>
-      </div>
-    </li>
+      )}
+    </div>
   );
 }
 
 export default function LiveCalls() {
   const navigate = useNavigate();
-  const openCall = (id) => navigate(`/clinic/live-calls/${id}`);
+  const { calls, stats, source } = useActiveCalls();
+  const now = useNow();
+  const [canvasRef, size] = useElementSize();
+
+  const targets = useMemo(() => layoutCalls(calls, size), [calls, size]);
+  const zoneCounts = useMemo(() => {
+    const counts = {};
+    for (const call of calls) counts[anchorKey(call.intent)] = (counts[anchorKey(call.intent)] || 0) + 1;
+    return counts;
+  }, [calls]);
+
+  const transitions = useTransition(calls, {
+    keys: (call) => call.call_id,
+    // A new call materialises at the centre — where unclassified calls live —
+    // then drifts out to its outcome once intent lands.
+    from: () => ({ opacity: 0, scale: 0.5, x: size.w / 2 - CARD_W / 2, y: size.h / 2 - CARD_H / 2 }),
+    enter: (call) => {
+      const t = targets.get(call.call_id);
+      return { opacity: 1, scale: 1, x: t?.x ?? 0, y: t?.y ?? 0 };
+    },
+    update: (call) => {
+      const t = targets.get(call.call_id);
+      return t ? { x: t.x, y: t.y } : {};
+    },
+    leave: { opacity: 0, scale: 0.5 },
+    config: springs.gentle,
+  });
 
   return (
     <div className="live-calls-page">
       <SectionHeader
-        eyebrow={`${ACTIVE_CALLS.length} activas`}
+        eyebrow={source === "live" ? "En directo" : source === "mock" ? "Datos de demostración" : "Conectando…"}
         title="Live Calls"
-        subtitle="Llamadas en curso ahora mismo. Selecciona una para ver el detalle completo."
+        subtitle="Cada llamada en curso se acerca a su desenlace según se clasifica su intención."
       />
 
-      <div className="live-calls-grid">
-        {ACTIVE_CALLS.map((call) => (
-          <ActiveCallCard key={call.id} call={call} onOpen={() => openCall(call.id)} />
+      <Card padding="md" className="lc-stats">
+        <StatTile label="En línea ahora" value={calls.length} large />
+        <StatTile label="Completadas hoy" value={stats.completed_today} large />
+        <OutcomeTally outcomes={stats.outcomes} />
+      </Card>
+
+      <div className="lc-canvas" ref={canvasRef}>
+        <span className="lc-axis lc-axis-x" />
+        <span className="lc-axis lc-axis-y" />
+
+        {ZONE_ORDER.map((key) => {
+          const anchor = ANCHORS[key];
+          const outX = anchor.x - 0.5;
+          const outY = anchor.y - 0.5;
+          const len = Math.hypot(outX, outY) || 1;
+          const lx = key === "unclassified" ? anchor.x : anchor.x + (outX / len) * 0.075;
+          const ly = key === "unclassified" ? anchor.y + 0.13 : anchor.y + (outY / len) * 0.11;
+          return (
+            <span
+              key={key}
+              className="lc-zone"
+              style={{ left: `${lx * 100}%`, top: `${ly * 100}%` }}
+            >
+              {key === "unclassified" ? "Sin clasificar" : INTENT_LABEL[key]}
+              <b>{zoneCounts[key] || 0}</b>
+            </span>
+          );
+        })}
+
+        {calls.length === 0 && (
+          <p className="lc-empty">
+            {source === "connecting" ? "Conectando con la línea…" : "No hay llamadas activas en este momento."}
+          </p>
+        )}
+
+        {transitions((style, call) => (
+          <animated.div className="lc-card-pos" style={style}>
+            <CallCard call={call} now={now} onOpen={() => navigate(`/clinic/live-calls/${call.call_id}`)} />
+          </animated.div>
         ))}
       </div>
-
-      <aside className="feed-panel">
-        <div className="feed-half feed-half-rejected">
-          <div className="feed-panel-head">
-            <span className="feed-panel-title-group urgent">
-              <AlertIcon />
-              <span className="feed-panel-title">Llamadas rechazadas</span>
-            </span>
-            <span className="feed-panel-count">{REJECTED_CALLS.length}</span>
-          </div>
-          <ul className="feed-list">
-            {REJECTED_CALLS.map((call) => (
-              <RejectedRow key={call.id} call={call} />
-            ))}
-          </ul>
-        </div>
-
-        <div className="feed-divider" />
-
-        <div className="feed-half feed-half-escalated">
-          <div className="feed-panel-head">
-            <span className="feed-panel-title-group muted">
-              <EscalateIcon />
-              <span className="feed-panel-title">Llamadas escaladas</span>
-            </span>
-            <span className="feed-panel-count">{ESCALATED_CALLS.length}</span>
-          </div>
-          <ul className="feed-list">
-            {ESCALATED_CALLS.map((call) => (
-              <EscalatedRow key={call.id} call={call} />
-            ))}
-          </ul>
-        </div>
-      </aside>
     </div>
   );
 }
