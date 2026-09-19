@@ -67,6 +67,7 @@ from vortex.contract import (
 from vortex.identity import tools as identity
 from vortex.rules import eligibility, facts, geo
 from vortex.rules import triage as triage_table
+from vortex.settings import Settings
 
 _TITLES = {"dr", "dra", "d", "doctor", "doctora"}
 _TYPO_MATCH_CUTOFF = 0.8
@@ -91,6 +92,14 @@ INSURANCE_REASONS: frozenset[str] = frozenset(
 #: them on whichever provider it was asked about, but no other provider in the
 #: specialty escapes them, so there is nobody to redirect to.
 _PLAN_WIDE_REASONS: frozenset[str] = frozenset({"insurer_referral_required", "allowance_exhausted"})
+
+
+def _settings_of(ctx: ToolContext) -> Settings:
+    """The socket's Settings. ``CallSession.open`` attaches them; bare tests stay offline."""
+    settings = getattr(ctx, "settings", None)
+    if isinstance(settings, Settings):
+        return settings
+    return Settings(geocoder="", geocoder_url="")
 
 
 def _name_tokens(name: str) -> set[str]:
@@ -351,7 +360,7 @@ async def nearest_location(ctx: ToolContext, args: NearestLocationInput) -> Near
             )
         )
 
-    point = await geo.locate(args.address)
+    point = await geo.locate(args.address, _settings_of(ctx))
     if point is not None:
         found = geo.nearest(point, sites)
         if found is not None:
