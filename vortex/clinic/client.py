@@ -666,6 +666,13 @@ def _load_json_list(path: Path) -> list[dict[str, Any]]:
     return []
 
 
+def fixtures_catalogue() -> Catalogue:
+    """``fixtures.CLINIC`` as a ``Catalogue`` — the same adapted shape a live
+    ``/clinic`` response produces. For offline readers (``FakeClinicClient``,
+    the Insights board's site hours) that need the catalogue without a call."""
+    return Catalogue.model_validate(_adapt_catalogue(fixtures.CLINIC))
+
+
 class FakeClinicClient:
     """Offline client over ``fixtures``. Deterministic; no network.
 
@@ -680,7 +687,7 @@ class FakeClinicClient:
     """
 
     def __init__(self, *, data_dir: Path | None = None) -> None:
-        self._catalogue = Catalogue.model_validate(_adapt_catalogue(fixtures.CLINIC))
+        self._catalogue = fixtures_catalogue()
         self._availability_cache: dict[tuple[Any, ...], AvailabilityResponse] = {}
         self._availability_generation = 0
         self._directory_cache: OrderedDict[tuple[Any, ...], list[PatientRecord]] = OrderedDict()
