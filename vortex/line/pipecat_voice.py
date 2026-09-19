@@ -63,6 +63,7 @@ from vortex.conversation.prompt import (
 )
 from vortex.conversation.stt_context import stt_context_text, stt_terms
 from vortex.conversation.turns import (
+    ConfirmationPolicy,
     IdlePolicy,
     TurnSettings,
     default_turn_settings,
@@ -714,8 +715,17 @@ def _make_tool_filler_speaker(session: CallSession, state: _LanguageState, task:
     return _on_function_calls_started
 
 
-def _CallLogObserver(session: CallSession):  # noqa: N802 - factory that returns an observer
-    """Log user and assistant text, and count media frames, from the frame stream."""
+def _CallLogObserver(  # noqa: N802 - factory that returns an observer
+    session: CallSession, confirmations: ConfirmationPolicy | None = None
+):
+    """Log user and assistant text, count media frames, and watch for the yes.
+
+    The frame stream is where both sides of the call already pass in order, so
+    the confirmation guard reads it here: TTS text is the agent's turn, a
+    transcription is the caller's reply to it. When that reply is an agreement
+    to a read-back, ``CallSession.confirm_prepared`` submits what is prepared
+    instead of letting the model ask a second time.
+    """
     from pipecat.frames.frames import (
         InputAudioRawFrame,
         OutputAudioRawFrame,
@@ -724,13 +734,21 @@ def _CallLogObserver(session: CallSession):  # noqa: N802 - factory that returns
     )
     from pipecat.observers.base_observer import BaseObserver, FramePushed
 
+    policy = confirmations if confirmations is not None else ConfirmationPolicy()
+
     class Observer(BaseObserver):
         async def on_push_frame(self, data: FramePushed) -> None:
             frame = data.frame
             if isinstance(frame, TranscriptionFrame):
                 session.ctx.log.user_turn(frame.text)
+                decision = policy.on_user_text(
+                    frame.text, prepared=session.memory.prepared is not None
+                )
+                if decision.confirmed:
+                    session.confirm_prepared(decision.why)
             elif isinstance(frame, TTSTextFrame):
                 session.ctx.log.assistant_turn(frame.text)
+                policy.on_assistant_text(frame.text)
             elif isinstance(frame, InputAudioRawFrame):
                 session.media_frames_in += 1
             elif isinstance(frame, OutputAudioRawFrame):

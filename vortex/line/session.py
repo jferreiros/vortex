@@ -4,6 +4,8 @@ The session owns:
 - the ``ToolContext`` every tool receives (call_id, clock, clinic, log, submitter)
 - the call's ``CallMemory``: the last rejection a tool returned and the last
   action a tool prepared but nobody sent
+- the caller's agreement to that action (``confirm_prepared``), and the
+  submission it fires so the model never has to ask a second time
 - the submit client and the record of what was submitted
 - the end-of-call bookkeeping: summary line, fallback submission, cleanup
 
@@ -49,6 +51,11 @@ from vortex.settings import Settings, get_settings
 # The tool the model calls to send an action itself. It goes through
 # ``ctx.submitter``, so the session has to be told about it by name.
 SUBMIT_TOOL = "submit_action"
+
+# The tools that draw an action up without sending it. Once the caller has
+# agreed, what they prepare goes out in the same turn: see
+# ``CallSession.confirm_prepared``.
+PREPARE_TOOLS: tuple[str, ...] = ("prepare_booking", "prepare_reschedule", "prepare_cancel")
 
 # What counts as an action the platform holds for this call. A 200 or a 409
 # (the same action twice) is a record; everything else is not, ``dry_run``
@@ -180,6 +187,10 @@ class CallSession:
     # the harness cut the call at three minutes. See ``arm_hangup``.
     hangup_reason: str = ""
     _closed: bool = False
+    # Submissions fired by ``confirm_prepared``. Held so the loop cannot collect
+    # one mid-flight, and so ``close`` waits for them before deciding a call
+    # submitted nothing.
+    _pending: set[asyncio.Task[Any]] = field(default_factory=set)
 
     @property
     def call_id(self) -> str:
@@ -260,7 +271,78 @@ class CallSession:
                 self.arm_hangup("submit_accepted")
         else:
             self.memory.observe(name, result)
+            await self._submit_after_prepare(name)
         return result
+
+    def confirm_prepared(self, why: str) -> None:
+        """The caller said yes to the plan we read back. Never ask a second time.
+
+        Called by the conversation lane's ``ConfirmationPolicy`` the moment an
+        affirmation lands on a read-back. It records the agreement for the
+        end-of-call fallback and, when an action is already drawn up, sends it:
+        asking the same question twice is what cost the scored run its wall
+        clock, and nothing un-sends an action that is already submitted.
+
+        Synchronous on purpose. It is called from the frame path, where awaiting
+        an HTTP POST would hold the caller's own audio, so the submission goes
+        out as a task and ``close`` waits for it.
+        """
+        memory = self.memory
+        if memory.confirmed:
+            return
+        memory.mark_confirmed()
+        self.ctx.log.event(
+            "confirm.affirmed",
+            why=why,
+            prepared_by=memory.prepared_tool,
+            has_prepared=memory.prepared is not None,
+        )
+        if memory.prepared is not None:
+            self._spawn(self.submit_confirmed_prepared("affirmation"))
+
+    async def submit_confirmed_prepared(self, trigger: str) -> SubmitResult | None:
+        """Send the prepared action the caller has agreed to, once.
+
+        ``None`` when there is nothing to send: no action drawn up, no agreement
+        yet, or this exact action already left.
+
+        This does not arm the hangup. The call may still have a second thing to
+        do (a cancel and a booking are two actions), and the caller has not been
+        said goodbye to yet; the model's own ``submit_action`` - a duplicate of
+        this one, which the platform answers 409 - is what ends the call, as it
+        did before.
+        """
+        memory = self.memory
+        action = memory.prepared
+        if action is None or not memory.confirmed or action in self.sent_actions:
+            return None
+        self.ctx.log.event(
+            "submit.on_confirmation",
+            trigger=trigger,
+            route=action_route(action),
+            prepared_by=memory.prepared_tool,
+        )
+        return await self.submit(action)
+
+    async def _submit_after_prepare(self, tool: str) -> None:
+        """A ``prepare_*`` after the caller's yes needs no second question."""
+        if tool in PREPARE_TOOLS:
+            await self.submit_confirmed_prepared(tool)
+
+    def _spawn(self, coro: Any) -> None:
+        """Run a submission off the frame path, and keep hold of it."""
+        try:
+            task = asyncio.get_running_loop().create_task(coro)
+        except RuntimeError:  # no loop: nothing can be sent from here
+            coro.close()
+            return
+        self._pending.add(task)
+        task.add_done_callback(self._pending_done)
+
+    def _pending_done(self, task: asyncio.Task[Any]) -> None:
+        self._pending.discard(task)
+        if not task.cancelled() and task.exception() is not None:
+            self.ctx.log.event("submit.on_confirmation_failed", error=repr(task.exception()))
 
     def arm_hangup(self, reason: str) -> None:
         """The call is done: let the pipeline end it once the agent stops talking.
@@ -329,7 +411,13 @@ class CallSession:
         Scoring is binary per case, so a wrong action costs exactly what silence
         costs and a right one wins the case. The branches below are ordered by
         how likely each is to be the answer the case expects.
+
+        A submission fired by ``confirm_prepared`` may still be in flight when
+        the socket dies, so it is waited for first: otherwise this would send a
+        refusal on top of the booking the caller agreed to.
         """
+        if self._pending:
+            await asyncio.gather(*tuple(self._pending), return_exceptions=True)
         if self.has_accepted_submission:
             return
         branch, action, why = self.fallback_action()
