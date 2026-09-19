@@ -65,6 +65,15 @@ def test_evals_report_uses_shared_pill_not_a_24px_override() -> None:
     assert "hollow" in hollow
 
 
+def test_calendar_visual_states_live_in_design_css() -> None:
+    """board.css stays Quasar overrides and layout; the calendar is a component (issue #322)."""
+    board = (REPO / "vortex" / "observability" / "board.css").read_text(encoding="utf-8")
+    assert ".cal-" not in board
+    css = SOURCE.read_text(encoding="utf-8")
+    for rule in (".cal-doc.on", ".cal-cell.free", ".cal-cell.booked", ".cal-cell.off"):
+        assert rule in css, f"{rule} is not defined in design.css"
+
+
 def test_tasks_html_does_not_redefine_chip() -> None:
     """Page CSS lays out only; .chip lives in design.css (issue #80)."""
     text = (REPO / "docs" / "tasks.html").read_text(encoding="utf-8")
