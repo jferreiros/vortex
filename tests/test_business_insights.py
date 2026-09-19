@@ -264,6 +264,56 @@ def test_service_occupancy_request_without_specialty_or_provider_counts_nowhere(
     assert all(r["requested"] == 0 for r in out["all"])
 
 
+def test_service_occupancy_recovers_a_provider_the_fixtures_never_modelled() -> None:
+    """The offline fixtures have no gynaecologist at all (vortex/clinic/
+    fixtures.py has none), so a real find_slots result naming one — the
+    shape a live, Supabase-backed call log produces — must still count
+    toward gynaecology's provider total. Without this, real demand shows a
+    real occupancy_pct next to "0 médicos", which reads as a specialty with
+    no doctors instead of one the offline catalogue never heard of."""
+    real_gynaecologist = _find_slots(
+        _card("a"),
+        date_from="2026-09-22",
+        specialty_id="gynaecology",
+        slots=[
+            {
+                "start": "2026-09-22T10:00:00+02:00",
+                "provider_id": "PR99",
+                "provider_name": "Dra. Bosch",
+                "specialty_id": "gynaecology",
+                "location_id": "centro",
+            }
+        ],
+    )
+    out = bi.service_occupancy([real_gynaecologist])
+    row = _occ(out, "gynaecology")
+    assert row["requested"] == 1
+    assert row["offered"] == 1
+    assert row["occupancy_pct"] == 100.0
+    assert row["providers"] == 1  # not 0 — PR99 was recovered from the slot
+
+
+def test_service_occupancy_does_not_double_count_a_provider_already_in_the_catalogue() -> None:
+    # PR04 (dermatology) is a real fixture provider; naming it in a slot
+    # must not add a second, duplicate entry to the provider count.
+    booked_slot = _find_slots(
+        _card("a"),
+        date_from="2026-09-22",
+        specialty_id="dermatology",
+        slots=[
+            {
+                "start": "2026-09-22T10:00:00+02:00",
+                "provider_id": "PR04",
+                "provider_name": "Dra. Iglesias",
+                "specialty_id": "dermatology",
+                "location_id": "centro",
+            }
+        ],
+    )
+    out = bi.service_occupancy([booked_slot])
+    assert _occ(out, "dermatology")["providers"] == 1
+
+
 def test_service_occupancy_scopes_demand_and_supply_per_site() -> None:
     # PR06 (physiotherapy) sits at "sur" only.
     physio_at_sur = _find_slots(

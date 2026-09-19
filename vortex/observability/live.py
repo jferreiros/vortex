@@ -981,13 +981,22 @@ def wall_business_insights_api(days: int = 30) -> JSONResponse:
     cutoff = now - timedelta(days=days)
     # Ask the line for every call started inside the window — a fetch bounded
     # by date, so a busy day's worth of events can never push an in-range call
-    # out of the read the way the old 800-event tail did.
+    # out of the read the way the old 800-event tail did. Bounded by date, so
+    # this (like the Agenda roster) prefers the hosted Supabase log first.
     events, _health, source = _load_events(
         f"insights:{days}", since=cutoff, cache_ttl=callfeed.INSIGHTS_CACHE_TTL_S
     )
     cards = build_calls(events)
     in_range = [c for c in cards if (started := _card_started(c)) and started >= cutoff]
-    payload = business_insights(in_range, now=now)
+    # Same roster the Agenda page shows, not one rebuilt per window: a
+    # provider is a lasting fact about the clinic, so a doctor the log saw
+    # outside this "days" cut still belongs on it (_ensure_agenda's own
+    # AGENDA_ROSTER_DAYS is wider on purpose). Without this, a specialty
+    # the offline fixtures never modelled at all (there is no gynaecologist
+    # in vortex/clinic/fixtures.py) reads as "0 médicos" while its real,
+    # log-sourced demand still shows a non-zero occupancy.
+    _ensure_agenda()
+    payload = business_insights(in_range, now=now, catalogue=_AGENDA_CATALOGUE)
     payload["range_days"] = days
     payload["source"] = source
     return JSONResponse(payload)
@@ -1423,6 +1432,40 @@ def wall_home_overview_api() -> JSONResponse:
     payload = home_overview(cards, now=datetime.now(UTC))
     payload["source"] = source
     return JSONResponse(payload)
+
+
+@app.get("/api/wall/live-calls")
+def wall_live_calls_api() -> JSONResponse:
+    """Calls in progress right now, for the Live Calls page and Home's rail.
+
+    Reads the same "recent" feed every other live card on the board does
+    (``_load_cards`` -> ``callfeed.load_events``): the line's own ``/calls``
+    first so an in-flight call shows before anything else could have heard
+    of it, the hosted Supabase log as the automatic fallback when the line
+    itself is unreachable, then this process's local JSONL last. No
+    JSONL-only or fixtures-only path here to begin with — this endpoint
+    replaces the page's ``PLACEHOLDER_CALLS`` mock, not a JSONL reader.
+    """
+    cards, _health = _load_cards()
+    live = [c for c in cards if c.live and is_real_call(c)]
+    calls = [
+        {
+            "id": c.call_id,
+            "patient": c.patient_name or "Sin identificar",
+            "phase": explain.STAGES[max(explain.stage_of(c) - 1, 0)][1],
+            "status": c.status,
+            "duration": _duration(c),
+            # Every socket connection is inbound (the platform only ever
+            # dials us — see .claude/skills/call-contract); the only
+            # outbound calls this product places are confirmation calls,
+            # which do not carry a live turn-by-turn transcript the same
+            # way and are not shown on this "in progress right now" list.
+            "direction": "inbound",
+            "phone": c.from_number or "",
+        }
+        for c in live
+    ]
+    return JSONResponse({"calls": calls})
 
 
 @app.get("/api/wall/occupancy")
