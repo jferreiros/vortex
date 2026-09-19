@@ -19,9 +19,12 @@ from vortex.line.confirmation_calls import (
     call_language,
     cancel_confirmation_calls,
     classify_reply,
+    handoff_from_parameters,
+    handoff_ws_url,
     schedule_confirmation_call,
     twilio_locale,
     twiml_ask,
+    twiml_handoff_to_agent,
 )
 from vortex.line.server import create_app
 
@@ -431,3 +434,146 @@ def test_a_second_job_registers_and_uses_its_own_policy() -> None:
         assert job.classify("whatever", "es") == "confirmed"
     finally:
         CALL_JOBS.pop("waitlist_offer_test", None)
+
+
+# ---- in-call reschedule handoff -------------------------------------------------
+
+
+def test_handoff_twiml_carries_the_context() -> None:
+    call = _pending()
+    xml = twiml_handoff_to_agent(call, "wss://demo.example.com/ws")
+    assert xml.startswith('<?xml version="1.0" encoding="UTF-8"?>')
+    assert '<Connect><Stream url="wss://demo.example.com/ws">' in xml
+    assert 'name="vortex_handoff" value="reschedule"' in xml
+    assert f'value="{call.appointment_id}"' in xml
+    assert f'value="{call.patient_id}"' in xml
+    assert f'value="{call.language}"' in xml
+
+
+def test_handoff_ws_url_switches_scheme() -> None:
+    assert handoff_ws_url("https://demo.example.com/") == "wss://demo.example.com/ws"
+    assert handoff_ws_url("http://localhost:8080") == "ws://localhost:8080/ws"
+
+
+def test_handoff_from_parameters_roundtrip() -> None:
+    params = {
+        "vortex_handoff": "reschedule",
+        "appointment_id": "apt-1",
+        "patient_id": "pat-9",
+        "language": "es",
+    }
+    handoff = handoff_from_parameters(params)
+    assert handoff == {
+        "kind": "reschedule",
+        "appointment_id": "apt-1",
+        "patient_id": "pat-9",
+        "language": "es",
+    }
+    assert handoff_from_parameters({}) is None
+    assert handoff_from_parameters({"vortex_handoff": "other"}) is None
+
+
+def test_result_endpoint_hands_off_to_the_voice_agent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from vortex import settings as settings_module
+
+    monkeypatch.setenv("VORTEX_VOICE_MODE", "pipecat")
+    monkeypatch.setenv("VORTEX_CLINIC_MODE", "fake")
+    monkeypatch.setenv("VORTEX_CALLS_LOG", str(tmp_path / "calls.jsonl"))
+    monkeypatch.setenv("VORTEX_CONFIRMATION_CALLS_PATH", str(tmp_path / "calls.json"))
+    monkeypatch.setenv("VORTEX_PUBLIC_BASE_URL", "https://demo.example.com")
+    settings_module.reset_settings()
+    settings = settings_module.get_settings()
+    try:
+        client = TestClient(create_app(settings))
+        call = _seed(Path(settings.confirmation_calls_path))
+        response = client.post(
+            f"/confirmation/result?cid={call.confirmation_id}&attempt=1",
+            content="SpeechResult=Quiero+cambiarla&Confidence=0.9",
+            headers={"content-type": "application/x-www-form-urlencoded"},
+        )
+        assert response.status_code == 200
+        assert '<Connect><Stream url="wss://demo.example.com/ws">' in response.text
+        assert 'name="vortex_handoff" value="reschedule"' in response.text
+        assert "le paso con nuestro agente" in response.text
+
+        import asyncio
+
+        row = asyncio.run(ConfirmationStore(Path(settings.confirmation_calls_path)).get(
+            call.confirmation_id
+        ))
+        assert row is not None
+        assert row.status == "reschedule_requested"
+        assert row.detail == "handoff_to_voice_agent"
+    finally:
+        settings_module.reset_settings()
+
+
+def test_result_endpoint_stub_voice_keeps_the_callback_promise(confirmation_client) -> None:
+    client, settings = confirmation_client
+    call = _seed(Path(settings.confirmation_calls_path))
+    response = client.post(
+        f"/confirmation/result?cid={call.confirmation_id}&attempt=1",
+        content="SpeechResult=Quiero+cambiarla&Confidence=0.9",
+        headers={"content-type": "application/x-www-form-urlencoded"},
+    )
+    assert response.status_code == 200
+    assert "<Connect>" not in response.text
+    assert "para mover la cita" in response.text
+
+    import asyncio
+
+    row = asyncio.run(ConfirmationStore(Path(settings.confirmation_calls_path)).get(
+        call.confirmation_id
+    ))
+    assert row is not None
+    assert row.status == "reschedule_requested"
+    assert row.detail == "answered"
+
+
+def test_handoff_note_enters_the_prompt() -> None:
+    from vortex.conversation.prompt import build_system_prompt, handoff_note_for
+
+    handoff = {"kind": "reschedule", "appointment_id": "apt-1", "patient_id": "pat-9",
+               "language": "es"}
+    note = handoff_note_for(handoff)
+    assert "apt-1" in note and "pat-9" in note and "Spanish" in note
+    prompt = build_system_prompt(WHEN, handoff=handoff)
+    assert "HANDOFF" in prompt and "apt-1" in prompt
+    assert handoff_note_for(None) == ""
+
+
+def test_handoff_greeting_is_mid_task_and_localised() -> None:
+    from vortex.conversation.prompt import handoff_greeting_for
+
+    assert "mover su cita" in handoff_greeting_for("es")
+    assert "move that appointment" in handoff_greeting_for("en")
+    assert handoff_greeting_for("fr") == handoff_greeting_for("en")
+
+
+def test_session_open_picks_up_the_handoff(tmp_path: Path, offline_settings) -> None:
+    from vortex.line.session import CallSession
+    from vortex.line.twilio import StartPayload
+
+    start = StartPayload(
+        streamSid="MZ-1",
+        callSid="CA-handoff",
+        customParameters={
+            "vortex_handoff": "reschedule",
+            "appointment_id": "apt-1",
+            "patient_id": "pat-9",
+            "language": "es",
+        },
+    )
+    session = CallSession.open(start, settings=offline_settings, now=WHEN)
+    assert session.handoff is not None
+    assert session.handoff["appointment_id"] == "apt-1"
+    assert session.language == "es"
+
+    plain = CallSession.open(
+        StartPayload(streamSid="MZ-2", callSid="CA-plain", customParameters={}),
+        settings=offline_settings,
+        now=WHEN,
+    )
+    assert plain.handoff is None

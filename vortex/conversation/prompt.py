@@ -246,11 +246,49 @@ def caller_note_for(match: CallerLineMatch | None) -> str:
     )
 
 
+def handoff_note_for(handoff: dict[str, str] | None) -> str:
+    """The HANDOFF block: this call continues an outbound confirmation call.
+
+    The patient was just called to confirm tomorrow's appointment and asked to
+    move it, so the conversation opens mid-task: the agent goes straight to the
+    rebooking loop with the diary tools, in the patient's language, instead of
+    the plain identify-and-help opening.
+    """
+    if not handoff:
+        return ""
+    language = language_name(handoff.get("language") or DEFAULT_LANGUAGE)
+    lines = [
+        "HANDOFF: This is the continuation of an outbound confirmation call placed by us.",
+        "The patient has just said they want to move their appointment "
+        f"(appointment_id: {handoff.get('appointment_id', 'unknown')}, "
+        f"patient_id: {handoff.get('patient_id', 'unknown')}).",
+        "Do not ask who is calling or what they need: go straight to rescheduling that "
+        "appointment with the diary tools and submit the change.",
+        f"The patient speaks {language}; continue in {language}.",
+    ]
+    return "\n".join(lines)
+
+
+HANDOFF_GREETINGS: dict[str, str] = {
+    "en": "Let's move that appointment for you. Which day would suit you better?",
+    "es": "Vamos a mover su cita. ¿Qué día le vendría mejor?",
+    "ca": "Anem a moure la seva cita. Quin dia li vindria millor?",
+    "gl": "Imos mover a súa cita. Que día lle viñera mellor?",
+    "eu": "Hitzordua mugituko dugu. Zein egun etor litzaizukeen hobeto?",
+}
+
+
+def handoff_greeting_for(language: str | None = None) -> str:
+    """The line a handoff call opens with: mid-task, straight to rescheduling."""
+    return _line(HANDOFF_GREETINGS, language)
+
+
 def build_system_prompt(
     now: datetime,
     *,
     language: str | None = None,
     caller: CallerLineMatch | None = None,
+    handoff: dict[str, str] | None = None,
     version: str | None = None,
 ) -> str:
     """The system prompt for one call, with the clock rendered in.
@@ -270,7 +308,9 @@ def build_system_prompt(
         language=language_name(language or DEFAULT_LANGUAGE),
         sites_brief=SITES_BRIEF,
         specialties_brief=SPECIALTIES_BRIEF,
-        caller_note=caller_note_for(caller),
+        caller_note="\n".join(
+            part for part in (caller_note_for(caller), handoff_note_for(handoff)) if part
+        ),
         tool_guide=TOOL_GUIDE,
     )
 
@@ -280,10 +320,14 @@ def initial_messages(
     *,
     language: str | None = None,
     caller: CallerLineMatch | None = None,
+    handoff: dict[str, str] | None = None,
 ) -> list[dict[str, str]]:
     """The context the LLM starts with. The first assistant turn is the greeting."""
     return [
-        {"role": "system", "content": build_system_prompt(now, language=language, caller=caller)}
+        {
+            "role": "system",
+            "content": build_system_prompt(now, language=language, caller=caller, handoff=handoff),
+        }
     ]
 
 

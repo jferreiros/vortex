@@ -213,6 +213,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return Response(content=xml, media_type="application/xml")
         status: confirmations.ConfirmationStatus = outcome if outcome != "unknown" else "unclear"
         detail = "answered" if outcome != "unknown" else "unclear_response"
+        # A patient who wants to move the appointment goes straight into the
+        # voice-agent rebooking loop, in the same call, when the live pipeline
+        # runs behind this server. On stub/demo voice there is nobody to hand
+        # the call to, so the stored callback promise stands.
+        handoff_xml: str | None = None
+        if outcome == "reschedule_requested" and (
+            settings.voice_is_pipecat or settings.voice_is_gemini_live
+        ):
+            handoff_xml = confirmations.twiml_handoff_to_agent(
+                call, confirmations.handoff_ws_url(settings.public_base_url)
+            )
+            detail = "handoff_to_voice_agent"
         await store.update(
             call.confirmation_id,
             status=status,
@@ -221,6 +233,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             attempts=attempt,
         )
         log.info("confirmation %s -> %s (%r)", call.confirmation_id, status, transcript[:80])
+        if handoff_xml is not None:
+            return Response(content=handoff_xml, media_type="application/xml")
         text = (
             job.ack(outcome, call.language)
             if outcome != "unknown"
