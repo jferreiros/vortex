@@ -19,12 +19,15 @@ from vortex.line.confirmation_calls import (
     call_language,
     cancel_confirmation_calls,
     classify_reply,
+    ensure_confirmation_audio,
     handoff_from_parameters,
     handoff_ws_url,
     schedule_confirmation_call,
     twilio_locale,
     twiml_ask,
     twiml_handoff_to_agent,
+    twiml_say,
+    valid_audio_name,
 )
 from vortex.line.server import create_app
 
@@ -284,6 +287,88 @@ async def test_worker_live_marks_calling_with_sid(tmp_path: Path, offline_settin
 # ---- webhooks ------------------------------------------------------------------
 
 
+# ---- the wall's own voice for the Twilio-only segments -----------------------
+
+
+def test_twiml_ask_plays_synthesised_audio_when_given_a_url() -> None:
+    call = _pending()
+    url = "https://demo.example.com/confirmation/audio/" + "a" * 24 + ".mp3"
+    xml = twiml_ask(call, "https://demo.example.com", audio_url=url)
+    assert f"<Play>{url}</Play>" in xml
+    assert "<Say" not in xml
+
+
+def test_twiml_ask_keeps_say_without_audio() -> None:
+    xml = twiml_ask(_pending(), "https://demo.example.com")
+    assert "<Say" in xml and "<Play>" not in xml
+
+
+def test_handoff_plays_audio_then_connects() -> None:
+    call = _pending()
+    url = "https://demo.example.com/confirmation/audio/" + "b" * 24 + ".mp3"
+    xml = twiml_handoff_to_agent(call, "wss://demo.example.com/ws", audio_url=url)
+    assert f"<Play>{url}</Play>" in xml and "<Say" not in xml
+    assert "<Connect><Stream" in xml
+
+
+def test_twiml_say_plays_audio() -> None:
+    url = "https://x/" + "c" * 24 + ".mp3"
+    xml = twiml_say("Gracias, adiós.", "es", audio_url=url)
+    assert f"<Play>{url}</Play>" in xml and "<Say" not in xml
+
+
+@pytest.mark.asyncio
+async def test_ensure_confirmation_audio_synthesises_and_caches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from vortex import settings as settings_module
+    from vortex.line import voice_config
+
+    calls: list[str] = []
+
+    def fake_synthesize(settings, cfg, text, *, language_code, voice_name) -> bytes:
+        calls.append(f"{language_code}|{voice_name}")
+        return b"fake-mp3"
+
+    monkeypatch.setenv("VORTEX_CONFIRMATION_AUDIO_DIR", str(tmp_path / "audio"))
+    monkeypatch.setenv("VORTEX_CALLS_LOG", str(tmp_path / "calls.jsonl"))
+    monkeypatch.setattr(voice_config, "synthesize", fake_synthesize)
+    settings_module.reset_settings()
+    try:
+        settings = settings_module.get_settings()
+        name = await ensure_confirmation_audio(settings, "Hola, le llamamos de la clínica.", "es")
+        assert name is not None and valid_audio_name(name)
+        assert (tmp_path / "audio" / name).read_bytes() == b"fake-mp3"
+        assert calls == ["es-ES|es-ES-Chirp3-HD-Aoede"]
+        # second render of the same line reuses the file, no new synthesis
+        again = await ensure_confirmation_audio(settings, "Hola, le llamamos de la clínica.", "es")
+        assert again == name
+        assert len(calls) == 1
+    finally:
+        settings_module.reset_settings()
+
+
+@pytest.mark.asyncio
+async def test_ensure_confirmation_audio_returns_none_without_tts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from vortex import settings as settings_module
+    from vortex.line import voice_config
+
+    def boom(settings, cfg, text, *, language_code, voice_name) -> bytes:
+        raise RuntimeError("no credentials")
+
+    monkeypatch.setenv("VORTEX_CONFIRMATION_AUDIO_DIR", str(tmp_path / "audio"))
+    monkeypatch.setenv("VORTEX_CALLS_LOG", str(tmp_path / "calls.jsonl"))
+    monkeypatch.setattr(voice_config, "synthesize", boom)
+    settings_module.reset_settings()
+    try:
+        settings = settings_module.get_settings()
+        assert await ensure_confirmation_audio(settings, "Hola.", "es") is None
+    finally:
+        settings_module.reset_settings()
+
+
 @pytest.fixture
 def confirmation_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     from vortex import settings as settings_module
@@ -308,6 +393,23 @@ def _seed(store_path: Path) -> ConfirmationCall:
     asyncio.run(store.add(call))
     asyncio.run(store.claim_due(WHEN - timedelta(hours=23)))  # -> calling
     return call
+
+
+def test_twiml_endpoint_plays_the_wall_voice_when_tts_works(
+    confirmation_client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from vortex.line import voice_config
+
+    monkeypatch.setattr(voice_config, "synthesize", lambda settings, cfg, text, **kw: b"fake-mp3")
+    client, settings = confirmation_client
+    call = _seed(Path(settings.confirmation_calls_path))
+    response = client.post(f"/confirmation/twiml?cid={call.confirmation_id}")
+    assert response.status_code == 200
+    assert "<Play>" in response.text and "<Say" not in response.text
+    name = response.text.split("/confirmation/audio/")[1].split("</Play>")[0]
+    audio = client.get(f"/confirmation/audio/{name}")
+    assert audio.status_code == 200 and audio.content == b"fake-mp3"
+    assert client.get("/confirmation/audio/not-a-hash.mp3").status_code == 404
 
 
 def test_twiml_endpoint_serves_the_question(confirmation_client) -> None:
@@ -435,7 +537,7 @@ def test_a_second_job_registers_and_uses_its_own_policy() -> None:
         def call_at(self, *, when, lead):
             return when - timedelta(hours=2)  # its own schedule
 
-        def ask_twiml(self, call, base_url, *, attempt, reprompt):
+        def ask_twiml(self, call, base_url, *, attempt, reprompt, audio_url=None):
             return "TWIML"
 
         def classify(self, transcript, language):

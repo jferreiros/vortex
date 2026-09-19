@@ -183,6 +183,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def _call_store() -> confirmations.ConfirmationStore:
         return confirmations.confirmation_store_from_settings(settings)
 
+    async def _audio_url(text: str, language: str) -> str | None:
+        """A public <Play> URL for one line in the wall's voice, or None for <Say>."""
+        name = await confirmations.ensure_confirmation_audio(settings, text, language)
+        if name is None:
+            return None
+        base = settings.public_base_url.rstrip("/")
+        return f"{base}/confirmation/audio/{name}"
+
+    @app.get("/confirmation/audio/{name}")
+    async def confirmation_audio(name: str) -> Response:
+        """One synthesised confirmation-call line, for Twilio's <Play>."""
+        if not confirmations.valid_audio_name(name):
+            return Response(status_code=404)
+        path = confirmations.confirmation_audio_dir(settings) / name
+        if not path.is_file():
+            return Response(status_code=404)
+        return Response(content=path.read_bytes(), media_type="audio/mpeg")
+
     @app.api_route("/confirmation/twiml", methods=["GET", "POST"])
     async def confirmation_twiml(cid: str = "") -> Response:
         """The TwiML for one queued confirmation call: the question + Gather."""
@@ -191,8 +209,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return Response(status_code=404)
         base = settings.public_base_url.rstrip("/")
         job = confirmations.job_for(call.job)
+        audio_url = await _audio_url(confirmations.ask_speech(call), call.language)
         return Response(
-            content=job.ask_twiml(call, base, attempt=1, reprompt=False),
+            content=job.ask_twiml(call, base, attempt=1, reprompt=False, audio_url=audio_url),
             media_type="application/xml",
         )
 
@@ -209,7 +228,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         outcome = job.classify(transcript, call.language)
         if outcome == "unknown" and attempt < 2:
             base = settings.public_base_url.rstrip("/")
-            xml = job.ask_twiml(call, base, attempt=attempt + 1, reprompt=True)
+            audio_url = await _audio_url(
+                confirmations.ask_speech(call, reprompt=True), call.language
+            )
+            xml = job.ask_twiml(call, base, attempt=attempt + 1, reprompt=True, audio_url=audio_url)
             return Response(content=xml, media_type="application/xml")
         status: confirmations.ConfirmationStatus = outcome if outcome != "unknown" else "unclear"
         detail = "answered" if outcome != "unknown" else "unclear_response"
@@ -222,8 +244,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if outcome == "reschedule_requested" and (
             settings.voice_is_pipecat or settings.voice_is_gemini_live
         ):
+            bridge = confirmations.handoff_bridge_text(call.language)
+            audio_url = await _audio_url(bridge, call.language)
             handoff_xml = confirmations.twiml_handoff_to_agent(
-                call, confirmations.handoff_ws_url(settings.public_base_url)
+                call, confirmations.handoff_ws_url(settings.public_base_url), audio_url=audio_url
             )
             detail = "handoff_to_voice_agent"
         await store.update(
@@ -241,8 +265,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if outcome != "unknown"
             else job.final_unclear(call.language)
         )
+        audio_url = await _audio_url(text, call.language)
         return Response(
-            content=confirmations.twiml_say(text, call.language),
+            content=confirmations.twiml_say(text, call.language, audio_url=audio_url),
             media_type="application/xml",
         )
 
@@ -258,10 +283,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             status="unclear",
             detail="no_speech",
         )
+        text = confirmations.job_for(call.job).no_speech(call.language)
+        audio_url = await _audio_url(text, call.language)
         return Response(
-            content=confirmations.twiml_say(
-                confirmations.job_for(call.job).no_speech(call.language), call.language
-            ),
+            content=confirmations.twiml_say(text, call.language, audio_url=audio_url),
             media_type="application/xml",
         )
 
