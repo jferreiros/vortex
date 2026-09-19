@@ -43,7 +43,11 @@ def reasons(cards: list[CallCard], labels: dict[str, str] | None = None) -> list
 
 
 def outcomes(cards: list[CallCard], labels: dict[str, str] | None = None) -> list[Bar]:
-    counter: Counter[str] = Counter(c.status for c in cards if not c.live)
+    counter: Counter[str] = Counter(
+        "ended" if c.action_kind and not (c.submit_status or c.submit_route) else c.status
+        for c in cards
+        if not c.live
+    )
     return _bars(counter, labels)
 
 
@@ -74,7 +78,7 @@ def calls_by_hour(cards: list[CallCard]) -> list[Bar]:
         except ValueError:
             continue
         if stamp.tzinfo is None:
-            stamp = stamp.replace(tzinfo=ZoneInfo("UTC"))
+            continue
         counter[stamp.astimezone(MADRID).hour] += 1
     if not counter:
         return []
@@ -119,13 +123,14 @@ def _insurer(card: CallCard) -> str | None:
 def patients(cards: list[CallCard]) -> list[PatientRow]:
     """One row per patient seen on the line, most recent first.
 
-    A patient is keyed by name when the directory found one, else by phone.
-    Calls with neither stay out: there is no patient to show.
+    A patient is keyed by the directory patient_id when found, else by phone
+    for unmatched callers. Calls with neither stay out: there is no patient
+    to show.
     """
     rows: dict[str, PatientRow] = {}
     order: list[str] = []
     for card in cards:  # cards arrive newest first
-        key = card.patient_name or card.from_number
+        key = card.patient_id or card.from_number
         if not key:
             continue
         row = rows.get(key)
