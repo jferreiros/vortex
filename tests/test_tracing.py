@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -85,6 +86,28 @@ def test_trace_call_is_a_noop_without_keys(clean_langfuse, tmp_path) -> None:
         assert observation is None
         session.end_reason = "pipeline_finished"
     assert session.call_id == "CA-trace"
+
+
+def test_observe_tool_records_the_exception_type_without_its_text(clean_langfuse) -> None:
+    updates: list[dict] = []
+
+    class FakeObservation:
+        def update(self, **kwargs) -> None:
+            updates.append(kwargs)
+
+    class FakeClient:
+        @contextmanager
+        def start_as_current_observation(self, **_kwargs):
+            yield FakeObservation()
+
+    clean_langfuse.setattr(tracing, "_client", lambda: FakeClient())
+    secret = "12345678Z"
+    with pytest.raises(ValueError):
+        with tracing.observe_tool("find_patient", {"national_id": secret}):
+            raise ValueError(f"invalid input for find_patient: {secret}")
+
+    assert updates == [{"output": {"error": "ValueError"}, "level": "ERROR"}]
+    assert secret not in repr(updates)
 
 
 def test_async_openai_client_is_plain_openai_when_off(clean_langfuse) -> None:
