@@ -53,6 +53,9 @@ VOICE_KEYS = (
     "LANGFUSE_BASE_URL",
     "LANGFUSE_TRACING_ENVIRONMENT",
     "VORTEX_ENV",
+    "GOOGLE_API_KEY",
+    "GEMINI_LIVE_MODEL",
+    "GEMINI_LIVE_VOICE",
 )
 
 
@@ -316,6 +319,14 @@ def test_voice_mode_overrides_the_keys(clean_env) -> None:
         ).voice_is_pipecat
         is False
     )
+    gemini = _settings(clean_env, VORTEX_VOICE_MODE="gemini-live", GOOGLE_API_KEY="g-x")
+    assert gemini.voice_is_gemini_live is True
+    assert gemini.voice_is_pipecat is False
+    # A GOOGLE_API_KEY alone must not flip auto onto the demo path.
+    assert (
+        _settings(clean_env, VORTEX_VOICE_MODE="auto", GOOGLE_API_KEY="g-x").voice_is_gemini_live
+        is False
+    )
 
 
 def test_google_voice_defaults_cover_the_five_languages(clean_env) -> None:
@@ -406,6 +417,7 @@ def test_describe_never_leaks_a_key(clean_env) -> None:
         "ARBITER_API_KEY": "arbiter-secret",
         "LANGFUSE_PUBLIC_KEY": "pk-lf-secret",
         "LANGFUSE_SECRET_KEY": "sk-lf-secret",
+        "GOOGLE_API_KEY": "google-api-secret",
     }
     s = _settings(clean_env, VORTEX_TTS_PROVIDER="elevenlabs", **secrets)
     described = s.describe()
@@ -417,6 +429,7 @@ def test_describe_never_leaks_a_key(clean_env) -> None:
     assert described["has_elevenlabs_key"] is True
     assert described["has_arbiter_key"] is True
     assert described["has_langfuse_keys"] is True
+    assert described["has_google_api_key"] is True
     assert described["llm_provider"] == "helmcode"
     assert described["tts_provider"] == "elevenlabs"
     assert described["tts_provider_alt"] == "google"
