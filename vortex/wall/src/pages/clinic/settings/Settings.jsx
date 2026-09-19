@@ -15,7 +15,7 @@ const DEFAULTS = {
     canInfo: true,
     canEscalate: true,
   },
-  minimumBookingLeadDays: 1,
+  minimumBookingLeadHours: 12,
   patientIdentificationFieldsRequired: 1,
   callTimeCapMinutes: 3,
   personalization: {
@@ -35,9 +35,9 @@ const PERMISSIONS_CONFIG = [
   { key: "canEscalate", label: "Escalar urgencias", desc: "Derivar a un humano." },
 ];
 
-const LEAD_DAYS_HELP = "Días mínimos entre la llamada y la cita. 1 = la primera cita es mañana.";
+const LEAD_HOURS_HELP = "Horas mínimas entre la llamada y la cita.";
 
-const ID_FIELDS_HELP = "Datos que debe confirmar un paciente existente. Con 1, se pide un segundo solo si hay ambigüedad.";
+const ID_FIELDS_HELP = "Datos que debe confirmar un paciente existente.";
 
 const CAP_HELP = "Fijado por la plataforma.";
 
@@ -114,13 +114,14 @@ export default function Settings() {
     updateSetting(`permissions.${key}`, checked);
   };
 
-  const handleLeadDaysChange = (value) => {
-    const clamped = Math.max(0, Math.min(30, value));
-    updateSetting("minimumBookingLeadDays", clamped);
+  const handleLeadHoursChange = (value) => {
+    const clamped = Math.max(2, Math.min(72, value));
+    updateSetting("minimumBookingLeadHours", clamped);
   };
 
   const handleIdFieldsChange = (value) => {
-    updateSetting("patientIdentificationFieldsRequired", value);
+    const clamped = Math.max(1, Math.min(4, value));
+    updateSetting("patientIdentificationFieldsRequired", clamped);
   };
 
   const handlePersonalizationChange = (key, value) => {
@@ -186,130 +187,8 @@ export default function Settings() {
       {saveStatus === "defaulted" && <div className="settings-toast defaulted">Valores por defecto restaurados</div>}
 
       <div className="settings-groups">
-        {/* 1. Permisos del agente */}
+        {/* 1. Voz del agente (roscas) */}
         <Card padding="lg" className="settings-group">
-          <div className="settings-group-head">
-            <h3>Permisos</h3>
-            <p>Lo que el agente puede hacer por sí solo.</p>
-          </div>
-          <div className="settings-rows">
-            {PERMISSIONS_CONFIG.map((p) => (
-              <div className="settings-row" key={p.key}>
-                <div>
-                  <span className="settings-row-label">{p.label}</span>
-                  <span className="settings-row-desc">{p.desc}</span>
-                </div>
-                <Switch
-                  checked={settings.permissions[p.key]}
-                  onChange={(checked) => handlePermissionChange(p.key, checked)}
-                  label={p.label}
-                />
-              </div>
-            ))}
-          </div>
-        </Card>
-
-        <div className="settings-pair">
-        {/* 2. Reserva y duración de llamada */}
-        <Card padding="lg" className="settings-group">
-          <div className="settings-group-head">
-            <h3>Reserva</h3>
-            <p>Agenda y duración de la llamada.</p>
-          </div>
-          <div className="settings-rows">
-            <div className="settings-row settings-row-stepper">
-              <div>
-                <span className="settings-row-label">Antelación mínima</span>
-                <span className="settings-row-desc">{LEAD_DAYS_HELP}</span>
-              </div>
-              <div className="settings-stepper">
-                <button
-                  className="ui-stepper-btn"
-                  onClick={() => handleLeadDaysChange(settings.minimumBookingLeadDays - 1)}
-                  disabled={settings.minimumBookingLeadDays <= 0}
-                  aria-label="Decrementar"
-                >
-                  −
-                </button>
-                <input
-                  type="number"
-                  className="ui-stepper-input"
-                  value={settings.minimumBookingLeadDays}
-                  onChange={(e) => handleLeadDaysChange(parseInt(e.target.value) || 0)}
-                  min={0}
-                  max={30}
-                  readOnly
-                />
-                <button
-                  className="ui-stepper-btn"
-                  onClick={() => handleLeadDaysChange(settings.minimumBookingLeadDays + 1)}
-                  disabled={settings.minimumBookingLeadDays >= 30}
-                  aria-label="Incrementar"
-                >
-                  +
-                </button>
-                <span className="settings-stepper-unit">días</span>
-              </div>
-            </div>
-            <div className="settings-row settings-row-cap">
-              <div>
-                <span className="settings-row-label">Duración máx. de llamada</span>
-                <span className="settings-row-desc">{CAP_HELP}</span>
-              </div>
-              <div className="settings-cap-display">
-                <input
-                  type="text"
-                  value={`${settings.callTimeCapMinutes} min`}
-                  readOnly
-                  disabled={true}
-                  className="ui-cap-input"
-                  title={CAP_HELP}
-                />
-              </div>
-            </div>
-          </div>
-        </Card>
-
-        {/* 3. Identificación */}
-        <Card padding="lg" className="settings-group">
-          <div className="settings-group-head">
-            <h3>Identificación</h3>
-            <p>{ID_FIELDS_HELP}</p>
-          </div>
-          <div className="settings-rows">
-            <div className="settings-row settings-row-segmented">
-              <div>
-                <span className="settings-row-label">Campos requeridos</span>
-              </div>
-              <div className="ui-segmented" role="radiogroup" aria-label="Campos de identificación requeridos">
-                <label className={`ui-segmented-btn ${settings.patientIdentificationFieldsRequired === 1 ? "active" : ""}`}>
-                  <input
-                    type="radio"
-                    name="idFields"
-                    value={1}
-                    checked={settings.patientIdentificationFieldsRequired === 1}
-                    onChange={() => handleIdFieldsChange(1)}
-                  />
-                  1 dato
-                </label>
-                <label className={`ui-segmented-btn ${settings.patientIdentificationFieldsRequired === 2 ? "active" : ""}`}>
-                  <input
-                    type="radio"
-                    name="idFields"
-                    value={2}
-                    checked={settings.patientIdentificationFieldsRequired === 2}
-                    onChange={() => handleIdFieldsChange(2)}
-                  />
-                  2 datos
-                </label>
-              </div>
-            </div>
-          </div>
-        </Card>
-        </div>
-
-        {/* 4. Voz del agente (roscas) */}
-        <Card padding="lg" className="settings-group settings-group-wide">
           <div className="settings-group-head">
             <h3>Voz del agente</h3>
             <p>Cómo suena el agente.</p>
@@ -346,6 +225,135 @@ export default function Settings() {
             </div>
           </div>
         </Card>
+
+        {/* 2. Permisos del agente */}
+        <Card padding="lg" className="settings-group">
+          <div className="settings-group-head">
+            <h3>Permisos</h3>
+            <p>Lo que el agente puede hacer por sí solo.</p>
+          </div>
+          <div className="settings-rows">
+            {PERMISSIONS_CONFIG.map((p) => (
+              <div className="settings-row" key={p.key}>
+                <div>
+                  <span className="settings-row-label">{p.label}</span>
+                  <span className="settings-row-desc">{p.desc}</span>
+                </div>
+                <Switch
+                  checked={settings.permissions[p.key]}
+                  onChange={(checked) => handlePermissionChange(p.key, checked)}
+                  label={p.label}
+                />
+              </div>
+            ))}
+          </div>
+        </Card>
+
+        <div className="settings-pair">
+        {/* 2. Reserva y duración de llamada */}
+        <Card padding="lg" className="settings-group">
+          <div className="settings-group-head">
+            <h3>Reserva</h3>
+            <p>Agenda y duración de la llamada.</p>
+          </div>
+          <div className="settings-rows">
+            <div className="settings-row settings-row-stepper">
+              <div>
+                <span className="settings-row-label">Antelación mínima</span>
+                <span className="settings-row-desc">{LEAD_HOURS_HELP}</span>
+              </div>
+              <div className="settings-stepper">
+                <button
+                  className="ui-stepper-btn"
+                  onClick={() => handleLeadHoursChange(settings.minimumBookingLeadHours - 1)}
+                  disabled={settings.minimumBookingLeadHours <= 2}
+                  aria-label="Decrementar"
+                >
+                  −
+                </button>
+                <input
+                  type="number"
+                  className="ui-stepper-input"
+                  value={settings.minimumBookingLeadHours}
+                  onChange={(e) => handleLeadHoursChange(parseInt(e.target.value) || 0)}
+                  min={2}
+                  max={72}
+                  readOnly
+                />
+                <button
+                  className="ui-stepper-btn"
+                  onClick={() => handleLeadHoursChange(settings.minimumBookingLeadHours + 1)}
+                  disabled={settings.minimumBookingLeadHours >= 72}
+                  aria-label="Incrementar"
+                >
+                  +
+                </button>
+                <span className="settings-stepper-unit">horas</span>
+              </div>
+            </div>
+            <div className="settings-row settings-row-cap">
+              <div>
+                <span className="settings-row-label">Duración máx. de llamada</span>
+                <span className="settings-row-desc">{CAP_HELP}</span>
+              </div>
+              <div className="settings-cap-display">
+                <input
+                  type="text"
+                  value={`${settings.callTimeCapMinutes} min`}
+                  readOnly
+                  disabled={true}
+                  className="ui-cap-input"
+                  title={CAP_HELP}
+                />
+              </div>
+            </div>
+          </div>
+        </Card>
+
+        {/* 3. Identificación */}
+        <Card padding="lg" className="settings-group">
+          <div className="settings-group-head">
+            <h3>Identificación</h3>
+            <p>{ID_FIELDS_HELP}</p>
+          </div>
+          <div className="settings-rows">
+            <div className="settings-row settings-row-stepper">
+              <div>
+                <span className="settings-row-label">Campos requeridos</span>
+              </div>
+              <div className="settings-stepper">
+                <button
+                  className="ui-stepper-btn"
+                  onClick={() => handleIdFieldsChange(settings.patientIdentificationFieldsRequired - 1)}
+                  disabled={settings.patientIdentificationFieldsRequired <= 1}
+                  aria-label="Decrementar"
+                >
+                  −
+                </button>
+                <input
+                  type="number"
+                  className="ui-stepper-input"
+                  value={settings.patientIdentificationFieldsRequired}
+                  onChange={(e) => handleIdFieldsChange(parseInt(e.target.value) || 1)}
+                  min={1}
+                  max={4}
+                  readOnly
+                />
+                <button
+                  className="ui-stepper-btn"
+                  onClick={() => handleIdFieldsChange(settings.patientIdentificationFieldsRequired + 1)}
+                  disabled={settings.patientIdentificationFieldsRequired >= 4}
+                  aria-label="Incrementar"
+                >
+                  +
+                </button>
+                <span className="settings-stepper-unit">datos</span>
+              </div>
+            </div>
+          </div>
+        </Card>
+        </div>
+
       </div>
 
       {showDefaultConfirm && (
@@ -359,7 +367,7 @@ export default function Settings() {
               <p>Esto restablecerá todos los controles a los valores por defecto:</p>
               <ul>
                 <li>Permisos: <strong>ON</strong></li>
-                <li>Antelación mínima: <strong>1 día</strong></li>
+                <li>Antelación mínima: <strong>12 horas</strong></li>
                 <li>Identificación: <strong>1 dato</strong></li>
                 <li>Tono / Amabilidad / Ritmo: <strong>50</strong></li>
                 <li>Voz: <strong>Mujer</strong></li>
