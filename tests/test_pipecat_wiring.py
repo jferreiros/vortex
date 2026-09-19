@@ -792,6 +792,60 @@ async def test_the_idle_escalation_is_per_socket(voice_settings) -> None:
     assert [f.text for f in second_queued] == [idle_prompt_for("en")]
 
 
+async def test_tool_filler_speaks_one_short_phrase_per_language(voice_settings) -> None:
+    """on_function_calls_started queues a short TTSSpeakFrame in the call language.
+
+    The phrase masks LLM tool latency (~1.3 s). It is bot speech, so it does
+    not trip the word gate or start the idle timer. Under ~1 s of audio.
+    """
+    pytest.importorskip("pipecat")
+    from pipecat.frames.frames import TTSSpeakFrame
+
+    from vortex.conversation.language import SUPPORTED_LANGUAGES
+    from vortex.line.pipecat_voice import (
+        TOOL_FILLERS,
+        _LanguageState,
+        _make_tool_filler_speaker,
+        tool_filler_for,
+    )
+
+    for code in SUPPORTED_LANGUAGES:
+        phrase = tool_filler_for(code)
+        assert phrase == TOOL_FILLERS[code]
+        assert phrase.strip()
+        assert len(phrase.split()) <= 3
+
+    assert tool_filler_for("de") == tool_filler_for("en") == TOOL_FILLERS["en"]
+    assert tool_filler_for(None) == TOOL_FILLERS["en"]
+
+    settings = voice_settings()
+    events: list[tuple[str, dict]] = []
+    queued: list[object] = []
+
+    class Task:
+        async def queue_frames(self, frames: list[object]) -> None:
+            queued.extend(frames)
+
+    state = _LanguageState("es")
+    handler = _make_tool_filler_speaker(_session(settings, events), state, Task())
+
+    await handler(None, [{"name": "find_patient"}])
+    assert [kind for kind, _ in events] == ["voice.tool_filler"]
+    assert events[0][1]["language"] == "es"
+    assert events[0][1]["tools"] == 1
+    assert events[0][1]["text"] == TOOL_FILLERS["es"]
+    assert len(queued) == 1
+    assert isinstance(queued[0], TTSSpeakFrame)
+    assert queued[0].text == TOOL_FILLERS["es"]
+    assert queued[0].append_to_context is True
+
+    state.language = "ca"
+    await handler(None, [{}, {}])
+    assert queued[-1].text == TOOL_FILLERS["ca"]
+    assert events[-1][1]["tools"] == 2
+    assert [kind for kind, _ in events] == ["voice.tool_filler"] * 2
+
+
 def test_vad_mode_wires_our_turn_strategies() -> None:
     """The aggregator always gets the conversation lane's strategies.
 
