@@ -9,9 +9,10 @@ The log source is the synthetic-data pack by default
 single live call log (``logs/calls.jsonl``) later - the grid fills from
 whichever file it reads as more actions land.
 
-The builders (``bookings_from_events``, ``build_calendars``) are pure: they take
-data and return data, so the view and the tests share one code path. The two IO
-helpers (``appointment_index``, ``load_source_events``) sit at the bottom.
+The builders (``bookings_from_events``, ``build_calendars``, ``clinic_agenda``)
+are pure: they take data and return data, so the view and the tests share one
+code path. The IO helpers (``appointment_index``, ``load_source_events``,
+``load_agenda_bookings``) sit at the bottom.
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any, Literal
@@ -206,6 +207,78 @@ def bookings_from_appointments(items: list[Appointment]) -> dict[BookingKey, Boo
             appointment_id=item.appointment_id,
         )
     return bookings
+
+
+def assign_provider(catalogue: Catalogue, booking: Booking) -> Booking:
+    """Give a diary row a real ``provider_id`` when the pack left it blank.
+
+    ``appointments.json`` often knows the site and type but not the doctor.
+    The board still has to hang that visit on someone's grid, so we pick the
+    first catalogue provider at that site (and of that type's specialty, when
+    the type is not universal). A row that already names a doctor is unchanged.
+    """
+    if booking.provider_id:
+        return booking
+    provider_id = _provider_for_slot(
+        catalogue, booking.location_id, booking.appointment_type_id
+    )
+    if not provider_id:
+        return booking
+    return replace(booking, provider_id=provider_id)
+
+
+def _provider_for_slot(
+    catalogue: Catalogue, location_id: str, appointment_type_id: str
+) -> str:
+    type_specialty = next(
+        (
+            row.specialty_id
+            for row in catalogue.appointment_types
+            if row.appointment_type_id == appointment_type_id
+        ),
+        None,
+    )
+
+    def at_site(provider: Any) -> bool:
+        return not location_id or location_id in provider.location_ids
+
+    ranked = [
+        provider
+        for provider in catalogue.providers
+        if at_site(provider)
+        and (not type_specialty or provider.specialty_id == type_specialty)
+    ]
+    if not ranked:
+        ranked = [provider for provider in catalogue.providers if at_site(provider)]
+    if not ranked:
+        ranked = list(catalogue.providers)
+    return ranked[0].provider_id if ranked else ""
+
+
+def load_agenda_bookings(catalogue: Catalogue) -> dict[BookingKey, Booking]:
+    """Taken slots for the Clinic View: fixtures, the synthetic pack, then the log.
+
+    Per-patient clinic lookups miss pack rows with an empty ``patient_id``.
+    Reading ``appointments.json`` whole (and filling a missing doctor from the
+    catalogue) is what puts those visits on the board.
+    """
+    from vortex.clinic import fixtures
+    from vortex.clinic.client import _adapt_appointment
+
+    extra = [
+        Appointment.model_validate(_adapt_appointment(row)) for row in fixtures.APPOINTMENTS
+    ]
+    bookings = bookings_from_appointments(extra)
+    for booking in appointment_index().values():
+        placed = assign_provider(catalogue, booking)
+        if not placed.provider_id:
+            continue
+        bookings[_key(placed.provider_id, placed.location_id, placed.start)] = placed
+    return bookings_from_events(
+        load_source_events(),
+        {row.appointment_id: row for row in bookings.values() if row.appointment_id},
+        base=bookings,
+    )
 
 
 def bookings_from_events(
@@ -1051,6 +1124,178 @@ def doctor_agenda(
         "days": columns,
         "weeks": weeks,
         "visits": visits,
+    }
+
+
+def _day_visits(
+    calendars: list[DoctorCalendar],
+    day: date,
+    patients: dict[str, PatientBrief],
+    brief_kw: dict[str, Any],
+    type_durations: dict[str, int] | None,
+    *,
+    require_name: bool,
+    tag_provider: bool,
+) -> list[dict[str, Any]]:
+    """Booked visits on ``day`` across one or more doctor grids."""
+    visits: list[dict[str, Any]] = []
+    for calendar in calendars:
+        day_obj = next((row for row in calendar.days if row.day == day), None)
+        if day_obj is None:
+            continue
+        for cell in day_obj.cells:
+            if cell.status != "booked":
+                continue
+            brief = briefing_for(cell, patients, **brief_kw)
+            if require_name and not _roster_visit(brief, patients):
+                continue
+            minutes = _type_duration(cell.appointment_type_id, type_durations)
+            row = _visit_row(
+                brief,
+                date_iso=day.isoformat(),
+                duration_minutes=minutes,
+            )
+            if not str(row.get("full_name") or "").strip():
+                row["full_name"] = "Cita"
+            if tag_provider:
+                row["provider_name"] = calendar.name
+                row["provider_id"] = calendar.provider_id
+                row["specialty"] = calendar.specialty
+                row["specialty_id"] = calendar.specialty_id
+            visits.append(row)
+    visits.sort(key=lambda row: (str(row["time"]), str(row.get("provider_name") or "")))
+    return visits
+
+
+def clinic_agenda(
+    calendars: list[DoctorCalendar],
+    patients: dict[str, PatientBrief],
+    *,
+    name: str = "",
+    specialty_id: str = "",
+    today: date,
+    week: date | None = None,
+    month: date | None = None,
+    location_names: dict[str, str] | None = None,
+    type_names: dict[str, str] | None = None,
+    type_durations: dict[str, int] | None = None,
+    plan_names: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """JSON payload for Horarios. A doctor is optional; specialty is enough."""
+    if (name or "").strip():
+        return doctor_agenda(
+            calendars,
+            patients,
+            name=name,
+            today=today,
+            week=week,
+            month=month,
+            location_names=location_names,
+            type_names=type_names,
+            type_durations=type_durations,
+            plan_names=plan_names,
+        )
+    chosen = [
+        calendar
+        for calendar in calendars
+        if not specialty_id or calendar.specialty_id == specialty_id
+    ]
+    brief_kw = {
+        "location_names": location_names,
+        "type_names": type_names,
+        "plan_names": plan_names,
+    }
+    span = sorted({day.day for calendar in chosen for day in calendar.days})
+    monday = week_start(week or today)
+    if span:
+        first_week = week_start(span[0])
+        last_week = week_start(span[-1])
+        if monday < first_week:
+            monday = first_week
+        if monday > last_week:
+            monday = last_week
+    else:
+        first_week = last_week = monday
+    sunday = monday + timedelta(days=6)
+    if monday.month == sunday.month:
+        week_label = f"{monday.strftime('%d')}–{sunday.strftime('%d %b')}"
+    else:
+        week_label = f"{monday.strftime('%d %b')} – {sunday.strftime('%d %b')}"
+    focus = month_start(month or week or today)
+    if span:
+        first_month = month_start(span[0])
+        last_month = month_start(span[-1])
+        if focus < first_month:
+            focus = first_month
+        if focus > last_month:
+            focus = last_month
+    weeks = []
+    for row in month_weeks(focus):
+        week_row = []
+        for day in row:
+            week_row.append(
+                {
+                    "date": day.isoformat(),
+                    "day": day.day,
+                    "in_month": day.month == focus.month,
+                    "today": day == today,
+                    "visits": _day_visits(
+                        chosen,
+                        day,
+                        patients,
+                        brief_kw,
+                        type_durations,
+                        require_name=False,
+                        tag_provider=True,
+                    ),
+                }
+            )
+        weeks.append(week_row)
+    month_label = f"{_MONTH_ES[focus.month - 1].capitalize()} {focus.year}"
+    specialty_name = ""
+    if specialty_id:
+        specialty_name = next(
+            (calendar.specialty for calendar in chosen if calendar.specialty),
+            specialty_id,
+        )
+    location_ids: list[str] = []
+    seen: set[str] = set()
+    for calendar in chosen:
+        for loc_id in calendar.location_ids:
+            if loc_id in seen:
+                continue
+            seen.add(loc_id)
+            location_ids.append(loc_id)
+    sites = [
+        {"id": loc_id, "name": (location_names or {}).get(loc_id, loc_id)}
+        for loc_id in location_ids
+    ]
+    return {
+        "ok": True,
+        "doctor": {
+            "name": specialty_name or "Toda la clínica",
+            "specialty": specialty_name,
+        },
+        "sites": sites,
+        "week": monday.isoformat(),
+        "week_label": week_label,
+        "month": focus.isoformat(),
+        "month_label": month_label,
+        "today": today.isoformat(),
+        "has_prev": monday > first_week,
+        "has_next": monday < last_week,
+        "times": [],
+        "days": [],
+        "weeks": weeks,
+        "visits": _day_visits(
+            chosen,
+            today,
+            patients,
+            brief_kw,
+            type_durations,
+            require_name=False,
+            tag_provider=True,
+        ),
     }
 
 
