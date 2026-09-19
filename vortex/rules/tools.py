@@ -482,7 +482,10 @@ async def nearest_location(ctx: ToolContext, args: NearestLocationInput) -> Near
             )
         )
 
-    point = await geo.locate(args.address, _settings_of(ctx))
+    # The geocode cache lives in this call's state, so an address never outlives
+    # the socket that spoke it.
+    cache = ctx.state.setdefault(geo.GEOCODE_CACHE_KEY, {})
+    point = await geo.locate(args.address, _settings_of(ctx), cache)
     if point is not None:
         found = geo.nearest(point, sites)
         if found is not None:
