@@ -44,6 +44,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  transform: translateY(28px);
 }
 
 .landing-hero-avatar-img {
