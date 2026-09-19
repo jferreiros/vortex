@@ -124,6 +124,7 @@ def build_llm(
     timeout: float = DEADLINE,
     retries: int = 1,
     fallback: Any = None,
+    retry_model: str | None = None,
 ) -> tuple[Any, list[tuple[str, dict]], list[Any], FakeCompletions]:
     """A guarded ``OpenAILLMService`` with a scripted client. Nothing connects."""
     pytest.importorskip("pipecat")
@@ -138,6 +139,7 @@ def build_llm(
         settings=OpenAILLMService.Settings(model="test-model"),
         first_token_timeout_secs=timeout,
         llm_retries=retries,
+        retry_model=retry_model,
         timeout_fallback_text=fallback if fallback is not None else (lambda: wait_prompt_for("es")),
         timeout_log_event=lambda kind, **data: events.append((kind, data)),
     )
@@ -189,6 +191,7 @@ async def test_a_stalled_body_is_abandoned_retried_and_answered_out_loud() -> No
     assert first["attempts"] == 2
     assert first["timeout_secs"] == DEADLINE
     assert first["elapsed_secs"] >= DEADLINE
+    assert first["model"] == "test-model"
     assert dict(events[1][1])["attempt"] == 2
 
     # The abandoned requests released their sockets rather than leaking them.
@@ -217,6 +220,40 @@ async def test_the_retry_is_what_answers_when_the_first_attempt_hangs() -> None:
     assert [kind for kind, _ in events] == [TIMEOUT_EVENT, RETRY_EVENT]
     # A turn the retry rescued says nothing extra: no holding line.
     assert pushed == []
+
+
+async def test_the_retry_switches_to_the_alternate_model() -> None:
+    """A hang on deepseek must not spend the retry on the same hung slot."""
+    chunks = [Chunk("hola")]
+    llm, events, pushed, completions = build_llm(
+        [stalled_body([]), streaming(chunks)],
+        retries=1,
+        retry_model="qwen3.6",
+    )
+
+    got = await drain(await llm.get_chat_completions(a_context()))
+
+    assert got == chunks
+    assert completions.calls == 2
+    assert completions.params[0]["model"] == "test-model"
+    assert completions.params[1]["model"] == "qwen3.6"
+    assert dict(events[1][1])["model"] == "qwen3.6"
+    assert llm._settings.model == "qwen3.6"
+    assert pushed == []
+
+
+async def test_the_retry_keeps_the_model_when_the_alt_is_empty_or_the_same() -> None:
+    chunks = [Chunk("sí")]
+    llm, _events, _pushed, completions = build_llm(
+        [stalled_body([]), streaming(chunks)],
+        retries=1,
+        retry_model="test-model",
+    )
+
+    await drain(await llm.get_chat_completions(a_context()))
+
+    assert [call["model"] for call in completions.params] == ["test-model", "test-model"]
+    assert llm._settings.model == "test-model"
 
 
 async def test_retries_can_be_switched_off() -> None:
@@ -384,6 +421,8 @@ def test_the_settings_carry_the_deadline(monkeypatch: pytest.MonkeyPatch) -> Non
 
     monkeypatch.delenv("LLM_FIRST_TOKEN_TIMEOUT_SECS", raising=False)
     monkeypatch.delenv("LLM_RETRIES", raising=False)
+    monkeypatch.delenv("LLM_MAX_TOKENS", raising=False)
+    monkeypatch.delenv("LLM_ALT_MODEL", raising=False)
     settings_module.reset_settings()
     defaults = settings_module.Settings()
     assert defaults.llm_first_token_timeout_secs == 8.0
@@ -391,6 +430,8 @@ def test_the_settings_carry_the_deadline(monkeypatch: pytest.MonkeyPatch) -> Non
     described = defaults.describe()
     assert described["llm_first_token_timeout_secs"] == 8.0
     assert described["llm_retries"] == 1
+    assert described["llm_max_tokens"] == 320
+    assert described["llm_alt_model"] == "qwen3.6"
 
     monkeypatch.setenv("LLM_FIRST_TOKEN_TIMEOUT_SECS", "2.5")
     monkeypatch.setenv("LLM_RETRIES", "3")
@@ -407,6 +448,8 @@ def test_the_env_example_documents_both_knobs() -> None:
     text = Path(__file__).resolve().parent.parent.joinpath(".env.example").read_text("utf-8")
     assert "LLM_FIRST_TOKEN_TIMEOUT_SECS=8.0" in text
     assert "LLM_RETRIES=1" in text
+    assert "LLM_ALT_MODEL=qwen3.6" in text
+    assert "LLM_MAX_TOKENS=320" in text
 
 
 def test_the_holding_line_exists_in_every_language_we_detect() -> None:

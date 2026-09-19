@@ -48,7 +48,7 @@ class ModelSpec:
     base_url: str  # empty means the SDK default (api.openai.com)
     api_key: str
     temperature: float = 0.2
-    max_tokens: int = 120
+    max_tokens: int = 320
     # Request keyword arguments beyond the message list: ``reasoning_effort``,
     # ``extra_body``. Same shape pipecat spreads into ``chat.completions.create``.
     extra: dict[str, Any] = field(default_factory=dict)

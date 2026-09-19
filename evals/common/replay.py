@@ -42,6 +42,7 @@ from vortex.contract import NoAction, SubmitInput
 from vortex.conversation.prompt import GREETING
 from vortex.line.submit import submit_action
 from vortex.models import ModelSpec
+from vortex.settings import MIN_TOKENS_FOR_A_BOOKING
 
 LAYER = "replay"
 
@@ -52,9 +53,6 @@ FALLBACK = NoAction(reason="out_of_scope")
 #: side is pennies on top.
 EST_TOKENS_IN_PER_CASE = 90_000
 EST_TOKENS_OUT_PER_CASE = 500
-
-#: A BOOK submit with its nested slot measured at 107 completion tokens.
-MIN_TOKENS_FOR_A_BOOKING = 256
 
 CALLER_STYLE = (
     "Speak one or two short sentences at a time, the way people do on the "
