@@ -16,7 +16,7 @@ not a pass.
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Protocol, get_args
 
 import httpx
 
@@ -31,6 +31,16 @@ from vortex.contract import (
     action_route,
 )
 from vortex.settings import get_settings
+
+# Where ``submit_action`` leaves the action the POST actually carried. The JEV
+# arbiter can replace a booking with an escalation between the tool call and
+# the send, so whatever acts on acceptance - the confirmation SMS - has to read
+# what the platform holds, not what it was asked for. It lives on the call's
+# own ``ToolContext.state``, so nothing is shared between sockets.
+SUBMITTED_ACTION_KEY = "line_submitted_action"
+
+# The concrete classes behind the ``Action`` union, for ``isinstance``.
+_ACTION_TYPES: tuple[type, ...] = get_args(Action)
 
 
 class SubmitApi(Protocol):
@@ -121,6 +131,12 @@ def with_verdict_reason(ctx: ToolContext, action: Action) -> Action:
     return forced
 
 
+def submitted_action(ctx: ToolContext, requested: Action) -> Action:
+    """The action the last POST on this call carried, or ``requested`` if none did."""
+    sent = ctx.state.get(SUBMITTED_ACTION_KEY)
+    return sent if isinstance(sent, _ACTION_TYPES) else requested
+
+
 async def submit_action(ctx: ToolContext, args: SubmitInput) -> SubmitResult:
     """The ``submit_action`` tool. Sends through the call's own submit client."""
     if ctx.submitter is None:
@@ -144,6 +160,7 @@ async def submit_action(ctx: ToolContext, args: SubmitInput) -> SubmitResult:
             model_reason=args.action.reason,  # type: ignore[union-attr]
             reason=action.reason,  # type: ignore[union-attr]
         )
+    ctx.state[SUBMITTED_ACTION_KEY] = action
     route = action_route(action)
     payload = action_payload(action, ctx.call_id)
     ctx.log.event("submit.sent", route=route, payload=payload)

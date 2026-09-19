@@ -302,14 +302,18 @@ def render_confirmation_text(action: Action, details: AppointmentDetails) -> str
 
 
 def notification_payload(action: Action, details: AppointmentDetails) -> dict[str, Any]:
-    """Compact log fields for sms.* events."""
+    """Compact log fields for sms.* events.
+
+    Clinic ids and enums only. ``CallLog.event`` writes every field here to
+    ``calls.jsonl`` verbatim, and the doctor's and the site's names are free
+    text about where a named patient is treated - the message the caller reads
+    carries them, the log does not.
+    """
     payload: dict[str, Any] = {
         "action_kind": action.kind,
         "when": details.when.isoformat() if details.when else "",
         "provider_id": details.provider_id,
         "location_id": details.location_id,
-        "provider_name": details.provider_name,
-        "location_name": details.location_name,
         "missing": list(details.missing),
     }
     if isinstance(action, CancelAction):
