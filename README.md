@@ -38,12 +38,12 @@ ahora mismo"), so the caller learns the option exists without guessing (es, ca, 
 eu and en scripts; the call inherits the language the caller used, Spanish by
 default). No answer lands as `no_answer` or `unclear`. A reschedule answer does
 not end the call: when the live voice pipeline runs behind the same server the
-call hands off into the agent's rebooking loop (`<Connect><Stream>` back to
-`/ws` with the appointment and language on the start message), so the patient
-moves the appointment in the same call; without a live pipeline, a short
-TwiML loop offers the provider's next openings from the clinic's availability
-and moves the appointment on the caller's pick (`/confirmation/reschedule-pick`).
-Every row lives in
+call hands the line to its colleague - "le paso con mi compañero, que es quien
+le agenda las citas" - and `<Connect><Stream>` carries it back to `/ws` with the
+appointment, the already-identified patient and the language on the start
+message, so the booking agent's rebooking flow continues without re-asking any
+data and the patient moves the appointment in the same call. Without the live
+voice pipeline the stored callback promise stands. Every row lives in
 `logs/confirmation_calls.json` — the hooks a waitlist filler or a retry/SMS
 fallback would subscribe to. Try it: `uv run python scripts/try_confirmation_call.py`
 (`--live --to <E.164> --base-url <tunnel>` to dial for real).
