@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
+import subprocess
 import sys
 import time
 from datetime import UTC, date, datetime, timedelta
@@ -20,21 +22,24 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import httpx
+from fastapi import Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from nicegui import app, ui
 
 from vortex.clinic.client import FakeClinicClient
-from vortex.observability import auth, explain, insights
+from vortex.line import voice_config
+from vortex.observability import auth, callfeed, explain, insights, pricing
 from vortex.observability import calendar as cal
 from vortex.observability.business_insights import business_insights
-from vortex.observability.calllog import read_recent
-from vortex.observability.demo import write_scripted_call
+from vortex.observability.demo import replay_cancellation_demo, write_scripted_call
+from vortex.observability.home_overview import home_overview, load_synthetic_cards, occupancy
 from vortex.observability.icons import icon
-from vortex.observability.view import CallCard, build_calls, flatten_grouped
+from vortex.observability.view import CallCard, build_calls
 from vortex.observability.wall_timeline import build_timeline, call_summary, latest_intent
 from vortex.settings import REPO_ROOT, get_settings
 
-LINE_URL = os.environ.get("VORTEX_LINE_URL", "http://127.0.0.1:7860").rstrip("/")
+log = logging.getLogger("vortex.observability")
+
 BOARD_PORT = int(os.environ.get("VORTEX_BOARD_PORT", "8080"))
 CLINIC_NAME = os.environ.get("VORTEX_CLINIC_NAME", "Clínica Arenal")
 PRESENCE: dict[str, float] = {}
@@ -68,20 +73,20 @@ def _log_path() -> Path:
     return get_settings().calls_log_path
 
 
-def _load_events() -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
-    health: dict[str, Any] | None = None
-    try:
-        health = httpx.get(f"{LINE_URL}/health", timeout=0.35).json()
-        grouped = (
-            httpx.get(f"{LINE_URL}/calls", params={"limit": 800}, timeout=0.5)
-            .json()
-            .get("calls", {})
-        )
-        if isinstance(grouped, dict):
-            return flatten_grouped(grouped), health
-    except Exception:
-        pass
-    return read_recent(_log_path(), limit=800), health
+#: Where the events a screen draws come from lives in ``callfeed`` (a leaf
+#: module, so it is importable in tests without pulling in these pages): the
+#: line's /calls first, then the last good fetch, then this process's own
+#: calls.jsonl — which in production is the line's log volume mounted into
+#: the board, not an empty private one.
+
+
+def _load_events(
+    scope: str = "recent",
+    *,
+    since: datetime | None = None,
+    cache_ttl: float = 0.0,
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None, dict]:
+    return callfeed.load_events(scope, _log_path(), since=since, cache_ttl=cache_ttl)
 
 
 def _parse_ts(value: str | None) -> datetime | None:
@@ -104,7 +109,7 @@ def _is_live(card: CallCard) -> bool:
 
 
 def _build_cards() -> tuple[list[CallCard], dict[str, Any] | None]:
-    events, health = _load_events()
+    events, health, _source_info = _load_events("recent")
     cards = build_calls(events)
     for card in cards:
         if card.live and not _is_live(card):
@@ -199,7 +204,27 @@ async def _play_line() -> None:
 
 
 async def _replay(scenario: str) -> None:
-    await write_scripted_call(_log_path(), scenario=scenario, delay_s=0.28)
+    try:
+        await write_scripted_call(_log_path(), scenario=scenario, delay_s=0.28)
+    except OSError:
+        # In production the board mounts the line's log read-only — scripted
+        # calls are a local demo tool, not something to mix into live metrics.
+        ui.notify("The call log is read-only here — replay demos locally.", type="warning")
+
+
+async def _replay_cancellations() -> None:
+    try:
+        await replay_cancellation_demo(_log_path())
+    except FileNotFoundError:
+        ui.notify(
+            "synthetic-data/logs/cancellation_demo.jsonl is missing — "
+            "regenerate it with scripts/make_cancellation_pack.py",
+            type="warning",
+        )
+    except OSError:
+        # In production the board mounts the line's log read-only — scripted
+        # calls are a local demo tool, not something to mix into live metrics.
+        ui.notify("The call log is read-only here — replay demos locally.", type="warning")
 
 
 def _client_ip() -> str:
@@ -372,18 +397,28 @@ def _footer() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _stat(n: str, label: str, dot: str | None = None) -> None:
+def _stat(n: str, label: str, dot: str | None = None, note: str | None = None) -> None:
     with ui.element("div").classes("stat"):
         with ui.element("div").classes("n row"):
             if dot:
                 _dot(dot)
             ui.label(n)
         ui.label(label).classes("l")
+        if note:
+            ui.label(note).classes("l")
+
+
+def _priced_note(cost: insights.CostSummary) -> str | None:
+    """'2 of 3 calls priced', only when some call had a leg with no price."""
+    if not cost.metered or cost.priced == cost.metered:
+        return None
+    return f"{cost.priced} of {cost.metered} calls priced"
 
 
 def _kpis(cards: list[CallCard]) -> None:
     s = explain.stats_for(cards)
     rate = "—" if s.submit_rate is None else f"{s.submit_rate * 100:.0f}%"
+    cost = insights.cost_per_call(cards)
     with ui.element("div").classes("stat-grid"):
         _stat(str(s.calls), explain.KPI_LABEL["calls"])
         _stat(str(s.live), explain.KPI_LABEL["live"], "live" if s.live else None)
@@ -396,6 +431,9 @@ def _kpis(cards: list[CallCard]) -> None:
             explain.KPI_LABEL["handle"],
         )
         _stat(_ms(s.median_tool_ms), explain.KPI_LABEL["tool"])
+        # Ninth tile: the grid is auto-fit minmax(140px, 1fr), so it wraps to
+        # a second row on a narrow screen instead of squeezing the other eight.
+        _stat(pricing.eur(cost.avg_list_eur, 3), explain.KPI_LABEL["cost"], note=_priced_note(cost))
 
 
 def _stages(card: CallCard | None) -> None:
@@ -539,6 +577,30 @@ def _outcome(card: CallCard | None) -> None:
                     ui.label(str(value)).classes("mono")
 
 
+def _cost_rows(card: CallCard | None) -> list[tuple[str, str | None]]:
+    """What this call cost, leg by leg. Empty when the call was never metered.
+
+    Cost is not patient data, so the public page shows these rows too: the
+    jury's question is what one answered call costs, and the answer belongs
+    next to the call it came from.
+    """
+    cost = pricing.price_call(card.usage if card else None)
+    if not cost.metered:
+        return []
+    partial = " · partial" if cost.partial else ""
+    llm = f"{pricing.count(cost.llm_tokens_in)} in / {pricing.count(cost.llm_tokens_out)} out"
+    llm += f" · {pricing.eur(cost.llm_list_eur)} list"
+    if cost.perk:
+        llm += " · perk"
+    return [
+        ("Cost (list)", f"{pricing.eur(cost.total_list_eur)}{partial}"),
+        ("Cost (we pay)", f"{pricing.eur(cost.total_eur)}{partial}"),
+        ("STT", f"{cost.stt_seconds:.1f} s · {pricing.eur(cost.stt_eur)}"),
+        ("LLM", llm),
+        ("TTS", f"{pricing.count(cost.tts_characters)} chars · {pricing.eur(cost.tts_eur)}"),
+    ]
+
+
 def _record(card: CallCard | None, *, public: bool = False) -> None:
     with ui.element("div").classes("section-title"):
         ui.label("Record").classes("t")
@@ -546,7 +608,7 @@ def _record(card: CallCard | None, *, public: bool = False) -> None:
     phone = card.from_number if card else None
     if public and phone:
         phone = insights.mask_phone(phone)
-    rows = [
+    rows: list[tuple[str, str | None]] = [
         ("Patient", card.patient_name if card else None),
         ("Phone", phone),
         ("Doctor", card.provider_name if card else None),
@@ -557,6 +619,7 @@ def _record(card: CallCard | None, *, public: bool = False) -> None:
         ("Duration", _duration(card) if card else None),
         ("Started", _clock(card.started_at) if card else None),
         ("Call id", card.call_id if card else None),
+        *_cost_rows(card),
     ]
     for label, value in rows:
         with ui.element("div").classes("kv"):
@@ -705,6 +768,7 @@ def _calls_table(
                 ("Why not booked", ""),
                 ("Tools", "narrow-hide"),
                 ("Duration", "narrow-hide"),
+                ("€", "narrow-hide"),
                 ("Call id", "narrow-hide"),
             ):
                 with ui.element("th").classes(extra):
@@ -735,6 +799,11 @@ def _calls_table(
                         ui.label(str(len(card.tools)))
                     with ui.element("td").classes("num narrow-hide"):
                         ui.label(_duration(card))
+                    with ui.element("td").classes("num narrow-hide"):
+                        # List price, three decimals. An em dash means the call
+                        # was never metered, not that it was free.
+                        cost = pricing.price_call(card.usage)
+                        ui.label(pricing.eur(cost.total_list_eur, 3) if cost.metered else "—")
                     with ui.element("td").classes("id narrow-hide"):
                         ui.label(card.call_id)
 
@@ -870,7 +939,7 @@ async def call_page(call_id: str) -> None:
 @app.get("/api/wall/timeline/{call_id}")
 def wall_timeline_api(call_id: str) -> JSONResponse:
     """The chat+tool timeline the react-spring zoom page polls."""
-    events, health = _load_events()
+    events, health, _source_info = _load_events("recent")
     items = build_timeline(events, call_id)
     intent = latest_intent(events, call_id)
     call = call_summary(events, call_id)
@@ -904,12 +973,18 @@ def wall_business_insights_api(days: int = 30) -> JSONResponse:
     """
     days = min((7, 30, 90), key=lambda d: abs(d - days))
     now = datetime.now(UTC)
-    events, _health = _load_events()
-    cards = build_calls(events)
     cutoff = now - timedelta(days=days)
+    # Ask the line for every call started inside the window — a fetch bounded
+    # by date, so a busy day's worth of events can never push an in-range call
+    # out of the read the way the old 800-event tail did.
+    events, _health, source = _load_events(
+        f"insights:{days}", since=cutoff, cache_ttl=callfeed.INSIGHTS_CACHE_TTL_S
+    )
+    cards = build_calls(events)
     in_range = [c for c in cards if (started := _card_started(c)) and started >= cutoff]
     payload = business_insights(in_range, now=now)
     payload["range_days"] = days
+    payload["source"] = source
     return JSONResponse(payload)
 
 
@@ -1031,6 +1106,76 @@ def wall_doctor_agenda_api(
     return JSONResponse(payload)
 
 
+#: The Home page's own numbers never come from the live line: the pack is a
+#: fixed corpus of eval calls, cached for the life of the process the same
+#: way the React app's build is.
+_HOME_CARDS_CACHE: list[CallCard] | None = None
+
+
+def _home_cards() -> list[CallCard]:
+    global _HOME_CARDS_CACHE
+    if _HOME_CARDS_CACHE is None:
+        _HOME_CARDS_CACHE = load_synthetic_cards()
+    return _HOME_CARDS_CACHE
+
+
+@app.get("/api/wall/home-overview")
+def wall_home_overview_api() -> JSONResponse:
+    """Stats, hourly and daily volume for the Home page — read straight off
+    ``synthetic-data/`` (see ``home_overview.py``), never a per-render mock."""
+    return JSONResponse(home_overview(_home_cards()))
+
+
+@app.get("/api/wall/occupancy")
+def wall_occupancy_api(site: str = "", specialty: str = "") -> JSONResponse:
+    """Occupancy calendar for the Home page's site/specialty filters — read
+    straight off ``wall-cache/occupancy.json``, precomputed at start-up."""
+    return JSONResponse(occupancy(site=site, specialty=specialty))
+
+
+# ---- "Voz del agente" settings ---------------------------------------------
+# The card's store lives on the line (a voiceconfig.db next to its calls log);
+# the board only has that volume read-only, so these proxy to the line's API.
+# When the line is down the GET falls back to defaults so the page still loads.
+
+
+@app.get("/api/wall/voice-config")
+async def wall_voice_config() -> JSONResponse:
+    try:
+        r = httpx.get(f"{callfeed.LINE_URL}/voice-config", timeout=callfeed.LINE_HEALTH_TIMEOUT_S)
+        if r.status_code == 200:
+            return JSONResponse(r.json())
+    except Exception as exc:
+        log.warning("voice-config fetch failed: %s", exc)
+    return JSONResponse(voice_config.DEFAULTS)
+
+
+@app.put("/api/wall/voice-config")
+async def wall_voice_config_put(request: Request) -> JSONResponse:
+    payload = await request.json()
+    try:
+        r = httpx.put(f"{callfeed.LINE_URL}/voice-config", json=payload, timeout=5)
+        return JSONResponse(r.json(), status_code=r.status_code)
+    except Exception as exc:
+        return JSONResponse({"error": f"line unreachable: {exc}"}, status_code=502)
+
+
+@app.post("/api/wall/voice-preview")
+async def wall_voice_preview(request: Request) -> Response:
+    """The Try button: streams back the line's MP3 of the greeting."""
+    payload = await request.json()
+    try:
+        r = httpx.post(f"{callfeed.LINE_URL}/voice-preview", json=payload, timeout=20)
+    except Exception as exc:
+        return JSONResponse({"error": f"line unreachable: {exc}"}, status_code=502)
+    if r.status_code == 200:
+        return Response(content=r.content, media_type="audio/mpeg")
+    try:
+        return JSONResponse(r.json(), status_code=r.status_code)
+    except Exception:
+        return JSONResponse({"error": r.text}, status_code=r.status_code)
+
+
 @app.get("/wall/avatar2d")
 def wall_avatar2d() -> FileResponse:
     """The 2D avatar art, served as a plain image — not wrapped in a page —
@@ -1046,6 +1191,14 @@ def wall_avatar2d_animated() -> FileResponse:
     as the landing page's hero avatar.
     """
     return FileResponse(WALL_MEDIA_DIR / "avatar2d_animated.svg", media_type="image/svg+xml")
+
+
+@app.get("/wall/vorty-face")
+def wall_vorty_face() -> FileResponse:
+    """A static, cropped-to-the-head SVG (no animation) used as Vorty's
+    chat avatar — e.g. the Live Call transcript.
+    """
+    return FileResponse(WALL_MEDIA_DIR / "vorty-face.svg", media_type="image/svg+xml")
 
 
 @app.get("/wall", response_model=None)
@@ -1164,6 +1317,9 @@ async def ops_page() -> None:
             "outline no-caps"
         ).classes("button-secondary")
         ui.button("Replay refusal", on_click=lambda: _replay("refuse")).props(
+            "outline no-caps"
+        ).classes("button-secondary")
+        ui.button("Replay cancellations", on_click=_replay_cancellations).props(
             "outline no-caps"
         ).classes("button-secondary")
 
@@ -1367,9 +1523,28 @@ def bench_page() -> None:
     )
 
 
+def _precompute_wall_cache() -> None:
+    """Refresh ``wall-cache/occupancy.json`` off the clinic API's own GETs
+    before serving the first request — see ``scripts/precompute_wall_cache.py``.
+    Run as a subprocess, the same way ``_play_line`` shells out to
+    ``scripts/fake_caller.py``: it's a standalone script, not a package
+    import, and a slow or failing fetch should delay start-up, never crash
+    the board — the Home page just shows an empty occupancy card until the
+    next successful run."""
+    script = REPO_ROOT / "scripts" / "precompute_wall_cache.py"
+    result = subprocess.run(
+        [sys.executable, str(script)], cwd=str(REPO_ROOT), capture_output=True, text=True
+    )
+    if result.returncode == 0:
+        print(result.stdout.strip())
+    else:
+        print(f"wall-cache precompute failed, keeping any existing file: {result.stderr.strip()}")
+
+
 def main() -> None:
     if auth.is_production() and not auth.ops_password():
         raise SystemExit("VORTEX_OPS_PASSWORD is required in production")
+    _precompute_wall_cache()
     ui.run(
         host="0.0.0.0",
         port=BOARD_PORT,
@@ -1384,11 +1559,7 @@ def main() -> None:
 
 # The clinic console (Overview, Agents, Patients, Insights, Settings) registers
 # its pages on import. It imports this module, so it must come last.
-from vortex.observability import console  # noqa: E402, F401, I001
-
-# The doctor calendar (/calendar) registers its page on import; it reuses this
-# module's chrome, so it comes after everything above is defined.
-from vortex.observability import calendar_view  # noqa: E402, F401, I001
+from vortex.observability import calendar_view, console  # noqa: E402, F401
 
 if __name__ in {"__main__", "__mp_main__"}:
     main()

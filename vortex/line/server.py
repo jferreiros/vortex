@@ -14,16 +14,20 @@ Owner: the line lane.
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Annotated
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, PlainTextResponse
+from fastapi import Body, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse, PlainTextResponse, Response
 
-from vortex.line import twilio
+from vortex.line import twilio, voice_config
 from vortex.line.session import CallSession
-from vortex.observability.calllog import group_by_call, read_recent
+from vortex.observability.calllog import group_by_call, read_calls, read_recent
+from vortex.observability.discord_calls import enabled as discord_calls_on
+from vortex.observability.discord_calls import notify_session
 from vortex.observability.tracing import trace_call
 from vortex.settings import Settings, get_settings
 
@@ -50,6 +54,11 @@ async def read_handshake(ws: WebSocket, *, max_messages: int = 5) -> twilio.Star
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
+    log.info(
+        "langfuse %s · discord calls %s",
+        "on" if settings.langfuse_public_key and settings.langfuse_secret_key else "off",
+        "on" if discord_calls_on() else "off",
+    )
     app = FastAPI(title="Vortex", version="0.1.0")
 
     @app.get("/health")
@@ -57,8 +66,36 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"status": "ok", **settings.describe()}
 
     @app.get("/calls")
-    async def calls(limit: int = 500) -> dict[str, object]:
-        events = read_recent(settings.calls_log_path, limit=limit)
+    async def calls(limit: int = 500, calls: int = 0, since: str = "") -> dict[str, object]:
+        """Recent call events grouped by ``call_id`` — what the board reads.
+
+        ``limit`` alone keeps the legacy behaviour: the last N *events*.
+
+        ``calls`` and ``since`` bound by calls instead of events, which is the
+        difference that matters: every group returned carries its
+        ``call.started``, so a date-filtered reader never silently drops the
+        call that straddled the tail. ``calls=60`` returns the newest sixty
+        complete calls; ``since=<ISO-8601>`` returns every call started at or
+        after the timestamp. Both run in a worker thread — parsing the log
+        must not stall the loop that streams live call audio.
+        """
+        if calls or since:
+            stamp = None
+            if since:
+                try:
+                    stamp = datetime.fromisoformat(since)
+                except ValueError:
+                    raise HTTPException(400, f"invalid since: {since!r}") from None
+                if stamp.tzinfo is None:
+                    stamp = stamp.replace(tzinfo=UTC)
+            grouped, meta = await asyncio.to_thread(
+                read_calls,
+                settings.calls_log_path,
+                max_calls=calls or None,
+                since=stamp,
+            )
+            return {"calls": grouped, "meta": meta}
+        events = await asyncio.to_thread(read_recent, settings.calls_log_path, limit)
         return {"calls": group_by_call(events)}
 
     @app.get("/mic", response_class=HTMLResponse)
@@ -70,6 +107,33 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def design_css() -> PlainTextResponse:
         """The design tokens for /mic. One source: vortex/observability/design.css."""
         return PlainTextResponse(DESIGN_CSS.read_text(encoding="utf-8"), media_type="text/css")
+
+    # ---- the wall's "Voz del agente" card ----------------------------------
+    # The board proxies these three; the db file lives on this process's log
+    # volume. Writes apply to calls opened after the PUT — a call in flight
+    # keeps the voice it started with.
+
+    @app.get("/voice-config")
+    async def get_voice_config() -> dict[str, object]:
+        return voice_config.load(settings).to_dict()
+
+    @app.put("/voice-config")
+    async def put_voice_config(
+        payload: Annotated[dict | None, Body()] = None,
+    ) -> dict[str, object]:
+        return voice_config.save(settings, payload).to_dict()
+
+    @app.post("/voice-preview")
+    async def voice_preview(payload: Annotated[dict | None, Body()] = None) -> Response:
+        """One MP3 of the greeting with the posted (or stored) settings, for
+        the wall's Try button. Synthesised off the event loop — the Google
+        client is blocking."""
+        cfg = voice_config.preview_config(settings, payload)
+        try:
+            audio = await asyncio.to_thread(voice_config.synthesize_preview, settings, cfg)
+        except Exception as exc:
+            raise HTTPException(503, f"voice preview unavailable: {exc}") from exc
+        return Response(content=audio, media_type="audio/mpeg")
 
     @app.websocket(settings.ws_path)
     async def call_socket(ws: WebSocket) -> None:
@@ -109,6 +173,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 # closes. close() submits the fallback if nothing went out.
                 await session.close(reason=reason)
                 log.info("call %s ended (%s)", session.call_id, reason)
+                notify_session(session)
 
     return app
 

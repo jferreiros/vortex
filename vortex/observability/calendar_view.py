@@ -8,11 +8,12 @@ calls book, move and cancel.
 The doctor types their name to open their own diary (no roster dump). The grid
 shows one week at a time. Today's visits sit under it as full cards, with a
 plain-language note. Long notes are summarised with Hugging Face when
-``HF_TOKEN`` is set.
+``HF_TOKEN`` is set. A taken slot on the public grid is generic: the cell
+carries no ``patient_id`` and no ``appointment_type_id``.
 
 This module reuses the chrome from ``live.py`` (nav, footer, dots, pills) the
-same way ``console.py`` does, and follows DESIGN.md: layout only lives in
-``board.css``, colour comes from the tokens.
+same way ``console.py`` does, and follows DESIGN.md: the ``.cal-*`` component
+lives in ``design.css``, colour comes from the tokens.
 """
 
 from __future__ import annotations
@@ -236,8 +237,8 @@ def _grid(
     calendar: cal.DoctorCalendar | None,
     monday: date,
     today: date,
-    selected_key: str,
-    open_cell: Any,
+    _selected_key: str,
+    _open_cell: Any,
     shift: Any,
 ) -> None:
     with ui.element("div").classes("section-title"):
@@ -281,17 +282,8 @@ def _grid(
                     if cell is None:
                         ui.element("div").classes("cal-cell off")
                     elif cell.status == "booked":
-                        key = _cell_key(cell)
-                        classes = "cal-cell booked on" if key == selected_key else "cal-cell booked"
-                        who = cell.patient_id or "Booked"
-                        kind = cell.appointment_type_id or "appointment"
-                        block = (
-                            ui.button(who, on_click=lambda c=cell: open_cell(c))
-                            .props("flat unelevated no-caps")
-                            .classes(classes)
-                        )
-                        with block:
-                            ui.tooltip(f"{who} · {kind}")
+                        with ui.element("div").classes("cal-cell booked"):
+                            ui.tooltip("Booked")
                     else:
                         ui.element("div").classes("cal-cell free")
 
@@ -354,7 +346,7 @@ def calendar_page() -> None:
         total_booked = sum(c.booked for c in calendars)
         today = _today()
         sig = (
-            tuple((c.provider_id, c.booked, c.capacity, len(c.days)) for c in calendars),
+            cal.grid_signature(calendars),
             state["provider"],
             state["cell"],
             state["error"],

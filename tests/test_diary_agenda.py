@@ -9,11 +9,15 @@ guard returns when it refuses.
 
 from __future__ import annotations
 
+import copy
 from datetime import date, datetime, time
 from pathlib import Path
+from typing import Any
+from unittest import mock
 
 import pytest
 
+from vortex.clinic import fixtures
 from vortex.clinic.client import FakeClinicClient
 from vortex.contract import (
     MADRID,
@@ -228,6 +232,92 @@ async def test_a_blocked_provider_survives_an_open_window(ctx: ToolContext) -> N
     assert [b.provider_id for b in answer.blocked] == ["PR07"]
     assert answer.blocked[0].reason == "provider_on_leave"
     assert answer.rejection is None  # slots exist; the rule is not a refusal
+
+
+class PlatformLeaveClinic(FakeClinicClient):
+    """The platform's rule visibility, over the fixtures.
+
+    ``/availability`` names a ``blocked`` rule only when it stops the whole
+    window asked for (docs/evals-corpus.md, "The window decides whether a rule
+    is visible at all"). Dr. Sáez (PR02) here carries the 14-30 September
+    leave: a window inside it answers empty with the rule named, a window that
+    reaches past its end answers with the days after it and ``blocked: []``.
+    """
+
+    LEAVE_START = date(2026, 9, 14)
+    LEAVE_END = date(2026, 9, 30)
+
+    def __init__(self) -> None:
+        clinic = copy.deepcopy(fixtures.CLINIC)
+        provider = next(p for p in clinic["providers"] if p["id"] == "PR02")
+        provider["leave"] = {
+            "start": self.LEAVE_START.isoformat(),
+            "end": self.LEAVE_END.isoformat(),
+            "reason": "annual leave",
+        }
+        with mock.patch.object(fixtures, "CLINIC", clinic):
+            super().__init__()
+
+    async def availability(self, **kwargs: Any) -> AvailabilityResponse:
+        answer = await super().availability(**kwargs)
+        if kwargs["date_from"] < self.LEAVE_START or kwargs["date_to"] > self.LEAVE_END:
+            kept = [b for b in answer.blocked if b.provider_id != "PR02"]
+            return answer.model_copy(update={"blocked": kept})
+        return answer
+
+
+def _leave_ctx(tmp_path: Path) -> ToolContext:
+    return ToolContext(
+        call_id="CA-diary-leave",
+        now=NOW,
+        from_number="+34612345678",
+        clinic=PlatformLeaveClinic(),
+        log=CallLog("CA-diary-leave", tmp_path / "calls.jsonl"),
+        submitter=DryRunSubmitClient(),
+    )
+
+
+async def test_a_window_over_leave_and_the_days_after_still_names_the_rule(
+    tmp_path: Path,
+) -> None:
+    """PR02, 21 September - 4 October: his leave AND the days after it.
+
+    The platform answers that window with October slots and ``blocked: []`` --
+    one day past the leave's end and Dr. Sáez simply looks available. A wide
+    search must not lose why the September days were empty: find_slots re-asks
+    the slot-free head of the window, where the rule is still named.
+    """
+    answer = await find_slots(
+        _leave_ctx(tmp_path),
+        FindSlotsInput(provider_id="PR02", date_from=date(2026, 9, 21), date_to=date(2026, 10, 4)),
+    )
+    assert answer.slots  # the days after the leave are genuinely on offer
+    assert all(s.start.astimezone(MADRID).date() >= date(2026, 10, 1) for s in answer.slots)
+    assert [b.provider_id for b in answer.blocked] == ["PR02"]
+    assert answer.blocked[0].reason == "provider_on_leave"
+    assert answer.rejection is None  # slots exist; the rule is not a refusal
+
+
+async def test_a_window_inside_the_leave_names_the_rule(tmp_path: Path) -> None:
+    """The corpus' first row: 21-30 September answers empty with the rule named."""
+    answer = await find_slots(
+        _leave_ctx(tmp_path),
+        FindSlotsInput(provider_id="PR02", date_from=date(2026, 9, 21), date_to=date(2026, 9, 30)),
+    )
+    assert answer.slots == []
+    assert [b.provider_id for b in answer.blocked] == ["PR02"]
+    assert answer.blocked[0].reason == "provider_on_leave"
+
+
+async def test_a_window_wholly_past_the_leave_names_nothing(tmp_path: Path) -> None:
+    """1-4 October: he is back. No slot-free head, no rule, nothing re-asked."""
+    answer = await find_slots(
+        _leave_ctx(tmp_path),
+        FindSlotsInput(provider_id="PR02", date_from=date(2026, 10, 1), date_to=date(2026, 10, 4)),
+    )
+    assert answer.slots
+    assert answer.blocked == []
+    assert answer.rejection is None
 
 
 async def test_a_site_closed_that_afternoon_simply_has_nothing(ctx: ToolContext) -> None:

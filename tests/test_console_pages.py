@@ -7,6 +7,7 @@ against a seeded call log.
 from __future__ import annotations
 
 import asyncio
+import json
 import threading
 from collections.abc import Iterator
 from pathlib import Path
@@ -143,9 +144,37 @@ async def test_calendar_login_opens_one_diary_and_a_visit(
     await user.should_see("Next")
     await user.should_see("Today")
     await user.should_not_see("Dr. Sáez")
-    await user.should_see("Ignacio Vázquez Moreno")
+    await user.should_see("Teresa López García")
     await user.should_not_see("Roster record")
     await user.should_not_see("Fake record")
+
+
+async def test_calendar_hides_patient_data_on_a_booked_slot(
+    seeded: Path, user: User, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The grid is public: a taken slot says it is taken and nothing else."""
+    calendar_log = tmp_path / "calendar.jsonl"
+    booking = {
+        "kind": "submit.result",
+        "call_id": "cal-privacy",
+        "ts": "2026-09-07T10:00:00+02:00",
+        "payload": {
+            "action": "BOOK",
+            "patient_id": "P-LEAKED-ID",
+            "provider_id": "PR01",
+            "location_id": "centro",
+            "appointment_type_id": "T-LEAKED-TYPE",
+            "slot": "2026-09-08T10:00:00+02:00",
+        },
+    }
+    calendar_log.write_text(json.dumps(booking) + "\n", encoding="utf-8")
+    monkeypatch.setenv("VORTEX_CALENDAR_LOG", str(calendar_log))
+
+    await user.open("/calendar")
+    # The pill proves the booking reached the grid, so the checks below are real.
+    await user.should_see("1 booked")
+    await user.should_not_see("P-LEAKED-ID")
+    await user.should_not_see("T-LEAKED-TYPE")
 
 
 async def test_public_pages_mask_the_phone(seeded: Path, user: User) -> None:
@@ -198,3 +227,28 @@ async def test_unsigned_root_is_sign_in_not_the_wall(
     await user.should_see("Team sign-in")
     await user.should_not_see("Recent calls")
     await user.should_not_see("Overview")
+
+
+# New tests go below this line: the guard above reads the settings the wall
+# test leaves behind, so nothing may be inserted between the two.
+
+
+async def test_insights_shows_what_a_call_costs(seeded: Path, user: User) -> None:
+    await user.open("/insights")
+    await user.should_see("€/call (list)")
+    await user.should_see("€/call (we pay)")
+    await user.should_see("€ today (list)")
+    await user.should_see("p95 handle time")
+    # The seeded refusal ends on a Gemini voice with no published price, so the
+    # page has to say which leg it left out rather than quietly averaging it in.
+    await user.should_see("1 of 2 calls priced")
+    await user.should_see("gemini-2.5-flash-tts")
+
+
+async def test_call_page_shows_the_cost_of_that_call(seeded: Path, user: User) -> None:
+    ids = [line.split('"call_id": "')[1].split('"')[0] for line in seeded.read_text().splitlines()]
+    booked = next(i for i in ids if i.startswith("demo-book"))
+    await user.open(f"/call/{booked}")
+    await user.should_see("Cost (list)")
+    await user.should_see("Cost (we pay)")
+    await user.should_see("perk")

@@ -106,6 +106,17 @@ export function ToolIcon({ name, className, size = 22 }) {
   );
 }
 
+// Generic caller avatar — the same 24x24 stroke grammar as ToolIcon/PhaseIcon,
+// used wherever a real photo doesn't apply (the patient side of a transcript).
+export function PersonIcon({ className, size = 22 }) {
+  return (
+    <svg {...base} width={size} height={size} className={className} aria-hidden="true">
+      <circle cx="12" cy="8.3" r="3.6" />
+      <path d="M5 19.5c0-3.6 3.13-6.2 7-6.2s7 2.6 7 6.2" />
+    </svg>
+  );
+}
+
 const PHASE_PATHS = {
   connecting: (
     <>

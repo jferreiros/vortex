@@ -11,11 +11,12 @@ No platform submit is made here; the output is an ops draft for follow-up.
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from vortex.clinic.client import FakeClinicClient
-from vortex.contract import AvailabilityResponse
+from vortex.contract import MADRID, AvailabilityResponse
 from vortex.diary.rebooking import RebookingStore, RebookingWatcher, analyze_call
 
 
@@ -102,10 +103,11 @@ async def main() -> None:
 
     clinic = ReopeningClinic()
     watcher = RebookingWatcher(clinic, store)
-    print("Before another client cancels:", await watcher.check_once())
+    now = datetime(2026, 9, 18, 9, 0, tzinfo=MADRID)
+    print("Before another client cancels:", await watcher.check_once(now=now))
 
     clinic.reopened = True
-    matched = await watcher.check_once()
+    matched = await watcher.check_once(now=now)
     print("After another client cancels:")
     print(matched[0].draft_action.model_dump_json(indent=2) if matched else "no draft")
 

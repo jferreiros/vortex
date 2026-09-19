@@ -202,9 +202,23 @@ def action_route(action: Action) -> str:
     return ACTION_ROUTES[action.kind]
 
 
+# The published judge scores three refusal codes: ``referral_required``,
+# ``specialty_not_covered``, ``provider_not_found``. The clinic has a finer
+# word, ``insurer_referral_required`` (the plan's own referral, not the
+# specialty's). Call ``e50c1c96`` of the 19 Sep 11:30 run sent that finer
+# word; the case wanted ``referral_required`` and scored zero. The wire
+# collapses the alias so the judge sees the code it actually accepts.
+SCORE_REASON_ALIASES: dict[str, str] = {
+    "insurer_referral_required": "referral_required",
+}
+
+
 def action_payload(action: Action, call_id: str) -> dict[str, Any]:
     """The JSON body for the submit route: snake_case, ``call_id`` first."""
     body = action.model_dump(mode="json", exclude={"kind"})
+    reason = body.get("reason")
+    if isinstance(reason, str) and reason in SCORE_REASON_ALIASES:
+        body["reason"] = SCORE_REASON_ALIASES[reason]
     return {"call_id": call_id, **body}
 
 

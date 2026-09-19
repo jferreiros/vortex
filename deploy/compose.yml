@@ -22,7 +22,12 @@ services:
       # the board never sees a real call: it would read its own empty log.
       VORTEX_LINE_URL: http://vortex-line:7860
     volumes:
-      - board-logs:/app/logs
+      # Fallback only: the board reads the line's /calls API first
+      # (VORTEX_LINE_URL above). If that fetch fails, it reads this file —
+      # which must be the *line's* volume, not a private one, or the fallback
+      # reads an empty log and every screen silently shows zeros. Read-only:
+      # the board never writes call events.
+      - board-logs:/app/logs:ro
     networks:
       - coolify
     expose:
@@ -51,3 +56,9 @@ services:
 
 volumes:
   board-logs:
+    # The line's own volume, pinned under this name in deploy/compose.yaml.
+    # External: the board borrows it, the line owns it. Deploy the line first
+    # (deploy/deploy-both.sh does) or this mount fails loudly — which is the
+    # point: no volume, no silent empty board.
+    name: vortex-line_line-logs
+    external: true

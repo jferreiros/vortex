@@ -1,4 +1,5 @@
 import { HashRouter, Routes, Route, Navigate } from "react-router-dom";
+import ScrollToTop from "./ScrollToTop";
 import Landing from "../pages/landing/Landing";
 import ClinicShell from "../pages/clinic/ClinicShell";
 import Home from "../pages/clinic/home/Home";
@@ -18,6 +19,7 @@ import Agenda from "../pages/clinic/agenda/Agenda";
 export default function AppRouter() {
   return (
     <HashRouter>
+      <ScrollToTop />
       <Routes>
         <Route path="/" element={<Landing />} />
 

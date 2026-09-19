@@ -1,18 +1,14 @@
 // Shared by the legacy server-registered entry (/call/{id}/zoom, still the
 // only path FastAPI actually serves this SPA's index.html from — see
-// vortex/observability/live.py) and the new app router. "demo" and the
-// reserved "design-N" ids mean: run the scripted no-backend demo, not a
-// real poll. A real call_id never legitimately equals either.
-
-const DESIGN_ID_RE = /^design-([1-9]|10|11)$/;
+// vortex/observability/live.py) and the new app router. "demo" means: run
+// the scripted no-backend demo, not a real poll. A real call_id never
+// legitimately equals it.
 
 export function resolveRawId(rawId) {
-  const designMatch = rawId && DESIGN_ID_RE.exec(rawId);
-  const isDemo = !rawId || rawId === "demo" || Boolean(designMatch);
+  const isDemo = !rawId || rawId === "demo";
   return {
     callId: isDemo ? null : rawId,
     isDemo,
-    designVariant: designMatch ? designMatch[1] : null,
   };
 }
 

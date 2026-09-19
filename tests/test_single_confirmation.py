@@ -18,6 +18,7 @@ assertion in the file. Everything runs offline: the submit client is a fake.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -29,6 +30,7 @@ from vortex.contract import (
     AvailabilityResult,
     BookAction,
     BookingResult,
+    EligibilityVerdict,
     Rejection,
     Slot,
     SubmitResult,
@@ -39,6 +41,7 @@ from vortex.conversation.prompt import build_system_prompt
 from vortex.conversation.turns import (
     ConfirmationPolicy,
     is_affirmation,
+    is_refusal_acceptance,
     looks_like_confirmation_question,
 )
 from vortex.line.session import CallSession
@@ -63,6 +66,24 @@ class AcceptingSubmitter:
 
     async def aclose(self) -> None:
         return None
+
+
+class GatedSubmitter(AcceptingSubmitter):
+    """The same client, with the POST held open until the test lets it answer.
+
+    A real POST is in flight for as long as the platform takes to answer, and
+    that is the window the next caller turn arrives in.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.in_flight = asyncio.Event()
+        self.answer = asyncio.Event()
+
+    async def submit(self, call_id: str, action: Action) -> SubmitResult:
+        self.in_flight.set()
+        await self.answer.wait()
+        return await super().submit(call_id, action)
 
 
 def make_session(settings, call_id: str) -> CallSession:
@@ -158,6 +179,54 @@ def test_anything_that_takes_it_back_is_not_an_affirmation(said: str) -> None:
 def test_a_yes_that_names_something_new_is_not_an_affirmation(said: str) -> None:
     """A yes carrying a detail we never read back is a request, not agreement."""
     assert not is_affirmation(said)
+
+
+@pytest.mark.parametrize(
+    "said",
+    [
+        "Ah, I see.",
+        "I understand",
+        "Okay, I understand.",
+        "thanks anyway",
+        "I understand, thank you",
+        "ya veo",
+        "lo entiendo",
+        "entendido",
+        "entendido, gracias",
+    ],
+)
+def test_accepting_the_refusal_is_not_a_yes_to_another_policy(said: str) -> None:
+    assert is_refusal_acceptance(said)
+    assert not is_affirmation(said)
+
+
+@pytest.mark.parametrize(
+    "said",
+    [
+        "I understand, can I pay myself?",
+        "I see, is there anything on Friday",
+        "entendido, puedo pagarlo yo",
+    ],
+)
+def test_an_acceptance_carrying_a_new_request_is_not_accepting_the_refusal(said: str) -> None:
+    """A phrase inside a longer request is a request: the stored refusal must wait."""
+    assert not is_refusal_acceptance(said)
+
+
+@pytest.mark.parametrize(
+    "said",
+    [
+        "yes",
+        "sí",
+        "vale",
+        "I do have a referral",
+        "why doesn't it cover it",
+        "I have another policy",
+        "",
+    ],
+)
+def test_a_yes_or_a_challenge_is_not_accepting_the_refusal(said: str) -> None:
+    assert not is_refusal_acceptance(said)
 
 
 def test_a_read_back_is_a_question_about_the_appointment() -> None:
@@ -277,6 +346,65 @@ async def test_a_rule_that_bit_leaves_nothing_to_agree_to(offline_settings) -> N
     assert session.memory.prepared is None
 
 
+async def test_accepting_the_refusal_submits_it_at_once(offline_settings) -> None:
+    """Call 6d537b3a: they said 'Ah, I see' and we asked about another policy."""
+    session = make_session(offline_settings, "CA-ah-i-see")
+    session.memory.observe(
+        "check_eligibility",
+        EligibilityVerdict(
+            allowed=False,
+            rejection=Rejection(reason="specialty_not_covered"),
+        ),
+    )
+
+    session.accept_refusal("caller accepted the refusal: Ah, I see.")
+    await session.close()
+
+    route, payload = sent(session)[0]
+    assert route == "/api/v1/submit/no-action"
+    assert payload["reason"] == "specialty_not_covered"
+    assert len(sent(session)) == 1
+
+
+async def test_a_second_acceptance_never_sends_the_refusal_twice(offline_settings) -> None:
+    """Two acceptance turns in a row, with the platform answering after both."""
+    session = make_session(offline_settings, "CA-ah-i-see-twice")
+    submitter = GatedSubmitter()
+    session.submitter = submitter
+    session.ctx.submitter = submitter
+    session.memory.observe(
+        "check_eligibility",
+        EligibilityVerdict(
+            allowed=False,
+            rejection=Rejection(reason="specialty_not_covered"),
+        ),
+    )
+
+    session.accept_refusal("caller accepted the refusal: Ah, I see.")
+    await submitter.in_flight.wait()
+    session.accept_refusal("caller accepted the refusal: Right, thanks.")
+    await asyncio.sleep(0)  # let the second task reach the POST it must not make
+    submitter.answer.set()
+    await session.close()
+
+    assert [route for route, _ in sent(session)] == ["/api/v1/submit/no-action"]
+
+
+async def test_a_yes_to_another_policy_does_not_submit_the_refusal(offline_settings) -> None:
+    session = make_session(offline_settings, "CA-other-policy")
+    session.memory.observe(
+        "check_eligibility",
+        EligibilityVerdict(
+            allowed=False,
+            rejection=Rejection(reason="specialty_not_covered"),
+        ),
+    )
+    session.confirm_prepared("caller affirmed: yes")
+
+    assert sent(session) == []
+    assert session.memory.last_rejection is not None
+
+
 async def test_the_same_action_never_goes_twice(offline_settings) -> None:
     session = make_session(offline_settings, "CA-once")
     session.memory.observe("prepare_booking", BookingResult(action=a_booking()))
@@ -294,6 +422,7 @@ def test_the_prompt_tells_the_model_not_to_ask_twice() -> None:
     text = build_system_prompt(NOW)
     assert "Never ask twice" in text
     assert "Do not submit before the caller agrees" in text
+    assert "If they accept the refusal" in text
 
 
 # ---- the yes belongs to the offer on the table ------------------------------

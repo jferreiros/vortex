@@ -169,15 +169,15 @@ def _apply_book(
     call_id: str,
     *,
     appointment_id: str = "",
-) -> None:
+) -> Booking | None:
     """Place the slot a BOOK (or the new leg of a RESCHEDULE) names."""
     provider_id = str(payload.get("provider_id") or "")
     location_id = str(payload.get("location_id") or "")
     start = _parse_dt(payload.get("slot"))
     if not provider_id or start is None:
-        return
+        return None
     start = start.replace(second=0, microsecond=0)
-    bookings[_key(provider_id, location_id, start)] = Booking(
+    booking = Booking(
         provider_id=provider_id,
         location_id=location_id,
         start=start,
@@ -186,6 +186,8 @@ def _apply_book(
         appointment_id=appointment_id,
         call_id=call_id,
     )
+    bookings[_key(provider_id, location_id, start)] = booking
+    return booking
 
 
 def bookings_from_appointments(items: list[Appointment]) -> dict[BookingKey, Booking]:
@@ -218,14 +220,17 @@ def bookings_from_events(
     history: a BOOK takes a slot, a CANCEL frees the one its ``appointment_id``
     names, a RESCHEDULE frees the old slot and takes the new one. CANCEL and the
     old leg of a RESCHEDULE carry no slot of their own, so they are resolved
-    through ``appt_index`` (the pre-existing appointments from the pack). A
-    cancel for an appointment with no known provider simply frees nothing.
+    against the bookings this replay has already placed, then against
+    ``appt_index`` (the pre-existing appointments from the pack). A cancel for
+    an appointment with no known provider simply frees nothing.
     """
     appt_index = dict(appt_index or {})
     bookings: dict[BookingKey, Booking] = dict(base or {})
+    replayed: dict[str, Booking] = {}
     for booking in bookings.values():
         if booking.appointment_id:
             appt_index.setdefault(booking.appointment_id, booking)
+            replayed.setdefault(booking.appointment_id, booking)
     for event in events:
         if event.get("kind") != "submit.result":
             continue
@@ -238,11 +243,13 @@ def bookings_from_events(
         call_id = str(event.get("call_id") or "")
         appointment_id = str(payload.get("appointment_id") or "")
         if action in {"CANCEL", "RESCHEDULE"}:
-            existing = appt_index.get(appointment_id)
+            existing = replayed.pop(appointment_id, None) or appt_index.get(appointment_id)
             if existing is not None:
                 bookings.pop(_key(existing.provider_id, existing.location_id, existing.start), None)
         if action in {"BOOK", "RESCHEDULE"}:
-            _apply_book(bookings, payload, call_id, appointment_id=appointment_id)
+            booked = _apply_book(bookings, payload, call_id, appointment_id=appointment_id)
+            if booked is not None and appointment_id:
+                replayed[appointment_id] = booked
     return bookings
 
 
@@ -300,6 +307,26 @@ def _cells_for_day(
         cells.append(_booked_cell(booking, booking.start, booking.location_id))
     cells.sort(key=lambda cell: (cell.start, cell.location_id))
     return cells
+
+
+def grid_signature(calendars: list[DoctorCalendar]) -> tuple:
+    """A fingerprint of everything the grids show: each cell's minute and state.
+
+    The view redraws only when this changes. Totals are not enough: a reschedule
+    moves a booking inside one doctor's window while the booked count, the
+    capacity and the day count all stay the same, and the old slot would stay on
+    screen.
+    """
+    return tuple(
+        (
+            calendar.provider_id,
+            tuple(
+                (day.day, tuple((cell.start, cell.status) for cell in day.cells))
+                for day in calendar.days
+            ),
+        )
+        for calendar in calendars
+    )
 
 
 def build_calendars(
