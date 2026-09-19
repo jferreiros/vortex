@@ -19,13 +19,8 @@ from vortex.line.confirmation_calls import (
     call_language,
     cancel_confirmation_calls,
     classify_reply,
-    classify_slot_pick,
     handoff_from_parameters,
     handoff_ws_url,
-    offered_slots_payload,
-    parse_offered_slots,
-    pick_reschedule_slots,
-    reschedule_offer_text,
     schedule_confirmation_call,
     twilio_locale,
     twiml_ask,
@@ -503,7 +498,7 @@ def test_result_endpoint_hands_off_to_the_voice_agent(
         assert response.status_code == 200
         assert '<Connect><Stream url="wss://demo.example.com/ws">' in response.text
         assert 'name="vortex_handoff" value="reschedule"' in response.text
-        assert "le paso con nuestro agente" in response.text
+        assert "Le paso con mi compañero" in response.text
 
         import asyncio
 
@@ -548,14 +543,17 @@ def test_handoff_note_enters_the_prompt() -> None:
     assert "apt-1" in note and "pat-9" in note and "Spanish" in note
     prompt = build_system_prompt(WHEN, handoff=handoff)
     assert "HANDOFF" in prompt and "apt-1" in prompt
+    # the transferred patient is never re-identified on the same call
+    assert "ALREADY IDENTIFIED" in prompt
+    assert "pat-9" in prompt
     assert handoff_note_for(None) == ""
 
 
 def test_handoff_greeting_is_mid_task_and_localised() -> None:
     from vortex.conversation.prompt import handoff_greeting_for
 
-    assert "mover su cita" in handoff_greeting_for("es")
-    assert "move that appointment" in handoff_greeting_for("en")
+    assert "compañero que le agenda las citas" in handoff_greeting_for("es")
+    assert "colleague who books your appointments" in handoff_greeting_for("en")
     assert handoff_greeting_for("fr") == handoff_greeting_for("en")
 
 
@@ -584,167 +582,3 @@ def test_session_open_picks_up_the_handoff(tmp_path: Path, offline_settings) -> 
         now=WHEN,
     )
     assert plain.handoff is None
-
-
-# ---- Twilio-only in-call rebooking ------------------------------------------
-
-
-def _starts() -> list[datetime]:
-    return [
-        datetime(2026, 9, 21, 9, 30, tzinfo=MADRID),
-        datetime(2026, 9, 22, 10, 15, tzinfo=MADRID),
-        datetime(2026, 9, 23, 11, 0, tzinfo=MADRID),
-    ]
-
-
-def test_reschedule_offer_text_lists_the_openings() -> None:
-    text = reschedule_offer_text("es", _starts())
-    assert "lunes 21 de septiembre" in text
-    assert "Diga uno, dos o tres" in text
-    assert reschedule_offer_text("en", _starts()).startswith("Of course, let's move it right now")
-
-
-def test_classify_slot_pick_digits_ordinals_weekdays() -> None:
-    starts = _starts()
-    assert classify_slot_pick("", "2", starts, "es") == 1
-    assert classify_slot_pick("la primera", "", starts, "es") == 0
-    assert classify_slot_pick("three", "", starts, "en") == 2
-    assert classify_slot_pick("el martes", "", starts, "es") == 1  # only one Tuesday on offer
-    assert classify_slot_pick("ninguna me viene bien", "", starts, "es") == "none"
-    assert classify_slot_pick("pues no sé", "", starts, "es") is None
-    assert classify_slot_pick("", "9", starts, "es") is None
-
-
-def test_offered_slots_payload_roundtrip() -> None:
-    from vortex.contract import Slot
-
-    slots = [
-        Slot(
-            start=start,
-            provider_id="PR01",
-            location_id="centro",
-            appointment_type_id="first_visit",
-        )
-        for start in _starts()
-    ]
-    starts = parse_offered_slots(offered_slots_payload(slots))
-    assert starts == _starts()
-    assert parse_offered_slots("") == []
-    assert parse_offered_slots("not json") == []
-
-
-def test_result_endpoint_stub_voice_offers_slots_in_call(confirmation_client) -> None:
-    client, settings = confirmation_client
-    call = _seed_with_provider(Path(settings.confirmation_calls_path))
-    response = client.post(
-        f"/confirmation/result?cid={call.confirmation_id}&attempt=1",
-        content="SpeechResult=Quiero+cambiarla&Confidence=0.9",
-        headers={"content-type": "application/x-www-form-urlencoded"},
-    )
-    assert response.status_code == 200
-    assert "la movemos ahora mismo" in response.text
-    assert "reschedule-pick" in response.text
-
-    import asyncio
-
-    store = ConfirmationStore(Path(settings.confirmation_calls_path))
-    row = asyncio.run(store.get(call.confirmation_id))
-    assert row is not None
-    assert row.status == "reschedule_requested"
-    assert row.detail == "rebooking_offered_in_call"
-    assert len(parse_offered_slots(row.offered_slots)) == 3
-
-
-def _seed_with_provider(store_path: Path) -> ConfirmationCall:
-    import asyncio
-
-    store = ConfirmationStore(store_path)
-    call = _pending(provider_id="PR01", patient_id="P00042")
-    asyncio.run(store.add(call))
-    asyncio.run(store.claim_due(WHEN - timedelta(hours=23)))
-    return call
-
-
-def test_reschedule_pick_moves_the_appointment(confirmation_client) -> None:
-    client, settings = confirmation_client
-    call = _seed_with_provider(Path(settings.confirmation_calls_path))
-    client.post(
-        f"/confirmation/result?cid={call.confirmation_id}&attempt=1",
-        content="SpeechResult=Quiero+cambiarla&Confidence=0.9",
-        headers={"content-type": "application/x-www-form-urlencoded"},
-    )
-    response = client.post(
-        f"/confirmation/reschedule-pick?cid={call.confirmation_id}&attempt=1",
-        content="Digits=2",
-        headers={"content-type": "application/x-www-form-urlencoded"},
-    )
-    assert response.status_code == 200
-    assert "queda movida" in response.text
-
-    import asyncio
-
-    row = asyncio.run(ConfirmationStore(Path(settings.confirmation_calls_path)).get(
-        call.confirmation_id
-    ))
-    assert row is not None
-    assert row.detail == "rescheduled_in_call"
-    assert row.rescheduled_to  # the picked start, ISO
-
-    picked = parse_offered_slots(row.offered_slots)[1]
-    assert row.rescheduled_to == picked.isoformat()
-
-
-def test_reschedule_pick_reprompts_once_then_falls_back(confirmation_client) -> None:
-    client, settings = confirmation_client
-    call = _seed_with_provider(Path(settings.confirmation_calls_path))
-    client.post(
-        f"/confirmation/result?cid={call.confirmation_id}&attempt=1",
-        content="SpeechResult=Quiero+cambiarla&Confidence=0.9",
-        headers={"content-type": "application/x-www-form-urlencoded"},
-    )
-    first = client.post(
-        f"/confirmation/reschedule-pick?cid={call.confirmation_id}&attempt=1",
-        content="SpeechResult=mmm+no+se",
-        headers={"content-type": "application/x-www-form-urlencoded"},
-    )
-    assert "no le he entendido" in first.text  # reprompt, same call
-    second = client.post(
-        f"/confirmation/reschedule-pick?cid={call.confirmation_id}&attempt=2",
-        content="SpeechResult=mmm+no+se",
-        headers={"content-type": "application/x-www-form-urlencoded"},
-    )
-    assert "para mover la cita" in second.text  # the callback promise, unchanged
-
-    import asyncio
-
-    row = asyncio.run(ConfirmationStore(Path(settings.confirmation_calls_path)).get(
-        call.confirmation_id
-    ))
-    assert row is not None
-    assert row.detail == "rebooking_unpicked"
-    assert row.rescheduled_to == ""
-
-
-def test_classify_slot_pick_by_time_of_day() -> None:
-    starts = _starts()
-    assert classify_slot_pick("el lunes a las 9:30", "", starts, "es") == 0
-    assert classify_slot_pick("a las 11:00", "", starts, "es") == 2
-    assert classify_slot_pick("las diez y cuarto, vamos a por esa", "", starts, "es") is None
-
-
-async def test_pick_reschedule_slots_spreads_days(offline_settings) -> None:
-    from vortex.clinic import make_clinic_client
-
-    call = _pending(provider_id="PR01", patient_id="P00042")
-    slots = await pick_reschedule_slots(make_clinic_client(offline_settings), call)
-    assert len(slots) == 3
-    days = [slot.start.date() for slot in slots]
-    assert len(set(days)) == 3  # one opening per day, not three in one morning
-    assert all(slot.start.date() > call.appointment_dt.date() for slot in slots)
-
-
-async def test_pick_reschedule_slots_without_provider_cannot_offer() -> None:
-    from vortex.clinic import make_clinic_client
-
-    call = _pending()  # no provider_id
-    assert await pick_reschedule_slots(make_clinic_client(), call) == []
