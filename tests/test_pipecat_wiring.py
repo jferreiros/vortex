@@ -26,6 +26,8 @@ TTS_ENV = (
     "GOOGLE_TTS_VOICE_CA",
     "GOOGLE_TTS_VOICE_GL",
     "GOOGLE_TTS_VOICE_EU",
+    "GOOGLE_TTS_GEMINI_MODEL",
+    "GOOGLE_TTS_STANDARD_FALLBACK",
     "ELEVENLABS_API_KEY",
     "ELEVENLABS_MODEL",
     "ELEVENLABS_VOICE_ID_ES",
@@ -379,24 +381,93 @@ async def test_google_http_tts_applies_a_language_delta() -> None:
         assert service._settings.language == expected
 
 
-def test_make_tts_builds_the_google_service(voice_settings) -> None:
-    """_make_tts wires our settings into GoogleHttpTTSService at 8 kHz."""
+def test_make_tts_builds_the_google_chirp_gemini_pair(voice_settings) -> None:
+    """Default Google path: Chirp HTTP for en/es, GeminiTTSService for ca/gl/eu."""
+    pytest.importorskip("pipecat")
+    pytest.importorskip("cryptography")
+    google_tts = pytest.importorskip("pipecat.services.google.tts")
+    from pipecat.pipeline.parallel_pipeline import ParallelPipeline
+
+    from vortex.line.pipecat_voice import _LanguageState, _make_tts
+    from vortex.settings import DEFAULT_GEMINI_TTS_MODEL, DEFAULT_GEMINI_TTS_VOICE
+
+    settings = voice_settings(GOOGLE_TTS_CREDENTIALS_JSON=fake_service_account_json())
+    assert settings.google_tts_uses_gemini is True
+    tts = _make_tts(settings, state=_LanguageState())
+
+    from vortex.conversation.language import DEFAULT_GOOGLE_VOICE_EN
+
+    assert isinstance(tts, ParallelPipeline)
+    (gemini_filter, gemini), (chirp_filter, chirp) = _router_branches(tts)
+    assert isinstance(gemini, google_tts.GeminiTTSService)
+    assert isinstance(chirp, google_tts.GoogleHttpTTSService)
+    assert chirp._init_sample_rate == 8000
+    # Call opens in English on Chirp; Gemini waits for ca/gl/eu.
+    assert chirp._settings.voice == DEFAULT_GOOGLE_VOICE_EN
+    assert chirp._settings.language == "en-GB"
+    assert gemini._settings.voice == DEFAULT_GEMINI_TTS_VOICE
+    assert gemini._settings.model == DEFAULT_GEMINI_TTS_MODEL
+    assert gemini._settings.language == "ca-ES"
+    assert gemini_filter is not None and chirp_filter is not None
+
+
+def test_make_tts_standard_fallback_is_a_single_http_service(voice_settings) -> None:
+    """GOOGLE_TTS_STANDARD_FALLBACK keeps one GoogleHttpTTSService for every language."""
     pytest.importorskip("pipecat")
     pytest.importorskip("cryptography")
     google_tts = pytest.importorskip("pipecat.services.google.tts")
 
     from vortex.line.pipecat_voice import _make_tts
 
-    settings = voice_settings(GOOGLE_TTS_CREDENTIALS_JSON=fake_service_account_json())
+    settings = voice_settings(
+        GOOGLE_TTS_CREDENTIALS_JSON=fake_service_account_json(),
+        GOOGLE_TTS_STANDARD_FALLBACK="true",
+    )
+    assert settings.google_tts_uses_gemini is False
     tts = _make_tts(settings)
 
     from vortex.conversation.language import DEFAULT_GOOGLE_VOICE_EN
 
     assert isinstance(tts, google_tts.GoogleHttpTTSService)
     assert tts._init_sample_rate == 8000
-    # The call opens in English, the clinic's default; the watcher moves it later.
     assert tts._settings.voice == DEFAULT_GOOGLE_VOICE_EN
     assert tts._settings.language == "en-GB"
+    assert settings.google_tts_voice_ca == "ca-ES-Standard-B"
+
+
+async def test_google_gemini_gate_sends_ca_to_gemini_and_es_to_chirp(
+    voice_settings,
+) -> None:
+    """Inside the Google pair, ca/gl/eu feed GeminiTTSService; es/en feed Chirp."""
+    pytest.importorskip("pipecat")
+    pytest.importorskip("cryptography")
+    google_tts = pytest.importorskip("pipecat.services.google.tts")
+    from pipecat.frames.frames import TextFrame
+
+    from vortex.line.pipecat_voice import _LanguageState, _make_tts
+
+    state = _LanguageState()
+    settings = voice_settings(GOOGLE_TTS_CREDENTIALS_JSON=fake_service_account_json())
+    router = _make_tts(settings, state=state)
+    (gemini_filter, gemini), (chirp_filter, chirp) = _router_branches(router)
+    assert isinstance(gemini, google_tts.GeminiTTSService)
+    assert isinstance(chirp, google_tts.GoogleHttpTTSService)
+
+    state.language = "ca"
+    assert await gemini_filter._filter(TextFrame(text="bon dia")) is True
+    assert await chirp_filter._filter(TextFrame(text="bon dia")) is False
+
+    state.language = "gl"
+    assert await gemini_filter._filter(TextFrame(text="bos días")) is True
+    assert await chirp_filter._filter(TextFrame(text="bos días")) is False
+
+    state.language = "es"
+    assert await gemini_filter._filter(TextFrame(text="hola")) is False
+    assert await chirp_filter._filter(TextFrame(text="hola")) is True
+
+    state.language = "en"
+    assert await gemini_filter._filter(TextFrame(text="hello")) is False
+    assert await chirp_filter._filter(TextFrame(text="hello")) is True
 
 
 def test_make_tts_builds_the_elevenlabs_service(voice_settings) -> None:
@@ -441,14 +512,35 @@ def test_elevenlabs_base_url_override_is_passed_through(voice_settings) -> None:
     assert _make_tts(settings)._url == "wss://gateway.example.invalid"
 
 
-def test_one_provider_on_both_sides_stays_a_single_service(voice_settings) -> None:
+def test_one_provider_on_both_sides_builds_chirp_gemini_router(voice_settings) -> None:
+    """google/google with Gemini on: one ParallelPipeline, not a provider router."""
+    pytest.importorskip("pipecat")
+    pytest.importorskip("cryptography")
+    google_tts = pytest.importorskip("pipecat.services.google.tts")
+    from pipecat.pipeline.parallel_pipeline import ParallelPipeline
+
+    from vortex.line.pipecat_voice import _LanguageState, _make_tts_stage
+
+    settings = voice_settings(GOOGLE_TTS_CREDENTIALS_JSON=fake_service_account_json())
+    assert settings.tts_is_routed is False
+    stage = _make_tts_stage(settings, _LanguageState())
+    assert isinstance(stage, ParallelPipeline)
+    (_gemini_filter, gemini), (_chirp_filter, chirp) = _router_branches(stage)
+    assert isinstance(gemini, google_tts.GeminiTTSService)
+    assert isinstance(chirp, google_tts.GoogleHttpTTSService)
+
+
+def test_standard_fallback_keeps_a_single_google_service(voice_settings) -> None:
     pytest.importorskip("pipecat")
     pytest.importorskip("cryptography")
     google_tts = pytest.importorskip("pipecat.services.google.tts")
 
     from vortex.line.pipecat_voice import _LanguageState, _make_tts_stage
 
-    settings = voice_settings(GOOGLE_TTS_CREDENTIALS_JSON=fake_service_account_json())
+    settings = voice_settings(
+        GOOGLE_TTS_CREDENTIALS_JSON=fake_service_account_json(),
+        GOOGLE_TTS_STANDARD_FALLBACK="true",
+    )
     assert settings.tts_is_routed is False
     stage = _make_tts_stage(settings, _LanguageState())
     assert isinstance(stage, google_tts.GoogleHttpTTSService)
@@ -460,7 +552,7 @@ def _router_branches(router) -> list[list]:
 
 
 def test_a_mixed_pair_builds_a_router(voice_settings) -> None:
-    """ElevenLabs for Spanish, Google for the rest: two branches, two services."""
+    """ElevenLabs for Spanish, Google (Chirp|Gemini) for the rest."""
     pytest.importorskip("pipecat")
     pytest.importorskip("cryptography")
     elevenlabs_tts = pytest.importorskip("pipecat.services.elevenlabs.tts")
@@ -487,12 +579,15 @@ def test_a_mixed_pair_builds_a_router(voice_settings) -> None:
     assert isinstance(primary_filter, FunctionFilter)
     assert isinstance(alt_filter, FunctionFilter)
     assert isinstance(primary, elevenlabs_tts.ElevenLabsTTSService)
-    assert isinstance(alternate, google_tts.GoogleHttpTTSService)
-    # Each service starts on its own English voice; the watcher moves it later.
+    # Google side is itself Chirp|Gemini when the Gemini path is on.
+    assert isinstance(alternate, ParallelPipeline)
+    (_g_filter, gemini), (_c_filter, chirp) = _router_branches(alternate)
+    assert isinstance(gemini, google_tts.GeminiTTSService)
+    assert isinstance(chirp, google_tts.GoogleHttpTTSService)
     from vortex.conversation.language import DEFAULT_GOOGLE_VOICE_EN
 
     assert primary._settings.voice == "voice-1"
-    assert alternate._settings.voice == DEFAULT_GOOGLE_VOICE_EN
+    assert chirp._settings.voice == DEFAULT_GOOGLE_VOICE_EN
 
 
 async def test_the_router_sends_each_language_to_one_branch(voice_settings) -> None:
