@@ -126,4 +126,8 @@ against the client the scenario runs against, so a live run times production
 ids. `/directory` only answers an exact field, so a live run can only reuse a
 fixture patient production also knows: when it knows none, the recipes that
 need a patient or an appointment are reported as `SKIPPED` rather than timed on
-an id the platform would reject.
+an id the platform would reject. The patient and the appointment are resolved
+first, then the booking and the reschedule recipes each get their own slot,
+warmed under the patient and plan that operation carries — availability answers
+differently per patient, so a slot warmed without one is rejected by
+`prepare_booking`'s re-check instead of timing a booking.
