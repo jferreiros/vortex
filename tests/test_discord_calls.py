@@ -109,6 +109,12 @@ def test_digest_counts_kinds_and_stays_red_when_one_call_crashed() -> None:
     assert body["embeds"][0]["color"] == 0xE23D4A
 
 
+def test_calls_webhook_wins_over_github(monkeypatch) -> None:
+    monkeypatch.setenv("DISCORD_CALLS_WEBHOOK_URL", "https://example.test/calls")
+    monkeypatch.setenv("DISCORD_WEBHOOK_URL", "https://example.test/github")
+    assert discord_calls.webhook_url() == "https://example.test/calls"
+
+
 def test_notify_is_a_noop_under_pytest(tmp_path: Path) -> None:
     assert discord_calls.enabled() is False
     discord_calls.notify_session(_session(tmp_path))

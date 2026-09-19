@@ -1,20 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-if [[ -z "${DISCORD_WEBHOOK_URL:-}" && -f "$ROOT/.env" ]]; then
-  DISCORD_WEBHOOK_URL="$(python3 -c '
+load_hook() {
+  local key="$1"
+  python3 -c '
 from pathlib import Path
 import sys
-for line in Path(sys.argv[1]).read_text().splitlines():
-    if line.startswith("DISCORD_WEBHOOK_URL=") and "https://" in line:
+key, path = sys.argv[1], sys.argv[2]
+if not Path(path).is_file():
+    raise SystemExit
+for line in Path(path).read_text().splitlines():
+    if line.startswith(key + "=") and "https://" in line:
         print(line.split("=", 1)[1].strip().strip("\"'\''"))
         break
-' "$ROOT/.env")"
+' "$key" "$ROOT/.env"
+}
+
+if [[ -z "${DISCORD_WEBHOOK_URL:-}" && -f "$ROOT/.env" ]]; then
+  DISCORD_WEBHOOK_URL="$(load_hook DISCORD_WEBHOOK_URL)"
   export DISCORD_WEBHOOK_URL
-fi
-if [[ -z "${DISCORD_WEBHOOK_URL:-}" ]]; then
-  echo "DISCORD_WEBHOOK_URL is not set" >&2
-  exit 1
 fi
 
 mode="text"
@@ -30,6 +34,22 @@ elif [[ "${1:-}" == "--json" ]]; then
 elif [[ "${1:-}" == "--calls" ]]; then
   mode="calls"
   shift
+fi
+
+if [[ "$mode" == "calls" ]]; then
+  if [[ -z "${DISCORD_CALLS_WEBHOOK_URL:-}" && -f "$ROOT/.env" ]]; then
+    DISCORD_CALLS_WEBHOOK_URL="$(load_hook DISCORD_CALLS_WEBHOOK_URL)"
+  fi
+  if [[ -n "${DISCORD_CALLS_WEBHOOK_URL:-}" ]]; then
+    DISCORD_WEBHOOK_URL="$DISCORD_CALLS_WEBHOOK_URL"
+    export DISCORD_CALLS_WEBHOOK_URL
+  fi
+  export DISCORD_WEBHOOK_URL
+fi
+
+if [[ -z "${DISCORD_WEBHOOK_URL:-}" ]]; then
+  echo "DISCORD_WEBHOOK_URL is not set" >&2
+  exit 1
 fi
 
 export DISCORD_WEBHOOK_URL

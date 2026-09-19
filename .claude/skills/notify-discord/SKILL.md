@@ -9,10 +9,9 @@ The team log is the `#github` channel on `vortex-hackspain`. PRs, pushes,
 reviews, releases and workflow runs arrive through GitHub's native webhook
 (`…/github` suffix). Evals and ad-hoc pings go through `scripts/notify-discord.sh`.
 
-Never commit the webhook URL. It lives in `.env` locally,
-`/opt/vortex-board/deploy/.env` on the VPS, and is **not** posted from GitHub
-Actions: Discord 403s those runner IPs. The `/github` hook is the allowlisted
-path.
+Never commit webhook URLs. They live in `.env` locally and `deploy/.env` on
+the VPS, and are **not** posted from GitHub Actions: Discord 403s those
+runner IPs. The `/github` hook is the allowlisted path for git events.
 
 ## Official Discord MCP / CLI
 
@@ -35,8 +34,9 @@ scripts/notify-discord.sh --calls     # digest of the live call log
 make logs-discord LOG=logs/calls-runall-2026-09-18-2332.jsonl
 ```
 
-Each inbound call also posts one short card when the socket closes, from
-`vortex-line`, if `DISCORD_WEBHOOK_URL` is in `deploy/.env`.
+Call logs go to `#calls` via `DISCORD_CALLS_WEBHOOK_URL` (fallback:
+`DISCORD_WEBHOOK_URL` / `#github`). Each inbound call posts one short card
+when the socket closes, from `vortex-line`.
 
 Keep dumps short: score, case id, wall/evals/langfuse link. Never names,
 national ids, phones or transcript text. Do not paste ops passwords or
