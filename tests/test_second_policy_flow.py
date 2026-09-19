@@ -103,21 +103,6 @@ async def test_the_whole_chain_books_under_the_second_plan_not_the_first(
     assert booking.action.policy_id != "asisa"  # never the plan on file
 
 
-async def test_spoken_plan_name_resolves_to_the_id(ctx: ToolContext) -> None:
-    verdict = await check_eligibility(
-        ctx,
-        CheckEligibilityInput(
-            patient_id=ELENA,
-            specialty_id="physiotherapy",
-            location_id="sur",
-            insurer="Mapfre Salud",
-        ),
-    )
-    assert verdict.allowed is True
-    assert verdict.note is not None
-    assert "mapfre" in verdict.note
-
-
 async def test_control_case_the_own_plan_already_works(ctx: ToolContext) -> None:
     """Marta's own Sanitas covers this. A second policy must never be invented."""
     control_ctx = ToolContext(

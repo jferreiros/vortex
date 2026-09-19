@@ -26,8 +26,6 @@ TTS_ENV = (
     "GOOGLE_TTS_VOICE_CA",
     "GOOGLE_TTS_VOICE_GL",
     "GOOGLE_TTS_VOICE_EU",
-    "GOOGLE_TTS_GEMINI_MODEL",
-    "GOOGLE_TTS_STANDARD_FALLBACK",
     "ELEVENLABS_API_KEY",
     "ELEVENLABS_MODEL",
     "ELEVENLABS_VOICE_ID_ES",
@@ -381,93 +379,24 @@ async def test_google_http_tts_applies_a_language_delta() -> None:
         assert service._settings.language == expected
 
 
-def test_make_tts_builds_the_google_chirp_gemini_pair(voice_settings) -> None:
-    """Default Google path: Chirp HTTP for en/es, GeminiTTSService for ca/gl/eu."""
-    pytest.importorskip("pipecat")
-    pytest.importorskip("cryptography")
-    google_tts = pytest.importorskip("pipecat.services.google.tts")
-    from pipecat.pipeline.parallel_pipeline import ParallelPipeline
-
-    from vortex.line.pipecat_voice import _LanguageState, _make_tts
-    from vortex.settings import DEFAULT_GEMINI_TTS_MODEL, DEFAULT_GEMINI_TTS_VOICE
-
-    settings = voice_settings(GOOGLE_TTS_CREDENTIALS_JSON=fake_service_account_json())
-    assert settings.google_tts_uses_gemini is True
-    tts = _make_tts(settings, state=_LanguageState())
-
-    from vortex.conversation.language import DEFAULT_GOOGLE_VOICE_EN
-
-    assert isinstance(tts, ParallelPipeline)
-    (gemini_filter, gemini), (chirp_filter, chirp) = _router_branches(tts)
-    assert isinstance(gemini, google_tts.GeminiTTSService)
-    assert isinstance(chirp, google_tts.GoogleHttpTTSService)
-    assert chirp._init_sample_rate == 8000
-    # Call opens in English on Chirp; Gemini waits for ca/gl/eu.
-    assert chirp._settings.voice == DEFAULT_GOOGLE_VOICE_EN
-    assert chirp._settings.language == "en-GB"
-    assert gemini._settings.voice == DEFAULT_GEMINI_TTS_VOICE
-    assert gemini._settings.model == DEFAULT_GEMINI_TTS_MODEL
-    assert gemini._settings.language == "ca-ES"
-    assert gemini_filter is not None and chirp_filter is not None
-
-
-def test_make_tts_standard_fallback_is_a_single_http_service(voice_settings) -> None:
-    """GOOGLE_TTS_STANDARD_FALLBACK keeps one GoogleHttpTTSService for every language."""
+def test_make_tts_builds_the_google_service(voice_settings) -> None:
+    """_make_tts wires our settings into GoogleHttpTTSService at 8 kHz."""
     pytest.importorskip("pipecat")
     pytest.importorskip("cryptography")
     google_tts = pytest.importorskip("pipecat.services.google.tts")
 
     from vortex.line.pipecat_voice import _make_tts
 
-    settings = voice_settings(
-        GOOGLE_TTS_CREDENTIALS_JSON=fake_service_account_json(),
-        GOOGLE_TTS_STANDARD_FALLBACK="true",
-    )
-    assert settings.google_tts_uses_gemini is False
+    settings = voice_settings(GOOGLE_TTS_CREDENTIALS_JSON=fake_service_account_json())
     tts = _make_tts(settings)
 
     from vortex.conversation.language import DEFAULT_GOOGLE_VOICE_EN
 
     assert isinstance(tts, google_tts.GoogleHttpTTSService)
     assert tts._init_sample_rate == 8000
+    # The call opens in English, the clinic's default; the watcher moves it later.
     assert tts._settings.voice == DEFAULT_GOOGLE_VOICE_EN
     assert tts._settings.language == "en-GB"
-    assert settings.google_tts_voice_ca == "ca-ES-Standard-B"
-
-
-async def test_google_gemini_gate_sends_ca_to_gemini_and_es_to_chirp(
-    voice_settings,
-) -> None:
-    """Inside the Google pair, ca/gl/eu feed GeminiTTSService; es/en feed Chirp."""
-    pytest.importorskip("pipecat")
-    pytest.importorskip("cryptography")
-    google_tts = pytest.importorskip("pipecat.services.google.tts")
-    from pipecat.frames.frames import TextFrame
-
-    from vortex.line.pipecat_voice import _LanguageState, _make_tts
-
-    state = _LanguageState()
-    settings = voice_settings(GOOGLE_TTS_CREDENTIALS_JSON=fake_service_account_json())
-    router = _make_tts(settings, state=state)
-    (gemini_filter, gemini), (chirp_filter, chirp) = _router_branches(router)
-    assert isinstance(gemini, google_tts.GeminiTTSService)
-    assert isinstance(chirp, google_tts.GoogleHttpTTSService)
-
-    state.language = "ca"
-    assert await gemini_filter._filter(TextFrame(text="bon dia")) is True
-    assert await chirp_filter._filter(TextFrame(text="bon dia")) is False
-
-    state.language = "gl"
-    assert await gemini_filter._filter(TextFrame(text="bos días")) is True
-    assert await chirp_filter._filter(TextFrame(text="bos días")) is False
-
-    state.language = "es"
-    assert await gemini_filter._filter(TextFrame(text="hola")) is False
-    assert await chirp_filter._filter(TextFrame(text="hola")) is True
-
-    state.language = "en"
-    assert await gemini_filter._filter(TextFrame(text="hello")) is False
-    assert await chirp_filter._filter(TextFrame(text="hello")) is True
 
 
 def test_make_tts_builds_the_elevenlabs_service(voice_settings) -> None:
@@ -512,35 +441,14 @@ def test_elevenlabs_base_url_override_is_passed_through(voice_settings) -> None:
     assert _make_tts(settings)._url == "wss://gateway.example.invalid"
 
 
-def test_one_provider_on_both_sides_builds_chirp_gemini_router(voice_settings) -> None:
-    """google/google with Gemini on: one ParallelPipeline, not a provider router."""
+def test_one_provider_on_both_sides_stays_a_single_service(voice_settings) -> None:
     pytest.importorskip("pipecat")
     pytest.importorskip("cryptography")
     google_tts = pytest.importorskip("pipecat.services.google.tts")
-    from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 
     from vortex.line.pipecat_voice import _LanguageState, _make_tts_stage
 
     settings = voice_settings(GOOGLE_TTS_CREDENTIALS_JSON=fake_service_account_json())
-    assert settings.tts_is_routed is False
-    stage = _make_tts_stage(settings, _LanguageState())
-    assert isinstance(stage, ParallelPipeline)
-    (_gemini_filter, gemini), (_chirp_filter, chirp) = _router_branches(stage)
-    assert isinstance(gemini, google_tts.GeminiTTSService)
-    assert isinstance(chirp, google_tts.GoogleHttpTTSService)
-
-
-def test_standard_fallback_keeps_a_single_google_service(voice_settings) -> None:
-    pytest.importorskip("pipecat")
-    pytest.importorskip("cryptography")
-    google_tts = pytest.importorskip("pipecat.services.google.tts")
-
-    from vortex.line.pipecat_voice import _LanguageState, _make_tts_stage
-
-    settings = voice_settings(
-        GOOGLE_TTS_CREDENTIALS_JSON=fake_service_account_json(),
-        GOOGLE_TTS_STANDARD_FALLBACK="true",
-    )
     assert settings.tts_is_routed is False
     stage = _make_tts_stage(settings, _LanguageState())
     assert isinstance(stage, google_tts.GoogleHttpTTSService)
@@ -552,7 +460,7 @@ def _router_branches(router) -> list[list]:
 
 
 def test_a_mixed_pair_builds_a_router(voice_settings) -> None:
-    """ElevenLabs for Spanish, Google (Chirp|Gemini) for the rest."""
+    """ElevenLabs for Spanish, Google for the rest: two branches, two services."""
     pytest.importorskip("pipecat")
     pytest.importorskip("cryptography")
     elevenlabs_tts = pytest.importorskip("pipecat.services.elevenlabs.tts")
@@ -579,15 +487,12 @@ def test_a_mixed_pair_builds_a_router(voice_settings) -> None:
     assert isinstance(primary_filter, FunctionFilter)
     assert isinstance(alt_filter, FunctionFilter)
     assert isinstance(primary, elevenlabs_tts.ElevenLabsTTSService)
-    # Google side is itself Chirp|Gemini when the Gemini path is on.
-    assert isinstance(alternate, ParallelPipeline)
-    (_g_filter, gemini), (_c_filter, chirp) = _router_branches(alternate)
-    assert isinstance(gemini, google_tts.GeminiTTSService)
-    assert isinstance(chirp, google_tts.GoogleHttpTTSService)
+    assert isinstance(alternate, google_tts.GoogleHttpTTSService)
+    # Each service starts on its own English voice; the watcher moves it later.
     from vortex.conversation.language import DEFAULT_GOOGLE_VOICE_EN
 
     assert primary._settings.voice == "voice-1"
-    assert chirp._settings.voice == DEFAULT_GOOGLE_VOICE_EN
+    assert alternate._settings.voice == DEFAULT_GOOGLE_VOICE_EN
 
 
 async def test_the_router_sends_each_language_to_one_branch(voice_settings) -> None:
@@ -717,108 +622,17 @@ async def test_a_short_ambiguous_turn_keeps_the_call_language(voice_settings) ->
 
 
 async def test_the_idle_handler_speaks_the_prompt_in_the_call_language(voice_settings) -> None:
-    """A silent caller hears the nudge in the language of the call.
+    """A silent caller hears "are you still there?" in the language of the call.
 
-    The platform cuts a call that goes quiet, so the first silence has to
-    answer. The line is read at fire time, so a mid-call language switch moves
-    it — the second nudge below comes out in Catalan because the call did.
+    The platform cuts a call that goes quiet, so the idle event has to speak.
+    The prompt is read at fire time, so a mid-call language switch moves it.
     """
-    pytest.importorskip("pipecat")
-
-    from vortex.conversation.prompt import idle_patience_for, idle_prompt_for
-    from vortex.conversation.turns import IdlePolicy, default_turn_settings
-    from vortex.line.pipecat_voice import _LanguageState, _make_idle_speaker
-
-    settings = voice_settings()
-    events: list[tuple[str, dict]] = []
-    queued: list[object] = []
-
-    class Task:
-        async def queue_frames(self, frames: list[object]) -> None:
-            queued.extend(frames)
-
-    now = [0.0]
-    policy = IdlePolicy(default_turn_settings(), clock=lambda: now[0])
-    state = _LanguageState("es")
-    handler = _make_idle_speaker(_session(settings, events), state, Task(), policy)
-
-    await handler(None)
-    assert [kind for kind, _ in events] == ["voice.user_idle"]
-    assert [frame.text for frame in queued] == [idle_prompt_for("es")]
-    assert events[-1][1]["count"] == 1
-    assert events[-1][1]["level"] == 1
-
-    now[0] = 12.0
-    state.language = "ca"
-    await handler(None)
-    assert queued[-1].text == idle_patience_for("ca")
-    assert [kind for kind, _ in events] == ["voice.user_idle"] * 2
-    assert events[-1][1]["level"] == 2
-
-    # Third event inside the mute window: logged, but nothing is spoken.
-    now[0] = 20.0
-    await handler(None)
-    assert len(queued) == 2
-    assert events[-1][1]["spoke"] is False
-    assert events[-1][1]["suppressed"] == "muted"
-
-
-async def test_the_idle_escalation_is_per_socket(voice_settings) -> None:
-    """Two handlers never share a count. Run All opens ten sockets at once."""
     pytest.importorskip("pipecat")
 
     from vortex.conversation.prompt import idle_prompt_for
     from vortex.line.pipecat_voice import _LanguageState, _make_idle_speaker
 
     settings = voice_settings()
-
-    def make() -> tuple[object, list[object]]:
-        queued: list[object] = []
-
-        class Task:
-            async def queue_frames(self, frames: list[object]) -> None:
-                queued.extend(frames)
-
-        handler = _make_idle_speaker(_session(settings, []), _LanguageState("en"), Task())
-        return handler, queued
-
-    first, first_queued = make()
-    second, second_queued = make()
-
-    await first(None)
-    await second(None)
-
-    assert [f.text for f in first_queued] == [idle_prompt_for("en")]
-    assert [f.text for f in second_queued] == [idle_prompt_for("en")]
-
-
-async def test_tool_filler_speaks_one_short_phrase_per_language(voice_settings) -> None:
-    """on_function_calls_started queues a short TTSSpeakFrame in the call language.
-
-    The phrase masks LLM tool latency (~1.3 s). It is bot speech, so it does
-    not trip the word gate or start the idle timer. Under ~1 s of audio.
-    """
-    pytest.importorskip("pipecat")
-    from pipecat.frames.frames import TTSSpeakFrame
-
-    from vortex.conversation.language import SUPPORTED_LANGUAGES
-    from vortex.line.pipecat_voice import (
-        TOOL_FILLERS,
-        _LanguageState,
-        _make_tool_filler_speaker,
-        tool_filler_for,
-    )
-
-    for code in SUPPORTED_LANGUAGES:
-        phrase = tool_filler_for(code)
-        assert phrase == TOOL_FILLERS[code]
-        assert phrase.strip()
-        assert len(phrase.split()) <= 3
-
-    assert tool_filler_for("de") == tool_filler_for("en") == TOOL_FILLERS["en"]
-    assert tool_filler_for(None) == TOOL_FILLERS["en"]
-
-    settings = voice_settings()
     events: list[tuple[str, dict]] = []
     queued: list[object] = []
 
@@ -827,39 +641,30 @@ async def test_tool_filler_speaks_one_short_phrase_per_language(voice_settings) 
             queued.extend(frames)
 
     state = _LanguageState("es")
-    handler = _make_tool_filler_speaker(_session(settings, events), state, Task())
+    handler = _make_idle_speaker(_session(settings, events), state, Task())
 
-    await handler(None, [{"name": "find_patient"}])
-    assert [kind for kind, _ in events] == ["voice.tool_filler"]
-    assert events[0][1]["language"] == "es"
-    assert events[0][1]["tools"] == 1
-    assert events[0][1]["text"] == TOOL_FILLERS["es"]
-    assert len(queued) == 1
-    assert isinstance(queued[0], TTSSpeakFrame)
-    assert queued[0].text == TOOL_FILLERS["es"]
-    assert queued[0].append_to_context is True
+    await handler(None)
+    assert [kind for kind, _ in events] == ["voice.user_idle"]
+    assert [frame.text for frame in queued] == [idle_prompt_for("es")]
 
     state.language = "ca"
-    await handler(None, [{}, {}])
-    assert queued[-1].text == TOOL_FILLERS["ca"]
-    assert events[-1][1]["tools"] == 2
-    assert [kind for kind, _ in events] == ["voice.tool_filler"] * 2
+    await handler(None)
+    assert queued[-1].text == idle_prompt_for("ca")
+    assert [kind for kind, _ in events] == ["voice.user_idle"] * 2
 
 
 def test_vad_mode_wires_our_turn_strategies() -> None:
     """The aggregator always gets the conversation lane's strategies.
 
-    VAD+Smart Turn installs LocalSmartTurnAnalyzerV3 with VAD stop_secs=0.2.
-    Soniox mode overrides ExternalUserTurnStrategies so interrupt_min_words runs.
+    Without them it falls back to its defaults (smart-turn v3) or, in Soniox
+    mode, to ExternalUserTurnStrategies that ignore interrupt_min_words.
     """
     pytest.importorskip("pipecat")
-    from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
-    from pipecat.audio.vad.vad_analyzer import VADParams
     from pipecat.processors.aggregators.llm_response_universal import LLMUserAggregatorParams
     from pipecat.turns.user_start import MinWordsUserTurnStartStrategy, VADUserTurnStartStrategy
     from pipecat.turns.user_stop import (
         ExternalUserTurnStopStrategy,
-        TurnAnalyzerUserTurnStopStrategy,
+        SpeechTimeoutUserTurnStopStrategy,
     )
     from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
@@ -873,10 +678,9 @@ def test_vad_mode_wires_our_turn_strategies() -> None:
         VADUserTurnStartStrategy,
         MinWordsUserTurnStartStrategy,
     ]
-    assert [type(s) for s in params.user_turn_strategies.stop] == [TurnAnalyzerUserTurnStopStrategy]
-    assert isinstance(params.user_turn_strategies.stop[0]._turn_analyzer, LocalSmartTurnAnalyzerV3)
-    assert isinstance(params.vad_analyzer.params, VADParams)
-    assert params.vad_analyzer.params.stop_secs == 0.2
+    assert [type(s) for s in params.user_turn_strategies.stop] == [
+        SpeechTimeoutUserTurnStopStrategy
+    ]
 
     soniox_params = _user_aggregator_params(TurnSettings())
     assert isinstance(soniox_params.user_turn_strategies, UserTurnStrategies)
@@ -888,48 +692,3 @@ def test_vad_mode_wires_our_turn_strategies() -> None:
     ]
     assert soniox_params.user_turn_strategies.start[0]._min_words == 2
     assert soniox_params.user_turn_strategies.stop[0].resolves_proposed_turn_stop_frames is True
-    assert soniox_params.vad_analyzer.params.stop_secs == 0.4
-    assert soniox_params.user_idle_timeout == TurnSettings().user_idle_secs
-
-
-def test_smart_turn_is_built_only_where_the_vad_mode_asks_for_it() -> None:
-    """The default pipeline never constructs ``LocalSmartTurnAnalyzerV3``.
-
-    It used to, once per socket: ``user_turn_strategies=None`` made the
-    aggregator build ``UserTurnStrategies()``, whose ``__post_init__`` fills an
-    empty ``stop`` from ``default_user_turn_stop_strategies()``, which builds an
-    ``onnxruntime.InferenceSession`` over ``smart-turn-v3.2-cpu.onnx`` eagerly
-    in ``__init__``. Soniox's own endpoint detection then made it redundant, so
-    every call loaded and threw away a model.
-
-    The VAD path builds it on purpose. That is where it earns its keep.
-    Silero VAD is a different model and stays in both: it feeds the aggregator.
-    """
-    pytest.importorskip("pipecat")
-    import pipecat.audio.turn.smart_turn.local_smart_turn_v3 as smart_turn_v3
-    from pipecat.processors.aggregators.llm_context import LLMContext
-    from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
-
-    from vortex.conversation.turns import TurnSettings
-    from vortex.line.pipecat_voice import _user_aggregator_params
-
-    built: list[object] = []
-    original = smart_turn_v3.LocalSmartTurnAnalyzerV3.__init__
-
-    def spy(self, *args, **kwargs):
-        built.append(self)
-        return original(self, *args, **kwargs)
-
-    def count(turns: TurnSettings) -> int:
-        built.clear()
-        smart_turn_v3.LocalSmartTurnAnalyzerV3.__init__ = spy
-        try:
-            # Constructing the aggregator is where the fallback used to bite.
-            LLMContextAggregatorPair(LLMContext([]), user_params=_user_aggregator_params(turns))
-        finally:
-            smart_turn_v3.LocalSmartTurnAnalyzerV3.__init__ = original
-        return len(built)
-
-    assert count(TurnSettings()) == 0, "Soniox mode loaded a model it never uses"
-    assert count(TurnSettings(soniox_turn_detection=False, use_smart_turn=False)) == 0
-    assert count(TurnSettings(soniox_turn_detection=False)) == 1, "VAD mode wants it"
