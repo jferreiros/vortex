@@ -247,34 +247,44 @@ def caller_note_for(match: CallerLineMatch | None) -> str:
 
 
 def handoff_note_for(handoff: dict[str, str] | None) -> str:
-    """The HANDOFF block: this call continues an outbound confirmation call.
+    """The HANDOFF block: a colleague has just transferred this call to you.
 
-    The patient was just called to confirm tomorrow's appointment and asked to
-    move it, so the conversation opens mid-task: the agent goes straight to the
-    rebooking loop with the diary tools, in the patient's language, instead of
-    the plain identify-and-help opening.
+    The confirmation agent called the patient about tomorrow's appointment,
+    they asked to move it, and the call was handed over mid-conversation -
+    "te paso con mi compañero, que te agenda las citas". You are that
+    colleague: the scheduling agent. The conversation opens mid-task, with
+    the rebooking flow and the diary tools, in the patient's language.
     """
     if not handoff:
         return ""
     language = language_name(handoff.get("language") or DEFAULT_LANGUAGE)
     lines = [
-        "HANDOFF: This is the continuation of an outbound confirmation call placed by us.",
-        "The patient has just said they want to move their appointment "
+        "HANDOFF: A colleague has just transferred this call to you. You called the patient",
+        "to confirm tomorrow's appointment and they said they want to move it "
         f"(appointment_id: {handoff.get('appointment_id', 'unknown')}, "
         f"patient_id: {handoff.get('patient_id', 'unknown')}).",
-        "Do not ask who is calling or what they need: go straight to rescheduling that "
-        "appointment with the diary tools and submit the change.",
+        "The patient is ALREADY IDENTIFIED - we placed this call to their registered number,",
+        "so the Identify step is done. Never ask for their name, national id, birth date or",
+        "any personal data again on this call; if a tool needs the patient, use the patient_id",
+        "above. The patient knows you are the colleague who books the appointments. Do not ask",
+        "who is calling or what they need: go straight to rescheduling that appointment with",
+        "the diary tools and submit the change.",
         f"The patient speaks {language}; continue in {language}.",
     ]
     return "\n".join(lines)
 
 
 HANDOFF_GREETINGS: dict[str, str] = {
-    "en": "Let's move that appointment for you. Which day would suit you better?",
-    "es": "Vamos a mover su cita. ¿Qué día le vendría mejor?",
-    "ca": "Anem a moure la seva cita. Quin dia li vindria millor?",
-    "gl": "Imos mover a súa cita. Que día lle viñera mellor?",
-    "eu": "Hitzordua mugituko dugu. Zein egun etor litzaizukeen hobeto?",
+    "es": "Hola, soy el compañero que le agenda las citas. Vamos a mover la suya: "
+    "¿qué día le viene mejor?",
+    "ca": "Hola, sóc el company que li agenda les cites. Anem a moure la seva: "
+    "quin dia li va millor?",
+    "gl": "Ola, son o compañeiro que lle axenda as citas. Imos mover a súa: "
+    "que día lle ven mellor?",
+    "eu": "Kaixo, hitzorduak kudeatzen dituen kidea naiz. Zurea mugituko dugu: "
+    "zein egun datorkizun ondo?",
+    "en": "Hello, I'm the colleague who books your appointments. Let's move yours: "
+    "which day suits you best?",
 }
 
 

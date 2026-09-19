@@ -24,7 +24,6 @@ from typing import Annotated
 from fastapi import Body, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, PlainTextResponse, Response
 
-from vortex.clinic import make_clinic_client
 from vortex.line import confirmation_calls as confirmations
 from vortex.line import twilio, voice_config
 from vortex.line.confirmation_calls import ConfirmationWorker, confirmation_worker_status
@@ -215,42 +214,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         status: confirmations.ConfirmationStatus = outcome if outcome != "unknown" else "unclear"
         detail = "answered" if outcome != "unknown" else "unclear_response"
         # A patient who wants to move the appointment moves it in the same
-        # call. With the live voice pipeline behind this server the call hands
-        # off to the agent's full rebooking loop; without one, a short TwiML
-        # offer-and-pick loop over the clinic's availability does the move.
+        # call: the confirmation call hands the line to its colleague, the
+        # booking agent, and its existing rebooking conversation takes over.
+        # Without the live voice pipeline there is no colleague to hand the
+        # line to, so the stored callback promise stands.
         handoff_xml: str | None = None
-        offer_xml: str | None = None
-        extra: dict[str, str] = {}
-        if outcome == "reschedule_requested":
-            if settings.voice_is_pipecat or settings.voice_is_gemini_live:
-                handoff_xml = confirmations.twiml_handoff_to_agent(
-                    call, confirmations.handoff_ws_url(settings.public_base_url)
-                )
-                detail = "handoff_to_voice_agent"
-            else:
-                slots = await confirmations.pick_reschedule_slots(
-                    make_clinic_client(settings), call
-                )
-                if slots:
-                    starts = [slot.start for slot in slots]
-                    offer_xml = confirmations.twiml_reschedule_offer(
-                        call, settings.public_base_url, starts, attempt=1
-                    )
-                    extra["offered_slots"] = confirmations.offered_slots_payload(slots)
-                    detail = "rebooking_offered_in_call"
+        if outcome == "reschedule_requested" and (
+            settings.voice_is_pipecat or settings.voice_is_gemini_live
+        ):
+            handoff_xml = confirmations.twiml_handoff_to_agent(
+                call, confirmations.handoff_ws_url(settings.public_base_url)
+            )
+            detail = "handoff_to_voice_agent"
         await store.update(
             call.confirmation_id,
             status=status,
             detail=detail,
             transcript=transcript,
             attempts=attempt,
-            **extra,
         )
         log.info("confirmation %s -> %s (%r)", call.confirmation_id, status, transcript[:80])
         if handoff_xml is not None:
             return Response(content=handoff_xml, media_type="application/xml")
-        if offer_xml is not None:
-            return Response(content=offer_xml, media_type="application/xml")
         text = (
             job.ack(outcome, call.language)
             if outcome != "unknown"
@@ -258,65 +243,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         return Response(
             content=confirmations.twiml_say(text, call.language),
-            media_type="application/xml",
-        )
-
-    @app.post("/confirmation/reschedule-pick")
-    async def confirmation_reschedule_pick(
-        request: Request, cid: str = "", attempt: int = 1
-    ) -> Response:
-        """The Twilio-only rebooking pick: which of the offered slots she takes."""
-        store = _call_store()
-        call = await store.get(cid) if cid else None
-        if call is None:
-            return Response(status_code=404)
-        starts = confirmations.parse_offered_slots(call.offered_slots)
-        if not starts:
-            return Response(status_code=409)
-        form = await _form(request)
-        transcript = (form.get("SpeechResult") or "").strip()
-        digits = (form.get("Digits") or "").strip()
-        pick = confirmations.classify_slot_pick(transcript, digits, starts, call.language)
-        base = settings.public_base_url.rstrip("/")
-        if pick is None:
-            if attempt < 2:
-                xml = confirmations.twiml_reschedule_offer(
-                    call, base, starts, attempt=attempt + 1, reprompt=True
-                )
-                return Response(content=xml, media_type="application/xml")
-            await store.update(
-                call.confirmation_id,
-                detail="rebooking_unpicked",
-                transcript=transcript or call.transcript,
-            )
-            text = confirmations.job_for(call.job).ack("reschedule_requested", call.language)
-            return Response(
-                content=confirmations.twiml_say(text, call.language),
-                media_type="application/xml",
-            )
-        if pick == "none":
-            await store.update(
-                call.confirmation_id,
-                detail="rebooking_declined_options",
-                transcript=transcript or call.transcript,
-            )
-            text = confirmations.job_for(call.job).ack("reschedule_requested", call.language)
-            return Response(
-                content=confirmations.twiml_say(text, call.language),
-                media_type="application/xml",
-            )
-        chosen = starts[pick]
-        await store.update(
-            call.confirmation_id,
-            detail="rescheduled_in_call",
-            rescheduled_to=chosen.isoformat(),
-            transcript=transcript or call.transcript,
-        )
-        log.info("confirmation %s rescheduled in call -> %s", call.confirmation_id, chosen)
-        return Response(
-            content=confirmations.twiml_say(
-                confirmations.reschedule_done_text(call.language, chosen), call.language
-            ),
             media_type="application/xml",
         )
 
