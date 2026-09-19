@@ -1,0 +1,140 @@
+# Problem 6: one scenario per published "the rules" case.
+#
+# Source: evals/corpus/cases/public-cases.json, problem_id the_rules. The
+# published cases' own ids (patients, providers) belong to the platform's
+# world, not our fixtures, so each is re-cast onto our own patients and
+# providers while keeping the exact trap the case tests (the repo's existing
+# convention for a public case; see booking.yaml's p3 scenarios and
+# nearest_site.yaml). The call connects Friday 18 September 2026, 09:00
+# Europe/Madrid, matching every published case's reference_time.
+#
+# The five published cases, and the rule each one bites on:
+#   the_rules-8d92ce10f4a6  age puts the patient in a different specialty
+#   the_rules-d760519fdfcd  the specialty demands a referral the patient lacks
+#   the_rules-460d9e84504a  the plan refuses the specialty outright
+#   the_rules-fe23fca4aeb7  the named provider refuses the plan
+#   the_rules-04b2b5c51b40  control: a referred adult books with nothing to refuse
+group: the_rules
+now: "2026-09-18T09:00:00+02:00"
+
+scenarios:
+  - id: p6.age_redirects_general_practice_to_paediatrics
+    problem: 6
+    # the_rules-8d92ce10f4a6: a General Practice request for a child under 14
+    # is an age refusal, not a booking -- Lucas Ruiz López (P00107, 2018-06-20)
+    # is under our own fixtures' paediatrics/general-practice split, so the
+    # same trap holds without the organizers' patient id.
+    caller:
+      - says: "Hello, I'd like to book a General Practice appointment for my son. His name is Lucas Ruiz López, born the twentieth of June 2018. He's due for his routine check-up."
+        means:
+          identify: {name: "Lucas Ruiz López", date_of_birth: "2018-06-20"}
+          request: {intent: book, specialty_id: general_practice, complaint: "routine check-up"}
+      - says: "Oh, I see -- paediatrics, then. Yes, please book whichever is earliest with her."
+        means: {accept: true}
+      - says: "Yes, that time is fine, thank you."
+        means: {accept: true}
+      - says: "Yes, please go ahead and book it."
+        means: {accept: true}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00107
+          provider_id: PR03
+          location_id: centro
+          appointment_type_id: review
+          slot: {$earliest_slot: {specialty_id: paediatrics, patient_id: P00107}}
+          policy_id: sanitas
+      trajectory_contains: [find_patient, check_eligibility, find_slots, prepare_booking, submit_action]
+      must_not_call: [build_registration, prepare_cancel, prepare_reschedule]
+      privacy_of: [P00107]
+      max_tool_calls: 16
+
+  - id: p6.dermatology_referral_required_is_refused
+    problem: 6
+    # the_rules-d760519fdfcd: Dermatology needs a referral on the record
+    # (SpecialtyRecord.referral_required), whatever the plan says. Marta Ruiz
+    # (P00042) holds none, so the call ends in a refusal, not a different
+    # doctor, site or insurer.
+    caller:
+      - says: "Hello, this is Marta Ruiz, born the twelfth of March 1985. I'd like to book a Dermatology appointment, please -- it's time for my annual mole check."
+        means:
+          identify: {name: "Marta Ruiz", date_of_birth: "1985-03-12"}
+          request: {intent: book, specialty_id: dermatology, complaint: "annual mole check"}
+      - says: "No, I don't have one. All right, never mind then, thank you."
+        means: {decline: true, end: true}
+    expect:
+      actions:
+        - {kind: no-action, reason: referral_required}
+      must_not_call: [prepare_booking]
+      privacy_of: [P00042]
+
+  - id: p6.adeslas_gynaecology_specialty_not_covered
+    problem: 6
+    # the_rules-460d9e84504a: Adeslas excludes Gynaecology
+    # (InsurancePlanRecord.specialty_ids), and there is one gynaecologist in
+    # this world, so there is nowhere to redirect -- a plain refusal. Marta
+    # Ruiz García (P00043) holds Adeslas on her own fixture record.
+    caller:
+      - says: "Hello, this is Marta Ruiz García, born the second of November 1992. I have Adeslas, and I'd like a Gynaecology appointment for my yearly check-up."
+        means:
+          identify: {name: "Marta Ruiz García", date_of_birth: "1992-11-02"}
+          request: {intent: book, specialty_id: gynaecology, insurer: adeslas, complaint: "yearly check-up"}
+      - says: "No, Adeslas is the only insurance I hold. If that doesn't cover it, please don't book anything else -- that's fine, thank you."
+        means: {decline: true, end: true}
+    expect:
+      actions:
+        - {kind: no-action, reason: specialty_not_covered}
+      must_not_call: [prepare_booking]
+      privacy_of: [P00043]
+
+  - id: p6.dkv_dermatologist_provider_not_in_network
+    problem: 6
+    # the_rules-fe23fca4aeb7: Dra. Iglesias (PR04) refuses DKV
+    # (ProviderRecord.insurer_ids_refused), and she is this world's only
+    # dermatologist, so unlike the platform's world there is nobody to
+    # redirect to -- the rule still has to be read from the refusal, not
+    # guessed into a booking that does not exist here. Antonio Pérez Martín
+    # (P00200) already holds a dermatology referral and DKV on his own
+    # fixture record, so the referral rule never masks this one.
+    caller:
+      - says: "Hello, this is Antonio Pérez Martín, NIE X-1-2-3-4-5-6-7-L. I have a referral from my GP for Dermatology, and I'd like an appointment with Dra. Iglesias -- my eczema has flared up again."
+        means:
+          identify: {name: "Antonio Pérez Martín", national_id: "X1234567L"}
+          request: {intent: book, provider: "Dra. Iglesias", specialty_id: dermatology, complaint: "eczema flare-up"}
+      - says: "Ah, I see. No, never mind then, thank you."
+        means: {decline: true, end: true}
+    expect:
+      actions:
+        - {kind: no-action, reason: provider_not_in_network}
+      must_not_call: [prepare_booking]
+      privacy_of: [P00200]
+
+  - id: p6.cigna_dermatology_referral_books_normally
+    problem: 6
+    # the_rules-04b2b5c51b40: the control case. A referred adult with nothing
+    # to refuse books like any other call. Ignacio Vázquez Moreno (P00005)
+    # matches the published persona (name, date of birth, insurer) exactly;
+    # only the fixture world's slot and provider differ, so this keeps his
+    # own dermatology referral rather than inventing a new patient.
+    caller:
+      - says: "Hello. Ignacio Vázquez Moreno here, born the ninth of December 1939. I have a referral from my GP for Dermatology, and I'd like the earliest appointment you have, please -- it's a follow-up on a skin condition."
+        means:
+          identify: {name: "Ignacio Vázquez Moreno", date_of_birth: "1939-12-09"}
+          request: {intent: book, specialty_id: dermatology, complaint: "follow-up on a skin condition"}
+      - says: "Whichever of those is earliest, please -- go ahead and book that one."
+        means: {accept: true}
+      - says: "Yes, that one, thank you. Please go ahead."
+        means: {accept: true}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00005
+          provider_id: PR04
+          location_id: centro
+          appointment_type_id: dermatology_review
+          slot: {$earliest_slot: {specialty_id: dermatology, patient_id: P00005}}
+          policy_id: cigna
+      trajectory_contains: [find_patient, check_eligibility, find_slots, prepare_booking, submit_action]
+      must_not_call: [build_registration, prepare_cancel, prepare_reschedule]
+      privacy_of: [P00005]
+      max_tool_calls: 14

@@ -295,7 +295,14 @@ class RulesBrain:
                 if verdict["allowed"]:
                     insurer = s.policy
             if not verdict["allowed"] and verdict.get("redirect_to"):
-                provider_id = verdict["redirect_to"][0]["provider_id"]
+                redirect = verdict["redirect_to"][0]
+                provider_id = redirect["provider_id"]
+                # The age rule can redirect into a different specialty (a
+                # general practice request for a child, say); a provider
+                # rule redirects within the one already asked about. Either
+                # way the redirect provider's own specialty is the one to
+                # book, never the specialty first named.
+                specialty = redirect.get("specialty_id") or specialty
                 trace.notes.append(f"redirected to {provider_id}")
             elif not verdict["allowed"]:
                 reason = (verdict.get("rejection") or {}).get("reason", "out_of_scope")
