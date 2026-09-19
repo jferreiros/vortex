@@ -407,6 +407,45 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 )
         return Response(status_code=204)
 
+    # ---- live Twilio Voice: inbound ring + outbound "call me" ---------------
+    # Twilio fetches these as TwiML. Both bridge the PSTN leg into /ws so the
+    # receptionist pipeline (same Media Streams socket the platform uses) talks.
+
+    def _voice_stream_twiml(form: dict[str, str]) -> Response:
+        base = settings.public_base_url.strip()
+        if not base:
+            return Response(
+                content="VORTEX_PUBLIC_BASE_URL is unset",
+                status_code=400,
+                media_type="text/plain",
+            )
+        ws_url = twilio.public_ws_url(base, settings.ws_path)
+        params = {
+            "call_id": (form.get("CallSid") or "").strip(),
+            "from_number": (form.get("From") or form.get("To") or "").strip(),
+        }
+        return Response(
+            content=twilio.twiml_connect_stream(ws_url, params),
+            media_type="application/xml",
+        )
+
+    @app.api_route("/voice/incoming", methods=["GET", "POST"])
+    async def voice_incoming(request: Request) -> Response:
+        """A real number rang us: connect the caller into the receptionist."""
+        form = await _form(request) if request.method == "POST" else dict(request.query_params)
+        return _voice_stream_twiml(form)
+
+    @app.api_route("/voice/outbound", methods=["GET", "POST"])
+    async def voice_outbound(request: Request) -> Response:
+        """We dialled a phone: connect the answered party into the receptionist."""
+        form = await _form(request) if request.method == "POST" else dict(request.query_params)
+        return _voice_stream_twiml(form)
+
+    @app.api_route("/voice/status", methods=["GET", "POST"])
+    async def voice_status() -> Response:
+        """Twilio terminal statuses for live PSTN calls. We log, we do not score."""
+        return Response(status_code=204)
+
     @app.websocket(settings.ws_path)
     async def call_socket(ws: WebSocket) -> None:
         await ws.accept()
