@@ -252,6 +252,23 @@ cases:
       rejection: {$absent: true}
       action: {email: "natalia.munoz86@hotmail.com", insurer: sanitas}
 
+  - id: identity.register.spanish_spoken_email_and_phone
+    problem: 4
+    tool: build_registration
+    # Acceptance for T56: "ana punto garcia arroba gmail punto com" and digit words.
+    args:
+      given_name: Ana
+      first_surname: García
+      second_surname: Pérez
+      national_id: "12345678Z"
+      date_of_birth: "1990-01-02"
+      phone: "seis uno dos cero cero cero uno uno uno"
+      email: "ana punto garcia arroba gmail punto com"
+      insurer: adeslas
+    expect:
+      rejection: {$absent: true}
+      action: {email: "ana.garcia@gmail.com", phone: "+34612000111", insurer: adeslas}
+
   - id: identity.register.rejection_names_the_field_to_ask_again
     problem: 4
     tool: build_registration
