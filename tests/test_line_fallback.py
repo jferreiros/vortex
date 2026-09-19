@@ -258,6 +258,29 @@ async def test_a_later_rejection_drops_the_prepared_action(offline_settings) -> 
     assert session.memory.confirmed is False
 
 
+def test_a_different_prepared_action_clears_confirmation() -> None:
+    """Confirming A must not let the fallback treat a later-prepared B as agreed."""
+    memory = CallMemory()
+    memory.remember_prepared("prepare_booking", a_booking())
+    memory.mark_confirmed()
+    other = a_booking().model_copy(update={"slot": SLOT.replace(hour=17)})
+    memory.remember_prepared("prepare_booking", other)
+
+    assert memory.confirmed is False
+    assert memory.prepared == other
+
+
+def test_repreparing_the_same_action_keeps_confirmation() -> None:
+    """The caller often says yes before the model draws the same plan up again."""
+    memory = CallMemory()
+    memory.remember_prepared("prepare_booking", a_booking())
+    memory.mark_confirmed()
+    memory.remember_prepared("prepare_booking", a_booking())
+
+    assert memory.confirmed is True
+    assert memory.prepared == a_booking()
+
+
 # --- what stops the fallback --------------------------------------------------
 
 
@@ -276,15 +299,17 @@ async def test_a_dry_run_is_not_an_accepted_submission(offline_settings) -> None
     assert events(offline_settings, "CA-dry", "submit.fallback")[0]["skipped"] is False
 
 
-async def test_the_fallback_never_repeats_an_action_already_sent(offline_settings) -> None:
+async def test_the_fallback_retries_an_unaccepted_action(offline_settings) -> None:
+    """A prior send that never landed (dry_run / error) must not skip the fallback."""
     session = make_session(offline_settings, "CA-repeat")
     await session.submit(NoAction(reason="out_of_scope"))
 
     await session.close()
 
-    assert len(sent(session)) == 1
+    assert len(sent(session)) == 2
     event = events(offline_settings, "CA-repeat", "submit.fallback")[0]
-    assert event["skipped"] is True
+    assert event["skipped"] is False
+    assert event["retrying"] is True
     assert event["branch"] == "no_turns"
 
 
