@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="500" height="500" viewBox="59.87 13.32 125.3 125.3" fill="none">
+  <!-- Vorty accessory: round sunglasses, aligned to the eye row of vorty-face-no-headphones.svg -->
+  <g id="accessory-sunglasses">
+    <path d="m84 76-13-5" stroke="#111" stroke-linecap="round" stroke-width="2.5" fill="none"/>
+    <path d="m152 76 13-5" stroke="#111" stroke-linecap="round" stroke-width="2.5" fill="none"/>
+    <rect x="84" y="65" width="32" height="24" rx="12" fill="url(#sg-lens)" stroke="#111" stroke-width="2"/>
+    <rect x="120" y="65" width="32" height="24" rx="12" fill="url(#sg-lens)" stroke="#111" stroke-width="2"/>
+    <rect x="115" y="74" width="5" height="4" rx="1.5" fill="#111"/>
+    <path d="m90 71 12-2.5v4l-12 2.4z" fill="#FEFEFF" opacity=".35"/>
+    <path d="m126 71 12-2.5v4l-12 2.4z" fill="#FEFEFF" opacity=".35"/>
+  </g>
+  <defs>
+    <linearGradient id="sg-lens" x1="0" x2="0" y1="65" y2="89" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#8FD6F5" offset="0"/>
+      <stop stop-color="#2C6F8E" offset="1"/>
+    </linearGradient>
+  </defs>
+</svg>

@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="500" height="500" viewBox="59.87 13.32 125.3 125.3" fill="none">
+  <!-- Vorty accessory: baseball cap, dome over the crown with a forward brim -->
+  <g id="accessory-baseball-cap">
+    <path d="m78 44c1-16 20-27 45-27s44 11 45 27c-14-6-30-9-45-9s-31 3-45 9z" fill="url(#bc-dome)"/>
+    <path d="m78 44c9.5-5 12-6 20-7.5" stroke="#183828" stroke-linecap="round" stroke-width="1.5" opacity=".5"/>
+    <path d="m78 44c-8 1-14 5-14 10 0 3 3 5 7 5 5 0 11-3 17-8-3-2-6-4-10-7z" fill="url(#bc-brim)"/>
+    <circle cx="123" cy="19" r="3" fill="#0A2E17"/>
+  </g>
+  <defs>
+    <linearGradient id="bc-dome" x1="123" x2="123" y1="17" y2="44" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#37784B" offset="0"/>
+      <stop stop-color="#183828" offset="1"/>
+    </linearGradient>
+    <linearGradient id="bc-brim" x1="66" x2="90" y1="50" y2="47" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#183828" offset="0"/>
+      <stop stop-color="#0A2E17" offset="1"/>
+    </linearGradient>
+  </defs>
+</svg>

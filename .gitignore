@@ -32,6 +32,8 @@ logs/*
 api_results/
 database/processed/*
 !database/processed/.gitkeep
+database/vortex.db
+database/vortex.db-*
 wall-cache/*.json
 
 # Coverage (CI job `coverage`, and local `pytest --cov`)
