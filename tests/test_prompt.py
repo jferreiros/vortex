@@ -32,9 +32,12 @@ NOW = datetime(2026, 9, 18, 9, 0, tzinfo=MADRID)  # Friday, the public-case anch
 
 # Characters per token, and the ceiling. Kept here rather than in the module
 # so the budget is a test the lane has to argue with, not a constant it can
-# quietly raise while editing the prompt.
+# quietly raise while editing the prompt. 1400 until issue 298: listing the
+# six specialty ids next to SITES_BRIEF cost ~25 tokens on a prompt that was
+# already at the wall. The next claim on this budget buys its tokens out of
+# the existing text.
 CHARS_PER_TOKEN = 4
-TOKEN_BUDGET = 1400
+TOKEN_BUDGET = 1430
 
 
 def test_the_prompt_builds() -> None:
