@@ -17,6 +17,7 @@ def test_build_call_pairs_tools_and_booking(tmp_path: Path) -> None:
         {
             "status": "found",
             "patient": {
+                "patient_id": "P00042",
                 "given_name": "Marta",
                 "first_surname": "Ruiz",
                 "second_surname": "López",
@@ -51,6 +52,7 @@ def test_build_call_pairs_tools_and_booking(tmp_path: Path) -> None:
     assert card.live is False
     assert card.status == "booked"
     assert card.patient_name == "Marta Ruiz López"
+    assert card.patient_id == "P00042"
     assert card.slot == "19/09 10:15"
     assert card.tools[0].status == "ok"
     assert card.tools[0].ms == 12.0

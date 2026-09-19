@@ -21,10 +21,14 @@ def seeded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     asyncio.run(write_scripted_call(log, scenario="refuse", delay_s=0))
     asyncio.run(write_scripted_call(log, scenario="book", delay_s=0))
     monkeypatch.setenv("VORTEX_CALLS_LOG", str(log))
-    monkeypatch.setenv("VORTEX_LINE_URL", "http://127.0.0.1:1")
     from vortex import settings
 
     settings.reset_settings()
+
+    def _offline_get(*_args: object, **_kwargs: object) -> object:
+        raise OSError("offline")
+
+    monkeypatch.setattr("httpx.get", _offline_get)
     return log
 
 
@@ -34,7 +38,7 @@ async def test_wall_shows_the_last_call_and_why(seeded: Path, user: User) -> Non
     await user.should_see("Booked")
     await user.should_see("Marta Ruiz López")
     await user.should_see("Recent calls")
-    await user.should_see("specialty_not_covered")
+    await user.should_see("insurance does not cover")
 
 
 async def test_call_page_explains_a_refusal(seeded: Path, user: User) -> None:
@@ -69,7 +73,7 @@ async def test_console_routes_render(seeded: Path, user: User) -> None:
         ("/agents/reminders", "Preview"),
         ("/agents/nope", "No agent with this name"),
         ("/calls", "Why not booked"),
-        ("/calls/live", "Transcript"),
+        ("/calls/live", "Call opened"),
         ("/patients", "Marta Ruiz López"),
         ("/insights", "Why not booked"),
         ("/settings", "Sites"),
