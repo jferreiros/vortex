@@ -115,7 +115,7 @@ def test_a_failed_lookup_raises_instead_of_answering_nothing(
 
 def test_a_failed_lookup_creates_nothing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     review = tmp_path / "review.txt"
-    review.write_text(PLAIN)
+    review.write_text(PLAIN, encoding="utf-8")
     calls = _gh(monkeypatch, 1, "", "HTTP 403")
     monkeypatch.setattr(sys, "argv", ["coderabbit_issues.py", str(review), "--pr", "85"])
     with pytest.raises(SystemExit) as exit_code:
