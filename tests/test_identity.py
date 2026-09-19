@@ -24,7 +24,8 @@ from vortex.contract import (
     Slot,
     ToolContext,
 )
-from vortex.identity.tools import check_national_id, find_patient
+from vortex.identity.dictation import check_email, check_phone
+from vortex.identity.tools import check_national_id, find_patient, normalize_email, normalize_phone
 from vortex.line.submit import DryRunSubmitClient
 from vortex.observability.calllog import CallLog
 from vortex.tools import call_tool
@@ -50,6 +51,56 @@ def logged(ctx: ToolContext) -> list[dict]:
     if not ctx.log.path.exists():
         return []
     return [json.loads(line) for line in ctx.log.path.read_text().splitlines() if line.strip()]
+
+
+# ---- dictated email / phone (problem 4; docs/research/05 §3) ---------------
+
+
+@pytest.mark.parametrize(
+    ("spoken", "address"),
+    [
+        ("ana punto garcia arroba gmail punto com", "ana.garcia@gmail.com"),  # es
+        ("ana punt garcia arrova gmail punt com", "ana.garcia@gmail.com"),  # ca
+        ("ana dot garcia at gmail dot com", "ana.garcia@gmail.com"),  # en
+        ("sergio guion bajo martinez arroba outlook punto es", "sergio_martinez@outlook.es"),
+        ("natalia dot munoz 86 at hotmail dot com", "natalia.munoz86@hotmail.com"),
+        ("juan arroba yimeil punto com", "juan@gmail.com"),  # STT domain alias
+        ("Ana.Garcia@Gmail.com", "ana.garcia@gmail.com"),  # already an address
+    ],
+)
+def test_spoken_email_maps_and_validates_without_dns(spoken: str, address: str) -> None:
+    result = check_email(spoken)
+    assert result.normalized == address
+    assert result.valid is True
+    assert normalize_email(spoken) == address
+
+
+@pytest.mark.parametrize(
+    ("spoken", "e164"),
+    [
+        ("seis uno dos tres cuatro cinco seis siete ocho", "+34612345678"),  # es digits
+        ("sis un dos tres quatre cinc sis set vuit", "+34612345678"),  # ca digits
+        ("612 34 56 78", "+34612345678"),  # grouped digits
+    ],
+)
+def test_spoken_phone_maps_through_phonenumbers_es(spoken: str, e164: str) -> None:
+    result = check_phone(spoken)
+    assert result.normalized == e164
+    assert result.possible is True
+    assert normalize_phone(spoken) == e164
+
+
+def test_check_email_rejects_garbage_without_dns() -> None:
+    result = check_email("esto no es un correo")
+    assert result.valid is False
+    assert "@" not in result.normalized
+
+
+def test_organiser_7xx_mobile_is_possible_even_if_unallocated() -> None:
+    """Platform fixtures use 7xx mobiles; is_valid_number would refuse them."""
+    result = check_phone("792919982")
+    assert result.normalized == "+34792919982"
+    assert result.possible is True
 
 
 # ---- check_national_id: DNI/NIE, mod-23 -----------------------------------
@@ -79,6 +130,42 @@ def test_check_national_id_folds_spoken_separators() -> None:
     assert dictated.valid is spelled.valid
 
 
+def test_unique_one_edit_repair_accepts_the_matching_id() -> None:
+    """seis/tres at one position: letter Z uniquely recovers Marta's DNI."""
+    result = check_national_id("12645678Z")  # heard 6, true 3 at position 2
+    assert result.valid is True
+    assert result.kind == "dni"
+    assert result.normalized == "12345678Z"
+    assert result.repaired_from == "12645678Z"
+    assert result.ask_digit_positions == []
+
+
+def test_unique_one_edit_repair_works_for_nie() -> None:
+    result = check_national_id("X1264567L")
+    assert result.valid is True
+    assert result.kind == "nie"
+    assert result.normalized == "X1234567L"
+    assert result.repaired_from == "X1264567L"
+
+
+def test_ambiguous_one_edit_asks_for_the_differing_digits() -> None:
+    result = check_national_id("12345778Z")
+    assert result.valid is False
+    assert result.normalized == "12345778Z"
+    assert result.repaired_from is None
+    assert result.ask_digit_positions == [0, 5, 7]
+
+
+def test_wrong_letter_with_no_repair_stays_invalid() -> None:
+    """Right digits, wrong letter, and no 1-edit yields that letter → still invalid."""
+    result = check_national_id("12345678A")
+    assert result.valid is False
+    assert result.normalized == "12345678A"
+    assert result.expected_letter == "Z"
+    assert result.ask_digit_positions == []
+    assert result.repaired_from is None
+
+
 # ---- find_patient: ambiguity and near misses ------------------------------
 
 
@@ -95,6 +182,16 @@ async def test_a_wrong_digit_in_the_id_is_a_near_miss_not_a_match(ctx: ToolConte
     )
     assert result.status == "not_found"
     assert any(p.patient_id == "P00042" for p in result.candidates)
+
+
+async def test_a_repairable_misheard_id_finds_the_patient(ctx: ToolContext) -> None:
+    """One confusion edit that uniquely fits the letter is applied before /directory."""
+    result = await find_patient(
+        ctx, FindPatientInput(name="Marta Ruiz López", national_id="12645678Z")
+    )
+    assert result.status == "found"
+    assert result.patient is not None
+    assert result.patient.patient_id == "P00042"
 
 
 async def test_a_line_shared_by_two_patients_is_still_ambiguous(ctx: ToolContext) -> None:

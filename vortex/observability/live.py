@@ -20,12 +20,15 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import httpx
+from fastapi.responses import HTMLResponse, JSONResponse
 from nicegui import app, ui
 
 from vortex.observability import auth, explain, insights
 from vortex.observability.calllog import read_recent
 from vortex.observability.demo import write_scripted_call
+from vortex.observability.icons import icon
 from vortex.observability.view import CallCard, build_calls, flatten_grouped
+from vortex.observability.wall_timeline import build_timeline, call_summary, latest_intent
 from vortex.settings import REPO_ROOT, get_settings
 
 LINE_URL = os.environ.get("VORTEX_LINE_URL", "http://127.0.0.1:7860").rstrip("/")
@@ -36,6 +39,10 @@ _HERE = Path(__file__).parent
 DESIGN_CSS = (_HERE / "design.css").read_text(encoding="utf-8")
 BOARD_CSS = (_HERE / "board.css").read_text(encoding="utf-8")
 EVALS_SUMMARY = REPO_ROOT / "evals" / "results" / "summary.json"
+#: The react-spring per-call "zoom" page (vortex/observability/wall-app/),
+#: built by `npm run build`. /call/{id} above is the NiceGUI page; this is
+#: an animated alternative at /call/{id}/zoom, additive and never required.
+WALL_APP_DIST = _HERE / "wall-app" / "dist"
 
 MADRID = ZoneInfo("Europe/Madrid")
 
@@ -325,17 +332,17 @@ def _kpis(cards: list[CallCard]) -> None:
     s = explain.stats_for(cards)
     rate = "—" if s.submit_rate is None else f"{s.submit_rate * 100:.0f}%"
     with ui.element("div").classes("stat-grid"):
-        _stat(str(s.calls), "calls on the line")
-        _stat(str(s.live), "on a call now", "live" if s.live else None)
-        _stat(str(s.booked), "booked", "ok")
-        _stat(str(s.refused), "no action, with a reason", "warn")
-        _stat(str(s.escalated), "escalated to a human", "warn")
-        _stat(rate, "ended with a submission")
+        _stat(str(s.calls), explain.KPI_LABEL["calls"])
+        _stat(str(s.live), explain.KPI_LABEL["live"], "live" if s.live else None)
+        _stat(str(s.booked), explain.KPI_LABEL["booked"], "ok")
+        _stat(str(s.refused), explain.KPI_LABEL["refused"], "warn")
+        _stat(str(s.escalated), explain.KPI_LABEL["escalated"], "warn")
+        _stat(rate, explain.KPI_LABEL["submitted"])
         _stat(
             "—" if s.median_duration_s is None else f"{s.median_duration_s:.0f} s",
-            "median handle time",
+            explain.KPI_LABEL["handle"],
         )
-        _stat(_ms(s.median_tool_ms), "median tool latency")
+        _stat(_ms(s.median_tool_ms), explain.KPI_LABEL["tool"])
 
 
 def _stages(card: CallCard | None) -> None:
@@ -520,6 +527,29 @@ def _call_panel(card: CallCard | None, *, verbose: bool, public: bool = False) -
             _record(card, public=public)
 
 
+def _workflow_card(beat: explain.Beat, card: CallCard | None) -> None:
+    classes = f"wf-card {beat.kind}"
+    if beat.speaking:
+        classes += " speaking"
+    with ui.element("article").classes(classes):
+        with ui.element("div").classes("wf-meta"):
+            if beat.kind in {"patient", "agent", "tool", "start", "submit"}:
+                icon(beat.kind)
+            else:
+                _dot(beat.dot)
+            ui.label(beat.title).classes("wf-who")
+            if beat.tool:
+                ui.label(beat.tool).classes("command-tag")
+            ui.element("div").classes("grow")
+            if beat.ms is not None:
+                ui.label(_ms(beat.ms)).classes("caption-sm")
+            elif card is not None:
+                stamp = _turn_time(card, beat.ts)
+                if stamp:
+                    ui.label(stamp).classes("caption-sm mono")
+        ui.label(beat.text).classes("wf-text")
+
+
 def _workflow_panel(card: CallCard | None, *, public: bool = False) -> None:
     """The jury demo: one card per turn and tool, pulsing while someone speaks."""
     beats = explain.workflow_beats(card)
@@ -545,35 +575,24 @@ def _workflow_panel(card: CallCard | None, *, public: bool = False) -> None:
             ui.label("No call on the line").classes("t")
             ui.label("The next inbound call builds this workflow card by card.").classes("d")
         return
-    with ui.element("div").classes("workflow"):
-        for beat in beats:
-            if beat.kind == "outcome":
+    stream = [beat for beat in beats if beat.kind != "outcome"]
+    ending = next((beat for beat in beats if beat.kind == "outcome"), None)
+    with ui.element("div").classes("wf-layout"):
+        with ui.element("div").classes("workflow"):
+            for beat in stream:
+                _workflow_card(beat, card)
+        with ui.element("aside").classes("wf-side"):
+            if ending is not None:
                 with ui.element("div").classes("outcome"):
                     ui.label("Outcome").classes("label")
                     with ui.element("div").classes("title"):
-                        _dot(beat.dot)
-                        ui.label(beat.title)
-                    ui.label(beat.text).classes("text")
+                        _dot(ending.dot)
+                        ui.label(ending.title)
+                    ui.label(ending.text).classes("text")
                     if card and card.decline_reason:
                         ui.label(card.decline_reason).classes("reason")
-                continue
-            classes = f"wf-card {beat.kind}"
-            if beat.speaking:
-                classes += " speaking"
-            with ui.element("article").classes(classes):
-                with ui.element("div").classes("wf-meta"):
-                    _dot(beat.dot)
-                    ui.label(beat.title).classes("wf-who")
-                    if beat.tool:
-                        ui.label(beat.tool).classes("command-tag")
-                    ui.element("div").classes("grow")
-                    if beat.ms is not None:
-                        ui.label(_ms(beat.ms)).classes("caption-sm")
-                    elif card is not None:
-                        stamp = _turn_time(card, beat.ts)
-                        if stamp:
-                            ui.label(stamp).classes("caption-sm mono")
-                ui.label(beat.text).classes("wf-text")
+                ui.element("div").style("height: 24px")
+            _record(card, public=public)
 
 
 def _live_strip(cards: list[CallCard], featured: CallCard | None, *, public: bool = False) -> None:
@@ -701,6 +720,8 @@ def wall_page() -> None:
             slot = _nav("/wall", team=False)
             with slot:
                 _line_pill(health)
+                zoom_id = featured.call_id if featured else "demo"
+                ui.link("Demo", f"/call/{zoom_id}/zoom", new_tab=True).classes("pill mute")
             with ui.element("main").classes("page"):
                 with ui.element("div").classes("page-head"):
                     with ui.element("div"):
@@ -747,6 +768,7 @@ def call_page(call_id: str) -> None:
             slot = _nav("", team=False)
             with slot:
                 _line_pill(health)
+                ui.link("Demo", f"/call/{call_id}/zoom", new_tab=True).classes("pill mute")
             with ui.element("main").classes("page"):
                 with ui.element("div").classes("page-head"):
                     with ui.element("div"):
@@ -772,6 +794,42 @@ def call_page(call_id: str) -> None:
 
     redraw()
     ui.timer(0.6, redraw)
+
+
+@app.get("/api/wall/timeline/{call_id}")
+def wall_timeline_api(call_id: str) -> JSONResponse:
+    """The chat+tool timeline the react-spring zoom page polls."""
+    events, health = _load_events()
+    items = build_timeline(events, call_id)
+    intent = latest_intent(events, call_id)
+    call = call_summary(events, call_id)
+    call["submit_window_secs"] = get_settings().submit_window_secs
+    return JSONResponse(
+        {
+            "call_id": call_id,
+            "items": items,
+            "intent": intent,
+            "call": call,
+            "line_up": health is not None,
+        }
+    )
+
+
+if WALL_APP_DIST.exists():
+    app.add_static_files("/wall-assets", str(WALL_APP_DIST))
+    _WALL_INDEX_HTML = (WALL_APP_DIST / "index.html").read_text(encoding="utf-8")
+
+    @app.get("/call/{call_id}/zoom")
+    def call_zoom_page(call_id: str) -> HTMLResponse:
+        """The react-spring zoom page: voice orb, live tool demo, extracted
+        info with the rule behind each, final action.
+
+        Built by ``npm run build`` in ``vortex/observability/wall-app/``. It
+        reads its data from ``/api/wall/timeline/{call_id}`` above, client-side.
+        Additive: ``/call/{call_id}`` (no ``/zoom``) stays the NiceGUI page.
+        """
+        del call_id  # the SPA reads the id itself from window.location
+        return HTMLResponse(_WALL_INDEX_HTML)
 
 
 # ---------------------------------------------------------------------------
