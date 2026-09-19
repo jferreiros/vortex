@@ -33,7 +33,7 @@ def seeded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 async def test_wall_shows_the_last_call_and_why(seeded: Path, user: User) -> None:
-    await user.open("/wall")
+    await user.open("/wall/classic")
     await user.should_see("Live")
     await user.should_see("Booked")
     await user.should_see("Marta Ruiz López")
@@ -86,5 +86,5 @@ async def test_console_routes_render(seeded: Path, user: User) -> None:
 
 
 async def test_public_pages_mask_the_phone(seeded: Path, user: User) -> None:
-    await user.open("/wall")
+    await user.open("/wall/classic")
     await user.should_not_see("+34612345678")

@@ -1,0 +1,94 @@
+/* Central design tokens for the app shell (Landing, Clinic View, Home,
+   Settings, Insights, Live Calls). Every new page reads colour, type,
+   spacing, radius, shadow and motion from here — never a hardcoded hex or
+   px value in a page's own stylesheet.
+
+   Seeded from Live Call Design 11 ("Clínico") so the whole product reads as
+   one thing today. To change the product's visual direction later: edit
+   the values in this file (and theme.js's mirror of the few JS-side ones)
+   and every page picks it up. The eleven Live Call concepts under
+   src/designs/ are untouched historical explorations, each self-contained —
+   swapping which one the app embeds is one import in
+   pages/clinic/live-calls/LiveCallDetail.jsx. */
+
+:root {
+  /* Colour ------------------------------------------------------------- */
+  --color-bg: #f6faf8;
+  --color-bg-raised: #ffffff;
+  --color-panel: #ffffff;
+  --color-ink: #1b2420;
+  --color-mute: #6d7a74;
+  --color-faint: #9aa6a0;
+  --color-border: #e3e9e5;
+  --color-border-strong: #cfdbd4;
+
+  --color-primary: #2f7d5c;
+  --color-primary-deep: #1f5c43;
+  --color-primary-soft: #e4f2ea;
+  --color-on-primary: #ffffff;
+
+  --color-warn: #b6543f;
+  --color-warn-soft: #f7e6e2;
+  --color-info: #3a6ea5;
+  --color-info-soft: #e6eef6;
+
+  --color-overlay: rgba(17, 26, 22, 0.5);
+
+  /* Typography ----------------------------------------------------------- */
+  --font-display: "Manrope", ui-sans-serif, system-ui, sans-serif;
+  --font-body: ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: ui-monospace, "IBM Plex Mono", monospace;
+
+  --text-xs: 12px;
+  --text-sm: 13.5px;
+  --text-md: 15px;
+  --text-lg: 18px;
+  --text-xl: 24px;
+  --text-2xl: 32px;
+  --text-3xl: 44px;
+  --text-hero: clamp(34px, 5.4vw, 66px);
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  --leading-tight: 1.15;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.65;
+
+  /* Spacing (8px base) ----------------------------------------------------- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+  --space-9: 96px;
+  --space-10: 128px;
+
+  /* Radius ------------------------------------------------------------------ */
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-xl: 28px;
+  --radius-full: 999px;
+
+  /* Shadow -------------------------------------------------------------------- */
+  --shadow-sm: 0 4px 12px rgba(31, 92, 67, 0.06);
+  --shadow-md: 0 10px 28px rgba(31, 92, 67, 0.08);
+  --shadow-lg: 0 24px 56px rgba(31, 92, 67, 0.13);
+
+  /* Motion --------------------------------------------------------------------- */
+  --ease-standard: cubic-bezier(0.22, 1, 0.36, 1);
+  --duration-fast: 150ms;
+  --duration-base: 260ms;
+  --duration-slow: 480ms;
+
+  /* Layout -------------------------------------------------------------------- */
+  --sidebar-width: 248px;
+  --sidebar-width-collapsed: 76px;
+  --content-max-width: 1180px;
+}

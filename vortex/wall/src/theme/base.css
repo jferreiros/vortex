@@ -1,0 +1,29 @@
+/* Base resets for the app shell only — scoped under .app-root so the
+   existing Live Call design concepts (src/designs/*) are never affected. */
+
+.app-root {
+  font-family: var(--font-body);
+  color: var(--color-ink);
+  background: var(--color-bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+.app-root * {
+  box-sizing: border-box;
+}
+
+.app-root h1,
+.app-root h2,
+.app-root h3,
+.app-root p {
+  margin: 0;
+}
+
+.app-root button {
+  font-family: inherit;
+}
+
+.app-root a {
+  color: inherit;
+  text-decoration: none;
+}

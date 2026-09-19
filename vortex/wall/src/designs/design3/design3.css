@@ -1,0 +1,490 @@
+/* Design 3 — Call-first. The three-column skeleton is gone: the call itself
+   (the orb) is the one dominant element on a dark, cinematic stage.
+   Extracted insight cards orbit it contextually instead of living in a
+   side panel, and the transcript drops to a caption line plus an
+   on-demand drawer — present, but no longer the thing the eye lands on
+   first. */
+
+.design3-root {
+  --d3-bg-deep: #05070a;
+  --d3-bg-mid: #10161f;
+  --d3-ink: #f4f6f8;
+  --d3-mute: rgba(244, 246, 248, 0.58);
+  --d3-glow: #57e6c9;
+  --d3-glow2: #7c8cff;
+  --d3-warn: #ff6a6a;
+  --d3-glass: rgba(255, 255, 255, 0.055);
+  --d3-glass-strong: rgba(255, 255, 255, 0.09);
+  --d3-border: rgba(255, 255, 255, 0.12);
+
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background: radial-gradient(1200px 800px at 50% 20%, var(--d3-bg-mid), var(--d3-bg-deep) 70%);
+  color: var(--d3-ink);
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  display: flex;
+  flex-direction: column;
+}
+
+.design3-root .d3-vignette {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(900px 620px at 50% 42%, transparent 55%, rgba(0, 0, 0, 0.55) 100%);
+}
+
+/* Top bar ------------------------------------------------------------------*/
+
+.design3-root .d3-topbar {
+  position: relative;
+  z-index: 2;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 22px 30px;
+}
+
+.design3-root .d3-topbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: "Space Grotesk", ui-sans-serif, sans-serif;
+  font-weight: 600;
+  font-size: 16px;
+  letter-spacing: 0.01em;
+}
+
+.design3-root .d3-brand-mark {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--d3-glow);
+  box-shadow: 0 0 0 5px rgba(87, 230, 201, 0.18);
+}
+
+.design3-root .d3-topbar-meta {
+  display: flex;
+  gap: 8px;
+}
+
+.design3-root .d3-meta-pill {
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: var(--d3-glass);
+  border: 1px solid var(--d3-border);
+  color: var(--d3-mute);
+}
+
+.design3-root .d3-meta-pill.warn {
+  color: var(--d3-warn);
+  border-color: rgba(255, 106, 106, 0.35);
+}
+
+.design3-root .d3-meta-pill.mono {
+  font-family: "Space Grotesk", ui-monospace, monospace;
+}
+
+/* Center stage ---------------------------------------------------------------*/
+
+.design3-root .d3-center {
+  position: relative;
+  z-index: 1;
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 30px;
+  padding-bottom: 40px;
+}
+
+.design3-root .d3-orbit-zone {
+  position: relative;
+  width: min(680px, 82vw);
+  height: 360px;
+}
+
+.design3-root .d3-stage {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+}
+
+.design3-root .d3-stage-ring {
+  position: absolute;
+  top: -34px;
+  left: 50%;
+  width: 200px;
+  height: 200px;
+  margin-left: -100px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(87, 230, 201, 0.5), transparent 68%);
+  filter: blur(1px);
+}
+
+.design3-root .phase-connecting .d3-stage-ring,
+.design3-root .phase-ended .d3-stage-ring {
+  background: radial-gradient(circle, rgba(244, 246, 248, 0.28), transparent 68%);
+}
+
+.design3-root .phase-working .d3-stage-ring {
+  background: radial-gradient(circle, rgba(124, 140, 255, 0.55), transparent 68%);
+}
+
+.design3-root .d3-stage-core {
+  position: relative;
+  width: 132px;
+  height: 132px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(160deg, rgba(87, 230, 201, 0.22), rgba(124, 140, 255, 0.16));
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 0 80px rgba(87, 230, 201, 0.18), inset 0 0 30px rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(6px);
+}
+
+.design3-root .d3-stage-core svg {
+  color: var(--d3-ink);
+}
+
+.design3-root .d3-stage-caption {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-family: "Space Grotesk", ui-sans-serif, sans-serif;
+}
+
+.design3-root .d3-stage-phase {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.design3-root .d3-stage-tool {
+  font-size: 12px;
+  color: var(--d3-mute);
+  text-transform: capitalize;
+}
+
+/* Orbiting insight cards ------------------------------------------------------*/
+
+.design3-root .d3-orbit {
+  position: absolute;
+  inset: 0;
+}
+
+.design3-root .d3-orbit-card {
+  position: absolute;
+  width: 176px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: var(--d3-glass);
+  border: 1px solid var(--d3-border);
+  backdrop-filter: blur(14px);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.design3-root .d3-orbit-card.anchor-top-left {
+  top: 0;
+  left: 0;
+}
+
+.design3-root .d3-orbit-card.anchor-top-right {
+  top: 0;
+  right: 0;
+  text-align: right;
+}
+
+.design3-root .d3-orbit-card.anchor-bottom-left {
+  bottom: 0;
+  left: 8%;
+}
+
+.design3-root .d3-orbit-card.anchor-bottom-right {
+  bottom: 0;
+  right: 8%;
+  text-align: right;
+}
+
+.design3-root .d3-orbit-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--d3-mute);
+}
+
+.design3-root .d3-orbit-value {
+  font-family: "Space Grotesk", ui-sans-serif, sans-serif;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* Live caption ------------------------------------------------------------- */
+
+.design3-root .d3-caption-zone {
+  min-height: 26px;
+  max-width: 640px;
+  text-align: center;
+  padding: 0 24px;
+}
+
+.design3-root .d3-caption {
+  font-size: 15px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.design3-root .d3-caption.muted {
+  color: var(--d3-mute);
+}
+
+.design3-root .d3-caption-who {
+  font-weight: 700;
+  color: var(--d3-glow);
+  margin-right: 8px;
+}
+
+/* Verdict (call ended) --------------------------------------------------------*/
+
+.design3-root .d3-verdict {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 26px 34px;
+  border-radius: 26px;
+  background: var(--d3-glass-strong);
+  border: 1px solid var(--d3-border);
+  backdrop-filter: blur(18px);
+}
+
+.design3-root .d3-verdict.done {
+  border-color: rgba(87, 230, 201, 0.45);
+  box-shadow: 0 0 60px rgba(87, 230, 201, 0.12);
+}
+
+.design3-root .d3-verdict-kicker {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--d3-mute);
+  margin-bottom: 6px;
+}
+
+.design3-root .d3-verdict-value {
+  font-family: "Space Grotesk", ui-sans-serif, sans-serif;
+  font-size: 30px;
+  font-weight: 600;
+  display: block;
+}
+
+.design3-root .d3-verdict-note {
+  display: block;
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--d3-mute);
+}
+
+.design3-root .d3-verdict-ring {
+  position: relative;
+}
+
+.design3-root .countdown-ring-track {
+  stroke: rgba(255, 255, 255, 0.14);
+}
+
+.design3-root .countdown-ring-fill {
+  stroke: var(--d3-glow);
+}
+
+.design3-root .countdown-ring {
+  position: relative;
+}
+
+.design3-root .countdown-ring-content {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: "Space Grotesk", ui-sans-serif, sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* Drawer ---------------------------------------------------------------------*/
+
+.design3-root .d3-drawer-toggle {
+  position: relative;
+  z-index: 2;
+  align-self: center;
+  margin-bottom: 14px;
+  appearance: none;
+  border: 1px solid var(--d3-border);
+  background: var(--d3-glass);
+  color: var(--d3-ink);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 8px 18px;
+  border-radius: 999px;
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+}
+
+.design3-root .d3-drawer-toggle:hover {
+  background: var(--d3-glass-strong);
+}
+
+.design3-root .d3-drawer {
+  position: relative;
+  z-index: 2;
+  overflow: hidden;
+  border-top: 1px solid var(--d3-border);
+  background: rgba(6, 9, 13, 0.86);
+  backdrop-filter: blur(20px);
+}
+
+.design3-root .d3-drawer-inner {
+  height: 520px;
+  display: flex;
+  gap: 1px;
+  background: var(--d3-border);
+}
+
+.design3-root .d3-drawer-col {
+  flex: 1 1 50%;
+  min-width: 0;
+  background: rgba(6, 9, 13, 0.92);
+  padding: 22px 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto;
+}
+
+.design3-root .d3-drawer-kicker {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--d3-mute);
+}
+
+.design3-root .d3-drawer-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.design3-root .d3-drawer-turn {
+  max-width: 80%;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: var(--d3-glass);
+  border: 1px solid var(--d3-border);
+}
+
+.design3-root .d3-drawer-turn.user {
+  align-self: flex-end;
+}
+
+.design3-root .d3-drawer-turn .who {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--d3-mute);
+  margin-bottom: 3px;
+}
+
+.design3-root .d3-drawer-turn p {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.design3-root .d3-drawer-tool {
+  color: var(--d3-ink);
+}
+
+.design3-root .d3-drawer-tool .stage-head,
+.design3-root .d3-drawer-tool .tool-live-label,
+.design3-root .d3-drawer-tool .recent-tools-title {
+  display: none;
+}
+
+.design3-root .d3-drawer-tool .stage-label,
+.design3-root .d3-drawer-tool .stage-record-name,
+.design3-root .d3-drawer-tool .recent-tool-name {
+  color: var(--d3-ink);
+}
+
+.design3-root .d3-drawer-tool .stage-section h4 {
+  color: var(--d3-mute);
+}
+
+.design3-root .d3-drawer-tool .chip,
+.design3-root .d3-drawer-tool .stage-record,
+.design3-root .d3-drawer-tool .stage-cal-day,
+.design3-root .d3-drawer-tool .recent-tool-row {
+  background: var(--d3-glass);
+  border: 1px solid var(--d3-border);
+  color: var(--d3-ink);
+}
+
+.design3-root .d3-drawer-tool .stage-cal-day.has-slots {
+  border-color: rgba(87, 230, 201, 0.4);
+  background: rgba(87, 230, 201, 0.12);
+}
+
+.design3-root .d3-drawer-tool .stage-empty-inline,
+.design3-root .d3-drawer-tool .stage-empty {
+  color: var(--d3-mute);
+}
+
+.design3-root .muted {
+  color: var(--d3-mute);
+}
+
+/* Responsive -------------------------------------------------------------------*/
+
+@media (max-width: 900px) {
+  .design3-root .d3-orbit-card {
+    width: 130px;
+    padding: 10px;
+  }
+  .design3-root .d3-orbit-zone {
+    height: 300px;
+  }
+  .design3-root .d3-drawer-inner {
+    flex-direction: column;
+    height: auto;
+    max-height: 62vh;
+  }
+}
+
+@media (max-width: 620px) {
+  .design3-root .d3-orbit-card {
+    display: none;
+  }
+  .design3-root .d3-topbar-meta {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+}

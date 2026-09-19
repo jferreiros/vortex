@@ -1,0 +1,473 @@
+/* Design 4 — Spatial/immersive. No columns at all: a dark canvas where the
+   orb, a floating "tool window", scattered insight pins and a stream of
+   note-card chat bubbles each live at their own depth, drifting gently and
+   tilting a few degrees with the pointer — a limited, tasteful stand-in for
+   3D depth rather than a real WebGL scene. */
+
+.design4-root {
+  --d4-bg: #05060a;
+  --d4-bg-2: #0b0e18;
+  --d4-ink: #eef0f6;
+  --d4-mute: rgba(238, 240, 246, 0.55);
+  --d4-cyan: #4fd8ff;
+  --d4-violet: #9b7bff;
+  --d4-warn: #ff7a7a;
+  --d4-glass: rgba(255, 255, 255, 0.05);
+  --d4-border: rgba(255, 255, 255, 0.12);
+
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background: var(--d4-bg);
+  color: var(--d4-ink);
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+
+.design4-root .d4-field {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.07) 1px, transparent 1px);
+  background-size: 28px 28px;
+  background-position: -4px -4px;
+}
+
+.design4-root .d4-nebula {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(6px);
+  opacity: 0.55;
+  animation: d4-drift 28s ease-in-out infinite;
+}
+
+.design4-root .d4-nebula.n1 {
+  width: 560px;
+  height: 560px;
+  left: -160px;
+  top: -120px;
+  background: radial-gradient(circle, rgba(79, 216, 255, 0.16), transparent 70%);
+}
+
+.design4-root .d4-nebula.n2 {
+  width: 620px;
+  height: 620px;
+  right: -200px;
+  bottom: -200px;
+  background: radial-gradient(circle, rgba(155, 123, 255, 0.16), transparent 70%);
+  animation-duration: 34s;
+  animation-delay: -8s;
+}
+
+@keyframes d4-drift {
+  0%, 100% { transform: translate(0, 0); }
+  50% { transform: translate(26px, -18px); }
+}
+
+/* HUD corners --------------------------------------------------------------*/
+
+.design4-root .d4-hud-corner {
+  position: absolute;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.design4-root .d4-hud-corner.top-left {
+  top: 22px;
+  left: 24px;
+  width: 220px;
+}
+
+.design4-root .d4-hud-corner.top-right {
+  top: 24px;
+  right: 26px;
+  align-items: flex-end;
+  text-align: right;
+}
+
+.design4-root .d4-hud-tag {
+  font-family: "Space Mono", ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--d4-cyan);
+  text-transform: uppercase;
+}
+
+.design4-root .d4-hud-tag.on-dark {
+  color: var(--d4-cyan);
+  display: block;
+  margin-bottom: 2px;
+}
+
+.design4-root .d4-hud-sub {
+  font-size: 11px;
+  color: var(--d4-mute);
+}
+
+.design4-root .d4-hud-track {
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.design4-root .d4-hud-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--d4-cyan), var(--d4-violet));
+}
+
+.design4-root .d4-hud-fill.warn {
+  background: linear-gradient(90deg, var(--d4-warn), #ff9f6a);
+}
+
+.design4-root .d4-hud-value {
+  font-family: "Space Mono", ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--d4-mute);
+}
+
+.design4-root .d4-hud-chips {
+  display: flex;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.design4-root .d4-hud-chip {
+  font-family: "Space Mono", ui-monospace, monospace;
+  font-size: 10px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--d4-border);
+  color: var(--d4-mute);
+}
+
+.design4-root .d4-hud-chip.warn {
+  color: var(--d4-warn);
+  border-color: rgba(255, 122, 122, 0.4);
+}
+
+/* Canvas + orb ---------------------------------------------------------------*/
+
+.design4-root .d4-canvas {
+  position: absolute;
+  inset: 0;
+}
+
+.design4-root .d4-orb-zone {
+  position: absolute;
+  top: 44%;
+  left: 32%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+.design4-root .d4-orb-halo {
+  position: absolute;
+  top: -46px;
+  left: 50%;
+  margin-left: -80px;
+  width: 160px;
+  height: 160px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(79, 216, 255, 0.5), transparent 70%);
+}
+
+.design4-root .d4-orb-halo.phase-working {
+  background: radial-gradient(circle, rgba(155, 123, 255, 0.55), transparent 70%);
+}
+
+.design4-root .d4-orb-halo.phase-connecting,
+.design4-root .d4-orb-halo.phase-ended {
+  background: radial-gradient(circle, rgba(238, 240, 246, 0.28), transparent 70%);
+}
+
+.design4-root .d4-orb-core {
+  width: 118px;
+  height: 118px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--d4-border);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 0 60px rgba(79, 216, 255, 0.15);
+}
+
+.design4-root .d4-orb-label {
+  font-family: "Space Mono", ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--d4-mute);
+  white-space: nowrap;
+}
+
+/* Floating tool window ---------------------------------------------------------*/
+
+.design4-root .d4-window {
+  position: absolute;
+  top: 16%;
+  left: 56%;
+  width: 360px;
+  border-radius: 14px;
+  background: rgba(11, 14, 24, 0.72);
+  border: 1px solid var(--d4-border);
+  backdrop-filter: blur(16px);
+  box-shadow: 0 30px 60px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+
+.design4-root .d4-window-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--d4-border);
+}
+
+.design4-root .d4-window-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.design4-root .d4-window-dot.r { background: #ff5f56; }
+.design4-root .d4-window-dot.y { background: #ffbd2e; }
+.design4-root .d4-window-dot.g { background: #27c93f; }
+
+.design4-root .d4-window-title {
+  margin-left: 8px;
+  font-family: "Space Mono", ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--d4-mute);
+}
+
+.design4-root .d4-window-body {
+  padding: 16px 18px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.design4-root .d4-window-body .stage-head,
+.design4-root .d4-window-body .tool-live-label,
+.design4-root .d4-window-body .recent-tools-title {
+  display: none;
+}
+
+.design4-root .d4-window-body .stage-label,
+.design4-root .d4-window-body .stage-record-name,
+.design4-root .d4-window-body .recent-tool-name {
+  color: var(--d4-ink);
+  font-family: "Space Mono", ui-monospace, monospace;
+  font-size: 12px;
+}
+
+.design4-root .d4-window-body .stage-section h4 {
+  color: var(--d4-mute);
+}
+
+.design4-root .d4-window-body .chip,
+.design4-root .d4-window-body .stage-record,
+.design4-root .d4-window-body .stage-cal-day,
+.design4-root .d4-window-body .recent-tool-row {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--d4-border);
+  color: var(--d4-ink);
+}
+
+.design4-root .d4-window-body .stage-cal-day.has-slots {
+  border-color: rgba(79, 216, 255, 0.4);
+  background: rgba(79, 216, 255, 0.12);
+}
+
+.design4-root .d4-window-body .stage-empty,
+.design4-root .d4-window-body .stage-empty-inline {
+  color: var(--d4-mute);
+}
+
+.design4-root .d4-window-body .stage-icon svg,
+.design4-root .d4-window-body .tool-live-icon svg {
+  color: var(--d4-cyan);
+}
+
+/* Insight pins --------------------------------------------------------------- */
+
+.design4-root .d4-pin {
+  position: absolute;
+  width: 172px;
+  padding: 10px 13px;
+  border-radius: 12px;
+  background: var(--d4-glass);
+  border: 1px solid var(--d4-border);
+  backdrop-filter: blur(12px);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  filter: blur(calc((1 - var(--depth, 1)) * 0.6px));
+}
+
+.design4-root .d4-pin-title {
+  font-family: "Space Mono", ui-monospace, monospace;
+  font-size: 9.5px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--d4-cyan);
+}
+
+.design4-root .d4-pin-value {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+/* Chat scatter (bottom-left stream) --------------------------------------------*/
+
+.design4-root .d4-chat-scatter {
+  position: absolute;
+  z-index: 3;
+  left: 24px;
+  bottom: 22px;
+  width: 360px;
+  max-height: 46vh;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 10px;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 18%);
+  mask-image: linear-gradient(to bottom, transparent, #000 18%);
+  padding-top: 40px;
+}
+
+.design4-root .d4-chat-empty {
+  color: var(--d4-mute);
+  font-size: 13px;
+  font-family: "Space Mono", ui-monospace, monospace;
+}
+
+.design4-root .d4-note {
+  max-width: 88%;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgba(11, 14, 24, 0.78);
+  border: 1px solid var(--d4-border);
+  backdrop-filter: blur(10px);
+  transform: rotate(var(--rot, 0deg));
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.3);
+}
+
+.design4-root .d4-note.user {
+  align-self: flex-end;
+  border-color: rgba(79, 216, 255, 0.3);
+}
+
+.design4-root .d4-note.assistant {
+  align-self: flex-start;
+  border-color: rgba(155, 123, 255, 0.3);
+}
+
+.design4-root .d4-note-who {
+  display: block;
+  font-family: "Space Mono", ui-monospace, monospace;
+  font-size: 9.5px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--d4-mute);
+  margin-bottom: 3px;
+}
+
+.design4-root .d4-note p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+/* Verdict seal ------------------------------------------------------------------*/
+
+.design4-root .d4-seal {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 320px;
+  padding: 26px 28px;
+  border-radius: 20px;
+  background: rgba(11, 14, 24, 0.82);
+  border: 1px solid var(--d4-border);
+  backdrop-filter: blur(20px);
+  box-shadow: 0 40px 80px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.design4-root .d4-seal.done {
+  border-color: rgba(79, 216, 255, 0.45);
+  box-shadow: 0 0 60px rgba(79, 216, 255, 0.15);
+}
+
+.design4-root .d4-seal-value {
+  font-family: "Space Mono", ui-monospace, monospace;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.design4-root .d4-seal-note {
+  font-size: 12px;
+  color: var(--d4-mute);
+}
+
+.design4-root .d4-ring {
+  align-self: center;
+}
+
+.design4-root .countdown-ring-track {
+  stroke: rgba(255, 255, 255, 0.14);
+}
+
+.design4-root .countdown-ring-fill {
+  stroke: var(--d4-cyan);
+}
+
+.design4-root .countdown-ring {
+  position: relative;
+}
+
+.design4-root .countdown-ring-content {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: "Space Mono", ui-monospace, monospace;
+  font-size: 11px;
+}
+
+/* Responsive ---------------------------------------------------------------------*/
+
+@media (max-width: 1024px) {
+  .design4-root .d4-window {
+    width: 300px;
+    left: 50%;
+    top: 14%;
+    transform: translateX(-50%) !important;
+  }
+  .design4-root .d4-pin {
+    display: none;
+  }
+  .design4-root .d4-orb-zone {
+    left: 50%;
+    top: 40%;
+  }
+  .design4-root .d4-chat-scatter {
+    width: calc(100vw - 48px);
+  }
+}
+
+@media (max-width: 620px) {
+  .design4-root .d4-window {
+    display: none;
+  }
+  .design4-root .d4-hud-corner.top-left {
+    width: 160px;
+  }
+}
