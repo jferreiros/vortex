@@ -136,3 +136,58 @@ async def test_privacy_guard_replaces_frame_and_logs() -> None:
     assert events and events[0][0] == "voice.privacy_block"
     assert events[0][1]["kinds"] == ["phone"]
     assert PATIENT_RECORDS_KEY in ctx.state
+
+
+async def test_privacy_guard_scans_the_whole_llm_response() -> None:
+    pytest.importorskip("pipecat")
+    from pipecat.frames.frames import (
+        LLMFullResponseEndFrame,
+        LLMFullResponseStartFrame,
+        LLMTextFrame,
+    )
+    from pipecat.processors.frame_processor import FrameDirection
+
+    from vortex.line.pipecat_voice import _LanguageState, _PrivacyGuard
+
+    events: list[tuple[str, dict]] = []
+
+    class Log:
+        def event(self, kind: str, **kwargs: object) -> None:
+            events.append((kind, kwargs))
+
+    class Session:
+        pass
+
+    ctx = _ctx()
+    ctx.log = Log()  # type: ignore[assignment]
+    remember_patient(
+        ctx,
+        _patient(patient_id="P1", national_id="12345678Z", phone="612345678"),
+    )
+    Session.ctx = ctx
+    guard = _PrivacyGuard(Session(), _LanguageState())  # type: ignore[arg-type]
+
+    pushed: list[object] = []
+
+    async def capture(frame: object, direction: object = FrameDirection.DOWNSTREAM) -> None:
+        pushed.append(frame)
+
+    guard.push_frame = capture  # type: ignore[method-assign]
+
+    async def respond(chunks: list[str]) -> list[str]:
+        pushed.clear()
+        await guard.process_frame(LLMFullResponseStartFrame(), FrameDirection.DOWNSTREAM)
+        for chunk in chunks:
+            await guard.process_frame(LLMTextFrame(chunk), FrameDirection.DOWNSTREAM)
+        await guard.process_frame(LLMFullResponseEndFrame(), FrameDirection.DOWNSTREAM)
+        return [frame.text for frame in pushed if isinstance(frame, LLMTextFrame)]
+
+    safe = await respond(["Puedo darle ", "cita el martes ", "a las diez."])
+    assert safe == ["Puedo darle cita el martes a las diez."]
+    assert events == []
+
+    leaked = await respond(["Su teléfono es ", "612 ", "345 ", "678", ", ¿correcto?"])
+    assert len(leaked) == 1
+    assert "612" not in leaked[0]
+    assert events and events[0][0] == "voice.privacy_block"
+    assert events[0][1]["kinds"] == ["phone"]
