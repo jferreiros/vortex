@@ -4,7 +4,9 @@ One trace per socket (one agent run). Concurrent Run All calls stay isolated
 because each WebSocket handler is its own asyncio task and Langfuse uses
 contextvars. Phone numbers and national ids are masked; audio is never sent.
 
-The OpenAI drop-in records each completion as a generation (model, tokens,
+Prompts and completions never leave the process. The model calls go through the
+uninstrumented OpenAI client and each one is recorded by hand as a generation
+carrying only metadata (model, parameters, message and tool counts, tokens,
 latency, errors). Tool calls nest as ``tool`` or ``retriever`` observations.
 """
 
@@ -38,6 +40,15 @@ _PII_KEYS = frozenset(
         "document",
     }
 )
+GENERATION_NAME = "generate-response"
+GENERATION_PARAMETER_KEYS = (
+    "temperature",
+    "max_tokens",
+    "top_p",
+    "stream",
+    "reasoning_effort",
+)
+
 _DNI_RE = re.compile(r"\b\d{8}[A-Za-z]\b")
 _NIE_RE = re.compile(r"\b[XYZxyz]\d{7}[A-Za-z]\b")
 _PHONE_RE = re.compile(r"\+?\d[\d\s-]{7,}\d")
@@ -122,6 +133,65 @@ def tool_observation_name(name: str) -> str:
     return name.replace("_", "-")
 
 
+def _generation_model_parameters(create_kwargs: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: create_kwargs[key]
+        for key in GENERATION_PARAMETER_KEYS
+        if create_kwargs.get(key) is not None
+    }
+
+
+def _generation_metadata(create_kwargs: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "message_count": len(create_kwargs.get("messages") or []),
+        "tool_count": len(create_kwargs.get("tools") or []),
+    }
+
+
+def _usage_details(response: Any) -> dict[str, int]:
+    usage = getattr(response, "usage", None)
+    if usage is None:
+        return {}
+    counted = {
+        "input": getattr(usage, "prompt_tokens", None),
+        "output": getattr(usage, "completion_tokens", None),
+        "total": getattr(usage, "total_tokens", None),
+    }
+    return {key: value for key, value in counted.items() if isinstance(value, int)}
+
+
+def content_free_create(original: Any) -> Any:
+    """``chat.completions.create`` wrapped in a generation that carries no content.
+
+    The messages hold names, national ids, phone numbers, insurers and clinical
+    reasons, and the completion repeats them, so neither is ever passed to
+    Langfuse as ``input`` or ``output``. Only the shape of the request survives.
+    """
+
+    async def create(*args: Any, **create_kwargs: Any) -> Any:
+        client = _client()
+        if client is None:
+            return await original(*args, **create_kwargs)
+        with client.start_as_current_observation(
+            as_type="generation",
+            name=GENERATION_NAME,
+            model=create_kwargs.get("model"),
+            model_parameters=_generation_model_parameters(create_kwargs),
+            metadata=_generation_metadata(create_kwargs),
+        ) as generation:
+            try:
+                response = await original(*args, **create_kwargs)
+            except Exception as exc:
+                generation.update(level="ERROR", status_message=f"{type(exc).__name__}: {exc}")
+                raise
+            usage = _usage_details(response)
+            if usage:
+                generation.update(usage_details=usage)
+            return response
+
+    return create
+
+
 def async_openai_client(
     *,
     api_key: str | None = None,
@@ -146,21 +216,13 @@ def async_openai_client(
         kwargs["project"] = project
     if default_headers is not None:
         kwargs["default_headers"] = default_headers
-    if enabled():
-        _sync_env()
-        from langfuse.openai import AsyncOpenAI
-    else:
-        from openai import AsyncOpenAI
+    from openai import AsyncOpenAI
 
     client = AsyncOpenAI(**kwargs)
     if enabled():
-        original = client.chat.completions.create
-
-        async def create(*args: Any, **create_kwargs: Any) -> Any:
-            create_kwargs.setdefault("name", "generate-response")
-            return await original(*args, **create_kwargs)
-
-        client.chat.completions.create = create  # type: ignore[method-assign]
+        client.chat.completions.create = content_free_create(  # type: ignore[method-assign]
+            client.chat.completions.create
+        )
     return client
 
 
