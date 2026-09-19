@@ -15,7 +15,7 @@ const DEFAULTS = {
     canInfo: true,
     canEscalate: true,
   },
-  minimumBookingLeadHours: 12,
+  minimumBookingLeadDays: 1,
   patientIdentificationFieldsRequired: 1,
   callTimeCapMinutes: 3,
   personalization: {
@@ -35,9 +35,10 @@ const PERMISSIONS_CONFIG = [
   { key: "canEscalate", label: "Escalar urgencias", desc: "Derivar a un humano." },
 ];
 
-const LEAD_HOURS_HELP = "Horas mínimas entre la llamada y la cita.";
+const LEAD_DAYS_HELP = "Días mínimos entre la llamada y la cita.";
 
-const ID_FIELDS_HELP = "Datos que debe confirmar un paciente existente.";
+const ID_FIELDS_HELP =
+  "Cuántos datos debe confirmar un paciente existente antes de confiar su identidad: nombre, DNI/NIE, teléfono o fecha de nacimiento.";
 
 const CAP_HELP = "Fijado por la plataforma.";
 
@@ -114,9 +115,9 @@ export default function Settings() {
     updateSetting(`permissions.${key}`, checked);
   };
 
-  const handleLeadHoursChange = (value) => {
-    const clamped = Math.max(2, Math.min(72, value));
-    updateSetting("minimumBookingLeadHours", clamped);
+  const handleLeadDaysChange = (value) => {
+    const clamped = Math.max(1, Math.min(2, value));
+    updateSetting("minimumBookingLeadDays", clamped);
   };
 
   const handleIdFieldsChange = (value) => {
@@ -226,29 +227,6 @@ export default function Settings() {
           </div>
         </Card>
 
-        {/* 2. Permisos del agente */}
-        <Card padding="lg" className="settings-group">
-          <div className="settings-group-head">
-            <h3>Permisos</h3>
-            <p>Lo que el agente puede hacer por sí solo.</p>
-          </div>
-          <div className="settings-rows">
-            {PERMISSIONS_CONFIG.map((p) => (
-              <div className="settings-row" key={p.key}>
-                <div>
-                  <span className="settings-row-label">{p.label}</span>
-                  <span className="settings-row-desc">{p.desc}</span>
-                </div>
-                <Switch
-                  checked={settings.permissions[p.key]}
-                  onChange={(checked) => handlePermissionChange(p.key, checked)}
-                  label={p.label}
-                />
-              </div>
-            ))}
-          </div>
-        </Card>
-
         <div className="settings-pair">
         {/* 2. Reserva y duración de llamada */}
         <Card padding="lg" className="settings-group">
@@ -260,13 +238,13 @@ export default function Settings() {
             <div className="settings-row settings-row-stepper">
               <div>
                 <span className="settings-row-label">Antelación mínima</span>
-                <span className="settings-row-desc">{LEAD_HOURS_HELP}</span>
+                <span className="settings-row-desc">{LEAD_DAYS_HELP}</span>
               </div>
               <div className="settings-stepper">
                 <button
                   className="ui-stepper-btn"
-                  onClick={() => handleLeadHoursChange(settings.minimumBookingLeadHours - 1)}
-                  disabled={settings.minimumBookingLeadHours <= 2}
+                  onClick={() => handleLeadDaysChange(settings.minimumBookingLeadDays - 1)}
+                  disabled={settings.minimumBookingLeadDays <= 1}
                   aria-label="Decrementar"
                 >
                   −
@@ -274,21 +252,21 @@ export default function Settings() {
                 <input
                   type="number"
                   className="ui-stepper-input"
-                  value={settings.minimumBookingLeadHours}
-                  onChange={(e) => handleLeadHoursChange(parseInt(e.target.value) || 0)}
-                  min={2}
-                  max={72}
+                  value={settings.minimumBookingLeadDays}
+                  onChange={(e) => handleLeadDaysChange(parseInt(e.target.value) || 1)}
+                  min={1}
+                  max={2}
                   readOnly
                 />
                 <button
                   className="ui-stepper-btn"
-                  onClick={() => handleLeadHoursChange(settings.minimumBookingLeadHours + 1)}
-                  disabled={settings.minimumBookingLeadHours >= 72}
+                  onClick={() => handleLeadDaysChange(settings.minimumBookingLeadDays + 1)}
+                  disabled={settings.minimumBookingLeadDays >= 2}
                   aria-label="Incrementar"
                 >
                   +
                 </button>
-                <span className="settings-stepper-unit">horas</span>
+                <span className="settings-stepper-unit">días</span>
               </div>
             </div>
             <div className="settings-row settings-row-cap">
@@ -354,6 +332,28 @@ export default function Settings() {
         </Card>
         </div>
 
+        {/* 4. Permisos del agente */}
+        <Card padding="lg" className="settings-group">
+          <div className="settings-group-head">
+            <h3>Permisos</h3>
+            <p>Lo que el agente puede hacer por sí solo.</p>
+          </div>
+          <div className="settings-rows">
+            {PERMISSIONS_CONFIG.map((p) => (
+              <div className="settings-row" key={p.key}>
+                <div>
+                  <span className="settings-row-label">{p.label}</span>
+                  <span className="settings-row-desc">{p.desc}</span>
+                </div>
+                <Switch
+                  checked={settings.permissions[p.key]}
+                  onChange={(checked) => handlePermissionChange(p.key, checked)}
+                  label={p.label}
+                />
+              </div>
+            ))}
+          </div>
+        </Card>
       </div>
 
       {showDefaultConfirm && (
@@ -367,7 +367,7 @@ export default function Settings() {
               <p>Esto restablecerá todos los controles a los valores por defecto:</p>
               <ul>
                 <li>Permisos: <strong>ON</strong></li>
-                <li>Antelación mínima: <strong>12 horas</strong></li>
+                <li>Antelación mínima: <strong>1 día</strong></li>
                 <li>Identificación: <strong>1 dato</strong></li>
                 <li>Tono / Amabilidad / Ritmo: <strong>50</strong></li>
                 <li>Voz: <strong>Mujer</strong></li>
