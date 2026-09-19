@@ -264,8 +264,16 @@ def pct(samples: list[float]) -> dict:
 
 
 #: A five-day window inside the event calendar, shared by the ``find_slots``
-#: recipe and the warmup that feeds the booking ones.
+#: recipe and the warmups that feed the booking ones.
 FIND_SLOTS_WINDOW: dict[str, str] = {"date_from": "2026-09-21", "date_to": "2026-09-25"}
+
+#: ``resolve_inputs`` key -> the patient and policy keys that slot belongs to.
+#: Availability answers differently per patient (appointment type, insurer
+#: restrictions), so each operation gets a slot warmed under its own patient.
+SLOT_SCOPES: dict[str, tuple[str, str]] = {
+    "booking_slot": ("patient_id", "policy_id"),
+    "reschedule_slot": ("appointment_patient_id", "appointment_policy_id"),
+}
 
 #: recipe -> {tool argument: key in ``resolve_inputs``}. Every clinic-side
 #: identifier a recipe needs is listed here and nowhere else, so a scenario
@@ -274,11 +282,15 @@ RESOLVED_INPUTS: dict[str, dict[str, str]] = {
     "find_patient": {"phone": "phone"},
     "find_slots": {"specialty_id": "specialty_id"},
     "list_appointments": {"patient_id": "appointment_patient_id"},
-    "prepare_booking": {"patient_id": "patient_id", "policy_id": "policy_id", "slot": "slot"},
+    "prepare_booking": {
+        "patient_id": "patient_id",
+        "policy_id": "policy_id",
+        "slot": "booking_slot",
+    },
     "prepare_reschedule": {
         "appointment_id": "appointment_id",
         "policy_id": "appointment_policy_id",
-        "slot": "slot",
+        "slot": "reschedule_slot",
     },
     "prepare_cancel": {"appointment_id": "appointment_id", "patient_id": "appointment_patient_id"},
     "check_eligibility": {"patient_id": "patient_id", "specialty_id": "specialty_id"},
@@ -359,12 +371,15 @@ async def known_patient(client, raw: dict) -> PatientRecord | None:
 async def resolve_inputs(client) -> dict:
     """Every clinic-side recipe value, taken from ``client`` itself.
 
-    Catalogue ids and the warmup slot come straight off the client. A patient
-    cannot be invented - ``/directory`` only answers an exact field - so each
-    fixture patient is offered to the client and the first one it recognises is
-    used, plus the first upcoming appointment of the first recognised patient
-    that has one. What stays unresolved excludes its recipes instead of timing
-    an identifier this API would reject.
+    Catalogue ids come straight off the client. A patient cannot be invented -
+    ``/directory`` only answers an exact field - so each fixture patient is
+    offered to the client and the first one it recognises is used, plus the
+    first upcoming appointment of the first recognised patient that has one.
+    The patient and the appointment are resolved first because the slots depend
+    on them: ``prepare_booking`` re-checks availability for its own patient, so
+    the booking and reschedule recipes each get a slot warmed under the patient
+    and policy that operation carries. What stays unresolved excludes its
+    recipes instead of timing an identifier this API would reject.
     """
     resolved: dict = {}
     catalogue = await client.catalogue()
@@ -374,14 +389,6 @@ async def resolve_inputs(client) -> dict:
         resolved["location_id"] = catalogue.locations[0].location_id
     if catalogue.providers:
         resolved["provider_name"] = catalogue.providers[0].name
-
-    slot_args = dict(FIND_SLOTS_WINDOW)
-    if "specialty_id" in resolved:
-        slot_args["specialty_id"] = resolved["specialty_id"]
-    try:
-        resolved["slot"] = await warmup_slot(client, slot_args)
-    except Exception as exc:
-        print(f"!! no warmup slot: {type(exc).__name__}: {exc}", file=sys.stderr)
 
     for raw in fixtures.PATIENTS:
         if "patient_id" in resolved and "appointment_id" in resolved:
@@ -405,6 +412,20 @@ async def resolve_inputs(client) -> dict:
             resolved["appointment_patient_id"] = record.patient_id
             if record.insurer:
                 resolved["appointment_policy_id"] = record.insurer
+
+    for slot_key, (patient_key, policy_key) in SLOT_SCOPES.items():
+        if not resolved.get(patient_key):
+            continue
+        slot_args = dict(FIND_SLOTS_WINDOW)
+        if "specialty_id" in resolved:
+            slot_args["specialty_id"] = resolved["specialty_id"]
+        slot_args["patient_id"] = resolved[patient_key]
+        if resolved.get(policy_key):
+            slot_args["insurer"] = resolved[policy_key]
+        try:
+            resolved[slot_key] = await warmup_slot(client, slot_args)
+        except Exception as exc:
+            print(f"!! no warmup {slot_key}: {type(exc).__name__}: {exc}", file=sys.stderr)
     return resolved
 
 
