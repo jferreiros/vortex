@@ -81,7 +81,7 @@ export default function Sidebar() {
   return (
     <nav className="clinic-sidebar">
       <div className="clinic-sidebar-brand">
-        <span className="clinic-sidebar-mark" />
+        <img className="clinic-sidebar-mark" src="/wall/vorty-face" alt="" />
         <span className="clinic-sidebar-brand-text">
           Vortex
           <small>Clínica Arenal</small>
