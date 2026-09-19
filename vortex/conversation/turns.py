@@ -61,10 +61,18 @@ never from the caller's last word, and it cannot fire while the bot is speaking
 or while a tool call is in flight. ``idle_bot_grace_secs`` is a floor on top of
 that for the one case the controller cannot see: our own nudge, queued as a
 ``TTSSpeakFrame`` that has not reached the transport yet.
+
+**The single confirmation.** :class:`ConfirmationPolicy` reads one thing off the
+transcript: the caller has just said yes to the plan we read back. On the scored
+runs the agent sometimes answered that yes by reading the whole plan back again,
+and the call ran out of wall clock with nothing submitted. The prompt says to
+submit on the first yes; this policy is the part that does not depend on the
+model obeying it, and ``CallSession.confirm_prepared`` is what it feeds.
 """
 
 from __future__ import annotations
 
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -341,3 +349,184 @@ class IdlePolicy:
             self._muted_until = now + self._turns.idle_mute_secs
         self._spoke_at = now
         return decision
+
+
+# --- the single confirmation --------------------------------------------------
+# Pure, like the idle escalation: two string tests and a two-slot state machine,
+# so the rule can be read and tested without pipecat, a socket or a model.
+
+# A yes is short. Anything longer is a sentence with a yes somewhere in it, and
+# a sentence can carry a correction ("yes, but make it Friday afternoon").
+AFFIRMATION_MAX_WORDS = 6
+
+# What a caller says instead of "yes", in the five languages we answer in.
+AFFIRMATION_WORDS: frozenset[str] = frozenset(
+    {
+        "yes",
+        "yeah",
+        "yep",
+        "yup",
+        "sure",
+        "ok",
+        "okay",
+        "correct",
+        "perfect",
+        "exactly",
+        "confirm",
+        "confirmed",
+        "si",
+        "sí",
+        "vale",
+        "dale",
+        "claro",
+        "correcto",
+        "perfecto",
+        "adelante",
+        "d'acord",
+        "dacord",
+        "correcte",
+        "perfecte",
+        "endavant",
+        "bai",
+        "ados",
+    }
+)
+
+AFFIRMATION_PHRASES: tuple[str, ...] = (
+    "book it",
+    "book that",
+    "go ahead",
+    "that works",
+    "that's right",
+    "sounds good",
+    "de acuerdo",
+    "así es",
+    "asi es",
+    "me va bien",
+    "está bien",
+    "esta bien",
+)
+
+# A yes that is taking something back is not a yes. ``NEGATIONS`` are matched
+# whole ("no", "not"); the stems are matched anywhere, so "cambi" covers
+# "cambia", "cambiar" and "cambio".
+NEGATIONS: frozenset[str] = frozenset({"no", "not", "nope", "dont", "don't", "nada", "ez", "ezetz"})
+
+CORRECTION_STEMS: tuple[str, ...] = (
+    "instead",
+    "actually",
+    "rather",
+    "wait",
+    "change",
+    "en lugar",
+    "mejor",
+    "espera",
+    "cambi",
+    "prefer",
+)
+
+# Words that make an agent question a read-back rather than any other question.
+# Deliberately narrow: a missed read-back costs one avoidable turn, a false one
+# would send an action the caller never agreed to.
+CONFIRMATION_CUES: tuple[str, ...] = (
+    "book",
+    "confirm",
+    "appointment",
+    "cit",
+    "hora",
+    "reserv",
+    "anul",
+    "cancel",
+    "hitzordu",
+)
+
+_WORDS = re.compile(r"[\w'’]+")
+
+
+def _words(text: str) -> list[str]:
+    return _WORDS.findall(text.casefold().replace("’", "'"))
+
+
+def is_affirmation(text: str) -> bool:
+    """Is this caller turn a plain yes, and nothing else?
+
+    Short, carrying one of the yes words or phrases, and free of any negation or
+    correction. "yes" and "dale" pass; "yes, but Friday instead" does not.
+    """
+    words = _words(text)
+    if not words or len(words) > AFFIRMATION_MAX_WORDS:
+        return False
+    if any(word in NEGATIONS for word in words):
+        return False
+    joined = " ".join(words)
+    if any(stem in joined for stem in CORRECTION_STEMS):
+        return False
+    if any(word in AFFIRMATION_WORDS for word in words):
+        return True
+    return any(phrase in joined for phrase in AFFIRMATION_PHRASES)
+
+
+def looks_like_confirmation_question(text: str, *, prepared: bool = False) -> bool:
+    """Was the agent's last turn a read-back waiting for a yes?
+
+    A question mark is required either way. ``prepared`` says a tool has already
+    drawn an action up on this call, which is itself the closing step, so the
+    cue words are only needed before that.
+    """
+    if "?" not in text:
+        return False
+    if prepared:
+        return True
+    lowered = text.casefold()
+    return any(cue in lowered for cue in CONFIRMATION_CUES)
+
+
+@dataclass(frozen=True)
+class ConfirmDecision:
+    """What one caller turn means for the plan the agent read back."""
+
+    confirmed: bool
+    why: str = ""
+
+
+class ConfirmationPolicy:
+    """One caller's confirmations. One instance per socket, never shared.
+
+    The agent's turn arrives as TTS fragments, so :meth:`on_assistant_text` is
+    fed every piece and joins them; :meth:`on_user_text` judges the caller's
+    reply against that joined turn. The agent's turn is kept until the agent
+    speaks again, so a caller whose yes reaches the STT as two transcripts
+    ("well ..." then "yes") is still heard the second time.
+
+    ``confirmed`` means exactly one thing: submit what is prepared now, and do
+    not read the plan back a second time.
+    """
+
+    __slots__ = ("_answered", "_assistant")
+
+    def __init__(self) -> None:
+        self._assistant: list[str] = []
+        self._answered = False
+
+    @property
+    def last_assistant_turn(self) -> str:
+        return " ".join(self._assistant)
+
+    def on_assistant_text(self, text: str) -> None:
+        """Collect one fragment of what the agent is saying."""
+        if not text or not text.strip():
+            return
+        if self._answered:
+            self._assistant.clear()
+            self._answered = False
+        self._assistant.append(text.strip())
+
+    def on_user_text(self, text: str, *, prepared: bool = False) -> ConfirmDecision:
+        """Judge one caller turn against the agent's last question."""
+        question = self.last_assistant_turn
+        self._answered = True
+        if not is_affirmation(text):
+            return ConfirmDecision(False, "not a plain yes")
+        if not looks_like_confirmation_question(question, prepared=prepared):
+            return ConfirmDecision(False, "no read-back to agree to")
+        return ConfirmDecision(True, f"caller affirmed: {text.strip()}")
