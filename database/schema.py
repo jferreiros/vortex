@@ -121,8 +121,40 @@ CREATE INDEX idx_appointments_slot_start ON appointments(slot_start);
 CREATE INDEX idx_appointments_status ON appointments(status);
 """
 
+#: Migration 2: ``wall_cancellations`` — one row per slot the control centre
+#: (the board's Horarios page) cancelled by hand.
+#:
+#: These are not ``calls`` rows: no call happened, so nothing is written to
+#: the calls table — the join back to a transcript would be a lie. The honest
+#: join key is the diary slot itself (provider + site + minute), the same
+#: triple ``vortex/observability/calendar.py``'s ``BookingKey`` is built from:
+#: most visits on the wall come from the read-only clinic's seed data and have
+#: no row in ``appointments`` at all, so a FK to it would leave the common
+#: case unrepresentable. When the cancelled appointment *does* exist here,
+#: ``db.cancel_appointment_row(s)`` flips its ``status`` to ``cancelled`` —
+#: the same word a phone cancellation writes — and this row keeps the id as
+#: the audit link.
+_MIGRATION_2 = """
+CREATE TABLE wall_cancellations (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider_id     TEXT NOT NULL,
+    site_id         TEXT NOT NULL,
+    -- ISO-8601, Europe/Madrid, minute precision — the BookingKey third leg.
+    slot_start      TEXT NOT NULL,
+    -- The clinic's own appointment id when the visit carried one (seed/pack
+    -- rows do; a booking replayed from the log may not). Audit only.
+    appointment_id  TEXT,
+    -- Display hints for the audit trail — never authoritative, never joined.
+    patient_name    TEXT,
+    provider_name   TEXT,
+    cancelled_at    TEXT NOT NULL
+);
+CREATE INDEX idx_wall_cancellations_slot
+    ON wall_cancellations(provider_id, site_id, slot_start);
+"""
+
 #: Append, never edit — see the module docstring.
-MIGRATIONS: tuple[str, ...] = (_MIGRATION_1,)
+MIGRATIONS: tuple[str, ...] = (_MIGRATION_1, _MIGRATION_2)
 
 
 def migrate(conn: sqlite3.Connection) -> int:

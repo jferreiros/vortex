@@ -105,6 +105,38 @@ class AppointmentRecord:
 
 
 @dataclass(frozen=True)
+class WallCancellationRecord:
+    """One slot the control centre (the board's Horarios page) freed by hand.
+
+    Not a call: the join key is the diary slot (``provider_id``, ``site_id``,
+    ``slot_start``), never a ``calls`` row — see schema.py's migration-2
+    comment for why.
+    """
+
+    id: int
+    provider_id: str
+    site_id: str
+    slot_start: str
+    appointment_id: str | None
+    patient_name: str | None
+    provider_name: str | None
+    cancelled_at: str
+
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> WallCancellationRecord:
+        return cls(
+            id=row["id"],
+            provider_id=row["provider_id"],
+            site_id=row["site_id"],
+            slot_start=row["slot_start"],
+            appointment_id=row["appointment_id"],
+            patient_name=row["patient_name"],
+            provider_name=row["provider_name"],
+            cancelled_at=row["cancelled_at"],
+        )
+
+
+@dataclass(frozen=True)
 class AppointmentWithCalls:
     """An appointment plus its two named calls, resolved — the "navigable
     both ways" shape the FK pair exists for: from the appointment you reach
