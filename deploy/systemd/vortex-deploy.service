@@ -1,0 +1,10 @@
+[Unit]
+Description=Vortex line + board from origin/main
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/factory/personal/vortex
+ExecStart=/home/factory/personal/vortex/deploy/deploy-both.sh
+Nice=10
