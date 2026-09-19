@@ -6,7 +6,9 @@ Two implementations share one interface:
 - ``FakeClinicClient`` - in-memory fixtures, no network. Used when no key is set.
 
 The catalogue never changes during the event. ``ClinicClient`` fetches it once
-and keeps it for the life of the process. Patient lookups are never cached.
+and keeps it for the life of the process. Availability snapshots and a bounded
+patient lookup cache are also kept in process; accepted diary writes invalidate
+availability, and final booking checks bypass the snapshot.
 
 Every path, query parameter and field name below is taken from
 ``docs/platform/openapi.json`` and was checked against live responses from all
@@ -21,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections import OrderedDict
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any, Literal, Protocol
@@ -64,6 +67,42 @@ _NEW_PATIENT_REQUIREMENT = {
     "any": None,
     "": None,
 }
+
+_PATIENT_CACHE_SIZE = 128
+
+
+def _directory_key(
+    name: str | None,
+    national_id: str | None,
+    phone: str | None,
+    date_of_birth: date | None,
+) -> tuple[str | None, str | None, str | None, date | None]:
+    return (
+        name,
+        national_id.replace(" ", "").upper() if national_id else None,
+        _digits9(phone) if phone else None,
+        date_of_birth,
+    )
+
+
+def _availability_key(
+    date_from: date,
+    date_to: date,
+    provider_id: str | None,
+    specialty_id: str | None,
+    location_id: str | None,
+    patient_id: str | None,
+    insurer: list[str] | None,
+) -> tuple[date, date, str | None, str | None, str | None, str | None, tuple[str, ...]]:
+    return (
+        date_from,
+        date_to,
+        provider_id,
+        specialty_id,
+        location_id,
+        patient_id,
+        tuple(insurer or ()),
+    )
 
 
 def _adapt_slot(raw: dict[str, Any]) -> dict[str, Any]:
@@ -419,6 +458,10 @@ class ClinicClient:
         )
         self._catalogue: Catalogue | None = None
         self._catalogue_lock = asyncio.Lock()
+        self._availability_cache: dict[tuple[Any, ...], AvailabilityResponse] = {}
+        self._availability_lock = asyncio.Lock()
+        self._directory_cache: OrderedDict[tuple[Any, ...], list[PatientRecord]] = OrderedDict()
+        self._directory_lock = asyncio.Lock()
 
     async def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
         clean = {k: v for k, v in (params or {}).items() if v not in (None, "", [])}
@@ -450,6 +493,26 @@ class ClinicClient:
         date_of_birth: date | None = None,
     ) -> list[PatientRecord]:
         check_directory_query(name, national_id, phone, date_of_birth)
+        key = _directory_key(name, national_id, phone, date_of_birth)
+        async with self._directory_lock:
+            cached = self._directory_cache.get(key)
+            if cached is not None:
+                self._directory_cache.move_to_end(key)
+                return [record.model_copy(deep=True) for record in cached]
+            found = await self._fetch_directory(name, national_id, phone, date_of_birth)
+            self._directory_cache[key] = found
+            self._directory_cache.move_to_end(key)
+            while len(self._directory_cache) > _PATIENT_CACHE_SIZE:
+                self._directory_cache.popitem(last=False)
+            return [record.model_copy(deep=True) for record in found]
+
+    async def _fetch_directory(
+        self,
+        name: str | None,
+        national_id: str | None,
+        phone: str | None,
+        date_of_birth: date | None,
+    ) -> list[PatientRecord]:
         params = {
             "name": name,
             "national_id": national_id,
@@ -474,6 +537,35 @@ class ClinicClient:
         insurer: list[str] | None = None,
     ) -> AvailabilityResponse:
         check_availability_query(date_from, date_to, provider_id, specialty_id)
+        key = _availability_key(
+            date_from, date_to, provider_id, specialty_id, location_id, patient_id, insurer
+        )
+        async with self._availability_lock:
+            cached = self._availability_cache.get(key)
+            if cached is not None:
+                return cached.model_copy(deep=True)
+            answer = await self._fetch_availability(
+                date_from=date_from,
+                date_to=date_to,
+                provider_id=provider_id,
+                specialty_id=specialty_id,
+                location_id=location_id,
+                patient_id=patient_id,
+                insurer=insurer,
+            )
+            self._availability_cache[key] = answer
+            return answer.model_copy(deep=True)
+
+    async def _fetch_availability(
+        self,
+        date_from: date,
+        date_to: date,
+        provider_id: str | None,
+        specialty_id: str | None,
+        location_id: str | None,
+        patient_id: str | None,
+        insurer: list[str] | None,
+    ) -> AvailabilityResponse:
         params: dict[str, Any] = {
             "date_from": date_from.isoformat(),
             "date_to": date_to.isoformat(),
@@ -496,6 +588,36 @@ class ClinicClient:
             ),
         }
         return AvailabilityResponse.model_validate(adapted)
+
+    async def fresh_availability(self, **query: Any) -> AvailabilityResponse:
+        """Fetch availability outside the snapshot for a final safety check."""
+        check_availability_query(
+            query["date_from"],
+            query["date_to"],
+            query.get("provider_id"),
+            query.get("specialty_id"),
+        )
+        answer = await self._fetch_availability(
+            query["date_from"],
+            query["date_to"],
+            query.get("provider_id"),
+            query.get("specialty_id"),
+            query.get("location_id"),
+            query.get("patient_id"),
+            query.get("insurer"),
+        )
+        key = _availability_key(
+            query["date_from"], query["date_to"], query.get("provider_id"),
+            query.get("specialty_id"), query.get("location_id"), query.get("patient_id"),
+            query.get("insurer"),
+        )
+        async with self._availability_lock:
+            self._availability_cache[key] = answer
+        return answer.model_copy(deep=True)
+
+    def invalidate_availability(self) -> None:
+        """Drop availability derived before one of our writes was accepted."""
+        self._availability_cache.clear()
 
     async def appointments(
         self, patient_id: str, *, when: AppointmentWindow = "upcoming"
@@ -545,6 +667,8 @@ class FakeClinicClient:
 
     def __init__(self, *, data_dir: Path | None = None) -> None:
         self._catalogue = Catalogue.model_validate(_adapt_catalogue(fixtures.CLINIC))
+        self._availability_cache: dict[tuple[Any, ...], AvailabilityResponse] = {}
+        self._directory_cache: OrderedDict[tuple[Any, ...], list[PatientRecord]] = OrderedDict()
         if data_dir is None:
             patient_rows = list(fixtures.PATIENTS)
             appointment_rows = list(fixtures.APPOINTMENTS)
@@ -574,6 +698,25 @@ class FakeClinicClient:
         national_id: str | None = None,
         phone: str | None = None,
         date_of_birth: date | None = None,
+    ) -> list[PatientRecord]:
+        key = _directory_key(name, national_id, phone, date_of_birth)
+        cached = self._directory_cache.get(key)
+        if cached is not None:
+            self._directory_cache.move_to_end(key)
+            return [record.model_copy(deep=True) for record in cached]
+        found = await self._fetch_directory(name, national_id, phone, date_of_birth)
+        self._directory_cache[key] = found
+        self._directory_cache.move_to_end(key)
+        while len(self._directory_cache) > _PATIENT_CACHE_SIZE:
+            self._directory_cache.popitem(last=False)
+        return [record.model_copy(deep=True) for record in found]
+
+    async def _fetch_directory(
+        self,
+        name: str | None,
+        national_id: str | None,
+        phone: str | None,
+        date_of_birth: date | None,
     ) -> list[PatientRecord]:
         # NOT enforcing ``check_directory_query`` here is deliberate, and it is
         # the one place this client is more permissive than the platform: a
@@ -605,6 +748,36 @@ class FakeClinicClient:
         return found
 
     async def availability(
+        self,
+        *,
+        date_from: date,
+        date_to: date,
+        provider_id: str | None = None,
+        specialty_id: str | None = None,
+        location_id: str | None = None,
+        patient_id: str | None = None,
+        insurer: list[str] | None = None,
+    ) -> AvailabilityResponse:
+        check_availability_query(date_from, date_to, provider_id, specialty_id)
+        key = _availability_key(
+            date_from, date_to, provider_id, specialty_id, location_id, patient_id, insurer
+        )
+        cached = self._availability_cache.get(key)
+        if cached is not None:
+            return cached.model_copy(deep=True)
+        answer = await self._fetch_availability(
+            date_from=date_from,
+            date_to=date_to,
+            provider_id=provider_id,
+            specialty_id=specialty_id,
+            location_id=location_id,
+            patient_id=patient_id,
+            insurer=insurer,
+        )
+        self._availability_cache[key] = answer
+        return answer.model_copy(deep=True)
+
+    async def _fetch_availability(
         self,
         *,
         date_from: date,
@@ -703,6 +876,35 @@ class FakeClinicClient:
             blocked=blocked,
             appointment_type=appt_type,
         )
+
+    async def fresh_availability(self, **query: Any) -> AvailabilityResponse:
+        """Fetch availability outside the snapshot for a final safety check."""
+        check_availability_query(
+            query["date_from"],
+            query["date_to"],
+            query.get("provider_id"),
+            query.get("specialty_id"),
+        )
+        answer = await self._fetch_availability(
+            date_from=query["date_from"],
+            date_to=query["date_to"],
+            provider_id=query.get("provider_id"),
+            specialty_id=query.get("specialty_id"),
+            location_id=query.get("location_id"),
+            patient_id=query.get("patient_id"),
+            insurer=query.get("insurer"),
+        )
+        key = _availability_key(
+            query["date_from"], query["date_to"], query.get("provider_id"),
+            query.get("specialty_id"), query.get("location_id"), query.get("patient_id"),
+            query.get("insurer"),
+        )
+        self._availability_cache[key] = answer
+        return answer.model_copy(deep=True)
+
+    def invalidate_availability(self) -> None:
+        """Drop availability derived before one of our writes was accepted."""
+        self._availability_cache.clear()
 
     async def appointments(
         self, patient_id: str, *, when: AppointmentWindow = "upcoming"
