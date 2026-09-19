@@ -22,6 +22,7 @@ from vortex.contract import (
     BlockedProvider,
     BookAction,
     EligibilityVerdict,
+    ProviderMatch,
     Rejection,
     Slot,
     SubmitResult,
@@ -109,6 +110,23 @@ async def test_a_blocked_provider_is_the_verdict_too(offline_settings) -> None:
     assert submitter.sent[0][1]["reason"] == "provider_on_leave"
 
 
+async def test_every_tool_refusal_is_the_verdict(offline_settings) -> None:
+    """A typed Rejection from any tool, not only the rules' two, is what we submit."""
+    session, submitter = make_session(offline_settings, "CA-any-tool")
+    session.memory.observe(
+        "find_provider",
+        ProviderMatch(status="not_found", rejection=Rejection(reason="provider_not_found")),
+    )
+
+    await session.call_tool(
+        "submit_action", {"action": {"kind": "no-action", "reason": "out_of_scope"}}
+    )
+
+    assert submitter.sent[0][1]["reason"] == "provider_not_found"
+    (override,) = events(offline_settings, "CA-any-tool", "submit.reason_override")
+    assert override["model_reason"] == "out_of_scope"
+
+
 async def test_an_escalation_keeps_its_verb(offline_settings) -> None:
     """The reason is forced; the route the model chose is not touched."""
     session, submitter = make_session(offline_settings, "CA-escalate")
@@ -145,7 +163,7 @@ async def test_a_booking_is_never_rewritten(offline_settings) -> None:
 
 
 async def test_without_a_verdict_the_model_decides(offline_settings) -> None:
-    """A rejection that is not a rule - prose, a lookup miss - forces nothing."""
+    """No tool refused, so there is no reason to force and the model's stands."""
     session, submitter = make_session(offline_settings, "CA-no-verdict")
     session.memory.observe("triage", EligibilityVerdict(allowed=True))
 
