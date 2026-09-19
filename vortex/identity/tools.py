@@ -41,6 +41,7 @@ from typing import Any
 from vortex.contract import (
     Appointment,
     BuildRegistrationInput,
+    CallerLineMatch,
     Catalogue,
     FindPatientInput,
     FindPatientResult,
@@ -594,6 +595,54 @@ async def find_patient(ctx: ToolContext, args: FindPatientInput) -> FindPatientR
         )
         return FindPatientResult(status="not_found", candidates=_line_owner_first(ctx, near))
     return FindPatientResult(status="not_found")
+
+
+async def resolve_caller_line(ctx: ToolContext) -> CallerLineMatch:
+    """Who the dialling line belongs to, asked before the caller has spoken.
+
+    The scored runs lose calls to the clock, and the largest single block of it
+    is the opening exchange: the name, then a second identifier, one field per
+    turn, against a caller who hesitates. Twilio hands us the number on the
+    ``start`` message and ``/directory`` accepts a phone on its own, so that
+    exchange is answerable for free before the greeting is spoken.
+
+    One match is the line's owner. No match means the line is on no record,
+    which is the new-patient signal. Several means a shared line and names
+    nobody, though the records still go back so ``find_patient`` can order them.
+
+    Never raises: a call that cannot look its line up is a call that asks the
+    caller instead, exactly as before.
+    """
+    from_number = ctx.from_number or ""
+    if not from_number:
+        return CallerLineMatch()
+    try:
+        candidates = await _lookup(
+            ctx, name=None, national_id=None, phone=from_number, date_of_birth=None
+        )
+    except Exception as exc:
+        ctx.log.event("identity.caller_line_failed", detail=f"{type(exc).__name__}: {exc}")
+        return CallerLineMatch()
+
+    match = CallerLineMatch(
+        looked_up=True,
+        from_number=from_number,
+        patient=candidates[0] if len(candidates) == 1 else None,
+        candidates=candidates,
+    )
+    if match.patient is not None:
+        # The same bookkeeping ``find_patient`` does for a single match, so a
+        # later third-party booking still knows who was on the line, and the
+        # visit history is mined while the greeting plays.
+        entry = {"patient_id": match.patient.patient_id, "matched_on": ["from_number"]}
+        ctx.state.setdefault(CALLER_IDENTITY_KEY, entry)
+        _start_postprocess(ctx, match.patient)
+    ctx.log.event(
+        "identity.caller_line",
+        matches=len(candidates),
+        patient_id=match.patient.patient_id if match.patient else "",
+    )
+    return match
 
 
 def note_target_patient(ctx: ToolContext, target_patient_id: str) -> None:

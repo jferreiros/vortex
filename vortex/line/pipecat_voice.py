@@ -243,7 +243,13 @@ async def run_pipecat_call(
         )
         llm.register_function(fn["name"], make_handler(fn["name"]))
 
-    context = LLMContext(initial_messages(ctx.now), tools=ToolsSchema(standard_tools=schemas))
+    # Before the greeting: the caller id is an exact directory query, so the
+    # prompt can open knowing who the line belongs to instead of spending the
+    # first minute of the call asking.
+    caller = await session.resolve_caller_line()
+    context = LLMContext(
+        initial_messages(ctx.now, caller=caller), tools=ToolsSchema(standard_tools=schemas)
+    )
     aggregators = LLMContextAggregatorPair(context, user_params=_user_aggregator_params(turns))
 
     # Ends the call from our side once the platform holds an action and the

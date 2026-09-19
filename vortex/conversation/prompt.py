@@ -15,6 +15,13 @@ scorer or the jury can see. ``TOOL_GUIDE`` is part of that budget and says
 only what a tool's own JSON schema cannot: which field of the answer the next
 step depends on.
 
+The one thing outside that budget is the CALLER block (``caller_note_for``),
+built per call from the caller-id lookup. It costs 130-160 tokens a turn and
+is the only part of the prompt that is not the same for everyone, because it
+replaces something far more expensive: the two-to-six turns the call used to
+spend establishing who is on the line. ``tests/test_caller_id_prefetch.py``
+owns its ceiling.
+
 What it must achieve, and why each rule is there:
 
 - A submission on every call, inside three minutes. A call with no accepted
@@ -52,7 +59,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from vortex.contract import MADRID
+from vortex.contract import MADRID, CallerLineMatch
 from vortex.conversation.language import DEFAULT_LANGUAGE, language_name, normalise_language
 
 CLINIC_NAME = "Clínica Arenal"
@@ -140,10 +147,10 @@ find_slots. Copy them exactly.
 8. Never default GP: specialty from triage or named doctor; no slot before \
 check_eligibility allows it.
 
-FLOW.
-1. Identify: ask the name and one more identifier (birth date, phone or DNI), then \
-find_patient. Ambiguous: ask only the field in ask_for. Not found: ask them to repeat \
-it, try again; still nothing is a new patient - go to 7.
+{caller_note}FLOW.
+1. Identify: find_patient on what they first say about themselves; a name alone is \
+enough. Never wait for a second identifier. Ambiguous: ask only the field in ask_for. \
+Not found: ask again, then treat as a new patient - go to 7.
 2. Read the chart first: note, has_visited_before, insurer, referrals. Greet \
 them by name, follow the note, list_appointments for what they have. Never \
 ask a returning patient whether they have been here before.
@@ -187,11 +194,57 @@ its answer, never memory. The caller books on what you say.
 """
 
 
-def build_system_prompt(now: datetime, *, language: str | None = None) -> str:
+def caller_note_for(match: CallerLineMatch | None) -> str:
+    """The CALLER block: who the dialling line belongs to, before a word is said.
+
+    Empty when the line was never looked up, so a call with no caller id reads
+    exactly the prompt it read before. The record's national id and birth date
+    are deliberately left out: nothing in the flow needs them off this note, and
+    the fewer protected fields in front of the model the less there is to say
+    aloud by accident.
+    """
+    if match is None or not match.looked_up:
+        return ""
+    patient = match.patient
+    if patient is None and match.candidates:
+        # A shared line: several records, so it names nobody and claims nothing.
+        # Saying "not registered" here would be a lie about a patient we hold.
+        return ""
+    if patient is None:
+        return (
+            "CALLER. This line is on no patient record, so they are a new patient unless "
+            f"they give a name find_patient matches. Their phone is {match.from_number} - "
+            "it is known, so never ask for it and never say it aloud. If they want an "
+            "appointment, register them first (7).\n\n"
+        )
+    chart = [f"visited_before={str(patient.has_visited_before).lower()}"]
+    if patient.insurer:
+        chart.append(f"insurer={patient.insurer}")
+    if patient.referrals:
+        chart.append(f"referrals={', '.join(patient.referrals)}")
+    if patient.note:
+        chart.append(f"note={patient.note}")
+    return (
+        f"CALLER. This line belongs to {patient.full_name}, patient_id "
+        f"{patient.patient_id} ({'; '.join(chart)}). That is who is calling unless they "
+        "say otherwise: ask no identity questions, greet them by name and ask what they "
+        "need. Calling for someone else: find_patient that person by name and birth "
+        "date, and book their id.\n\n"
+    )
+
+
+def build_system_prompt(
+    now: datetime,
+    *,
+    language: str | None = None,
+    caller: CallerLineMatch | None = None,
+) -> str:
     """The system prompt for one call, with the clock rendered in.
 
     ``language`` is the language the caller opened in when it is already
     known (a repeat caller, a language header); the default is English.
+    ``caller`` is the caller-id lookup, when the line lane got one back in
+    time; it saves the call the whole identify exchange.
     """
     local = now.astimezone(MADRID)
     return SYSTEM_PROMPT_TEMPLATE.format(
@@ -200,13 +253,21 @@ def build_system_prompt(now: datetime, *, language: str | None = None) -> str:
         tomorrow=(local + timedelta(days=1)).strftime("%A %d %B %Y"),
         language=language_name(language or DEFAULT_LANGUAGE),
         sites_brief=SITES_BRIEF,
+        caller_note=caller_note_for(caller),
         tool_guide=TOOL_GUIDE,
     )
 
 
-def initial_messages(now: datetime, *, language: str | None = None) -> list[dict[str, str]]:
+def initial_messages(
+    now: datetime,
+    *,
+    language: str | None = None,
+    caller: CallerLineMatch | None = None,
+) -> list[dict[str, str]]:
     """The context the LLM starts with. The first assistant turn is the greeting."""
-    return [{"role": "system", "content": build_system_prompt(now, language=language)}]
+    return [
+        {"role": "system", "content": build_system_prompt(now, language=language, caller=caller)}
+    ]
 
 
 # ---------------------------------------------------------------------------
