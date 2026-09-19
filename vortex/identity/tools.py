@@ -544,6 +544,19 @@ async def find_patient(ctx: ToolContext, args: FindPatientInput) -> FindPatientR
 
     if len(candidates) == 1:
         patient = candidates[0]
+        have = len(given) or (1 if phone else 0)
+        try:
+            from vortex.clinic_policy import identification_fields_required
+
+            need = identification_fields_required()
+        except Exception:
+            need = 1
+        if have < need:
+            return FindPatientResult(
+                status="ambiguous",
+                candidates=[patient],
+                ask_for=_splitting_field(args, [patient]),
+            )
         entry = {
             "patient_id": patient.patient_id,
             "matched_on": given or ["from_number"],

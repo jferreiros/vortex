@@ -1,5 +1,5 @@
-// Shared demo feed until GET /api/wall/live-calls exists.
-// Home and Live Calls read this so inbound/outbound stay in sync.
+// First-paint demo feed. useLiveCalls() swaps this out for GET
+// /api/wall/live-calls as soon as the board answers.
 
 export const PLACEHOLDER_CALLS = [
   {

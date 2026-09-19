@@ -1,12 +1,12 @@
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import SectionHeader from "../../../components/ui/SectionHeader";
 import Card from "../../../components/ui/Card";
 import Button from "../../../components/ui/Button";
 import patientTimelines from "../../../data/patientTimelines.json";
 import patternsData from "../../../data/patterns.json";
 import shapeTypesData from "../../../data/shapeTypes.json";
 import { findMatchingPattern } from "../patterns/matchPattern";
+import "../live-calls/live-call-detail.css";
 import "./patient-timeline.css";
 
 // Not linked from anywhere yet — reachable directly at
@@ -50,11 +50,9 @@ function ShapeGlyphs({ family, type, subfamily }) {
   );
 }
 
-// Rejecting a suggestion is permanent for that patient — persisted so it
-// never comes back for them. TODO: this is a localStorage stand-in; once a
-// real database exists, record the rejection there instead (keyed by
-// patient_id + pattern id), the same way pathways/patterns/shapeTypes are
-// noted as JSON-only stand-ins elsewhere (see ISSUES.md).
+// Rejecting a suggestion is permanent for that patient — the wall API
+// stores it keyed by patient_id + pattern id. localStorage is a same-tab
+// cache for a board that cannot reach the API.
 const REJECTED_KEY = "vortex.rejectedSuggestions.v1";
 
 function loadRejectedMap() {
@@ -87,9 +85,9 @@ function formatDate(iso) {
 // (besides the suggestion at its end). `isEvidence` marks it as one of the
 // events the detected pattern actually matched on, drawing a highlight box
 // around it so the pattern is tied to the concrete facts that triggered it.
-function EventNode({ event, isEvidence }) {
+function EventNode({ event, isEvidence, gridColumn }) {
   return (
-    <div className={`pt-node ${isEvidence ? "pt-node-evidence" : ""}`}>
+    <div className={`pt-node ${isEvidence ? "pt-node-evidence" : ""}`} style={{ gridColumn }}>
       <span className="pt-node-caption above">{event.description}</span>
       <span className="pt-shape">
         <ShapeGlyphs family={event.shape.family} type={event.shape.type} subfamily={event.shape.subfamily} />
@@ -103,10 +101,10 @@ function EventNode({ event, isEvidence }) {
 // alone). Rejecting doesn't show a "dismissed" state here — the whole node
 // disappears immediately (see handleReject) — so the only status this ever
 // renders is "accepted".
-function SuggestionNode({ pattern, onAccept, onReject, status }) {
+function SuggestionNode({ pattern, onAccept, onReject, status, gridColumn }) {
   const { shape, description } = pattern.suggestionNode;
   return (
-    <div className={`pt-node pt-suggestion ${status ? `pt-suggestion-${status}` : ""}`}>
+    <div className={`pt-node pt-suggestion ${status ? `pt-suggestion-${status}` : ""}`} style={{ gridColumn }}>
       <span className="pt-node-caption above">{description}</span>
       <div className="pt-shape-wrap">
         <span className="pt-shape">
@@ -137,17 +135,18 @@ function SuggestionNode({ pattern, onAccept, onReject, status }) {
 // underneath, in quotes, naming the shape just drawn. No arrow here — that
 // only lives once, in the top row, pointing at the suggestion this box sits
 // under.
-function PatternDetectedBox({ pattern }) {
-  const count = pattern.nodes.length;
+function PatternDetectedBox({ pattern, gridColumn }) {
   return (
-    <div className="pt-explain">
+    <div className="pt-explain" style={{ gridColumn }}>
       <span className="pt-explain-label">Pattern detected</span>
       <div className="pt-pattern-box">
         <div className="pt-pattern-abstract-row">
-          {Array.from({ length: count }).map((_, i) => (
-            <Fragment key={i}>
+          {pattern.nodes.map((node, i) => (
+            <Fragment key={node.id}>
               {i > 0 && <span className="pt-pattern-plus">+</span>}
-              <span className="pt-pattern-abstract-node" />
+              <span className="pt-pattern-abstract-node" title={node.shape.type}>
+                <ShapeGlyphs family={node.shape.family} type={node.shape.type} subfamily={node.shape.subfamily} />
+              </span>
             </Fragment>
           ))}
         </div>
@@ -159,9 +158,15 @@ function PatternDetectedBox({ pattern }) {
 
 // Longer than a plain arrow glyph, and reused as the only arrow on the page —
 // the pattern box below the suggestion doesn't get its own.
-function TimelineArrow() {
+function TimelineArrow({ gridColumn }) {
   return (
-    <svg className="pt-timeline-arrow" viewBox="0 0 100 10" preserveAspectRatio="none" aria-hidden="true">
+    <svg
+      className="pt-timeline-arrow"
+      viewBox="0 0 100 10"
+      preserveAspectRatio="none"
+      aria-hidden="true"
+      style={{ gridColumn }}
+    >
       <line x1="0" y1="5" x2="90" y2="5" />
       <path d="M84 1 L94 5 L84 9" fill="none" />
     </svg>
@@ -171,26 +176,65 @@ function TimelineArrow() {
 export default function PatientTimeline() {
   const { patientId } = useParams();
   const navigate = useNavigate();
-  const patient = patientTimelines.patients.find((p) => p.patientId === patientId) || patientTimelines.patients[0];
+  const fallback = patientTimelines.patients.find((p) => p.patientId === patientId) || {
+    patientId,
+    name: patientId,
+    events: [],
+    referrals: [],
+  };
 
-  // The specialty this history is being read for is always the one the call
-  // that opened it was about — never a user-picked filter. There's no
-  // per-call specialty on the caller side yet, so it's read off this
-  // patient's own most recent specialty-bearing event, which is the closest
-  // stand-in for "the specialty of the call" until real call context is
-  // threaded through. Events with no specialty at all (general calls,
-  // messages or visits) always stay in view alongside it.
+  const [patient, setPatient] = useState(fallback);
+  const [patternsDoc, setPatternsDoc] = useState(patternsData);
+  const [suggestionStatus, setSuggestionStatus] = useState(null);
+  const [rejectedMap, setRejectedMap] = useState(loadRejectedMap);
+
+  useEffect(() => {
+    const nextFallback = patientTimelines.patients.find((p) => p.patientId === patientId) || {
+      patientId,
+      name: patientId,
+      events: [],
+      referrals: [],
+    };
+    setPatient(nextFallback);
+    setSuggestionStatus(null);
+    let cancelled = false;
+    fetch(`/api/wall/patient-timeline/${encodeURIComponent(patientId)}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((json) => {
+        if (cancelled || !json) return;
+        setPatient({
+          patientId: json.patientId || patientId,
+          name: json.name || nextFallback.name,
+          events: Array.isArray(json.events) ? json.events : [],
+          referrals: [],
+        });
+        if (Array.isArray(json.rejectedPatternIds)) {
+          setRejectedMap((prev) => ({ ...prev, [patientId]: json.rejectedPatternIds }));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setPatient(nextFallback);
+      });
+    fetch("/api/wall/patterns")
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((json) => {
+        if (!cancelled && Array.isArray(json?.patterns)) setPatternsDoc({ ...patternsData, ...json });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [patientId]);
+
   const specialty = useMemo(() => {
-    for (let i = patient.events.length - 1; i >= 0; i -= 1) {
-      if (patient.events[i].specialty) return patient.events[i].specialty;
+    const list = patient.events || [];
+    for (let i = list.length - 1; i >= 0; i -= 1) {
+      if (list[i].specialty) return list[i].specialty;
     }
     return null;
   }, [patient]);
 
   const specialtyLabel = specialty ? specialty.charAt(0).toUpperCase() + specialty.slice(1) : null;
-
-  const [suggestionStatus, setSuggestionStatus] = useState(null);
-  const [rejectedMap, setRejectedMap] = useState(loadRejectedMap);
 
   const events = useMemo(
     () => patient.events.filter((e) => !e.specialty || e.specialty === specialty),
@@ -204,12 +248,12 @@ export default function PatientTimeline() {
       findMatchingPattern({
         events: patient.events,
         referrals: patient.referrals || [],
-        patterns: patternsData.patterns,
+        patterns: patternsDoc.patterns || [],
         specialty,
-        asOf: patternsData.asOf,
-        specialtyRecallDays: patternsData.specialtyRecallDays,
+        asOf: patternsDoc.asOf,
+        specialtyRecallDays: patternsDoc.specialtyRecallDays,
       }),
-    [patient, specialty]
+    [patient, specialty, patternsDoc]
   );
 
   // A pattern this patient already rejected never comes back for them.
@@ -217,12 +261,18 @@ export default function PatientTimeline() {
   const match = rawMatch && rejectedIds.includes(rawMatch.pattern.id) ? null : rawMatch;
 
   const handleReject = () => {
-    if (!match) return;
+    if (!match || patient.patientId !== patientId) return;
+    const patternId = match.pattern.id;
     setRejectedMap((prev) => {
-      const next = { ...prev, [patient.patientId]: [...(prev[patient.patientId] || []), match.pattern.id] };
+      const next = { ...prev, [patient.patientId]: [...(prev[patient.patientId] || []), patternId] };
       saveRejectedMap(next);
       return next;
     });
+    fetch(`/api/wall/patient-timeline/${encodeURIComponent(patient.patientId)}/reject`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ patternId }),
+    }).catch(() => {});
   };
 
   // Suggestion copy is generic ("<specialty>") — fill in the real specialty
@@ -240,54 +290,79 @@ export default function PatientTimeline() {
 
   const evidenceIds = new Set(match ? match.evidenceEventIds : []);
 
+  // The "why" box sits centered under the evidence event(s) it explains —
+  // spanning from the first to the last evidence column when a pattern
+  // touched more than one real event — never under the suggestion. A
+  // pattern with no real-event evidence (condition-only rules, e.g. an
+  // unfulfilled referral) has nothing to point at, so it falls back to the
+  // suggestion's own column.
+  const evidenceColumns = events.reduce((acc, event, i) => {
+    if (evidenceIds.has(event.id)) acc.push(i + 1);
+    return acc;
+  }, []);
+  const explainGridColumn = evidenceColumns.length
+    ? `${evidenceColumns[0]} / ${evidenceColumns[evidenceColumns.length - 1] + 1}`
+    : `${events.length + 2}`;
+
   return (
-    <div className="pt-page">
-      <SectionHeader
-        eyebrow="Patient history"
-        title={specialtyLabel ? `${patient.name} - ${specialtyLabel}` : patient.name}
-        subtitle="Calls, messages and visits, sorted by time."
-      />
+    <div className="transcript-page">
+      {/* Same shell as the Live Call detail page (transcript-card, tx-head,
+          tx-close) — this opens over whatever page linked here the same
+          way a call opens from Home, and the × returns there via
+          navigate(-1) rather than a hardcoded destination. */}
+      <Card padding="sm" className="transcript-card">
+        <header className="tx-head">
+          <div className="tx-head-left">
+            <div className="tx-head-copy">
+              <h1>{specialtyLabel ? `${patient.name} - ${specialtyLabel}` : patient.name}</h1>
+              <p>Calls, messages and visits, sorted by time.</p>
+            </div>
+          </div>
+          <div className="tx-head-actions">
+            <Button
+              variant="secondary"
+              onClick={() => navigate("/clinic/patterns", { state: { patternId: match?.pattern.id } })}
+            >
+              Manage suggestions
+            </Button>
+            <button type="button" className="tx-close" aria-label="Close" onClick={() => navigate(-1)}>
+              ×
+            </button>
+          </div>
+        </header>
 
-      {/* Always filtered to this call's own specialty (plus any general,
-          specialty-less events) — never a user-picked filter, so no
-          selector here. */}
-      <div className="pt-main">
-        <div className="pt-main-toolbar">
-          <Button
-            variant="secondary"
-            onClick={() => navigate("/clinic/patterns", { state: { patternId: match?.pattern.id } })}
-          >
-            Manage suggestions
-          </Button>
-        </div>
-
-        {/* The whole main pane is one white card, its content centered
-            vertically as a block. The top row itself is centered as a
-            whole; when a pattern matched, the "why" box sits in the same
-            column as the suggestion node, right below it, so it reads as
-            centered under that dashed shape rather than under the row. */}
-        <Card padding="lg" className="pt-main-card">
+        {/* Always filtered to this call's own specialty (plus any general,
+            specialty-less events) — never a user-picked filter, so no
+            selector here. */}
+        <div className="pt-body">
+          {/* A CSS grid (not flex), centered as a block, so the "why" box
+              below can be placed by column index, centered under the
+              evidence node(s) it explains instead of under the suggestion. */}
           <div className="pt-timeline-track">
-            {events.map((event) => (
-              <EventNode key={event.id} event={event} isEvidence={evidenceIds.has(event.id)} />
+            {events.map((event, i) => (
+              <EventNode
+                key={event.id}
+                event={event}
+                isEvidence={evidenceIds.has(event.id)}
+                gridColumn={i + 1}
+              />
             ))}
             {matchedPattern && (
               <Fragment>
-                <TimelineArrow />
-                <div className="pt-suggestion-column">
-                  <SuggestionNode
-                    pattern={matchedPattern}
-                    status={suggestionStatus}
-                    onAccept={() => setSuggestionStatus("accepted")}
-                    onReject={handleReject}
-                  />
-                  <PatternDetectedBox pattern={matchedPattern} />
-                </div>
+                <TimelineArrow gridColumn={events.length + 1} />
+                <SuggestionNode
+                  pattern={matchedPattern}
+                  status={suggestionStatus}
+                  onAccept={() => setSuggestionStatus("accepted")}
+                  onReject={handleReject}
+                  gridColumn={events.length + 2}
+                />
+                <PatternDetectedBox pattern={matchedPattern} gridColumn={explainGridColumn} />
               </Fragment>
             )}
           </div>
-        </Card>
-      </div>
+        </div>
+      </Card>
     </div>
   );
 }

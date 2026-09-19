@@ -8,6 +8,12 @@
   gap: var(--space-5);
 }
 
+.live-calls-empty {
+  margin: var(--space-6) 0;
+  color: var(--color-mute);
+  font-size: var(--text-sm);
+}
+
 /* Active call card ----------------------------------------------------------*/
 
 .live-call-card {

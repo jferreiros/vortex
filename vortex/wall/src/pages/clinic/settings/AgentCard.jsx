@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import Card from "../../../components/ui/Card";
+import Pills from "../../../components/ui/Pills";
 import "./settings.css";
 
 const VOICE_DEFAULTS = { tone: 50, friendliness: 50, speechRate: 50, voice: "female" };
@@ -10,54 +11,13 @@ const RATES = [
   { value: 100, label: "Rápido", sample: "¿Mañana a las diez o el jueves a las doce?" },
 ];
 
-const PERMISSIONS = [
-  { key: "canBook", label: "Reservar citas" },
-  { key: "canReschedule", label: "Reprogramar" },
-  { key: "canCancel", label: "Cancelar" },
-  { key: "canRegister", label: "Registrar paciente" },
-  { key: "canInfo", label: "Información" },
-  { key: "canEscalate", label: "Escalar urgencias" },
-];
-
-const PERM_DEFAULTS = Object.fromEntries(PERMISSIONS.map((p) => [p.key, true]));
-const PERM_KEY = "vortex.clinic.permissions";
-
 const VOICE_SAMPLE = {
   female: "Buenos días, Clínica Arenal, le atiende Lucía. ¿En qué puedo ayudarle?",
   male: "Buenos días, Clínica Arenal, le atiende Mateo. ¿En qué puedo ayudarle?",
 };
 
-function loadPerms() {
-  try {
-    const raw = JSON.parse(localStorage.getItem(PERM_KEY) || "null");
-    if (raw && typeof raw === "object") return { ...PERM_DEFAULTS, ...raw };
-  } catch {
-    /* keep defaults */
-  }
-  return { ...PERM_DEFAULTS };
-}
-
 function nearestRate(n) {
   return RATES.reduce((best, opt) => (Math.abs(opt.value - n) < Math.abs(best - n) ? opt.value : best), RATES[0].value);
-}
-
-function Pills({ name, value, options, onChange }) {
-  return (
-    <div className="agent-pills" role="radiogroup" aria-label={name}>
-      {options.map((opt) => (
-        <button
-          key={String(opt.value)}
-          type="button"
-          role="radio"
-          aria-checked={value === opt.value}
-          className={value === opt.value ? "on" : ""}
-          onClick={() => onChange(opt.value)}
-        >
-          {opt.label}
-        </button>
-      ))}
-    </div>
-  );
 }
 
 export default function AgentCard() {
@@ -65,7 +25,6 @@ export default function AgentCard() {
   const [saved, setSaved] = useState(VOICE_DEFAULTS);
   const [isTrying, setIsTrying] = useState(false);
   const [toast, setToast] = useState(null);
-  const [perms, setPerms] = useState(loadPerms);
   const audioRef = useRef(null);
   const saveTimer = useRef(null);
 
@@ -129,14 +88,6 @@ export default function AgentCard() {
     setIsTrying(false);
   };
 
-  const setPerm = (key, allowed) => {
-    setPerms((prev) => {
-      const next = { ...prev, [key]: allowed };
-      localStorage.setItem(PERM_KEY, JSON.stringify(next));
-      return next;
-    });
-  };
-
   const rate = nearestRate(cfg.speechRate);
   const rateSample = RATES.find((opt) => opt.value === rate)?.sample;
 
@@ -173,26 +124,6 @@ export default function AgentCard() {
           onChange={(value) => setField("speechRate", value)}
         />
         <p className="agent-sample">{rateSample}</p>
-      </section>
-
-      <section className="agent-block">
-        <h3>Qué puede hacer</h3>
-        <div className="agent-perm-grid">
-          {PERMISSIONS.map((p) => (
-            <div className="agent-perm-item" key={p.key}>
-              <span>{p.label}</span>
-              <Pills
-                name={p.label}
-                value={perms[p.key]}
-                options={[
-                  { value: false, label: "No" },
-                  { value: true, label: "Sí" },
-                ]}
-                onChange={(value) => setPerm(p.key, value)}
-              />
-            </div>
-          ))}
-        </div>
       </section>
     </Card>
   );

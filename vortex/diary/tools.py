@@ -100,6 +100,18 @@ _MAX_DIRECTORY_SCAN = 25
 #: A status that means the visit is over or already gone. Anything else is live.
 _DEAD_STATUSES = frozenset({"cancelled", "canceled", "completed", "no_show", "noshow", "attended"})
 
+
+def _lead_day(now: datetime) -> date:
+    """First calendar day a slot may land on — tomorrow, or later if the
+    wall's lead-hours setting asks for more than one day."""
+    try:
+        from vortex.clinic_policy import earliest_bookable_date
+
+        return earliest_bookable_date(now)
+    except Exception:
+        return now.astimezone(MADRID).date() + timedelta(days=1)
+
+
 _WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 _MONTHS = (
     "january", "february", "march", "april", "may", "june",
@@ -444,7 +456,7 @@ async def resolve_date(ctx: ToolContext, args: ResolveDateInput) -> ResolvedWind
     """
     catalogue = await ctx.clinic.catalogue()
     today = ctx.now.astimezone(MADRID).date()
-    tomorrow = today + timedelta(days=1)
+    tomorrow = _lead_day(ctx.now)
 
     text, part_from_phrase = _split_part_of_day(_canonical(args.phrase))
     part_of_day = args.part_of_day or part_from_phrase
@@ -600,11 +612,11 @@ async def _fetch(
 
 
 def _bookable(
-    catalogue: Catalogue, slots: list[Slot], args: FindSlotsInput, today: date
+    catalogue: Catalogue, slots: list[Slot], args: FindSlotsInput, earliest: date
 ) -> list[Slot]:
-    """Drop what can never be offered: the call's own day, and a provider who
-    does not speak the language the caller asked for."""
-    kept = [s for s in slots if s.start.astimezone(MADRID).date() > today]
+    """Drop what can never be offered: a day before the lead-time floor, and a
+    provider who does not speak the language the caller asked for."""
+    kept = [s for s in slots if s.start.astimezone(MADRID).date() >= earliest]
     if args.language:
         speaks = {p.provider_id for p in catalogue.providers if args.language in p.languages}
         kept = [s for s in kept if s.provider_id in speaks]
@@ -660,7 +672,7 @@ async def _nearest(
     same_days: list[Slot],
     date_from: date,
     date_to: date,
-    today: date,
+    earliest: date,
 ) -> list[Slot]:
     """The closest free slots outside an empty window (problem 7).
 
@@ -678,7 +690,7 @@ async def _nearest(
     answer standing.
     """
     candidates = list(same_days)
-    low = max(date_from - timedelta(days=_NEAREST_REACH_DAYS), today + timedelta(days=1))
+    low = max(date_from - timedelta(days=_NEAREST_REACH_DAYS), earliest)
     if catalogue.bookable_from:
         low = max(low, catalogue.bookable_from)
     high = date_to + timedelta(days=_NEAREST_REACH_DAYS)
@@ -693,7 +705,7 @@ async def _nearest(
         fetched = await _fetch(ctx, args, span_from, span_to)
         if isinstance(fetched, Rejection):
             continue
-        candidates.extend(_bookable(catalogue, fetched[0], args, today))
+        candidates.extend(_bookable(catalogue, fetched[0], args, earliest))
 
     # Rank the (day, part of day) buckets by the slot in each closest to the
     # window; offer each bucket's earliest slot, the platform's own convention.
@@ -752,9 +764,9 @@ async def find_slots(ctx: ToolContext, args: FindSlotsInput) -> AvailabilityResu
     up — so the caller can be offered the nearest thing that works.
     """
     catalogue = await ctx.clinic.catalogue()
-    today = ctx.now.astimezone(MADRID).date()
+    earliest = _lead_day(ctx.now)
 
-    date_from = max(args.date_from, today + timedelta(days=1))
+    date_from = max(args.date_from, earliest)
     date_to = args.date_to
     if catalogue.bookable_from:
         date_from = max(date_from, catalogue.bookable_from)
@@ -788,7 +800,7 @@ async def find_slots(ctx: ToolContext, args: FindSlotsInput) -> AvailabilityResu
                 blocked.setdefault(provider_id, entry)
             appointment_type = appointment_type or probe[2]
 
-    same_days = _bookable(catalogue, raw, args, today)
+    same_days = _bookable(catalogue, raw, args, earliest)
     slots = _within_hours(same_days, args.time_from, args.time_to)
     slots.sort(key=lambda s: (s.start, s.provider_id, s.location_id))
 
@@ -800,7 +812,7 @@ async def find_slots(ctx: ToolContext, args: FindSlotsInput) -> AvailabilityResu
     nearest: list[Slot] = []
     rejection = None
     if not slots and not kept:
-        nearest = await _nearest(ctx, catalogue, args, same_days, date_from, date_to, today)
+        nearest = await _nearest(ctx, catalogue, args, same_days, date_from, date_to, earliest)
         detail = (
             f"every site in {sorted(sites)} is closed {date_from}..{date_to}"
             if not window_opens
@@ -988,11 +1000,15 @@ def _slot_rejection(
 ) -> Rejection | None:
     """The calendar checks every booked or moved slot has to survive."""
     today = ctx.now.astimezone(MADRID).date()
+    earliest = _lead_day(ctx.now)
     day = slot_start.astimezone(MADRID).date()
-    if day <= today:
+    if day < earliest:
         return Rejection(
             reason="no_availability",
-            detail=f"same-day booking: slot {day} is not after the call day {today}",
+            detail=(
+                f"lead-time: slot {day} is before the first bookable day {earliest} "
+                f"(call day {today})"
+            ),
         )
     if catalogue.bookable_from and day < catalogue.bookable_from:
         return Rejection(

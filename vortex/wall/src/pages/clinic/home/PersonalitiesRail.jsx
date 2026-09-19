@@ -124,9 +124,9 @@ export default function PersonalitiesRail() {
   return (
     <section className="persona-block">
       <SectionHeader
-        eyebrow="IA"
+        eyebrow="Personalizar agente"
         title="Quién atiende el teléfono"
-        subtitle="Elige una cara y cómo habla. Debajo, voz, ritmo y permisos."
+        subtitle="Elige una cara y cómo habla. Debajo, voz y ritmo."
       />
 
       {offline && (
