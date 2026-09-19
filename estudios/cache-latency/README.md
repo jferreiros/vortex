@@ -134,6 +134,13 @@ Lose / risks, with the mitigation this study supports:
   route and real production payload sizes. `PLATFORM_API_KEY=... --live`
   fills both in; every `estimated live today` cell above is the place those
   numbers land.
+- Every clinic-side identifier a recipe needs (slot, `patient_id`,
+  `appointment_id`, specialty, location, provider, insurance plan) is resolved
+  against the client the scenario runs against, so `--live` times production
+  ids. `/directory` only answers an exact field, so a live run can only reuse a
+  fixture patient production also knows: when it knows none, the recipes that
+  need a patient or an appointment are reported as `SKIPPED` rather than timed
+  on an id the platform would reject.
 - Fixture scale is 15 patients; the 3,000-patient storage numbers use
   synthetic rows of the real shape and are labeled synthetic in
   `results.json`.
