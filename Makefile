@@ -1,4 +1,4 @@
-.PHONY: install run smoke test call replay try-api tunnel tail lint fmt board design-sync didactica rehearse evals evals-logic evals-conversation evals-voice evals-replay evals-report evals-accept evals-selftest evals-discord logs-discord langfuse-check
+.PHONY: install run smoke test call replay try-api tunnel tail lint fmt board design-sync didactica rehearse confirmations evals evals-logic evals-conversation evals-voice evals-replay evals-report evals-accept evals-selftest evals-discord logs-discord langfuse-check
 
 PORT ?= 7860
 BOARD_PORT ?= 8080
@@ -40,6 +40,9 @@ tail:
 rehearse:         ## text rehearsal of the prompt against the real LLM: ONLY=p1|p4|p6, ARGS=--verbose
 	VORTEX_CLINIC_MODE=fake uv run python scripts/rehearse_text.py \
 	  $(if $(ONLY),--only $(ONLY),) $(ARGS)
+
+confirmations:    ## run the day-before confirmation job once (simulated calls); ARGS="--for 2026-09-25"
+	uv run python database/scripts/run_confirmations.py $(ARGS)
 
 lint:
 	uv run ruff check .

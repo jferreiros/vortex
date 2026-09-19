@@ -554,6 +554,115 @@ def test_doctor_agenda_spans_appointment_type_duration() -> None:
     assert payload["visits"][0]["duration_minutes"] == 30
 
 
+def test_assign_provider_fills_a_blank_doctor() -> None:
+    blank = cal.Booking(
+        provider_id="",
+        location_id="centro",
+        start=datetime(2026, 10, 5, 9, 0, tzinfo=MADRID),
+        patient_id="P00007",
+        appointment_type_id="review",
+    )
+    filled = cal.assign_provider(_catalogue(), blank)
+    assert filled.provider_id == "PR01"
+    named = cal.assign_provider(_catalogue(), _appt("A1", 9, 0))
+    assert named.provider_id == "PR01"
+
+
+def test_clinic_agenda_opens_without_a_doctor() -> None:
+    events = [_book_event(9, 0, patient="P00007")]
+    calendars = [_only_calendar(events)]
+    patients = cal.patient_index(
+        [{"patient_id": "P00007", "given_name": "Marta", "first_surname": "Ruiz"}]
+    )
+    payload = cal.clinic_agenda(calendars, patients, today=_START, week=_START)
+    assert payload["ok"] is True
+    assert payload["doctor"]["name"] == "Toda la clínica"
+    fifth = next(cell for week in payload["weeks"] for cell in week if cell["date"] == "2026-10-05")
+    assert fifth["visits"][0]["full_name"] == "Marta Ruiz"
+    assert fifth["visits"][0]["provider_name"] == "Dra. Uno"
+
+
+def test_clinic_agenda_filters_by_specialty() -> None:
+    gp = ProviderRecord(
+        provider_id="PR01",
+        name="Dra. Uno",
+        specialty_id="general",
+        specialty_name="General practice",
+        location_ids=["centro"],
+        schedules=[
+            ProviderSchedule(
+                location_id="centro",
+                hours=[OpeningHours(weekday=_MONDAY, opens=time(9, 0), closes=time(10, 0))],
+            )
+        ],
+    )
+    derm = ProviderRecord(
+        provider_id="PR02",
+        name="Dr. Dos",
+        specialty_id="dermatology",
+        specialty_name="Dermatology",
+        location_ids=["centro"],
+        schedules=[
+            ProviderSchedule(
+                location_id="centro",
+                hours=[OpeningHours(weekday=_MONDAY, opens=time(9, 0), closes=time(10, 0))],
+            )
+        ],
+    )
+    catalogue = Catalogue(
+        providers=[gp, derm],
+        bookable_from=_START,
+        bookable_to=date(2026, 10, 31),
+        closure_days=[_FIESTA],
+        slot_minutes=15,
+    )
+    events = [
+        _book_event(9, 0, patient="P00007"),
+        {
+            "kind": "submit.result",
+            "call_id": "roster:y",
+            "payload": {
+                "action": "BOOK",
+                "patient_id": "P00008",
+                "provider_id": "PR02",
+                "location_id": "centro",
+                "appointment_type_id": "review",
+                "slot": _slot(9, 15),
+            },
+        },
+    ]
+    bookings = cal.bookings_from_events(events)
+    calendars = cal.build_calendars(catalogue, bookings, start_from=_START, days_window=8)
+    patients = cal.patient_index(
+        [
+            {"patient_id": "P00007", "given_name": "Marta", "first_surname": "Ruiz"},
+            {"patient_id": "P00008", "given_name": "Luis", "first_surname": "Sanz"},
+        ]
+    )
+    derm_only = cal.clinic_agenda(
+        calendars,
+        patients,
+        specialty_id="dermatology",
+        today=_START,
+        week=_START,
+    )
+    names = [
+        row["full_name"] for week in derm_only["weeks"] for day in week for row in day["visits"]
+    ]
+    assert names == ["Luis Sanz"]
+    assert derm_only["doctor"]["name"] == "Dermatology"
+
+
+async def test_load_agenda_bookings_reads_the_synthetic_pack() -> None:
+    catalogue = await FakeClinicClient().catalogue()
+    bookings = cal.load_agenda_bookings(catalogue)
+    if not bookings:
+        import pytest
+
+        pytest.skip("synthetic-data pack not generated")
+    assert any(row.provider_id for row in bookings.values())
+
+
 def test_summarize_note_returns_empty_when_the_api_fails() -> None:
     cal.clear_summary_cache()
     long_note = " ".join(["word"] * 50)
