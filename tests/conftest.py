@@ -31,6 +31,7 @@ def offline_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> setting
         "DISCORD_NOTIFY_IN_TESTS",
         "VORTEX_JEV_ARBITER",
         "TYPESAFE_API_KEY",
+        "VORTEX_CALLS_DB",
     ):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("VORTEX_VOICE_MODE", "stub")
@@ -62,6 +63,7 @@ def _unset_dotenv_keys() -> None:
         "DISCORD_NOTIFY_IN_TESTS",
         "VORTEX_JEV_ARBITER",
         "TYPESAFE_API_KEY",
+        "VORTEX_CALLS_DB",
     ):
         os.environ.pop(key, None)
 
