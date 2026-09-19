@@ -202,7 +202,7 @@ def _turn_time(card: CallCard, ts: str | None) -> str:
     stamp = _parse_ts(ts)
     if stamp is None:
         return ""
-    label = stamp.astimezone().strftime("%H:%M:%S")
+    label = stamp.astimezone(MADRID).strftime("%H:%M:%S")
     start = _parse_ts(card.started_at)
     if start is not None:
         delta = (stamp - start).total_seconds()
