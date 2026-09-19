@@ -447,6 +447,7 @@ def test_describe_never_leaks_a_key(clean_env) -> None:
         "HELMCODE_API_KEY": "helmcode-secret",
         "ELEVENLABS_API_KEY": "elevenlabs-secret",
         "ARBITER_API_KEY": "arbiter-secret",
+        "TYPESAFE_API_KEY": "typesafe-secret",
         "LANGFUSE_PUBLIC_KEY": "pk-lf-secret",
         "LANGFUSE_SECRET_KEY": "sk-lf-secret",
         "GOOGLE_API_KEY": "google-api-secret",
@@ -460,6 +461,8 @@ def test_describe_never_leaks_a_key(clean_env) -> None:
     assert described["has_llm_key"] is True
     assert described["has_elevenlabs_key"] is True
     assert described["has_arbiter_key"] is True
+    assert described["has_typesafe_key"] is True
+    assert described["jev_arbiter"] is False
     assert described["has_langfuse_keys"] is True
     assert described["has_google_api_key"] is True
     assert described["llm_provider"] == "helmcode"
