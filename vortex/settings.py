@@ -387,11 +387,10 @@ class Settings:
     cold_booking_timeout_secs: float = 6.0
 
     # --- SMS confirmations (Twilio) -------------------------------------------
-    # After an accepted book/cancel we text the calling number. Off with the
-    # flag, or dry-run when the Twilio keys below are missing.
-    sms_confirmations: bool = field(
-        default_factory=lambda: _env_flag("VORTEX_SMS_CONFIRMATIONS", "true")
-    )
+    # After an accepted book/cancel we text the calling number. Opt-in: live
+    # messaging needs the flag on, and is dry-run when the Twilio keys below are
+    # missing. Off by default so no deployment texts a patient unasked.
+    sms_confirmations: bool = field(default_factory=lambda: _env_flag("VORTEX_SMS_CONFIRMATIONS"))
     twilio_account_sid: str = field(default_factory=lambda: _env("TWILIO_ACCOUNT_SID"))
     twilio_auth_token: str = field(default_factory=lambda: _env("TWILIO_AUTH_TOKEN"))
     # Prefer a Messaging Service; otherwise a bare From number works.
