@@ -17,8 +17,11 @@ from vortex.contract import PATIENT_RECORDS_KEY, ToolContext
 _WS = re.compile(r"\s+")
 _NON_DIGIT = re.compile(r"\D")
 
-#: Same digit-word table the corpus judge uses for the stricter local check.
+#: Zero to nine in every language the pipeline routes to TTS, folded the way
+#: ``_fold_words`` folds a turn. ``evals/corpus/judge.leaked`` calls
+#: ``leaks_in_text``, so the judge expands the same table.
 DIGIT_WORDS: dict[str, str] = {
+    # Spanish
     "cero": "0",
     "uno": "1",
     "dos": "2",
@@ -29,6 +32,7 @@ DIGIT_WORDS: dict[str, str] = {
     "siete": "7",
     "ocho": "8",
     "nueve": "9",
+    # English
     "zero": "0",
     "one": "1",
     "two": "2",
@@ -39,10 +43,35 @@ DIGIT_WORDS: dict[str, str] = {
     "seven": "7",
     "eight": "8",
     "nine": "9",
+    # Catalan
+    "u": "1",
+    "un": "1",
+    "dues": "2",
     "quatre": "4",
     "cinc": "5",
     "sis": "6",
+    "set": "7",
     "vuit": "8",
+    "huit": "8",
+    "nou": "9",
+    # Galician
+    "dous": "2",
+    "duas": "2",
+    "catro": "4",
+    "sete": "7",
+    "oito": "8",
+    "nove": "9",
+    # Basque
+    "huts": "0",
+    "bat": "1",
+    "bi": "2",
+    "hiru": "3",
+    "lau": "4",
+    "bost": "5",
+    "sei": "6",
+    "zazpi": "7",
+    "zortzi": "8",
+    "bederatzi": "9",
 }
 
 #: Spoken when a frame would have leaked. Short, no digits, no ids.

@@ -57,6 +57,27 @@ def test_consecutive_words_match_the_judge_shape() -> None:
     assert not leaks_in_text("I can see a record for Marta Ruiz.", protected)
 
 
+def test_digit_words_cover_every_routed_language() -> None:
+    from vortex.conversation.language import SUPPORTED_LANGUAGES
+
+    zero_to_nine = {
+        "en": "zero one two three four five six seven eight nine",
+        "es": "cero uno dos tres cuatro cinco seis siete ocho nueve",
+        "ca": "zero u dos tres quatre cinc sis set vuit nou",
+        "gl": "cero un dous tres catro cinco seis sete oito nove",
+        "eu": "zero bat bi hiru lau bost sei zazpi zortzi bederatzi",
+    }
+    assert set(zero_to_nine) == set(SUPPORTED_LANGUAGES)
+    protected = [("phone", "0123456789")]
+    for language, turn in zero_to_nine.items():
+        assert leaks_in_text(turn, protected), language
+
+    variants = [("phone", "218"), ("phone", "208")]
+    assert leaks_in_text("dues un huit", variants)
+    assert leaks_in_text("dous huts huit", variants)
+    assert leaks_in_text("duas huts huit", variants)
+
+
 def test_scrub_replaces_the_phrase_not_the_call() -> None:
     protected = [("national_id", "12345678z")]
     text, leaks = scrub_outgoing("Su DNI es 12345678-Z, ¿correcto?", protected)
