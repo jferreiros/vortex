@@ -590,11 +590,16 @@ def _workflow_panel(card: CallCard | None, *, public: bool = False) -> None:
                         _dot(ending.dot)
                         ui.label(ending.title)
                     ui.label(ending.text).classes("text")
-                    if card and card.decline_reason and card.status in {
-                        "refused",
-                        "escalated",
-                        "ended",
-                    }:
+                    if (
+                        card
+                        and card.decline_reason
+                        and card.status
+                        in {
+                            "refused",
+                            "escalated",
+                            "ended",
+                        }
+                    ):
                         ui.label(card.decline_reason).classes("reason")
                 ui.element("div").style("height: 24px")
             _record(card, public=public)

@@ -111,9 +111,7 @@ def fold_turns(turns: list[Turn]) -> list[Turn]:
                     continue
                 if _extends(text, last_text):
                     continue
-            if any(
-                item.role == turn.role and _norm_text(item.text) == text for item in out[-8:]
-            ):
+            if any(item.role == turn.role and _norm_text(item.text) == text for item in out[-8:]):
                 continue
         out.append(Turn(turn.role, text, turn.ts))
     return out
