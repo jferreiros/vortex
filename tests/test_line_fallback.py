@@ -32,6 +32,7 @@ from vortex.contract import (
     RegisterAction,
     RegistrationResult,
     Rejection,
+    RescheduleResult,
     Slot,
     SubmitResult,
     TriageResult,
@@ -659,6 +660,37 @@ async def test_a_named_reason_is_never_traded_for_a_cold_booking(offline_setting
     assert route == "/api/v1/submit/no-action"
     assert payload["reason"] == "referral_required"
     assert events(offline_settings, "CA-cold-vs-rule", "submit.cold_booking") == []
+
+
+async def test_an_explicit_out_of_scope_rejection_is_never_traded_for_a_cold_booking(
+    offline_settings,
+) -> None:
+    """The cold booking replaces the ``out_of_scope`` nobody named, not the one a tool did.
+
+    ``out_of_scope`` is the ending problem 14 is accepted on, and the reason a
+    tool returns is the reason we submit. Only the branches that reach it having
+    named no rule at all are worth trading for the guess off the line.
+    """
+    session = make_session(offline_settings, "CA-cold-vs-scope")
+    line_owner(session)
+    habit(session, FAKE_PATIENT.patient_id, "PR02")
+    session.ctx.log.user_turn("quiero mover la cita de mi vecina")
+    session.memory.observe(
+        "prepare_reschedule",
+        RescheduleResult(
+            rejection=Rejection(
+                reason="out_of_scope",
+                detail="appointment AP99 is in no diary this call has read",
+            )
+        ),
+    )
+
+    await session.close()
+
+    route, payload = sent(session)[0]
+    assert route == "/api/v1/submit/no-action"
+    assert payload["reason"] == "out_of_scope"
+    assert events(offline_settings, "CA-cold-vs-scope", "submit.cold_booking") == []
 
 
 async def test_a_prepared_action_is_never_traded_for_a_cold_booking(offline_settings) -> None:

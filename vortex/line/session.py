@@ -92,6 +92,12 @@ SELF_PAY_POLICY = "privado"
 # try before this goes out. See ``CallSession.cold_booking``.
 UNSCORED_REFUSAL = NoAction(reason="out_of_scope")
 
+# The only fallback branches that reach ``out_of_scope`` having named nothing: a
+# call with no turns and a call that resolved nothing. Everywhere else the reason
+# came from a tool's own ``Rejection``, and the reason a tool returns is the
+# reason we submit - problem 14 is accepted on exactly that refusal.
+UNNAMED_FALLBACK_BRANCHES: frozenset[str] = frozenset({"no_turns", "default"})
+
 # How far ahead the last-resort booking looks for the first free slot. Two weeks
 # is the longest span ``/availability`` answers in one request, and a slot past
 # it is not what a caller who asked for nothing in particular wanted anyway.
@@ -605,7 +611,7 @@ class CallSession:
         if self.has_accepted_submission:
             return
         branch, action, why = self.fallback_action()
-        if action == UNSCORED_REFUSAL:
+        if branch in UNNAMED_FALLBACK_BRANCHES and action == UNSCORED_REFUSAL:
             booking = await self.cold_booking()
             if booking is not None:
                 branch = "cold_booking"
