@@ -226,6 +226,44 @@ def test_stt_terms_boost_the_clinic_vocabulary() -> None:
     assert "Clínica Arenal" in stt_terms(object())
 
 
+def test_stt_terms_include_dictation_vocabulary() -> None:
+    """Letter names, email punctuation, domains, months and insurers (T57)."""
+    from vortex.clinic.client import FakeClinicClient
+    from vortex.clinic.fixtures import INSURER_NAMES
+    from vortex.conversation.stt_context import (
+        MAX_CONTEXT_CHARS,
+        stt_context_size,
+        stt_terms,
+    )
+
+    class Ctx:
+        clinic = FakeClinicClient()
+
+    terms = stt_terms(Ctx())
+
+    for letter in ("be", "uve", "i griega", "zeta", "eñe", "equis", "hache"):
+        assert letter in terms
+    for letter in ("efa", "enya", "ve baixa", "i grega", "ics", "essa"):
+        assert letter in terms
+
+    for punct in ("arroba", "punto", "guion", "guion bajo"):
+        assert punct in terms
+
+    for domain in ("gmail", "gmail.com", "hotmail", "outlook.com", "yahoo.es", "icloud.com"):
+        assert domain in terms
+
+    for month in ("enero", "septiembre", "gener", "setembre", "January", "September"):
+        assert month in terms
+
+    for insurer in INSURER_NAMES.values():
+        assert insurer in terms
+    assert "Caser" in terms
+    assert "Nueva Mutua" in terms
+
+    assert stt_context_size(Ctx()) < MAX_CONTEXT_CHARS
+    assert stt_context_size(object()) < MAX_CONTEXT_CHARS
+
+
 async def test_language_watcher_pushes_a_tts_settings_frame(voice_settings) -> None:
     """The watcher turns a Catalan transcript into a voice switch, once."""
     pytest.importorskip("pipecat")
