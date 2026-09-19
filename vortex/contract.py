@@ -655,12 +655,18 @@ class EligibilityVerdict(BaseModel):
 
 class TriageInput(BaseModel):
     complaint: str = Field(description="The symptom, in the caller's words")
+    provider_name: str | None = Field(
+        default=None,
+        description="The doctor the caller named, as said. Their specialty is the one to book.",
+    )
 
 
 class TriageResult(BaseModel):
     specialty_id: str | None = None
     emergency: bool = False
     rejection: Rejection | None = None  # medical_emergency when emergency
+    #: Set when a named doctor decided the specialty — the id to pass onward.
+    provider_id: str | None = None
 
 
 class NearestLocationInput(BaseModel):

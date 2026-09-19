@@ -101,6 +101,33 @@ def _name_tokens(name: str) -> set[str]:
     return tokens - _TITLES
 
 
+def _fuzzy_subset(wanted: set[str], have: set[str]) -> bool:
+    """Every spoken token fuzzy-matches one of the provider's — for a mis-heard name."""
+    return all(
+        any(SequenceMatcher(None, w, h).ratio() >= _TYPO_MATCH_CUTOFF for h in have) for w in wanted
+    )
+
+
+def _providers_named(catalogue: Catalogue, spoken_name: str, specialty_id: str | None) -> list:
+    """Everyone in the catalogue the spoken name can mean, within a specialty if given.
+
+    Every token the caller said (surname alone is enough) must be one of the
+    provider's tokens — deterministic, and never confuses Sáez with Sáenz,
+    since "saez" and "saenz" are different tokens even after accent-folding.
+    Only when nothing matches at all is the mis-heard-name fallback tried.
+    """
+    pool = catalogue.providers
+    if specialty_id:
+        pool = [p for p in pool if p.specialty_id == specialty_id]
+    target = _name_tokens(spoken_name)
+    if not target:
+        return []
+    matches = [p for p in pool if target <= _name_tokens(p.name)]
+    if not matches:
+        matches = [p for p in pool if _fuzzy_subset(target, _name_tokens(p.name))]
+    return matches
+
+
 #: Ids this call has already failed to place, so one miss costs one query and
 #: not one per rule. Per call, like everything on ``ToolContext``.
 PATIENT_MISSES_KEY = "rules.patient_misses"
@@ -321,6 +348,14 @@ async def triage(ctx: ToolContext, args: TriageInput) -> TriageResult:
     A lookup on the table problem 10 publishes, never a clinical judgement. The
     five red flags are checked first and book nothing: they return no specialty
     at all, so there is no agenda for the call to fall back onto.
+
+    A doctor the caller named outranks the table. General practice is the
+    table's residue for anything it does not recognise, and booking it for a
+    caller who asked for Dr. Iglesia sends an orthopaedic wrist to a GP. So
+    when ``provider_name`` resolves in the catalogue, the specialty is the one
+    that doctor actually consults in — the only specialty they can be booked
+    for. The complaint answers alone when the name resolves to nobody, or to
+    people in more than one specialty (Sáez/Sáenz), which the table can split.
     """
     flag = triage_table.red_flag(args.complaint)
     if flag:
@@ -330,7 +365,35 @@ async def triage(ctx: ToolContext, args: TriageInput) -> TriageResult:
             emergency=True,
             rejection=Rejection(reason="medical_emergency", detail=f"published red flag: {flag}"),
         )
-    return TriageResult(specialty_id=triage_table.route(args.complaint), emergency=False)
+
+    routed = triage_table.route(args.complaint)
+    if args.provider_name:
+        catalogue = await ctx.clinic.catalogue()
+        named = _providers_named(catalogue, args.provider_name, None)
+        specialties = {p.specialty_id for p in named}
+        if len(specialties) == 1:
+            specialty_id = named[0].specialty_id
+            assert specialty_id, "a catalogue provider always carries a specialty"
+            if specialty_id != routed:
+                ctx.log.event(
+                    "triage.specialty_from_provider",
+                    provider_name=args.provider_name,
+                    specialty_id=specialty_id,
+                    table_said=routed,
+                )
+            return TriageResult(
+                specialty_id=specialty_id,
+                emergency=False,
+                provider_id=named[0].provider_id if len(named) == 1 else None,
+            )
+        ctx.log.event(
+            "triage.provider_unresolved",
+            provider_name=args.provider_name,
+            candidates=len(named),
+            specialty_id=routed,
+        )
+
+    return TriageResult(specialty_id=routed, emergency=False)
 
 
 async def nearest_location(ctx: ToolContext, args: NearestLocationInput) -> NearestLocationResult:
@@ -382,26 +445,24 @@ async def find_provider(ctx: ToolContext, args: FindProviderInput) -> ProviderMa
     with both candidates when ``specialty_id`` isn't given to tell them apart;
     passing it filters the pool first, so the same spoken name resolves
     cleanly once the specialty is known.
+
+    A ``specialty_id`` that matches nobody of that name is a guess, not a
+    fact: the caller named a doctor, and the specialty was most often inferred
+    from a complaint the table did not recognise. Rather than report a doctor
+    who exists as ``provider_not_found``, the whole catalogue answers and the
+    match carries the specialty that doctor really consults in.
     """
     catalogue = await ctx.clinic.catalogue()
-    pool = catalogue.providers
-    if args.specialty_id:
-        pool = [p for p in pool if p.specialty_id == args.specialty_id]
-
-    # Every token the caller said (surname alone is enough) must be one of the
-    # provider's tokens — deterministic, and never confuses Sáez with Sáenz,
-    # since "saez" and "saenz" are different tokens even after accent-folding.
-    target = _name_tokens(args.spoken_name)
-    matches = [p for p in pool if target <= _name_tokens(p.name)]
-    if not matches:
-        # Typo-tolerant fallback: each target token fuzzy-matches some provider token.
-        def _fuzzy_subset(wanted: set[str], have: set[str]) -> bool:
-            return all(
-                any(SequenceMatcher(None, w, h).ratio() >= _TYPO_MATCH_CUTOFF for h in have)
-                for w in wanted
+    matches = _providers_named(catalogue, args.spoken_name, args.specialty_id)
+    if not matches and args.specialty_id:
+        matches = _providers_named(catalogue, args.spoken_name, None)
+        if len(matches) == 1:
+            ctx.log.event(
+                "find_provider.specialty_corrected",
+                spoken_name=args.spoken_name,
+                asked_for=args.specialty_id,
+                specialty_id=matches[0].specialty_id,
             )
-
-        matches = [p for p in pool if _fuzzy_subset(target, _name_tokens(p.name))]
 
     if not matches:
         return ProviderMatch(status="not_found", rejection=Rejection(reason="provider_not_found"))
