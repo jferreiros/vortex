@@ -119,13 +119,14 @@ def _insurer(card: CallCard) -> str | None:
 def patients(cards: list[CallCard]) -> list[PatientRow]:
     """One row per patient seen on the line, most recent first.
 
-    A patient is keyed by name when the directory found one, else by phone.
-    Calls with neither stay out: there is no patient to show.
+    A patient is keyed by the directory patient_id when found, else by phone
+    for unmatched callers. Calls with neither stay out: there is no patient
+    to show.
     """
     rows: dict[str, PatientRow] = {}
     order: list[str] = []
     for card in cards:  # cards arrive newest first
-        key = card.patient_name or card.from_number
+        key = card.patient_id or card.from_number
         if not key:
             continue
         row = rows.get(key)

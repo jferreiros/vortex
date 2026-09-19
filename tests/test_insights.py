@@ -52,13 +52,36 @@ def test_handle_times_and_hours() -> None:
     assert hours[10].value == 2  # 08:00 UTC is 10:00 in Madrid in September
 
 
-def test_patients_merge_by_name_and_mask_phone() -> None:
-    a = _card("a", "book", patient_name="Marta Ruiz", from_number="+34612345678")
+def test_patients_merge_by_patient_id_and_mask_phone() -> None:
+    a = _card(
+        "a",
+        "book",
+        patient_id="P00042",
+        patient_name="Marta Ruiz",
+        from_number="+34612345678",
+    )
     a.tools = [ToolStep("find_patient", status="ok", result={"patient": {"insurer": "sanitas"}})]
-    b = _card("b", "no-action", "no_availability", patient_name="Marta Ruiz")
+    # Same directory id, different phone — one row.
+    b = _card(
+        "b",
+        "no-action",
+        "no_availability",
+        patient_id="P00042",
+        patient_name="Marta Ruiz",
+        from_number="+34699999999",
+    )
+    # Same name, different directory id — separate row.
+    d = _card(
+        "d",
+        "book",
+        patient_id="P00099",
+        patient_name="Marta Ruiz",
+        from_number="+34611111111",
+    )
     c = _card("c", None, from_number="+34699000111")
-    rows = insights.patients([a, b, c])
-    assert [r.name for r in rows] == ["Marta Ruiz", "Unidentified patient"]
+    rows = insights.patients([a, b, d, c])
+    assert [r.key for r in rows] == ["P00042", "P00099", "+34699000111"]
+    assert [r.name for r in rows] == ["Marta Ruiz", "Marta Ruiz", "Unidentified patient"]
     assert rows[0].calls == 2
     assert rows[0].insurer == "sanitas"
     assert rows[0].last_call_id == "a"
