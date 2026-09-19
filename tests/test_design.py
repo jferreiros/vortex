@@ -40,3 +40,11 @@ def test_static_pages_load_the_tokens() -> None:
     for page in ("index.html", "tasks.html"):
         text = (REPO / "docs" / page).read_text(encoding="utf-8")
         assert 'href="design.css"' in text, f"docs/{page} does not load design.css"
+
+
+def test_tasks_html_does_not_redefine_chip() -> None:
+    """Page CSS lays out only; .chip lives in design.css (issue #80)."""
+    text = (REPO / "docs" / "tasks.html").read_text(encoding="utf-8")
+    style = text.split("<style>", 1)[1].split("</style>", 1)[0]
+    assert ".chip{" not in style.replace(" ", "")
+    assert ".chip[aria-pressed" not in style
