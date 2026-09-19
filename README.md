@@ -34,7 +34,12 @@ voice call for the day before the slot. The worker dials the patient, this
 server's `/confirmation/*` routes serve the TwiML, and `Gather input="speech"`
 captures the answer: confirmed / not_coming / reschedule_requested (es, ca, gl,
 eu and en scripts; the call inherits the language the caller used, Spanish by
-default). No answer lands as `no_answer` or `unclear`. Every row lives in
+default). No answer lands as `no_answer` or `unclear`. A reschedule answer does
+not end the call: when the live voice pipeline runs behind the same server the
+call hands off into the agent's rebooking loop (`<Connect><Stream>` back to
+`/ws` with the appointment and language on the start message), so the patient
+moves the appointment in the same call; on stub voice the callback promise
+stands. Every row lives in
 `logs/confirmation_calls.json` — the hooks a waitlist filler or a retry/SMS
 fallback would subscribe to. Try it: `uv run python scripts/try_confirmation_call.py`
 (`--live --to <E.164> --base-url <tunnel>` to dial for real).
