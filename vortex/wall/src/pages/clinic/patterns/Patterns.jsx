@@ -79,10 +79,16 @@ function loadStoredState() {
   return null;
 }
 
-function applyPatternsDoc(json, setPatterns, setSelectedId) {
-  if (!Array.isArray(json?.patterns) || !json.patterns.every(isValidPattern)) return;
+function applyPatternsDoc(json, setPatterns, setSelectedId, preferredId) {
+  if (!Array.isArray(json?.patterns) || json.patterns.length === 0 || !json.patterns.every(isValidPattern)) {
+    return;
+  }
   setPatterns(json.patterns);
-  if (json.selectedId) setSelectedId(json.selectedId);
+  const nextId =
+    (preferredId && json.patterns.some((p) => p.id === preferredId) && preferredId) ||
+    (json.selectedId && json.patterns.some((p) => p.id === json.selectedId) && json.selectedId) ||
+    json.patterns[0].id;
+  setSelectedId(nextId);
 }
 
 function SaveIcon() {
@@ -446,7 +452,7 @@ export default function Patterns() {
       .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then((json) => {
         if (cancelled) return;
-        applyPatternsDoc(json, setPatterns, setSelectedId);
+        applyPatternsDoc(json, setPatterns, setSelectedId, detectedId);
       })
       .catch(() => {});
     return () => {

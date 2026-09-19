@@ -26,6 +26,7 @@ from vortex.settings import get_settings
 
 NUMBERS_URL = "https://api.twilio.com/2010-04-01/Accounts/{sid}/IncomingPhoneNumbers.json"
 NUMBER_URL = "https://api.twilio.com/2010-04-01/Accounts/{sid}/IncomingPhoneNumbers/{pn_sid}.json"
+ADDRESSES_URL = "https://api.twilio.com/2010-04-01/Accounts/{sid}/Addresses.json"
 AVAILABLE_URL = (
     "https://api.twilio.com/2010-04-01/Accounts/{sid}/AvailablePhoneNumbers/{iso}/{kind}.json"
 )
@@ -116,11 +117,25 @@ def _search_available(http: httpx.Client, sid: str, iso: str) -> list[dict]:
     return found
 
 
-def _buy_number(http: httpx.Client, sid: str, phone: str) -> dict | None:
+def _first_address(http: httpx.Client, sid: str) -> tuple[str, str]:
+    response = http.get(ADDRESSES_URL.format(sid=sid))
+    if response.status_code != 200:
+        print(f"  addresses HTTP {response.status_code}: {_err_snippet(response)}")
+        return "", ""
+    rows = list(response.json().get("addresses") or [])
+    if not rows:
+        return "", ""
+    return str(rows[0].get("sid") or ""), str(rows[0].get("iso_country") or "").upper()
+
+
+def _buy_number(http: httpx.Client, sid: str, phone: str, *, address_sid: str = "") -> dict | None:
     if not is_european_e164(phone):
         print(f"REFUSED: will not buy non-EU number {phone}")
         return None
-    response = http.post(NUMBERS_URL.format(sid=sid), data={"PhoneNumber": phone})
+    data = {"PhoneNumber": phone}
+    if address_sid:
+        data["AddressSid"] = address_sid
+    response = http.post(NUMBERS_URL.format(sid=sid), data=data)
     if response.status_code not in (200, 201):
         print(f"ERROR: buy {phone} HTTP {response.status_code}: {_err_snippet(response)}")
         if _trial_purchase_blocked(response.text):
@@ -160,7 +175,7 @@ def main() -> int:
         print("ERROR: TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN must be set in .env")
         return 2
 
-    with httpx.Client(auth=(sid, token), timeout=20.0) as http:
+    with httpx.Client(auth=(sid, token), timeout=40.0) as http:
         response = http.get(NUMBERS_URL.format(sid=sid))
         if response.status_code != 200:
             print(f"ERROR: list numbers HTTP {response.status_code}: {_err_snippet(response)}")
@@ -193,8 +208,11 @@ def main() -> int:
                     found.append((iso, row))
                 if found and iso == "ES":
                     break
-                if args.buy and found:
-                    break
+                if args.buy and found and not args.search:
+                    # Keep searching other EU countries so we can retry if
+                    # the first inventory needs a local address we do not have.
+                    if len({iso for iso, _ in found}) >= 4:
+                        break
             if not found:
                 print("  (no EU inventory returned, or search denied)")
 
@@ -203,10 +221,19 @@ def main() -> int:
                     print("ERROR: no European number to purchase.")
                     _print_verify_steps()
                     return 1
-                iso, row = found[0]
-                phone = str(row.get("phone_number") or "")
-                print(f"=== buying {iso} {phone} ===")
-                bought = _buy_number(http, sid, phone)
+                address_sid, address_iso = _first_address(http, sid)
+                if address_sid:
+                    print(f"using AddressSid={address_sid} country={address_iso or '?'}")
+                ordered = sorted(
+                    found, key=lambda item: 0 if item[0] == address_iso else 1
+                )
+                bought = None
+                for iso, row in ordered:
+                    phone = str(row.get("phone_number") or "")
+                    print(f"=== buying {iso} {phone} ===")
+                    bought = _buy_number(http, sid, phone, address_sid=address_sid)
+                    if bought is not None:
+                        break
                 if bought is None:
                     return 1
                 numbers = [bought]

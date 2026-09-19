@@ -1,27 +1,15 @@
 import { useEffect, useRef, useState } from "react";
-import { PLACEHOLDER_CALLS } from "./placeholderCalls";
 
-/* The "in progress right now" feed, shared by Home, Live Calls, and the
-   detail pager so the three never disagree about which calls exist.
+/* The "in progress right now" feed, shared by Home and the call-detail pager.
 
-   It opens on PLACEHOLDER_CALLS and swaps to GET /api/wall/live-calls as
-   soon as the first answer lands — including an empty one. An empty real
-   feed means "no call in progress", which is a true and useful thing for
-   the page to say; holding the demo calls there instead would be a lie the
-   moment the line is quiet.
-
-   A failed poll keeps whatever is on screen. The endpoint is served by the
-   board itself, so a failure here means the board is going down anyway. */
+   Starts empty and fills from GET /api/wall/live-calls. An empty real feed
+   means no call in progress. A failed poll keeps the last good list. */
 
 const POLL_MS = 4000;
 const EMPTY = { calls: [], rejected: [], escalated: [] };
 
 export function useLiveCalls() {
-  const [feed, setFeed] = useState({
-    calls: PLACEHOLDER_CALLS,
-    rejected: [],
-    escalated: [],
-  });
+  const [feed, setFeed] = useState(EMPTY);
   const cancelled = useRef(false);
 
   useEffect(() => {

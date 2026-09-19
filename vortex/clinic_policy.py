@@ -17,7 +17,7 @@ from typing import Any
 from vortex.contract import MADRID
 
 _CACHE_TTL_S = 5.0
-_cache: tuple[float, dict[str, Any]] | None = None
+_cache: tuple[float, str, dict[str, Any]] | None = None
 
 DEFAULTS = {
     "minimum_booking_lead_hours": 24,
@@ -29,17 +29,22 @@ DEFAULTS = {
 def _load() -> dict[str, Any]:
     global _cache
     now = time.monotonic()
-    if _cache is not None and now - _cache[0] < _CACHE_TTL_S:
-        return _cache[1]
+    from vortex.settings import get_settings
+
+    try:
+        path = str(get_settings().product_db_path)
+    except Exception:
+        path = ""
+    if _cache is not None and now - _cache[0] < _CACHE_TTL_S and _cache[1] == path:
+        return _cache[2]
     try:
         from database import db
-        from vortex.settings import get_settings
 
         with db.connection(get_settings().product_db_path) as conn:
             values = db.get_clinic_settings(conn)
     except Exception:
         values = dict(DEFAULTS)
-    _cache = (now, values)
+    _cache = (now, path, values)
     return values
 
 

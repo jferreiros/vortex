@@ -5,18 +5,17 @@ import { useCallTimeline } from "../../../lib/useCallTimeline";
 import { deriveFinalAction } from "../../../lib/derive";
 import { resolveRawId } from "../../../lib/callRoute";
 import { formatClock } from "../../../lib/dates";
-import { LANGUAGE_LABEL, STATUS_LABEL } from "../../../lib/labels";
+import { LANGUAGE_LABEL, STATUS_LABEL, phaseView } from "../../../lib/labels";
 import { toolMeta } from "../../../lib/tools";
 import { ToolIcon } from "../../../lib/icons";
-import { PLACEHOLDER_CALLS } from "./placeholderCalls";
-import useLiveCalls from "./useLiveCalls";
+import { useLiveCalls } from "./useLiveCalls";
 import vortyAnimated from "../../../../media/avatar2d_animated.svg";
 import "./live-call-detail.css";
 
 const CALL_CAP = 180;
 
-function placeholderFor(id) {
-  return PLACEHOLDER_CALLS.find((c) => c.id === id) || null;
+function listedCall(calls, id) {
+  return calls.find((c) => c.id === id) || null;
 }
 
 function callerName(items, listed, call) {
@@ -146,8 +145,8 @@ export default function LiveCallDetail() {
   const navigate = useNavigate();
   const { callId } = resolveRawId(rawParam);
   const { items, call } = useCallTimeline(callId);
-  const { calls: liveCalls } = useLiveCalls();
-  const listed = liveCalls.find((c) => c.id === rawParam) || placeholderFor(rawParam);
+  const { calls } = useLiveCalls();
+  const listed = listedCall(calls, rawParam);
   const streamedTurns = items.filter((it) => it.type === "turn");
   const streamedTools = items.filter((it) => it.type === "tool");
   const turns = streamedTurns.length ? streamedTurns : listed?.turns || [];
@@ -156,7 +155,7 @@ export default function LiveCallDetail() {
   const name = callerName(items, listed, call);
   const direction = listed?.direction || "inbound";
   const streamRef = useRef(null);
-  const index = liveCalls.findIndex((c) => c.id === rawParam);
+  const index = calls.findIndex((c) => c.id === rawParam);
   const hasPager = index >= 0;
   const [, tick] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -181,7 +180,7 @@ export default function LiveCallDetail() {
 
   function go(delta) {
     if (!hasPager) return;
-    const next = liveCalls[index + delta];
+    const next = calls[index + delta];
     if (next) navigate(`/clinic/live-calls/${next.id}`);
   }
 
@@ -196,11 +195,11 @@ export default function LiveCallDetail() {
                   ‹
                 </button>
                 <span>
-                  {index + 1} / {liveCalls.length}
+                  {index + 1} / {calls.length}
                 </span>
                 <button
                   type="button"
-                  disabled={index === liveCalls.length - 1}
+                  disabled={index === calls.length - 1}
                   onClick={() => go(1)}
                   aria-label="Next call"
                 >
@@ -217,7 +216,7 @@ export default function LiveCallDetail() {
               </p>
             </div>
           </div>
-          <button type="button" className="tx-close" aria-label="Close" onClick={() => navigate("/clinic/live-calls")}>
+          <button type="button" className="tx-close" aria-label="Close" onClick={() => navigate("/clinic/home")}>
             ×
           </button>
         </header>
@@ -262,7 +261,7 @@ export default function LiveCallDetail() {
                   {language ? ` · ${language}` : ""}
                 </p>
                 <span className={`tx-status ${listed?.status === "escalated" ? "warn" : ""}`}>
-                  {STATUS_LABEL[statusKey] || listed?.phase || "En llamada"}
+                  {STATUS_LABEL[statusKey] || (listed ? phaseView(listed).label : "En llamada")}
                 </span>
               </div>
             </div>
@@ -290,25 +289,27 @@ export default function LiveCallDetail() {
 
             <section className="tx-tools">
               <h2>Tool calls</h2>
-              {tools.length === 0 ? (
-                <p className="tx-empty">No tools yet.</p>
-              ) : (
-                tools.map((item) => {
-                  const meta = toolMeta(item.tool);
-                  const ms = typeof item.ms === "number" ? `${Math.round(item.ms)} ms` : item.status === "running" ? "…" : "";
-                  const line = preview(item.result) || preview(item.args);
-                  return (
-                    <article key={item.id} className={`tx-tool ${item.status === "running" ? "live" : ""}`}>
-                      <header>
-                        <ToolIcon name={item.tool} size={15} />
-                        <span>{meta.label}</span>
-                        <em>{ms}</em>
-                      </header>
-                      {line ? <p>{line}</p> : null}
-                    </article>
-                  );
-                })
-              )}
+              <div className="tx-tools-list">
+                {tools.length === 0 ? (
+                  <p className="tx-empty">No tools yet.</p>
+                ) : (
+                  tools.map((item) => {
+                    const meta = toolMeta(item.tool);
+                    const ms = typeof item.ms === "number" ? `${Math.round(item.ms)} ms` : item.status === "running" ? "…" : "";
+                    const line = preview(item.result) || preview(item.args);
+                    return (
+                      <article key={item.id} className={`tx-tool ${item.status === "running" ? "live" : ""}`}>
+                        <header>
+                          <ToolIcon name={item.tool} size={15} />
+                          <span>{meta.label}</span>
+                          <em>{ms}</em>
+                        </header>
+                        {line ? <p>{line}</p> : null}
+                      </article>
+                    );
+                  })
+                )}
+              </div>
             </section>
 
             <div className={`tx-final ${final.accepted ? "done" : ""}`}>

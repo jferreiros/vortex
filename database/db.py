@@ -560,23 +560,7 @@ CLINIC_SETTINGS_DEFAULTS: dict[str, Any] = {
 }
 
 
-def get_clinic_settings(conn: sqlite3.Connection) -> dict[str, Any]:
-    from database.remote import mirrors_product, select
-
-    if mirrors_product(conn):
-        remote = select("clinic_settings", {"id": "eq.1"})
-        if remote:
-            row = remote[0]
-            return {
-                "minimum_booking_lead_hours": int(row["minimum_booking_lead_hours"]),
-                "patient_identification_fields_required": int(
-                    row["patient_identification_fields_required"]
-                ),
-                "call_time_cap_minutes": int(row["call_time_cap_minutes"]),
-            }
-    row = conn.execute("SELECT * FROM clinic_settings WHERE id = 1").fetchone()
-    if row is None:
-        return dict(CLINIC_SETTINGS_DEFAULTS)
+def _settings_from_mapping(row: Any) -> dict[str, Any]:
     return {
         "minimum_booking_lead_hours": int(row["minimum_booking_lead_hours"]),
         "patient_identification_fields_required": int(
@@ -584,6 +568,22 @@ def get_clinic_settings(conn: sqlite3.Connection) -> dict[str, Any]:
         ),
         "call_time_cap_minutes": int(row["call_time_cap_minutes"]),
     }
+
+
+def get_clinic_settings(conn: sqlite3.Connection) -> dict[str, Any]:
+    from database.remote import mirrors_product, select
+
+    local = conn.execute("SELECT * FROM clinic_settings WHERE id = 1").fetchone()
+    if mirrors_product(conn):
+        remote = select("clinic_settings", {"id": "eq.1"})
+        if remote:
+            remote_ts = str(remote[0].get("updated_at") or "")
+            local_ts = str(local["updated_at"]) if local is not None else ""
+            if remote_ts and (not local_ts or remote_ts >= local_ts):
+                return _settings_from_mapping(remote[0])
+    if local is None:
+        return dict(CLINIC_SETTINGS_DEFAULTS)
+    return _settings_from_mapping(local)
 
 
 def put_clinic_settings(conn: sqlite3.Connection, values: dict[str, Any]) -> dict[str, Any]:
@@ -658,18 +658,22 @@ def put_wall_document(conn: sqlite3.Connection, kind: str, body: dict[str, Any])
 def list_suggestion_rejections(conn: sqlite3.Connection, patient_id: str) -> list[str]:
     from database.remote import mirrors_product, select
 
+    local_ids = [
+        str(r["pattern_id"])
+        for r in conn.execute(
+            "SELECT pattern_id FROM suggestion_rejections WHERE patient_id = ?",
+            (patient_id,),
+        ).fetchall()
+    ]
     if mirrors_product(conn):
         remote = select(
             "suggestion_rejections",
             {"patient_id": f"eq.{patient_id}", "select": "pattern_id"},
         )
-        if remote is not None:
-            return [str(r["pattern_id"]) for r in remote]
-    rows = conn.execute(
-        "SELECT pattern_id FROM suggestion_rejections WHERE patient_id = ?",
-        (patient_id,),
-    ).fetchall()
-    return [str(r["pattern_id"]) for r in rows]
+        if remote:
+            remote_ids = [str(r["pattern_id"]) for r in remote]
+            return sorted(set(local_ids) | set(remote_ids))
+    return local_ids
 
 
 def add_suggestion_rejection(conn: sqlite3.Connection, patient_id: str, pattern_id: str) -> None:

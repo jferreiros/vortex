@@ -1257,17 +1257,24 @@ async def wall_clinic_settings_put(request: Request) -> JSONResponse:
     from vortex.clinic_policy import reset_cache
 
     payload = await request.json()
+    if not isinstance(payload, dict):
+        return JSONResponse({"error": "object required"}, status_code=422)
+    try:
+        lead = payload.get("minimumBookingLeadHours", payload.get("minimum_booking_lead_hours", 24))
+        fields = payload.get(
+            "patientIdentificationFieldsRequired",
+            payload.get("patient_identification_fields_required", 1),
+        )
+        int(lead)
+        int(fields)
+    except (TypeError, ValueError):
+        return JSONResponse({"error": "numeric settings required"}, status_code=422)
     with _product_db() as conn:
         saved = db.put_clinic_settings(
             conn,
             {
-                "minimum_booking_lead_hours": payload.get(
-                    "minimumBookingLeadHours", payload.get("minimum_booking_lead_hours", 24)
-                ),
-                "patient_identification_fields_required": payload.get(
-                    "patientIdentificationFieldsRequired",
-                    payload.get("patient_identification_fields_required", 1),
-                ),
+                "minimum_booking_lead_hours": lead,
+                "patient_identification_fields_required": fields,
             },
         )
     reset_cache()
@@ -1315,7 +1322,11 @@ def wall_patient_timeline(patient_id: str) -> JSONResponse:
     with _product_db() as conn:
         visits = db.list_appointments(conn, patient_id=patient_id, statuses=())
         rejected = db.list_suggestion_rejections(conn, patient_id)
-    cards, _health = _build_cards()
+    cutoff = datetime.now(UTC) - timedelta(days=400)
+    events, _, _ = _load_events(
+        f"timeline:{patient_id}", since=cutoff, cache_ttl=callfeed.INSIGHTS_CACHE_TTL_S
+    )
+    cards = build_calls(events)
     events = merge_events(
         events_from_appointments(visits),
         events_from_calls(cards, patient_id=patient_id),
@@ -1340,6 +1351,8 @@ async def wall_patient_timeline_reject(patient_id: str, request: Request) -> JSO
     from database import db
 
     payload = await request.json()
+    if not isinstance(payload, dict):
+        return JSONResponse({"error": "object required"}, status_code=422)
     pattern_id = str(payload.get("patternId") or payload.get("pattern_id") or "").strip()
     if not pattern_id:
         return JSONResponse({"error": "patternId required"}, status_code=422)

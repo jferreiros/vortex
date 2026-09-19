@@ -158,10 +158,11 @@
   flex: 1 1 auto;
   min-height: 340px;
   display: flex;
-  /* Top-aligned, not centered: every node's shape and when-editor then sit
-     at the same height regardless of a taller neighbor (e.g. a proactive
-     node with its extra fields). */
-  align-items: flex-start;
+  /* Centered vertically as a block within the card, whatever the card's
+     height; .pathways-timeline keeps its own children (the nodes) aligned
+     to each other at their top regardless of a taller neighbor (e.g. a
+     proactive node with its extra fields). */
+  align-items: center;
   gap: var(--space-6);
   overflow-x: auto;
   overflow-y: hidden;
@@ -492,6 +493,7 @@
   flex: 2 1 0;
   min-height: 0;
   display: flex;
+  align-items: center;
   gap: var(--space-4);
 }
 
