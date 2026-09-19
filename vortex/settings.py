@@ -90,6 +90,30 @@ DEFAULT_LLM_PROVIDER = "helmcode"
 DEFAULT_ARBITER_PROVIDER = "helmcode"
 DEFAULT_ARBITER_MODEL = "deepseek-v4-flash"
 
+# A ``submit_action`` with a nested ``BookAction`` measured 107 completion
+# tokens on qwen3.6; ``prepare_booking`` with a full ``Slot`` measured 150.
+# 120 was chosen for the spoken turn and silently capped the tool call too,
+# so a leftover ``LLM_MAX_TOKENS=120`` in .env made every booking impossible.
+# Anything below this floor is raised to the default. Do not lower it.
+MIN_TOKENS_FOR_A_BOOKING = 256
+DEFAULT_LLM_MAX_TOKENS = 320
+# Off unless set. qwen3.6 is ~2 s with tools on the same Helmcode perk, but
+# it loops prepare_booking/submit_action on problem 1, so a hang must not
+# spend the retry there. Set LLM_ALT_MODEL=qwen3.6 only if Helmcode is mute
+# and problem 1 is not on the line.
+DEFAULT_LLM_ALT_MODEL = ""
+
+
+def _llm_max_tokens() -> int:
+    raw = _env("LLM_MAX_TOKENS", str(DEFAULT_LLM_MAX_TOKENS))
+    try:
+        value = int(raw)
+    except ValueError:
+        return DEFAULT_LLM_MAX_TOKENS
+    if value < MIN_TOKENS_FOR_A_BOOKING:
+        return DEFAULT_LLM_MAX_TOKENS
+    return value
+
 
 def _llm_provider(var: str, default: str) -> str:
     """Fold an ``LLM_PROVIDER``-shaped variable to a known preset."""
@@ -174,12 +198,14 @@ class Settings:
     # 120 was chosen for the spoken turn (one or two sentences) and silently
     # capped the *tool call* as well, which is the same completion: a
     # prepare_booking/submit_action with a nested slot was cut off mid-argument,
-    # the tool call never closed and the call submitted nothing. A
-    # ``submit_action`` carrying a ``BookAction`` measures 107 tokens on
-    # qwen3.6 and ``prepare_booking`` with a full ``Slot`` measures 150, so at
-    # 120 the model could never emit a booking at all. Measured with
-    # scripts/rehearse_text.py.
-    llm_max_tokens: int = field(default_factory=lambda: int(_env("LLM_MAX_TOKENS", "320")))
+    # the tool call never closed and the call submitted nothing. A leftover
+    # ``LLM_MAX_TOKENS=120`` in .env survived the default bump to 320 and
+    # shipped that way; ``_llm_max_tokens`` raises anything below
+    # ``MIN_TOKENS_FOR_A_BOOKING``. Measured with scripts/rehearse_text.py.
+    llm_max_tokens: int = field(default_factory=_llm_max_tokens)
+    # Same host as ``llm_model``. On a first-token timeout the retry uses this
+    # instead of the hung model. Empty disables the swap.
+    llm_alt_model: str = field(default_factory=lambda: _env("LLM_ALT_MODEL", DEFAULT_LLM_ALT_MODEL))
     # Qwen3 hybrid builds think by default; a phone call cannot wait for that.
     llm_disable_thinking: bool = field(
         default_factory=lambda: (
@@ -215,6 +241,7 @@ class Settings:
     arbiter_base_url_env: str = field(default_factory=lambda: _env("ARBITER_BASE_URL"))
     arbiter_api_key_env: str = field(default_factory=lambda: _env("ARBITER_API_KEY"))
     arbiter_model_env: str = field(default_factory=lambda: _env("ARBITER_MODEL"))
+    jev_arbiter: bool = field(default_factory=lambda: _env_flag("VORTEX_JEV_ARBITER", "0"))
 
     # --- TTS: a primary and an alternate --------------------------------------
     # VORTEX_TTS_PROVIDER     speaks Spanish (google | elevenlabs)
@@ -532,6 +559,8 @@ class Settings:
             "stt_model": self.soniox_stt_model,
             "llm_provider": self.llm_provider,
             "llm_model": self.llm_model,
+            "llm_alt_model": self.llm_alt_model,
+            "llm_max_tokens": self.llm_max_tokens,
             "llm_base_url": self.llm_base_url,
             "gemini_live_model": self.gemini_live_model,
             "gemini_live_voice": self.gemini_live_voice,
@@ -541,6 +570,8 @@ class Settings:
             "arbiter_model": self.arbiter_model,
             "arbiter_base_url": self.arbiter_base_url,
             "has_arbiter_key": bool(self.arbiter_api_key),
+            "jev_arbiter": self.jev_arbiter,
+            "has_typesafe_key": bool(_env("TYPESAFE_API_KEY")),
             "tts_provider": self.tts_provider,
             "tts_provider_alt": self.tts_provider_alt,
             "tts_routed": self.tts_is_routed,

@@ -122,6 +122,16 @@ def test_one_call_over_the_wire(offline_settings) -> None:
     assert ended["media_frames_in"] == 100
     assert ended["media_frames_out"] >= 10
 
+    # Every call carries a usage line, so the wall never has to guess whether a
+    # zero means "cost nothing" or "nobody counted". The stub bills no one.
+    usage = next(line for line in lines if line["kind"] == "call.usage")
+    assert usage["metered"] is False
+    assert usage["stt"]["audio_seconds"] == 0
+    assert usage["stt"]["requests"] == 0
+    assert usage["llm"]["prompt_tokens"] == 0
+    assert usage["llm"]["completion_tokens"] == 0
+    assert usage["tts"] == []
+
 
 def test_health_reports_modes(offline_settings) -> None:
     client = TestClient(create_app(offline_settings))

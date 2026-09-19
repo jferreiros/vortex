@@ -45,6 +45,7 @@ from vortex.contract import (
     MADRID,
     Appointment,
     AppointmentList,
+    AvailabilityResponse,
     AvailabilityResult,
     BlockedProvider,
     BookAction,
@@ -508,6 +509,14 @@ async def find_slots(ctx: ToolContext, args: FindSlotsInput) -> AvailabilityResu
     ``time_to`` is exclusive, so a morning window ending at 14:00 does not
     return the 14:00 slot - 14:00 is the afternoon.
 
+    The platform names a ``blocked`` rule only when it stops the whole window
+    asked for: one day past the end of a leave and the rule is gone from the
+    answer, replaced by the slots after it (docs/evals-corpus.md). So when the
+    walk comes back with slots and no rule, the slot-free head of the window -
+    the stretch before the first slot, where the rule is still visible - is
+    re-asked in API-sized chunks and whatever it names is carried. A wide
+    search then reports both the October slots and the September leave.
+
     When nothing comes back the answer says which kind of nothing it is:
     ``clinic_closed`` when every site in scope is shut for the whole window
     (the caller takes the next open day), ``no_availability`` when the sites
@@ -539,20 +548,24 @@ async def find_slots(ctx: ToolContext, args: FindSlotsInput) -> AvailabilityResu
             )
         )
 
+    async def ask(span_from: date, span_to: date) -> AvailabilityResponse:
+        """One ``/availability`` call with the caller's constraints, as given."""
+        return await ctx.clinic.availability(
+            date_from=span_from,
+            date_to=span_to,
+            provider_id=args.provider_id,
+            specialty_id=args.specialty_id,
+            location_id=args.location_id,
+            patient_id=args.patient_id,
+            insurer=[args.insurer] if args.insurer else None,
+        )
+
     slots: list[Slot] = []
     blocked: dict[str, BlockedProvider] = {}
     appointment_type = None
     for span_from, span_to in _spans(date_from, date_to):
         try:
-            answer = await ctx.clinic.availability(
-                date_from=span_from,
-                date_to=span_to,
-                provider_id=args.provider_id,
-                specialty_id=args.specialty_id,
-                location_id=args.location_id,
-                patient_id=args.patient_id,
-                insurer=[args.insurer] if args.insurer else None,
-            )
+            answer = await ask(span_from, span_to)
         except ClinicApiError as exc:
             return AvailabilityResult(
                 rejection=Rejection(
@@ -564,6 +577,21 @@ async def find_slots(ctx: ToolContext, args: FindSlotsInput) -> AvailabilityResu
         for entry in answer.blocked:
             blocked.setdefault(entry.provider_id, entry)
         appointment_type = appointment_type or answer.appointment_type
+
+    # A wide window that found slots hides the rule that emptied its head: the
+    # platform only names a rule when it stops the whole window. Re-ask the
+    # stretch before the first slot, where the rule is still reported.
+    if slots and not blocked:
+        head_to = min(s.start.astimezone(MADRID).date() for s in slots) - timedelta(days=1)
+        for probe_from, probe_to in _spans(date_from, head_to):
+            try:
+                answer = await ask(probe_from, probe_to)
+            except ClinicApiError:
+                break  # best effort: the wide answer stands as it is
+            slots.extend(answer.slots)
+            for entry in answer.blocked:
+                blocked.setdefault(entry.provider_id, entry)
+            appointment_type = appointment_type or answer.appointment_type
 
     slots = [s for s in slots if s.start.astimezone(MADRID).date() > today]
     if args.time_from is not None or args.time_to is not None:

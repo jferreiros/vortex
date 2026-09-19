@@ -101,7 +101,7 @@ def collect(
         if run is None:
             continue
         prev = diff_runs(run, load_previous(layer, results_dir), "previous")
-        base = diff_runs(run, load_baseline(layer, baselines_dir), "baseline")
+        base = diff_runs(run, load_baseline(layer, baselines_dir, run.mode), "baseline")
         out.append((run, prev, base))
     return out
 

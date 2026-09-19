@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -20,21 +21,20 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-import httpx
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from nicegui import app, ui
 
-from vortex.observability import auth, explain, insights
+from vortex.observability import auth, callfeed, explain, insights, pricing
 from vortex.observability.business_insights import business_insights
-from vortex.observability.calllog import read_recent
-from vortex.observability.demo import write_scripted_call
+from vortex.observability.demo import write_cancellation_demo, write_scripted_call
 from vortex.observability.home_overview import home_overview, load_synthetic_cards, occupancy
 from vortex.observability.icons import icon
-from vortex.observability.view import CallCard, build_calls, flatten_grouped
+from vortex.observability.view import CallCard, build_calls
 from vortex.observability.wall_timeline import build_timeline, call_summary, latest_intent
 from vortex.settings import REPO_ROOT, get_settings
 
-LINE_URL = os.environ.get("VORTEX_LINE_URL", "http://127.0.0.1:7860").rstrip("/")
+log = logging.getLogger("vortex.observability")
+
 BOARD_PORT = int(os.environ.get("VORTEX_BOARD_PORT", "8080"))
 CLINIC_NAME = os.environ.get("VORTEX_CLINIC_NAME", "Clínica Arenal")
 PRESENCE: dict[str, float] = {}
@@ -57,7 +57,7 @@ MADRID = ZoneInfo("Europe/Madrid")
 #: A call with no event for this long is over, whatever the log says.
 STALE_AFTER_S = 180
 
-NAV_PUBLIC = (("Live", "/wall"), ("Console", "/"))
+NAV_PUBLIC = (("Live", "/wall"), ("Calendar", "/calendar"), ("Console", "/"))
 
 # ---------------------------------------------------------------------------
 # Data
@@ -68,20 +68,20 @@ def _log_path() -> Path:
     return get_settings().calls_log_path
 
 
-def _load_events() -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
-    health: dict[str, Any] | None = None
-    try:
-        health = httpx.get(f"{LINE_URL}/health", timeout=0.35).json()
-        grouped = (
-            httpx.get(f"{LINE_URL}/calls", params={"limit": 800}, timeout=0.5)
-            .json()
-            .get("calls", {})
-        )
-        if isinstance(grouped, dict):
-            return flatten_grouped(grouped), health
-    except Exception:
-        pass
-    return read_recent(_log_path(), limit=800), health
+#: Where the events a screen draws come from lives in ``callfeed`` (a leaf
+#: module, so it is importable in tests without pulling in these pages): the
+#: line's /calls first, then the last good fetch, then this process's own
+#: calls.jsonl — which in production is the line's log volume mounted into
+#: the board, not an empty private one.
+
+
+def _load_events(
+    scope: str = "recent",
+    *,
+    since: datetime | None = None,
+    cache_ttl: float = 0.0,
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None, dict]:
+    return callfeed.load_events(scope, _log_path(), since=since, cache_ttl=cache_ttl)
 
 
 def _parse_ts(value: str | None) -> datetime | None:
@@ -104,7 +104,7 @@ def _is_live(card: CallCard) -> bool:
 
 
 def _build_cards() -> tuple[list[CallCard], dict[str, Any] | None]:
-    events, health = _load_events()
+    events, health, _source_info = _load_events("recent")
     cards = build_calls(events)
     for card in cards:
         if card.live and not _is_live(card):
@@ -200,6 +200,10 @@ async def _play_line() -> None:
 
 async def _replay(scenario: str) -> None:
     await write_scripted_call(_log_path(), scenario=scenario, delay_s=0.28)
+
+
+async def _replay_cancellations() -> None:
+    await write_cancellation_demo(_log_path(), delay_s=0.05)
 
 
 def _client_ip() -> str:
@@ -372,18 +376,28 @@ def _footer() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _stat(n: str, label: str, dot: str | None = None) -> None:
+def _stat(n: str, label: str, dot: str | None = None, note: str | None = None) -> None:
     with ui.element("div").classes("stat"):
         with ui.element("div").classes("n row"):
             if dot:
                 _dot(dot)
             ui.label(n)
         ui.label(label).classes("l")
+        if note:
+            ui.label(note).classes("l")
+
+
+def _priced_note(cost: insights.CostSummary) -> str | None:
+    """'2 of 3 calls priced', only when some call had a leg with no price."""
+    if not cost.metered or cost.priced == cost.metered:
+        return None
+    return f"{cost.priced} of {cost.metered} calls priced"
 
 
 def _kpis(cards: list[CallCard]) -> None:
     s = explain.stats_for(cards)
     rate = "—" if s.submit_rate is None else f"{s.submit_rate * 100:.0f}%"
+    cost = insights.cost_per_call(cards)
     with ui.element("div").classes("stat-grid"):
         _stat(str(s.calls), explain.KPI_LABEL["calls"])
         _stat(str(s.live), explain.KPI_LABEL["live"], "live" if s.live else None)
@@ -396,6 +410,9 @@ def _kpis(cards: list[CallCard]) -> None:
             explain.KPI_LABEL["handle"],
         )
         _stat(_ms(s.median_tool_ms), explain.KPI_LABEL["tool"])
+        # Ninth tile: the grid is auto-fit minmax(140px, 1fr), so it wraps to
+        # a second row on a narrow screen instead of squeezing the other eight.
+        _stat(pricing.eur(cost.avg_list_eur, 3), explain.KPI_LABEL["cost"], note=_priced_note(cost))
 
 
 def _stages(card: CallCard | None) -> None:
@@ -539,6 +556,30 @@ def _outcome(card: CallCard | None) -> None:
                     ui.label(str(value)).classes("mono")
 
 
+def _cost_rows(card: CallCard | None) -> list[tuple[str, str | None]]:
+    """What this call cost, leg by leg. Empty when the call was never metered.
+
+    Cost is not patient data, so the public page shows these rows too: the
+    jury's question is what one answered call costs, and the answer belongs
+    next to the call it came from.
+    """
+    cost = pricing.price_call(card.usage if card else None)
+    if not cost.metered:
+        return []
+    partial = " · partial" if cost.partial else ""
+    llm = f"{pricing.count(cost.llm_tokens_in)} in / {pricing.count(cost.llm_tokens_out)} out"
+    llm += f" · {pricing.eur(cost.llm_list_eur)} list"
+    if cost.perk:
+        llm += " · perk"
+    return [
+        ("Cost (list)", f"{pricing.eur(cost.total_list_eur)}{partial}"),
+        ("Cost (we pay)", f"{pricing.eur(cost.total_eur)}{partial}"),
+        ("STT", f"{cost.stt_seconds:.1f} s · {pricing.eur(cost.stt_eur)}"),
+        ("LLM", llm),
+        ("TTS", f"{pricing.count(cost.tts_characters)} chars · {pricing.eur(cost.tts_eur)}"),
+    ]
+
+
 def _record(card: CallCard | None, *, public: bool = False) -> None:
     with ui.element("div").classes("section-title"):
         ui.label("Record").classes("t")
@@ -546,7 +587,7 @@ def _record(card: CallCard | None, *, public: bool = False) -> None:
     phone = card.from_number if card else None
     if public and phone:
         phone = insights.mask_phone(phone)
-    rows = [
+    rows: list[tuple[str, str | None]] = [
         ("Patient", card.patient_name if card else None),
         ("Phone", phone),
         ("Doctor", card.provider_name if card else None),
@@ -557,6 +598,7 @@ def _record(card: CallCard | None, *, public: bool = False) -> None:
         ("Duration", _duration(card) if card else None),
         ("Started", _clock(card.started_at) if card else None),
         ("Call id", card.call_id if card else None),
+        *_cost_rows(card),
     ]
     for label, value in rows:
         with ui.element("div").classes("kv"):
@@ -705,6 +747,7 @@ def _calls_table(
                 ("Why not booked", ""),
                 ("Tools", "narrow-hide"),
                 ("Duration", "narrow-hide"),
+                ("€", "narrow-hide"),
                 ("Call id", "narrow-hide"),
             ):
                 with ui.element("th").classes(extra):
@@ -735,6 +778,11 @@ def _calls_table(
                         ui.label(str(len(card.tools)))
                     with ui.element("td").classes("num narrow-hide"):
                         ui.label(_duration(card))
+                    with ui.element("td").classes("num narrow-hide"):
+                        # List price, three decimals. An em dash means the call
+                        # was never metered, not that it was free.
+                        cost = pricing.price_call(card.usage)
+                        ui.label(pricing.eur(cost.total_list_eur, 3) if cost.metered else "—")
                     with ui.element("td").classes("id narrow-hide"):
                         ui.label(card.call_id)
 
@@ -870,7 +918,7 @@ async def call_page(call_id: str) -> None:
 @app.get("/api/wall/timeline/{call_id}")
 def wall_timeline_api(call_id: str) -> JSONResponse:
     """The chat+tool timeline the react-spring zoom page polls."""
-    events, health = _load_events()
+    events, health, _source_info = _load_events("recent")
     items = build_timeline(events, call_id)
     intent = latest_intent(events, call_id)
     call = call_summary(events, call_id)
@@ -904,12 +952,18 @@ def wall_business_insights_api(days: int = 30) -> JSONResponse:
     """
     days = min((7, 30, 90), key=lambda d: abs(d - days))
     now = datetime.now(UTC)
-    events, _health = _load_events()
-    cards = build_calls(events)
     cutoff = now - timedelta(days=days)
+    # Ask the line for every call started inside the window — a fetch bounded
+    # by date, so a busy day's worth of events can never push an in-range call
+    # out of the read the way the old 800-event tail did.
+    events, _health, source = _load_events(
+        f"insights:{days}", since=cutoff, cache_ttl=callfeed.INSIGHTS_CACHE_TTL_S
+    )
+    cards = build_calls(events)
     in_range = [c for c in cards if (started := _card_started(c)) and started >= cutoff]
     payload = business_insights(in_range, now=now)
     payload["range_days"] = days
+    payload["source"] = source
     return JSONResponse(payload)
 
 
@@ -1081,6 +1135,9 @@ async def ops_page() -> None:
             "outline no-caps"
         ).classes("button-secondary")
         ui.button("Replay refusal", on_click=lambda: _replay("refuse")).props(
+            "outline no-caps"
+        ).classes("button-secondary")
+        ui.button("Replay cancellations", on_click=_replay_cancellations).props(
             "outline no-caps"
         ).classes("button-secondary")
 
@@ -1320,7 +1377,9 @@ def main() -> None:
 
 # The clinic console (Overview, Agents, Patients, Insights, Settings) registers
 # its pages on import. It imports this module, so it must come last.
-from vortex.observability import console  # noqa: E402, F401
+# The doctor calendar (/calendar) registers its page on import; it reuses this
+# module's chrome, so it comes after everything above is defined.
+from vortex.observability import calendar_view, console  # noqa: E402, F401
 
 if __name__ in {"__main__", "__mp_main__"}:
     main()

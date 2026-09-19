@@ -1,0 +1,16 @@
+{
+  "code": "kbSa2x99T",
+  "guild": {
+    "id": "1550611466367799296",
+    "name": "vortex-hackspain"
+  },
+  "channel": {
+    "id": "1550611553555062974",
+    "name": "evals"
+  },
+  "inviter": "jferreiros",
+  "captured_at": "2026-09-19T11:19:00+02:00",
+  "expires_at": "2026-10-18T20:57:56+00:00",
+  "approximate_member_count": 5,
+  "source": "https://discord.com/api/v10/invites/kbSa2x99T?with_counts=true"
+}
