@@ -14,6 +14,7 @@ export default defineConfig({
       "/api/wall": "http://127.0.0.1:8080",
       "/wall/avatar2d": "http://127.0.0.1:8080",
       "/wall/vorty-face": "http://127.0.0.1:8080",
+      "/wall/personalities": "http://127.0.0.1:8080",
     },
   },
 });

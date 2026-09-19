@@ -3,7 +3,7 @@ import "./ui.css";
 
 // A blank-content popup shell — the caller supplies `title`; the body is
 // intentionally empty until the real detail view for each stat exists.
-export default function Modal({ open, title, onClose, children }) {
+export default function Modal({ open, title, onClose, children, className = "" }) {
   useEffect(() => {
     if (!open) return undefined;
     function onKey(e) {
@@ -17,7 +17,7 @@ export default function Modal({ open, title, onClose, children }) {
 
   return (
     <div className="ui-modal-overlay" onClick={onClose}>
-      <div className="ui-modal" onClick={(e) => e.stopPropagation()}>
+      <div className={`ui-modal ${className}`.trim()} onClick={(e) => e.stopPropagation()}>
         <div className="ui-modal-head">
           <h3>{title}</h3>
           <button type="button" className="ui-modal-close" onClick={onClose} aria-label="Cerrar">

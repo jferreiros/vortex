@@ -26,7 +26,7 @@ from fastapi import Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from nicegui import app, ui
 
-from vortex.line import voice_config
+from vortex.line import personalities, voice_config
 from vortex.observability import auth, callfeed, explain, insights, pricing
 from vortex.observability.business_insights import business_insights
 from vortex.observability.demo import replay_cancellation_demo, write_scripted_call
@@ -54,6 +54,9 @@ WALL_APP_DIST = REPO_ROOT / "vortex" / "wall" / "dist"
 #: Source art for the app — not part of the Vite build, served straight off
 #: disk. vortex/wall/media/avatar2d.png -> GET /wall/avatar2d.
 WALL_MEDIA_DIR = REPO_ROOT / "vortex" / "wall" / "media"
+#: The persona portraits, one SVG per personality (the filename is the
+#: persona's ``avatar`` field). Served by GET /wall/personalities/{file}.
+PERSONALITY_MEDIA_DIR = WALL_MEDIA_DIR / "personalities"
 
 MADRID = ZoneInfo("Europe/Madrid")
 
@@ -1054,6 +1057,77 @@ async def wall_voice_preview(request: Request) -> Response:
         return JSONResponse(r.json(), status_code=r.status_code)
     except Exception:
         return JSONResponse({"error": r.text}, status_code=r.status_code)
+
+
+# ---- "Personalidades" picker -------------------------------------------------
+# Same arrangement as the voice card: the personas live on the line (a
+# personalities.db next to its calls log) and the board only has that volume
+# read-only, so these proxy to the line's API. When the line is down the GET
+# falls back to the seed personas, flagged ``offline`` so the page can say so
+# and grey out the buttons instead of pretending a write will land.
+
+
+@app.get("/api/wall/personalities")
+async def wall_personalities() -> JSONResponse:
+    try:
+        r = httpx.get(f"{callfeed.LINE_URL}/personalities", timeout=callfeed.LINE_HEALTH_TIMEOUT_S)
+        if r.status_code == 200:
+            return JSONResponse(r.json())
+    except Exception as exc:
+        log.warning("personalities fetch failed: %s", exc)
+    return JSONResponse(
+        {
+            "items": personalities.DEFAULTS,
+            "active": personalities.DEFAULTS[0]["slug"],
+            "offline": True,
+        }
+    )
+
+
+@app.get("/api/wall/personalities/{slug}")
+async def wall_personality(slug: str) -> JSONResponse:
+    try:
+        r = httpx.get(
+            f"{callfeed.LINE_URL}/personalities/{slug}", timeout=callfeed.LINE_HEALTH_TIMEOUT_S
+        )
+        return JSONResponse(r.json(), status_code=r.status_code)
+    except Exception as exc:
+        return JSONResponse({"error": f"line unreachable: {exc}"}, status_code=502)
+
+
+@app.put("/api/wall/personalities/{slug}")
+async def wall_personality_put(slug: str, request: Request) -> JSONResponse:
+    payload = await request.json()
+    try:
+        r = httpx.put(f"{callfeed.LINE_URL}/personalities/{slug}", json=payload, timeout=5)
+        return JSONResponse(r.json(), status_code=r.status_code)
+    except Exception as exc:
+        return JSONResponse({"error": f"line unreachable: {exc}"}, status_code=502)
+
+
+@app.post("/api/wall/personalities/{slug}/activate")
+async def wall_personality_activate(slug: str) -> JSONResponse:
+    try:
+        r = httpx.post(f"{callfeed.LINE_URL}/personalities/{slug}/activate", timeout=5)
+        return JSONResponse(r.json(), status_code=r.status_code)
+    except Exception as exc:
+        return JSONResponse({"error": f"line unreachable: {exc}"}, status_code=502)
+
+
+@app.get("/wall/personalities/{filename}")
+def wall_personality_art(filename: str) -> Response:
+    """One persona portrait, straight off disk like the avatar routes above.
+
+    The stored filename is validated on the way in (no separators), but this
+    resolves it inside the folder anyway and refuses anything that lands
+    outside it or is not an SVG: a hand-edited db row must not read /etc.
+    """
+    path = (PERSONALITY_MEDIA_DIR / filename).resolve()
+    if path.suffix.lower() != ".svg" or not path.is_relative_to(PERSONALITY_MEDIA_DIR.resolve()):
+        return JSONResponse({"error": "no such portrait"}, status_code=404)
+    if not path.is_file():
+        return JSONResponse({"error": "no such portrait"}, status_code=404)
+    return FileResponse(path, media_type="image/svg+xml")
 
 
 @app.get("/wall/avatar2d")
