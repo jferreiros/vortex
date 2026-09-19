@@ -406,7 +406,7 @@ async def test_a_missing_record_is_logged_and_noted_rather_than_passed_over(tmp_
     assert clinic.directory_calls == [], "there is no legal query to make without a number"
     # Standing down is not a refusal: /availability is the authority when the
     # record is not in hand, and it applies the same rules server-side.
-    assert verdict.skipped_checks == NO_RECORD_SKIPPED
+    assert verdict.skipped_checks == list(NO_RECORD_SKIPPED)
     assert verdict.note == ""
     events = [e for e in logged(ctx) if e["kind"] == "rules.patient_missing"]
     assert events and events[0]["patient_id"] == "P00042"
@@ -424,6 +424,21 @@ async def test_an_id_that_cannot_be_placed_is_looked_up_once(tmp_path):
     calls_after_first = len(clinic.directory_calls)
     second = await check_eligibility(ctx, args)
 
-    assert first.skipped_checks == NO_RECORD_SKIPPED
-    assert second.skipped_checks == NO_RECORD_SKIPPED
+    assert first.skipped_checks == list(NO_RECORD_SKIPPED)
+    assert second.skipped_checks == list(NO_RECORD_SKIPPED)
     assert len(clinic.directory_calls) == calls_after_first == 1
+
+
+@pytest.mark.asyncio
+async def test_a_verdict_that_is_edited_never_changes_the_next_one(tmp_path):
+    """The stood-down checks are module state, so they are immutable and copied."""
+    clinic = RecordingClinic()
+    ctx = make_ctx(tmp_path, clinic, from_number=None)
+    args = CheckEligibilityInput(patient_id="P00042", specialty_id="dermatology")
+
+    first = await check_eligibility(ctx, args)
+    first.skipped_checks.append("age")
+    second = await check_eligibility(ctx, args)
+
+    assert isinstance(NO_RECORD_SKIPPED, tuple)
+    assert second.skipped_checks == list(NO_RECORD_SKIPPED)

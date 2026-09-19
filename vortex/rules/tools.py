@@ -143,9 +143,10 @@ def _providers_named(catalogue: Catalogue, spoken_name: str, specialty_id: str |
 PATIENT_MISSES_KEY = "rules.patient_misses"
 
 #: Patient-record rules that stand down when the directory record is missing.
-#: The refusal, if there is one, still comes from ``/availability``; this list
-#: says which local checks did not get a chance to speak.
-NO_RECORD_SKIPPED: list[SkippedEligibilityCheck] = ["age", "referral"]
+#: The refusal, if there is one, still comes from ``/availability``; this says
+#: which local checks did not get a chance to speak. A tuple, so no importer can
+#: edit what every later call then copies into its verdict.
+NO_RECORD_SKIPPED: tuple[SkippedEligibilityCheck, ...] = ("age", "referral")
 
 
 async def _patient(ctx: ToolContext, patient_id: str) -> PatientRecord | None:
