@@ -18,6 +18,7 @@ from typing import Any
 import pytest
 
 from vortex.contract import (
+    FAKE_PATIENT,
     MADRID,
     Action,
     AvailabilityResult,
@@ -25,6 +26,7 @@ from vortex.contract import (
     BookAction,
     BookingResult,
     EligibilityVerdict,
+    FindPatientResult,
     NoAction,
     Rejection,
     Slot,
@@ -196,6 +198,86 @@ async def test_a_blocked_provider_is_a_reason(offline_settings) -> None:
     assert sent(session)[0][1]["reason"] == "provider_on_leave"
 
 
+async def test_the_fallback_names_the_verdict_not_the_last_tool(offline_settings) -> None:
+    """A rule the call already holds outranks the wording of whoever spoke last."""
+    session = make_session(offline_settings, "CA-verdict-wins")
+    session.ctx.log.user_turn("fisioterapia con ASISA en la sede sur")
+    session.memory.observe(
+        "check_eligibility",
+        EligibilityVerdict(
+            allowed=False,
+            rejection=Rejection(reason="location_not_covered", detail="ASISA, sede sur"),
+        ),
+    )
+    session.memory.observe(
+        "prepare_booking", BookingResult(rejection=Rejection(reason="no_availability"))
+    )
+    await session.close()
+
+    route, payload = sent(session)[0]
+    assert route == "/api/v1/submit/no-action"
+    assert payload["reason"] == "location_not_covered"
+    assert [action.reason for action in session.sent_actions] == ["location_not_covered"]
+    (event,) = events(offline_settings, "CA-verdict-wins", "submit.fallback")
+    assert event["branch"] == "last_rejection"
+    assert event["retrying"] is False
+
+
+# --- branch (c): a reason a later plan would have dropped -----------------------
+
+
+async def test_an_unconfirmed_plan_does_not_downgrade_a_named_reason(
+    offline_settings,
+) -> None:
+    """The rule that bit outlives the alternative nobody agreed to."""
+    session = make_session(offline_settings, "CA-kept-reason")
+    session.ctx.log.user_turn("con la doctora Cid, tengo ASISA")
+    session.memory.observe(
+        "check_eligibility",
+        EligibilityVerdict(
+            allowed=False,
+            rejection=Rejection(reason="location_not_covered", detail="ASISA, sede sur"),
+        ),
+    )
+    session.memory.observe("prepare_booking", BookingResult(action=a_booking()))
+    await session.close()
+
+    assert session.memory.last_rejection is None
+    route, payload = sent(session)[0]
+    assert route == "/api/v1/submit/no-action"
+    assert payload["reason"] == "location_not_covered"
+    event = events(offline_settings, "CA-kept-reason", "submit.fallback")[0]
+    assert event["branch"] == "stored_reason"
+    assert "check_eligibility" in event["why"]
+
+
+async def test_a_red_flag_survives_an_unconfirmed_plan(offline_settings) -> None:
+    session = make_session(offline_settings, "CA-kept-flag")
+    session.ctx.log.user_turn("me duele el pecho")
+    session.memory.observe(
+        "triage", TriageResult(emergency=True, rejection=Rejection(reason="medical_emergency"))
+    )
+    session.memory.observe("prepare_booking", BookingResult(action=a_booking()))
+    await session.close()
+
+    assert sent(session)[0][0] == "/api/v1/submit/escalate"
+    assert sent(session)[0][1]["reason"] == "medical_emergency"
+
+
+async def test_a_confirmed_plan_still_wins_over_a_stored_reason(offline_settings) -> None:
+    """The caller's yes is the one thing that outranks a named refusal."""
+    session = make_session(offline_settings, "CA-kept-book")
+    session.ctx.log.user_turn("si, con el otro medico entonces")
+    session.memory.observe(
+        "find_slots", AvailabilityResult(rejection=Rejection(reason="provider_on_leave"))
+    )
+    session.memory.observe("prepare_booking", BookingResult(action=a_booking()))
+    session.ctx.memory.mark_confirmed()
+    await session.close()
+
+    assert sent(session)[0][0] == "/api/v1/submit/book"
+
+
 async def test_free_slots_drop_an_earlier_rejection(offline_settings) -> None:
     session = make_session(offline_settings, "CA-cleared")
     session.ctx.log.user_turn("el martes")
@@ -206,6 +288,7 @@ async def test_free_slots_drop_an_earlier_rejection(offline_settings) -> None:
     await session.close()
 
     assert session.memory.last_rejection is None
+    assert session.memory.stored_reason is None
     assert sent(session)[0][1]["reason"] == "out_of_scope"
 
 
@@ -279,6 +362,49 @@ def test_repreparing_the_same_action_keeps_confirmation() -> None:
 
     assert memory.confirmed is True
     assert memory.prepared == a_booking()
+
+
+# --- branch (e): the line died with the lookup still open ----------------------
+
+
+async def test_an_unfinished_lookup_ends_on_patient_not_found(offline_settings) -> None:
+    """The caller gave a name, the line dropped: we never learned whose call it was."""
+    session = make_session(offline_settings, "CA-mid-identity")
+    session.ctx.log.user_turn("soy Amelia Hughes, quiero cita con el medico de cabecera")
+    session.memory.observe(
+        "find_patient", FindPatientResult(status="ambiguous", ask_for="date_of_birth")
+    )
+    await session.close()
+
+    route, payload = sent(session)[0]
+    assert route == "/api/v1/submit/no-action"
+    assert payload["reason"] == "patient_not_found"
+    event = events(offline_settings, "CA-mid-identity", "submit.fallback")[0]
+    assert event["branch"] == "identity_pending"
+
+
+async def test_an_identified_patient_leaves_the_default_alone(offline_settings) -> None:
+    session = make_session(offline_settings, "CA-identified")
+    session.ctx.log.user_turn("mi fecha de nacimiento es 12 de marzo del 85")
+    session.memory.observe("find_patient", FindPatientResult(status="not_found"))
+    session.memory.observe("find_patient", FindPatientResult(status="found", patient=FAKE_PATIENT))
+    await session.close()
+
+    assert session.memory.identity_pending is False
+    assert sent(session)[0][1]["reason"] == "out_of_scope"
+
+
+async def test_a_named_rule_outranks_an_unfinished_lookup(offline_settings) -> None:
+    session = make_session(offline_settings, "CA-rule-over-identity")
+    session.ctx.log.user_turn("quiero cita de fisioterapia")
+    session.memory.observe("find_patient", FindPatientResult(status="not_found"))
+    session.memory.observe(
+        "check_eligibility",
+        EligibilityVerdict(allowed=False, rejection=Rejection(reason="specialty_not_covered")),
+    )
+    await session.close()
+
+    assert sent(session)[0][1]["reason"] == "specialty_not_covered"
 
 
 # --- what stops the fallback --------------------------------------------------
