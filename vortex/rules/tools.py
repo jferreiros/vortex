@@ -363,6 +363,14 @@ async def triage(ctx: ToolContext, args: TriageInput) -> TriageResult:
     the wrong ``appointment_type_id`` and a lost case. A child marker still wins
     over a named specialty: nothing published sends a child anywhere but
     paediatrics, and the age rule agrees.
+
+    Where the table recognises nothing in ``complaint``, the caller's own turns
+    are read for that name instead. The model paraphrases the complaint down to
+    the symptom — "I need a dermatology appointment, about a mole on my back"
+    arrives as the mole alone in every one of the six live calls that said it —
+    and the residue it lands on is a guess made from no evidence at all. A
+    complaint the table *did* recognise is answered by the table, so a specialty
+    the caller only mentioned in passing never outranks a symptom that scored.
     """
     flag = triage_table.red_flag(args.complaint)
     if flag:
@@ -400,13 +408,27 @@ async def triage(ctx: ToolContext, args: TriageInput) -> TriageResult:
             specialty_id=routed,
         )
 
-    asked_for = triage_table.named_specialty(args.complaint)
-    if asked_for and asked_for != routed and not triage_table.mentions_child(args.complaint):
+    said = args.complaint
+    asked_for = triage_table.named_specialty(said)
+    if asked_for is None and not triage_table.score(said):
+        # The table matched nothing at all, so general practice here is a guess
+        # made from no evidence. The caller's own turns are better evidence than
+        # a summary of them: "I need a dermatology appointment, about a mole on
+        # my back" reaches this tool as the mole alone, six times out of six in
+        # the live log. Only read them in this branch - a complaint the table
+        # did recognise is answered by the table, and a specialty mentioned in
+        # passing must never outrank a symptom that scored. The child guard
+        # below then reads the same words the specialty came out of.
+        said = ctx.log.caller_words()
+        asked_for = triage_table.named_specialty(said)
+
+    if asked_for and asked_for != routed and not triage_table.mentions_child(said):
         ctx.log.event(
             "triage.specialty_named_by_caller",
             complaint=args.complaint,
             specialty_id=asked_for,
             table_said=routed,
+            from_transcript=said is not args.complaint,
         )
         return TriageResult(specialty_id=asked_for, emergency=False)
 

@@ -16,6 +16,7 @@ from vortex.clinic.client import FakeClinicClient
 from vortex.contract import MADRID, FindProviderInput, ToolContext, TriageInput
 from vortex.observability.calllog import CallLog
 from vortex.rules.tools import find_provider, triage
+from vortex.rules.triage import route
 
 #: Dr. Iglesia (orthopaedics) against Dra. Iglesias (dermatology).
 ORTHOPAEDIC_PROVIDER_ID = "PR05"
@@ -272,3 +273,97 @@ async def test_the_override_is_logged_with_what_the_table_had_said(tmp_path):
     assert events
     assert events[-1]["specialty_id"] == "gynaecology"
     assert events[-1]["table_said"] == "general_practice"
+
+
+# ---- when the model paraphrases the specialty away --------------------------
+#
+# All six live calls that said "I need a dermatology appointment, about a mole on
+# my back" reached triage as the mole alone. The one that passed submitted
+# dermatology_review anyway; the ones that lost submitted a GP review. So the
+# caller's own turns decide it, but only where the table recognised nothing.
+
+
+def caller_said(ctx: ToolContext, *turns: str) -> None:
+    for turn in turns:
+        ctx.log.user_turn(turn)
+
+
+async def test_the_caller_s_own_words_answer_when_the_model_drops_the_specialty(tmp_path):
+    """The 3-point failure of run 023ba365, in one line."""
+    ctx = make_ctx(tmp_path)
+    caller_said(ctx, "I need a dermatology appointment, about a mole on my back")
+
+    routed = await triage(
+        ctx, TriageInput(complaint="a mole on my back that looks different from last year")
+    )
+
+    assert routed.specialty_id == "dermatology"
+
+
+async def test_a_complaint_the_table_recognises_is_still_the_table_s_to_answer(tmp_path):
+    """A specialty mentioned in passing never outranks a symptom that scored."""
+    ctx = make_ctx(tmp_path)
+    caller_said(ctx, "I saw the dermatologist last year", "but now my knee locks going up stairs")
+
+    routed = await triage(ctx, TriageInput(complaint="my knee locks going up stairs"))
+
+    assert routed.specialty_id == "orthopaedics"
+
+
+async def test_a_scoring_general_practice_row_is_not_overridden_from_the_transcript(tmp_path):
+    """'sore throat' is a published GP row, not the residue. It stands."""
+    ctx = make_ctx(tmp_path)
+    caller_said(ctx, "my daughter saw a dermatologist once", "I have a sore throat for three days")
+
+    routed = await triage(ctx, TriageInput(complaint="sore throat for three days"))
+
+    assert routed.specialty_id == "general_practice"
+
+
+async def test_a_child_in_the_transcript_vetoes_the_override(tmp_path):
+    """The specialty came out of the transcript, so the child guard reads it too.
+
+    It vetoes rather than redirects: routing a child to paediatrics off words the
+    complaint never carried is a separate question, and this leaves that answer
+    exactly as it is today.
+    """
+    ctx = make_ctx(tmp_path)
+    caller_said(ctx, "my daughter needs to see a dermatologist about a rash on her arm")
+
+    routed = await triage(ctx, TriageInput(complaint="a rash on her arm"))
+
+    assert routed.specialty_id != "dermatology"
+    assert routed.specialty_id == route("a rash on her arm")
+
+
+async def test_a_silent_transcript_changes_nothing(tmp_path):
+    """No turns recorded: exactly the answer the table gave before."""
+    ctx = make_ctx(tmp_path)
+
+    routed = await triage(ctx, TriageInput(complaint="a mole on my back"))
+
+    assert routed.specialty_id == "general_practice"
+
+
+async def test_the_complaint_still_wins_over_the_transcript(tmp_path):
+    """Last stated request: what they are calling about now, not what they said first."""
+    ctx = make_ctx(tmp_path)
+    caller_said(ctx, "I thought I needed a dermatologist")
+
+    routed = await triage(ctx, TriageInput(complaint="actually a gynaecology appointment please"))
+
+    assert routed.specialty_id == "gynaecology"
+
+
+async def test_the_transcript_override_says_where_it_came_from(tmp_path):
+    ctx = make_ctx(tmp_path)
+    caller_said(ctx, "the earliest physiotherapy appointment you have")
+    await triage(ctx, TriageInput(complaint="my back has been sore"))
+
+    events = [
+        json.loads(line)
+        for line in ctx.log.path.read_text().splitlines()
+        if line.strip() and "triage.specialty_named_by_caller" in line
+    ]
+    assert events[-1]["specialty_id"] == "physiotherapy"
+    assert events[-1]["from_transcript"] is True
