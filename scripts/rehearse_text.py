@@ -54,19 +54,11 @@ from vortex import tools as registry  # noqa: E402
 from vortex.contract import ALL_REASONS  # noqa: E402
 from vortex.conversation.prompt import GREETING, initial_messages  # noqa: E402
 from vortex.conversation.turns import default_turn_settings  # noqa: E402
-from vortex.settings import Settings  # noqa: E402
+from vortex.settings import MIN_TOKENS_FOR_A_BOOKING, Settings  # noqa: E402
 from vortex.tools import ToolError  # noqa: E402
 
 # Per caller turn. The receptionist must stop calling tools and say something.
 MAX_TOOL_ROUNDS = 8
-
-# A ``submit_action`` carrying a ``BookAction`` measured at 107 completion
-# tokens on qwen3.6, with no spoken sentence beside it. ``LLM_MAX_TOKENS``
-# ships at 120, which is under that once the model says anything at all — so
-# the booking never leaves the model. Raising the cap is the line lane's call
-# (``vortex/settings.py``); this constant is here so the rehearsal says why it
-# failed instead of looking like a prompt problem.
-MIN_TOKENS_FOR_A_BOOKING = 256
 
 CALLER_STYLE = (
     "Speak one or two short sentences at a time, the way people do on the "
