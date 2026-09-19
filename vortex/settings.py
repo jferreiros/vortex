@@ -241,6 +241,7 @@ class Settings:
     arbiter_base_url_env: str = field(default_factory=lambda: _env("ARBITER_BASE_URL"))
     arbiter_api_key_env: str = field(default_factory=lambda: _env("ARBITER_API_KEY"))
     arbiter_model_env: str = field(default_factory=lambda: _env("ARBITER_MODEL"))
+    jev_arbiter: bool = field(default_factory=lambda: _env_flag("VORTEX_JEV_ARBITER", "0"))
 
     # --- TTS: a primary and an alternate --------------------------------------
     # VORTEX_TTS_PROVIDER     speaks Spanish (google | elevenlabs)
@@ -569,6 +570,8 @@ class Settings:
             "arbiter_model": self.arbiter_model,
             "arbiter_base_url": self.arbiter_base_url,
             "has_arbiter_key": bool(self.arbiter_api_key),
+            "jev_arbiter": self.jev_arbiter,
+            "has_typesafe_key": bool(_env("TYPESAFE_API_KEY")),
             "tts_provider": self.tts_provider,
             "tts_provider_alt": self.tts_provider_alt,
             "tts_routed": self.tts_is_routed,
