@@ -488,7 +488,9 @@ PATIENTS: list[dict[str, Any]] = [
         "sex": "M",
         "has_visited_before": True,
         "insurer": "cigna",
-        "referrals": [],
+        # Holds a dermatology referral: problem 6's control case, the referred
+        # adult whose booking goes through with nothing to refuse.
+        "referrals": ["dermatology"],
         "note": "Fake record. Published cases: orthopaedics Thursday, general practice Saturday.",
         "match_score": 1.0,
         "matched_fields": ["name"],
