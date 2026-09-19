@@ -503,11 +503,15 @@ The console (`live.py`) is built from these. Reuse them before you draw a new on
 - `.table` with `td.num`, `td.mute`, `td.id` and `tr.pick` / `.on`: dense rows
   for lists. Never a card per row.
 - `.live-badge`: "N on the line", dark, pulsing.
+- `.icon`: 16px stroke, `currentColor`, no hue. Sidebar, workflow cards, mark.
+- `.app` is one scroll: sidebar pinned, `.content` scrolls. Under 850px both
+  release and the page scrolls as a document.
 - `.workflow` with `.wf-card` / `.patient` / `.agent` / `.tool` / `.speaking`:
   the live call as cards in the order the line wrote them. The speaking card
   pulses with `transform` only. The outcome card is still the page's one
   dark surface. Lives on Calls › Live; `/wall` keeps the three-column projector
   layout.
+- `.wf-layout` / `.wf-side`: cards on the left, sticky outcome on the right.
 - `.wf-head`: who is on the call and the live badge.
 - `.table .narrow-hide`: drop Tools, Duration and Call id under 640px so the
   page does not scroll sideways.
