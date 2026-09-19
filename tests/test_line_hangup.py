@@ -324,6 +324,6 @@ def test_the_watcher_is_wired_into_the_pipeline() -> None:
 
     source = inspect.getsource(run_pipecat_call)
     assert "hangup = _make_hangup_watcher(session)" in source
-    assert "observers=[_CallLogObserver(session), hangup]" in source
+    assert "observers=[_CallLogObserver(session, filler_guard=filler_guard), hangup]" in source
     assert "hangup.bind(task)" in source
     assert '"on_user_turn_idle", hangup.on_user_idle' in source
