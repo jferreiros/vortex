@@ -6,8 +6,8 @@ Routes:
 - ``WS   /ws``       one call per connection, Twilio Media Streams format
 
 Per connection: accept -> read ``connected`` and ``start`` -> open a
-``CallSession`` -> run the voice pipeline (pipecat, Gemini Live demo, or
-stub) -> close the session inside the 30-second submission window.
+``CallSession`` -> run the voice pipeline (pipecat or stub) -> close the
+session inside the 30-second submission window.
 
 Owner: the line lane.
 """
@@ -86,11 +86,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         reason = "error"
         with trace_call(session):
             try:
-                if settings.voice_is_gemini_live:
-                    from vortex.line.gemini_live_voice import run_gemini_live_call
-
-                    reason = await run_gemini_live_call(ws, session)
-                elif settings.voice_is_pipecat:
+                if settings.voice_is_pipecat:
                     from vortex.line.pipecat_voice import run_pipecat_call
 
                     reason = await run_pipecat_call(ws, session)
