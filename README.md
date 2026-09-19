@@ -1,6 +1,6 @@
 # Repository Coverage
 
-[Full report](https://htmlpreview.github.io/?https://github.com/jferreiros/vortex/blob/python-coverage-comment-action-data/htmlcov/index.html)
+
 
 | Name                                   |    Stmts |     Miss |   Cover |   Missing |
 |--------------------------------------- | -------: | -------: | ------: | --------: |
@@ -8,7 +8,7 @@
 | vortex/clinic/\_\_init\_\_.py          |        9 |        1 |     89% |        24 |
 | vortex/clinic/client.py                |      252 |       60 |     76% |68, 105-107, 130, 147-149, 158, 163, 349-351, 371-375, 386, 388, 393, 400-406, 409-413, 416-420, 423-427, 437-448, 461-483, 488-491, 494, 520, 576, 580, 735 |
 | vortex/clinic/fixtures.py              |       28 |        0 |    100% |           |
-| vortex/contract.py                     |      432 |       29 |     93% |909-912, 916, 925, 931-932, 938, 942-948, 952, 956-958, 973, 988, 1000, 1006, 1010, 1016, 1020, 1024, 1044 |
+| vortex/contract.py                     |      432 |       29 |     93% |916-919, 923, 932, 938-939, 945, 949-955, 959, 963-965, 980, 995, 1007, 1013, 1017, 1023, 1027, 1031, 1051 |
 | vortex/conversation/language.py        |       71 |        7 |     90% |137-138, 186-187, 195-199 |
 | vortex/conversation/prompt.py          |       59 |        0 |    100% |           |
 | vortex/conversation/stt\_context.py    |       56 |        2 |     96% |   305-306 |
@@ -21,7 +21,7 @@
 | vortex/line/llm\_timeout.py            |      124 |        2 |     98% |  259, 272 |
 | vortex/line/pipecat\_voice.py          |      271 |      102 |     62% |112-113, 120-321, 325, 427, 578, 628-631, 657-658, 735-763 |
 | vortex/line/privacy.py                 |       72 |        5 |     93% |61, 85, 88, 94, 154 |
-| vortex/line/server.py                  |       73 |       20 |     73% |46-48, 61-62, 67, 72, 80-82, 90-92, 94-96, 101-106 |
+| vortex/line/server.py                  |       73 |       18 |     75% |46-48, 61-62, 67, 72, 80-82, 90-92, 94-96, 102, 104-106 |
 | vortex/line/session.py                 |      305 |       10 |     97% |352, 443, 487-489, 496, 537, 602, 637, 678 |
 | vortex/line/smart\_turn\_ab.py         |      152 |        7 |     95% |115, 126, 198-200, 208, 212 |
 | vortex/line/stub\_voice.py             |       44 |        7 |     84% | 34, 61-66 |
@@ -46,11 +46,11 @@
 | vortex/rules/eligibility.py            |       99 |       15 |     85% |90, 93, 126, 144, 148, 159, 237, 291-304, 310, 313-315 |
 | vortex/rules/facts.py                  |       84 |        2 |     98% |  200, 202 |
 | vortex/rules/geo.py                    |      103 |       11 |     89% |239, 242-243, 255-257, 272, 278, 288-289, 330 |
-| vortex/rules/tools.py                  |      153 |       17 |     89% |124, 172-173, 221-228, 338, 342, 410, 431, 470, 476 |
-| vortex/rules/triage.py                 |       57 |        4 |     93% |205-206, 217, 230 |
+| vortex/rules/tools.py                  |      157 |       17 |     89% |124, 172-173, 221-228, 338, 342, 427, 448, 487, 493 |
+| vortex/rules/triage.py                 |       62 |        1 |     98% |       259 |
 | vortex/settings.py                     |      214 |        2 |     99% |  365, 517 |
 | vortex/tools.py                        |       93 |        7 |     92% |257, 264, 275-277, 279, 298 |
-| **TOTAL**                              | **6374** |  **953** | **85%** |           |
+| **TOTAL**                              | **6383** |  **948** | **85%** |           |
 
 6 empty files skipped.
 
@@ -61,22 +61,11 @@ Below are examples of the badges you can use in your main branch `README` file.
 
 ### Direct image
 
-[![Coverage badge](https://raw.githubusercontent.com/jferreiros/vortex/python-coverage-comment-action-data/badge.svg)](https://htmlpreview.github.io/?https://github.com/jferreiros/vortex/blob/python-coverage-comment-action-data/htmlcov/index.html)
+[![Coverage badge](https://github.com/jferreiros/vortex/raw/python-coverage-comment-action-data/badge.svg)](https://github.com/jferreiros/vortex/tree/python-coverage-comment-action-data)
 
 This is the one to use if your repository is private or if you don't want to customize anything.
 
-### [Shields.io](https://shields.io) Json Endpoint
 
-[![Coverage badge](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/jferreiros/vortex/python-coverage-comment-action-data/endpoint.json)](https://htmlpreview.github.io/?https://github.com/jferreiros/vortex/blob/python-coverage-comment-action-data/htmlcov/index.html)
-
-Using this one will allow you to [customize](https://shields.io/endpoint) the look of your badge.
-It won't work with private repositories. It won't be refreshed more than once per five minutes.
-
-### [Shields.io](https://shields.io) Dynamic Badge
-
-[![Coverage badge](https://img.shields.io/badge/dynamic/json?color=brightgreen&label=coverage&query=%24.message&url=https%3A%2F%2Fraw.githubusercontent.com%2Fjferreiros%2Fvortex%2Fpython-coverage-comment-action-data%2Fendpoint.json)](https://htmlpreview.github.io/?https://github.com/jferreiros/vortex/blob/python-coverage-comment-action-data/htmlcov/index.html)
-
-This one will always be the same color. It won't work for private repos. I'm not even sure why we included it.
 
 ## What is that?
 
