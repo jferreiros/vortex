@@ -583,36 +583,85 @@ async def test_a_short_ambiguous_turn_keeps_the_call_language(voice_settings) ->
     assert pushed[0].delta.voice == settings.google_tts_voice_ca
 
 
-async def test_the_idle_handler_speaks_the_prompt_in_the_call_language(voice_settings) -> None:
-    """A silent caller hears "are you still there?" in the language of the call.
+async def test_the_idle_handler_reprompts_once_then_submits(offline_settings) -> None:
+    """First idle asks if they are there; second idle summarises and submits.
 
-    The platform cuts a call that goes quiet, so the idle event has to speak.
-    The prompt is read at fire time, so a mid-call language switch moves it.
+    The difficult caller goes quiet for about eight seconds. One nudge at 5 s,
+    then a submit on the next idle, so the three-minute call does not end empty.
     """
     pytest.importorskip("pipecat")
 
-    from vortex.conversation.prompt import idle_prompt_for
-    from vortex.line.pipecat_voice import _LanguageState, _make_idle_speaker
+    from datetime import datetime
 
-    settings = voice_settings()
+    from vortex.contract import MADRID, BookAction
+    from vortex.conversation.prompt import idle_prompt_for, idle_submit_line_for
+    from vortex.line.pipecat_voice import _LanguageState, _make_idle_speaker
+    from vortex.line.session import CallSession
+    from vortex.line.twilio import StartPayload
+
     events: list[tuple[str, dict]] = []
-    queued: list[object] = []
 
     class Task:
+        def __init__(self) -> None:
+            self.queued: list[object] = []
+
         async def queue_frames(self, frames: list[object]) -> None:
-            queued.extend(frames)
+            self.queued.extend(frames)
+
+    start = StartPayload(streamSid="MZ-idle", callSid="CA-idle", customParameters={})
+    session = CallSession.open(start, settings=offline_settings)
+    original_event = session.ctx.log.event
+
+    def _event(kind: str, **kwargs: object) -> None:
+        events.append((kind, kwargs))
+        original_event(kind, **kwargs)
+
+    session.ctx.log.event = _event  # type: ignore[method-assign]
+
+    booking = BookAction(
+        patient_id="P00042",
+        provider_id="PR05",
+        location_id="sur",
+        appointment_type_id="review",
+        slot=datetime(2026, 9, 24, 16, 30, tzinfo=MADRID),
+        policy_id="sanitas",
+    )
+    session.memory.remember_prepared("prepare_booking", booking)
 
     state = _LanguageState("es")
-    handler = _make_idle_speaker(_session(settings, events), state, Task())
+    task = Task()
+    handler = _make_idle_speaker(session, state, task)
 
     await handler(None)
-    assert [kind for kind, _ in events] == ["voice.user_idle"]
-    assert [frame.text for frame in queued] == [idle_prompt_for("es")]
+    assert ("voice.user_idle", {"count": 1, "phase": "reprompt"}) in events
+    assert [frame.text for frame in task.queued] == [idle_prompt_for("es")]
+    assert session.submitted == []
 
     state.language = "ca"
     await handler(None)
-    assert queued[-1].text == idle_prompt_for("ca")
-    assert [kind for kind, _ in events] == ["voice.user_idle"] * 2
+    assert ("voice.user_idle", {"count": 2, "phase": "submit"}) in events
+    idle_submit = next(kwargs for kind, kwargs in events if kind == "submit.idle")
+    assert idle_submit["branch"] == "prepared_on_idle"
+    assert task.queued[-1].text == idle_submit_line_for("ca")
+    assert len(session.submitted) == 1
+    assert session.sent_actions[0] == booking
+    assert session.memory.confirmed is True
+
+    await handler(None)
+    assert ("voice.user_idle", {"count": 3, "phase": "done"}) in events
+    assert len(session.submitted) == 1
+    await session.close(reason="test")
+
+
+def test_user_aggregator_params_carry_idle_and_stop_timeouts() -> None:
+    """Acceptance: user_idle_timeout=5.0 and user_turn_stop_timeout=6.0."""
+    pytest.importorskip("pipecat")
+    from vortex.conversation.turns import TurnSettings
+    from vortex.line.pipecat_voice import _user_aggregator_params
+
+    params = _user_aggregator_params(TurnSettings())
+    assert params.user_idle_timeout == 5.0
+    assert params.user_turn_stop_timeout == 6.0
 
 
 def test_vad_mode_wires_our_turn_strategies() -> None:

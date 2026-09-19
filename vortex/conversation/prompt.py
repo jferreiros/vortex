@@ -171,7 +171,8 @@ before the caller agrees. Then prepare_booking and submit_action, and only then 
 confirm briefly and say goodbye.
 
 TROUBLE. Garbled: ask them to repeat it; never guess. \
-Silence: "Are you still there?", then your last question. Rude caller: stay calm.
+Silence: "Are you still there?" once; second silence: submit. \
+Rude caller: stay calm.
 
 FACTS. {sites_brief} Hours, days, doctors, towns: ask clinic_facts and say only \
 its answer, never memory. The caller books on what you say.
@@ -224,6 +225,15 @@ IDLE_PROMPTS: dict[str, str] = {
     "eu": "Hor zaude oraindik?",
 }
 
+# Spoken on the second idle, just before we submit what the call already knows.
+IDLE_SUBMIT_LINES: dict[str, str] = {
+    "en": "I'll note what we have so far. Thank you for calling.",
+    "es": "Anoto lo que tenemos por ahora. Gracias por llamar.",
+    "ca": "Anoto el que tenim de moment. Gràcies per trucar.",
+    "gl": "Anoto o que temos por agora. Grazas por chamar.",
+    "eu": "Orain artekoa idatziko dut. Eskerrik asko deitzeagatik.",
+}
+
 # Said the moment triage flags a red flag. "112" is the check the harness runs.
 EMERGENCY_LINES: dict[str, str] = {
     "en": "This sounds like an emergency. Please hang up and call 112 right now.",
@@ -263,6 +273,10 @@ def greeting_for(language: str | None = None) -> str:
 
 def idle_prompt_for(language: str | None = None) -> str:
     return _line(IDLE_PROMPTS, language)
+
+
+def idle_submit_line_for(language: str | None = None) -> str:
+    return _line(IDLE_SUBMIT_LINES, language)
 
 
 def emergency_line_for(language: str | None = None) -> str:

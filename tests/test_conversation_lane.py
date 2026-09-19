@@ -32,6 +32,7 @@ from vortex.conversation.prompt import (
     goodbye_for,
     greeting_for,
     idle_prompt_for,
+    idle_submit_line_for,
     initial_messages,
     refusal_line_for,
 )
@@ -39,6 +40,7 @@ from vortex.conversation.turns import (
     DEFAULT_EXPOSED_TOOLS,
     TurnSettings,
     default_turn_settings,
+    idle_phase,
     user_turn_strategies,
 )
 
@@ -185,13 +187,21 @@ def test_initial_messages_is_one_system_turn() -> None:
 
 def test_canned_lines_exist_in_every_language_and_fall_back_to_english() -> None:
     for code in SUPPORTED_LANGUAGES:
-        lines = (greeting_for, idle_prompt_for, emergency_line_for, refusal_line_for, goodbye_for)
+        lines = (
+            greeting_for,
+            idle_prompt_for,
+            idle_submit_line_for,
+            emergency_line_for,
+            refusal_line_for,
+            goodbye_for,
+        )
         for fn in lines:
             assert fn(code).strip(), (fn.__name__, code)
     assert "112" in emergency_line_for("en")
     assert "112" in emergency_line_for("ca")
     assert greeting_for("de") == greeting_for("en") == GREETING
     assert idle_prompt_for(None) == "Are you still there?"
+    assert idle_submit_line_for(None).startswith("I'll note what we have")
     assert prompt_module.CLINIC_NAME in GREETING
 
 
@@ -201,6 +211,7 @@ def test_canned_lines_never_leak_anything() -> None:
     for table in (
         prompt_module.GREETINGS,
         prompt_module.IDLE_PROMPTS,
+        prompt_module.IDLE_SUBMIT_LINES,
         prompt_module.EMERGENCY_LINES,
         prompt_module.REFUSAL_LINES,
         prompt_module.GOODBYE_LINES,
@@ -221,12 +232,22 @@ def test_turn_settings_are_english_first_and_interruptible() -> None:
     assert turns.enable_interruptions is True
     assert turns.stt_language_hints[0] == "en"
     assert set(turns.stt_language_hints) >= {"en", "es", "ca"}
+    assert turns.user_idle_secs == 5.0
+    assert turns.user_turn_stop_secs == 6.0
     assert 0 < turns.user_idle_secs < 8, "nudge before the caller's 8-second silence ends the call"
     assert turns.exposed_tools == DEFAULT_EXPOSED_TOOLS
     assert "submit_action" in turns.exposed_tools
     # Frozen: one instance is shared by every call, so nobody may mutate it.
     with pytest.raises(FrozenInstanceError):
         turns.enable_interruptions = False  # type: ignore[misc]
+
+
+def test_idle_phase_is_one_reprompt_then_submit() -> None:
+    assert idle_phase(1) == "reprompt"
+    assert idle_phase(2) == "submit"
+    assert idle_phase(3) == "done"
+    with pytest.raises(ValueError):
+        idle_phase(0)
 
 
 def test_soniox_mode_leaves_turn_strategies_to_the_stt_service() -> None:
