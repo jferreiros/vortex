@@ -34,7 +34,8 @@ It is the only published ground truth in the challenge. A copy lives at
 **Re-fetch it each morning.** The roster is fixed — one seed builds it for every
 process — but "the earliest appointment" is anchored to 09:00 Europe/Madrid on
 the day it is dialled, so a booking answer changes overnight. A stale roster
-judges yesterday's call correctly and today's wrong.
+judges yesterday's call correctly and today's wrong. `make evals-fetch` prints
+the anchor of the file it saw; the runner gates on the same fact.
 
 ## The judge
 
@@ -139,11 +140,18 @@ persona, but the organisers reuse a persona across problems, so it identifies
 only **26 of the 73** cases on its own. The joiner uses the number when it is
 unambiguous, refuses to guess when it is not, and `CASE=` says which.
 
-**Watch the anchor.** The roster file is the export at Friday's anchor. "The
-earliest appointment" means the earliest from the day after the call, so from
-Saturday onward every "earliest" answer in the file has moved while the problem
-page shows today's. The runner compares the roster's anchor with today and says
-so; a slot mismatch on such a case is the anchor, not the agent.
+**Watch the anchor.** The roster file is the export at one day's anchor (09:00
+Europe/Madrid). "The earliest appointment" means the earliest from the day
+after the call, so from the next day onward the slot in an "earliest" answer
+has moved while the problem page shows today's. The runner therefore refuses
+to score them across the gap: a judged call dialled on a day other than its
+case's `reference_time` comes back `skipped` — with `STALE ANCHOR` on the
+notes — never `fail`, so a moved answer cannot silently fail the agent. Cases
+whose accepted answers carry no slot (registers, cancels, refusals) still
+score, and a call dialled on the anchor day itself still scores in full.
+Scoring resumes either when you judge a call from the anchor day or when the
+organisers re-export and `make evals-fetch` lands the new anchor; the fetch
+prints the anchor of every file it sees and warns when it is behind.
 
 ## Finding a caller for a rule nobody publishes
 
