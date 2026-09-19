@@ -6,15 +6,22 @@ contextvars. Phone numbers and national ids are masked; audio is never sent.
 
 The OpenAI drop-in records each completion as a generation (model, tokens,
 latency, errors). Tool calls nest as ``tool`` or ``retriever`` observations.
+
+Tracing fails open. Opening, updating or flushing an observation is logged when
+it breaks and never raised, because a dead exporter must not stop a call from
+reaching its one submission. What the traced body raises is always re-raised.
 """
 
 from __future__ import annotations
 
+import logging
 import os
 import re
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import Any
+
+log = logging.getLogger(__name__)
 
 RETRIEVER_TOOLS = frozenset(
     {
@@ -82,10 +89,60 @@ def _sync_env() -> None:
 def _client() -> Any | None:
     if not enabled():
         return None
-    _sync_env()
-    from langfuse import get_client
+    try:
+        _sync_env()
+        from langfuse import get_client
 
-    return get_client()
+        return get_client()
+    except Exception as exc:
+        _tracing_failed("client", exc)
+        return None
+
+
+def _tracing_failed(step: str, exc: BaseException) -> None:
+    log.debug("langfuse %s failed: %s: %s", step, type(exc).__name__, exc)
+
+
+@contextmanager
+def _observed(start: Callable[[], Any], step: str) -> Iterator[Any]:
+    """Enter a Langfuse context manager, or yield ``None`` when the SDK fails.
+
+    Tracing never decides whether a call submits, so a broken exporter must not
+    stop the body from running. Whatever the body raises is always re-raised.
+    """
+    try:
+        manager = start()
+        entered = manager.__enter__()
+    except Exception as exc:
+        _tracing_failed(f"{step} start", exc)
+        yield None
+        return
+    try:
+        yield entered
+    except BaseException as exc:
+        _leave(manager, step, exc)
+        raise
+    _leave(manager, step, None)
+
+
+def _leave(manager: Any, step: str, exc: BaseException | None) -> None:
+    try:
+        if exc is None:
+            manager.__exit__(None, None, None)
+        else:
+            manager.__exit__(type(exc), exc, exc.__traceback__)
+    except Exception as failure:
+        _tracing_failed(f"{step} exit", failure)
+
+
+def update_observation(observation: Any, **fields: Any) -> None:
+    """Write to an observation. A failing SDK is logged, never raised."""
+    if observation is None:
+        return
+    try:
+        observation.update(**fields)
+    except Exception as exc:
+        _tracing_failed("observation update", exc)
 
 
 def mask_phone(value: str | None) -> str:
@@ -226,8 +283,6 @@ def trace_call(session: Any) -> Iterator[Any]:
     if client is None:
         yield None
         return
-    from langfuse import propagate_attributes
-
     tags = ["voice", session.settings.llm_provider]
     tags.append("pipecat" if session.settings.voice_is_pipecat else "stub")
     problem = _problem_id(session)
@@ -241,29 +296,48 @@ def trace_call(session: Any) -> Iterator[Any]:
         "voice": "pipecat" if session.settings.voice_is_pipecat else "stub",
         "clinic": "live" if session.settings.clinic_is_live else "fake",
     }
-    with client.start_as_current_observation(
-        as_type="agent",
-        name="handle-inbound-call",
-        input=_call_input(session),
-        metadata=metadata,
-    ) as observation:
-        with propagate_attributes(
+
+    def start_call() -> Any:
+        return client.start_as_current_observation(
+            as_type="agent",
+            name="handle-inbound-call",
+            input=_call_input(session),
+            metadata=metadata,
+        )
+
+    def start_attributes() -> Any:
+        from langfuse import propagate_attributes
+
+        return propagate_attributes(
             session_id=session.call_id,
             user_id=mask_phone(session.start.from_number),
             tags=tags,
             metadata=metadata,
             environment=session.settings.langfuse_environment or None,
-        ):
+        )
+
+    with _observed(start_call, "call observation") as observation:
+        with _observed(start_attributes, "call attributes"):
             try:
                 yield observation
             finally:
-                output = _call_output(session)
-                level = "ERROR" if output.get("reason") == "crashed" else None
-                update: dict[str, Any] = {"output": output}
-                if level:
-                    update["level"] = level
-                observation.update(**update)
-                client.flush()
+                _record_call_output(observation, session)
+                _flush(client)
+
+
+def _record_call_output(observation: Any, session: Any) -> None:
+    if observation is None:
+        return
+    try:
+        output = _call_output(session)
+    except Exception as exc:
+        _tracing_failed("call output", exc)
+        return
+    level = "ERROR" if output.get("reason") == "crashed" else None
+    update: dict[str, Any] = {"output": output}
+    if level:
+        update["level"] = level
+    update_observation(observation, **update)
 
 
 @contextmanager
@@ -272,16 +346,21 @@ def observe_tool(name: str, raw_args: dict[str, Any]) -> Iterator[Any]:
     if client is None:
         yield None
         return
-    with client.start_as_current_observation(
-        as_type=tool_observation_type(name),
-        name=tool_observation_name(name),
-        input=redact(raw_args),
-        metadata={"tool": name},
-    ) as observation:
+
+    def start_tool() -> Any:
+        return client.start_as_current_observation(
+            as_type=tool_observation_type(name),
+            name=tool_observation_name(name),
+            input=redact(raw_args),
+            metadata={"tool": name},
+        )
+
+    with _observed(start_tool, "tool observation") as observation:
         try:
             yield observation
         except Exception as exc:
-            observation.update(
+            update_observation(
+                observation,
                 output={"error": f"{type(exc).__name__}: {exc}"},
                 level="ERROR",
             )
@@ -296,16 +375,27 @@ def observe_span(
     if client is None:
         yield None
         return
-    with client.start_as_current_observation(
-        as_type="span",
-        name=name,
-        input=redact(input) if input is not None else None,
-        metadata=metadata or {},
-    ) as observation:
+
+    def start_span() -> Any:
+        return client.start_as_current_observation(
+            as_type="span",
+            name=name,
+            input=redact(input) if input is not None else None,
+            metadata=metadata or {},
+        )
+
+    with _observed(start_span, "span observation") as observation:
         yield observation
 
 
 def flush() -> None:
-    client = _client()
-    if client is not None:
+    _flush(_client())
+
+
+def _flush(client: Any | None) -> None:
+    if client is None:
+        return
+    try:
         client.flush()
+    except Exception as exc:
+        _tracing_failed("flush", exc)
