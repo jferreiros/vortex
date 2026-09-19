@@ -342,13 +342,7 @@
   }
 }
 
-.ui-modal-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--space-3);
-  padding: var(--space-4) var(--space-5);
-  border-top: 1px solid var(--color-border);
-}
+/* .ui-modal-actions lives in components/ui/ui.css — shared by every modal. */
 
 .ui-modal-body ul {
   margin: var(--space-3) 0;

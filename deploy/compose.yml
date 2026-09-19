@@ -21,6 +21,12 @@ services:
       # The line runs as its own container on the same network. Without this
       # the board never sees a real call: it would read its own empty log.
       VORTEX_LINE_URL: http://vortex-line:7860
+      # /app/logs is the line's volume, mounted read-only below — but the
+      # wall's Horarios cancel buttons write wall_cancellations rows through
+      # database/, so the product DB lives on the board's own writable volume.
+      # It is not a copy of the line's: the appointments-status flip simply
+      # no-ops on ids only the line's file knows.
+      VORTEX_PRODUCT_DB: /app/board-data/vortex_product.db
     volumes:
       # Fallback only: the board reads the line's /calls API first
       # (VORTEX_LINE_URL above). If that fetch fails, it reads this file —
@@ -28,6 +34,7 @@ services:
       # reads an empty log and every screen silently shows zeros. Read-only:
       # the board never writes call events.
       - board-logs:/app/logs:ro
+      - board-data:/app/board-data
     networks:
       - coolify
     expose:
@@ -62,3 +69,9 @@ volumes:
     # point: no volume, no silent empty board.
     name: vortex-line_line-logs
     external: true
+  board-data:
+    # Writable scratch for the board's own product DB (wall_cancellations and
+    # the appointment status flips the Horarios cancel buttons write). The
+    # line's database stays on its own volume; this one is the control
+    # centre's, and losing it to a rebuild only re-frees the same slots.
+    name: vortex-board_board-data

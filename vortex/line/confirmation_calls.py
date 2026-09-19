@@ -46,8 +46,10 @@ Persistence is a JSON file next to the calls log, mirroring
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
+import os
 import re
 import unicodedata
 import uuid
@@ -61,6 +63,7 @@ import httpx
 
 from vortex.contract import MADRID
 from vortex.conversation.prompt import CLINIC_NAME
+from vortex.line import voice_config
 from vortex.line.sms import format_slot_es
 from vortex.settings import Settings
 
@@ -350,12 +353,14 @@ def no_speech_text(language: str) -> str:
     return _NO_SPEECH[call_language(language)]
 
 
-def _gather(action_url: str, locale: str, say: str, *, timeout: int = 10) -> str:
+def _gather(
+    action_url: str, locale: str, say: str, *, timeout: int = 10, audio_url: str | None = None
+) -> str:
     return (
         f'<Gather input="speech" language="{locale}" action={quoteattr(action_url)} '
         f'method="POST" speechTimeout="auto" timeout="{timeout}">'
-        f'<Say language="{locale}">{escape(say)}</Say>'
-        f"</Gather>"
+        + _speech(locale, say, audio_url)
+        + "</Gather>"
     )
 
 
@@ -394,7 +399,14 @@ _HANDOFF_BRIDGE: dict[str, tuple[str, str]] = {
 }
 
 
-def twiml_handoff_to_agent(call: ConfirmationCall, ws_url: str) -> str:
+def handoff_bridge_text(language: str | None) -> str:
+    """The "le paso con mi compañero" line in the call's language."""
+    return _HANDOFF_BRIDGE.get(call_language(language), _HANDOFF_BRIDGE["en"])[1]
+
+
+def twiml_handoff_to_agent(
+    call: ConfirmationCall, ws_url: str, *, audio_url: str | None = None
+) -> str:
     """TwiML that bridges into the voice-agent websocket carrying the handoff."""
     voice, text = _HANDOFF_BRIDGE.get(call.language, _HANDOFF_BRIDGE["en"])
     params = {
@@ -406,8 +418,7 @@ def twiml_handoff_to_agent(call: ConfirmationCall, ws_url: str) -> str:
     rendered = "".join(
         f"<Parameter name={quoteattr(k)} value={quoteattr(v)}/>" for k, v in params.items()
     )
-    inner = (
-        f'<Say language="{voice}">{escape(text)}</Say>'
+    inner = _speech(voice, text, audio_url) + (
         f"<Connect><Stream url={quoteattr(ws_url)}>{rendered}</Stream></Connect>"
     )
     return twiml_response(inner)
@@ -421,6 +432,76 @@ def handoff_ws_url(public_base_url: str) -> str:
     elif base.startswith("http://"):
         base = "ws://" + base[len("http://") :]
     return base + "/ws"
+
+
+# --- the wall's own voice for the Twilio-only segments -----------------------
+#: Synthesis runs off the event loop with this budget; on any failure the
+#: TwiML keeps its <Say>, so a TTS outage never breaks a confirmation call.
+AUDIO_BUDGET_SECS = 8.0
+_AUDIO_NAME_RE = re.compile(r"[0-9a-f]{24}\.mp3")
+
+
+def confirmation_audio_dir(settings: Settings) -> Path:
+    override = os.environ.get("VORTEX_CONFIRMATION_AUDIO_DIR", "").strip()
+    if override:
+        return Path(override)
+    return settings.calls_log_path.parent / "confirmation_audio"
+
+
+def confirmation_voice_name(cfg: voice_config.VoiceConfig, language: str | None) -> str:
+    """The Chirp 3 HD persona the wall configured, in the call's locale."""
+    base = f"{twilio_locale(language)}-Chirp3-HD-{voice_config.FEMALE_PERSONA}"
+    return voice_config.apply_gender(base, cfg.voice)
+
+
+def audio_filename(cfg: voice_config.VoiceConfig, language: str | None, text: str) -> str:
+    """Deterministic cache key: same words, voice and rate reuse the same MP3."""
+    key = f"{cfg.voice}|{cfg.speech_rate}|{call_language(language)}|{text}"
+    return hashlib.sha256(key.encode()).hexdigest()[:24] + ".mp3"
+
+
+def valid_audio_name(name: str) -> bool:
+    return bool(_AUDIO_NAME_RE.fullmatch(name))
+
+
+async def ensure_confirmation_audio(settings: Settings, text: str, language: str) -> str | None:
+    """The cached MP3 filename for one spoken line, in the wall's own voice.
+
+    None means "keep the <Say>": no TTS credentials, a synthesis error or a
+    slow Google all land there, and the call still says its line.
+    """
+    cfg = voice_config.load(settings)
+    name = audio_filename(cfg, language, text)
+    directory = confirmation_audio_dir(settings)
+    if (directory / name).is_file():
+        return name
+    try:
+        audio = await asyncio.wait_for(
+            asyncio.to_thread(
+                voice_config.synthesize,
+                settings,
+                cfg,
+                text,
+                language_code=twilio_locale(language),
+                voice_name=confirmation_voice_name(cfg, language),
+            ),
+            timeout=AUDIO_BUDGET_SECS,
+        )
+    except Exception as exc:  # noqa: BLE001 - the <Say> fallback owns failures
+        log.warning("confirmation audio unavailable, keeping <Say>: %s", exc)
+        return None
+    directory.mkdir(parents=True, exist_ok=True)
+    tmp = directory / f".{name}.tmp"
+    tmp.write_bytes(audio)
+    tmp.rename(directory / name)
+    return name
+
+
+def _speech(locale: str, text: str, audio_url: str | None) -> str:
+    """A <Play> of the synthesised line when we have it, else a <Say>."""
+    if audio_url:
+        return f"<Play>{escape(audio_url)}</Play>"
+    return f'<Say language="{locale}">{escape(text)}</Say>'
 
 
 def handoff_from_parameters(params: dict[str, str]) -> dict[str, str] | None:
@@ -439,32 +520,40 @@ def twiml_response(inner: str) -> str:
     return f'<?xml version="1.0" encoding="UTF-8"?><Response>{inner}</Response>'
 
 
+def ask_speech(call: ConfirmationCall, *, reprompt: bool = False) -> str:
+    """The words the question (or its reprompt) speaks."""
+    if reprompt:
+        return ack_text("unknown", call.language)
+    return ask_text(
+        language=call.language,
+        when=call.appointment_dt,
+        provider_name=call.provider_name,
+        location_name=call.location_name,
+    )
+
+
 def twiml_ask(
-    call: ConfirmationCall, base_url: str, *, attempt: int = 1, reprompt: bool = False
+    call: ConfirmationCall,
+    base_url: str,
+    *,
+    attempt: int = 1,
+    reprompt: bool = False,
+    audio_url: str | None = None,
 ) -> str:
     """The question Twilio plays. On silence the flow redirects to /noresult so
     an answered-but-quiet call is recorded instead of hanging as ``calling``."""
     base = base_url.rstrip("/")
     locale = twilio_locale(call.language)
-    say = (
-        ack_text("unknown", call.language)
-        if reprompt
-        else ask_text(
-            language=call.language,
-            when=call.appointment_dt,
-            provider_name=call.provider_name,
-            location_name=call.location_name,
-        )
-    )
+    say = ask_speech(call, reprompt=reprompt)
     result_url = f"{base}/confirmation/result?cid={call.confirmation_id}&attempt={attempt}"
-    gather = _gather(result_url, locale, say)
+    gather = _gather(result_url, locale, say, audio_url=audio_url)
     noresult = f"{base}/confirmation/noresult?cid={call.confirmation_id}"
     return twiml_response(gather + f'<Redirect method="POST">{escape(noresult)}</Redirect>')
 
 
-def twiml_say(text: str, language: str) -> str:
+def twiml_say(text: str, language: str, *, audio_url: str | None = None) -> str:
     locale = twilio_locale(language)
-    return twiml_response(f'<Say language="{locale}">{escape(text)}</Say>')
+    return twiml_response(_speech(locale, text, audio_url))
 
 
 class CallJob(Protocol):
@@ -482,7 +571,13 @@ class CallJob(Protocol):
         ...
 
     def ask_twiml(
-        self, call: ConfirmationCall, base_url: str, *, attempt: int, reprompt: bool
+        self,
+        call: ConfirmationCall,
+        base_url: str,
+        *,
+        attempt: int,
+        reprompt: bool,
+        audio_url: str | None = None,
     ) -> str: ...
 
     def classify(self, transcript: str, language: str) -> CallOutcome: ...
@@ -519,9 +614,15 @@ class AppointmentConfirmationJob:
         return when - lead
 
     def ask_twiml(
-        self, call: ConfirmationCall, base_url: str, *, attempt: int, reprompt: bool
+        self,
+        call: ConfirmationCall,
+        base_url: str,
+        *,
+        attempt: int,
+        reprompt: bool,
+        audio_url: str | None = None,
     ) -> str:
-        return twiml_ask(call, base_url, attempt=attempt, reprompt=reprompt)
+        return twiml_ask(call, base_url, attempt=attempt, reprompt=reprompt, audio_url=audio_url)
 
     def classify(self, transcript: str, language: str) -> CallOutcome:
         return classify_reply(transcript, language)

@@ -158,6 +158,26 @@ def test_cancel_frees_a_slot_booked_earlier_in_the_same_stream() -> None:
     assert calendar.booked == 0
 
 
+def test_wall_cancel_frees_the_slot_by_key() -> None:
+    """The Horarios cancel buttons don't write a CANCEL event — the board
+    drops the slot with cal.drop_cancelled over database/'s table."""
+    bookings = cal.bookings_from_events([_book_event(9, 30, patient="P00007")])
+    key = cal.cancel_key("PR01", "centro", "2026-10-05T09:30:00+02:00")
+    assert key in bookings
+    calendar = _only_calendar([])
+    calendars = cal.build_calendars(
+        _catalogue(), cal.drop_cancelled(bookings, {key}), start_from=_START, days_window=8
+    )
+    assert calendars[0].booked == calendar.booked == 0
+    # The input dict is untouched — drop_cancelled returns a fresh one.
+    assert key in bookings
+
+
+def test_cancel_key_rejects_a_bad_slot() -> None:
+    assert cal.cancel_key("PR01", "centro", "not-a-date") is None
+    assert cal.cancel_key("", "centro", "2026-10-05T09:30:00+02:00") is None
+
+
 # ---- RESCHEDULE -----------------------------------------------------------
 
 
@@ -458,6 +478,7 @@ def test_agenda_options_lists_catalogue_dropdowns() -> None:
     opts = cal.agenda_options(_catalogue())
     assert opts["ok"] is True
     assert opts["doctors"][0]["name"] == "Dra. Uno"
+    assert opts["doctors"][0]["id"] == "PR01"
 
 
 def test_suggest_doctors_stays_empty_until_you_type() -> None:
@@ -502,6 +523,12 @@ def test_doctor_agenda_never_lists_the_roster() -> None:
     assert fifth["visits"][0]["full_name"] == "Marta Ruiz"
     assert payload["visits"][0]["full_name"] == "Marta Ruiz"
     assert payload["visits"][0]["note"] == ""
+    # The slot key a wall cancellation posts back rides on every visit row.
+    visit = payload["visits"][0]
+    assert visit["provider_id"] == "PR01"
+    assert visit["patient_id"] == "P00007"
+    assert visit["location_id"] == "centro"
+    assert visit["slot"].startswith("2026-10-05T09:00")
     booked = next(cell for cell in payload["days"][0]["cells"] if cell["status"] == "booked")
     assert booked["visit"]["full_name"] == "Marta Ruiz"
     assert booked["visit"]["duration_minutes"] == 15
