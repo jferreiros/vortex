@@ -9,10 +9,9 @@ The team log is the `#github` channel on `vortex-hackspain`. PRs, pushes,
 reviews, releases and workflow runs arrive through GitHub's native webhook
 (`…/github` suffix). Evals and ad-hoc pings go through `scripts/notify-discord.sh`.
 
-Never commit the webhook URL. It lives in `.env` locally,
-`/opt/vortex-board/deploy/.env` on the VPS, and is **not** posted from GitHub
-Actions: Discord 403s those runner IPs. The `/github` hook is the allowlisted
-path.
+Never commit webhook URLs. They live in `.env` locally and `deploy/.env` on
+the VPS, and are **not** posted from GitHub Actions: Discord 403s those
+runner IPs. The `/github` hook is the allowlisted path for git events.
 
 ## Official Discord MCP / CLI
 
@@ -31,11 +30,18 @@ Local Discord RPC on `127.0.0.1:6463` is Rich Presence, not server admin.
 ```bash
 scripts/notify-discord.sh '**eval** 12/17 pass · https://vortex.203.0.113.20.sslip.io/wall'
 scripts/notify-discord.sh --evals     # embed from evals/results/summary.json
+scripts/notify-discord.sh --calls     # digest of the live call log
+make logs-discord LOG=logs/calls-runall-2026-09-18-2332.jsonl
 ```
 
-Keep dumps short: score, case id, wall/evals link. Do not paste ops passwords
-or `PLATFORM_API_KEY`. GitHub Actions cannot post here (Discord 403s runner
-IPs); run `--evals` on a laptop or the VPS after `make evals`.
+Call logs go to `#calls` via `DISCORD_CALLS_WEBHOOK_URL` (fallback:
+`DISCORD_WEBHOOK_URL` / `#github`). Each inbound call posts one short card
+when the socket closes, from `vortex-line`.
+
+Keep dumps short: score, case id, wall/evals/langfuse link. Never names,
+national ids, phones or transcript text. Do not paste ops passwords or
+`PLATFORM_API_KEY`. GitHub Actions cannot post here (Discord 403s runner
+IPs); run `--evals` / `--calls` on a laptop or the VPS.
 
 ## Confirm GitHub → Discord
 

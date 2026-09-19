@@ -18,6 +18,7 @@ VOICE_KEYS = (
     "LLM_BASE_URL",
     "LLM_MODEL",
     "LLM_MAX_TOKENS",
+    "LLM_ALT_MODEL",
     "HELMCODE_BASE_URL",
     "HELMCODE_API_KEY",
     "CLOUDFLARE_ACCOUNT_ID",
@@ -52,6 +53,7 @@ VOICE_KEYS = (
     "LANGFUSE_SECRET_KEY",
     "LANGFUSE_BASE_URL",
     "LANGFUSE_TRACING_ENVIRONMENT",
+    "HF_TOKEN",
     "VORTEX_ENV",
     "GOOGLE_API_KEY",
     "GEMINI_LIVE_MODEL",
@@ -177,9 +179,40 @@ def test_llm_max_tokens_defaults_to_320(clean_env) -> None:
     """
     s = _settings(clean_env)
     assert s.llm_max_tokens == 320
+    assert s.llm_alt_model == ""
+    assert s.describe()["llm_max_tokens"] == 320
+    assert s.describe()["llm_alt_model"] == ""
 
     s = _settings(clean_env, LLM_MAX_TOKENS="500")
     assert s.llm_max_tokens == 500
+    assert s.describe()["llm_max_tokens"] == 500
+
+
+def test_llm_max_tokens_below_the_booking_floor_is_raised_to_320(clean_env) -> None:
+    """A leftover ``LLM_MAX_TOKENS=120`` in .env must not ship again.
+
+    120 is enough for a spoken turn and too little for a nested-slot tool
+    call. The floor is 256; anything under it becomes the 320 default so
+    ``/health`` reports the value the line actually uses.
+    """
+    s = _settings(clean_env, LLM_MAX_TOKENS="120")
+    assert s.llm_max_tokens == 320
+    assert s.describe()["llm_max_tokens"] == 320
+
+    s = _settings(clean_env, LLM_MAX_TOKENS="255")
+    assert s.llm_max_tokens == 320
+
+    s = _settings(clean_env, LLM_MAX_TOKENS="256")
+    assert s.llm_max_tokens == 256
+
+
+def test_llm_alt_model_can_be_cleared(clean_env) -> None:
+    s = _settings(clean_env, LLM_ALT_MODEL="")
+    assert s.llm_alt_model == ""
+    assert s.describe()["llm_alt_model"] == ""
+
+    s = _settings(clean_env, LLM_ALT_MODEL="glm5.3-flash")
+    assert s.llm_alt_model == "glm5.3-flash"
 
 
 def test_the_arbiter_overrides_win_too(clean_env) -> None:
@@ -415,9 +448,11 @@ def test_describe_never_leaks_a_key(clean_env) -> None:
         "HELMCODE_API_KEY": "helmcode-secret",
         "ELEVENLABS_API_KEY": "elevenlabs-secret",
         "ARBITER_API_KEY": "arbiter-secret",
+        "TYPESAFE_API_KEY": "typesafe-secret",
         "LANGFUSE_PUBLIC_KEY": "pk-lf-secret",
         "LANGFUSE_SECRET_KEY": "sk-lf-secret",
         "GOOGLE_API_KEY": "google-api-secret",
+        "HF_TOKEN": "hf-secret",
     }
     s = _settings(clean_env, VORTEX_TTS_PROVIDER="elevenlabs", **secrets)
     described = s.describe()
@@ -428,7 +463,10 @@ def test_describe_never_leaks_a_key(clean_env) -> None:
     assert described["has_llm_key"] is True
     assert described["has_elevenlabs_key"] is True
     assert described["has_arbiter_key"] is True
+    assert described["has_typesafe_key"] is True
+    assert described["jev_arbiter"] is False
     assert described["has_langfuse_keys"] is True
+    assert described["has_hf_token"] is True
     assert described["has_google_api_key"] is True
     assert described["llm_provider"] == "helmcode"
     assert described["tts_provider"] == "elevenlabs"

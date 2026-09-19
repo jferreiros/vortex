@@ -6,6 +6,7 @@ pipecat releases, without a key and without a network.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime
 
@@ -716,51 +717,93 @@ async def test_a_short_ambiguous_turn_keeps_the_call_language(voice_settings) ->
     assert pushed[0].delta.voice == settings.google_tts_voice_ca
 
 
-async def test_the_idle_handler_speaks_the_prompt_in_the_call_language(voice_settings) -> None:
-    """A silent caller hears the nudge in the language of the call.
+async def test_the_idle_handler_reprompts_once_then_submits(offline_settings) -> None:
+    """First idle asks if they are there; second idle summarises and submits.
 
-    The platform cuts a call that goes quiet, so the first silence has to
-    answer. The line is read at fire time, so a mid-call language switch moves
-    it — the second nudge below comes out in Catalan because the call did.
+    The difficult caller goes quiet for about eight seconds. One nudge, then a
+    submit on the next idle, so the three-minute call does not end empty. The
+    line is read at fire time, so a mid-call language switch moves it — the
+    submit line below comes out in Catalan because the call did.
     """
     pytest.importorskip("pipecat")
 
-    from vortex.conversation.prompt import idle_patience_for, idle_prompt_for
+    from datetime import datetime
+
+    from vortex.contract import MADRID, BookAction
+    from vortex.conversation.prompt import idle_prompt_for, idle_submit_line_for
     from vortex.conversation.turns import IdlePolicy, default_turn_settings
     from vortex.line.pipecat_voice import _LanguageState, _make_idle_speaker
+    from vortex.line.session import CallSession
+    from vortex.line.twilio import StartPayload
 
-    settings = voice_settings()
     events: list[tuple[str, dict]] = []
-    queued: list[object] = []
 
     class Task:
+        def __init__(self) -> None:
+            self.queued: list[object] = []
+
         async def queue_frames(self, frames: list[object]) -> None:
-            queued.extend(frames)
+            self.queued.extend(frames)
+
+    start = StartPayload(streamSid="MZ-idle", callSid="CA-idle", customParameters={})
+    session = CallSession.open(start, settings=offline_settings)
+    original_event = session.ctx.log.event
+
+    def _event(kind: str, **kwargs: object) -> None:
+        events.append((kind, kwargs))
+        original_event(kind, **kwargs)
+
+    session.ctx.log.event = _event  # type: ignore[method-assign]
+
+    booking = BookAction(
+        patient_id="P00042",
+        provider_id="PR05",
+        location_id="sur",
+        appointment_type_id="review",
+        slot=datetime(2026, 9, 24, 16, 30, tzinfo=MADRID),
+        policy_id="sanitas",
+    )
+    session.memory.remember_prepared("prepare_booking", booking)
 
     now = [0.0]
     policy = IdlePolicy(default_turn_settings(), clock=lambda: now[0])
     state = _LanguageState("es")
-    handler = _make_idle_speaker(_session(settings, events), state, Task(), policy)
+    task = Task()
+    handler = _make_idle_speaker(session, state, task, policy)
 
     await handler(None)
-    assert [kind for kind, _ in events] == ["voice.user_idle"]
-    assert [frame.text for frame in queued] == [idle_prompt_for("es")]
-    assert events[-1][1]["count"] == 1
-    assert events[-1][1]["level"] == 1
+    assert events[-1] == (
+        "voice.user_idle",
+        {"count": 1, "level": 1, "spoke": True, "suppressed": None},
+    )
+    assert [frame.text for frame in task.queued] == [idle_prompt_for("es")]
+    assert session.submitted == []
 
+    # Second silence, after the caller switched the call to Catalan: no more
+    # nudging. The prepared booking counts as confirmed by the second silence.
     now[0] = 12.0
     state.language = "ca"
     await handler(None)
-    assert queued[-1].text == idle_patience_for("ca")
-    assert [kind for kind, _ in events] == ["voice.user_idle"] * 2
-    assert events[-1][1]["level"] == 2
+    idle_events = [kwargs for kind, kwargs in events if kind == "voice.user_idle"]
+    assert idle_events[-1]["count"] == 2
+    assert idle_events[-1]["level"] == 2
+    idle_submit = next(kwargs for kind, kwargs in events if kind == "submit.idle")
+    assert idle_submit["branch"] == "prepared_on_idle"
+    assert task.queued[-1].text == idle_submit_line_for("ca")
+    assert len(session.submitted) == 1
+    assert session.sent_actions[0] == booking
+    assert session.memory.confirmed is True
 
-    # Third event inside the mute window: logged, but nothing is spoken.
+    # A third event inside the mute window is logged but speaks nothing and
+    # never submits twice.
     now[0] = 20.0
     await handler(None)
-    assert len(queued) == 2
-    assert events[-1][1]["spoke"] is False
-    assert events[-1][1]["suppressed"] == "muted"
+    idle_events = [kwargs for kind, kwargs in events if kind == "voice.user_idle"]
+    assert idle_events[-1]["spoke"] is False
+    assert idle_events[-1]["suppressed"] == "muted"
+    assert len(task.queued) == 2
+    assert len(session.submitted) == 1
+    await session.close(reason="test")
 
 
 async def test_the_idle_escalation_is_per_socket(voice_settings) -> None:
@@ -806,6 +849,7 @@ async def test_tool_filler_speaks_one_short_phrase_per_language(voice_settings) 
         TOOL_FILLERS,
         _LanguageState,
         _make_tool_filler_speaker,
+        _ToolFillerGuard,
         tool_filler_for,
     )
 
@@ -827,7 +871,8 @@ async def test_tool_filler_speaks_one_short_phrase_per_language(voice_settings) 
             queued.extend(frames)
 
     state = _LanguageState("es")
-    handler = _make_tool_filler_speaker(_session(settings, events), state, Task())
+    guard = _ToolFillerGuard()
+    handler = _make_tool_filler_speaker(_session(settings, events), state, Task(), guard=guard)
 
     await handler(None, [{"name": "find_patient"}])
     assert [kind for kind, _ in events] == ["voice.tool_filler"]
@@ -840,10 +885,80 @@ async def test_tool_filler_speaks_one_short_phrase_per_language(voice_settings) 
     assert queued[0].append_to_context is True
 
     state.language = "ca"
+    guard.on_caller_turn()  # the caller answered: a new interaction may mask
     await handler(None, [{}, {}])
     assert queued[-1].text == TOOL_FILLERS["ca"]
     assert events[-1][1]["tools"] == 2
     assert [kind for kind, _ in events] == ["voice.tool_filler"] * 2
+
+
+async def test_the_filler_guard_speaks_one_filler_per_interaction(voice_settings) -> None:
+    """A tool chain that fires batch after batch speaks the phrase once.
+
+    Evidence CA-voicetest-1789811447: five completions in seven seconds, each
+    starting a tool batch, each re-speaking "Un momento.". The caller heard
+    the filler flood instead of an answer. The guard speaks the first batch,
+    suppresses the ones inside the cooldown, and speaks again once the caller
+    has said anything - the mark of a new interaction.
+    """
+    pytest.importorskip("pipecat")
+    from pipecat.frames.frames import TTSSpeakFrame
+
+    from vortex.line.pipecat_voice import (
+        _LanguageState,
+        _make_tool_filler_speaker,
+        _ToolFillerGuard,
+    )
+
+    settings = voice_settings()
+    events: list[tuple[str, dict]] = []
+    queued: list[object] = []
+
+    class Task:
+        async def queue_frames(self, frames: list[object]) -> None:
+            queued.extend(frames)
+
+    now = [0.0]
+    guard = _ToolFillerGuard(cooldown_secs=4.0, clock=lambda: now[0])
+    handler = _make_tool_filler_speaker(
+        _session(settings, events), _LanguageState("es"), Task(), guard=guard
+    )
+
+    # First batch speaks.
+    await handler(None, [{"name": "find_patient"}])
+    assert len(queued) == 1
+
+    # The next hops of the same chain stay quiet, whatever the language.
+    now[0] = 1.4
+    await handler(None, [{"name": "resolve_date"}])
+    now[0] = 2.9
+    await handler(None, [{"name": "triage"}])
+    assert len(queued) == 1
+    assert events[-1][1]["suppressed"] == "cooldown"
+
+    # Past the cooldown the chain may re-mask: the caller has heard silence.
+    now[0] = 5.0
+    await handler(None, [{"name": "find_slots"}])
+    assert len(queued) == 2
+
+    # A caller turn re-arms the slot even inside the cooldown.
+    now[0] = 5.5
+    guard.on_caller_turn()
+    await handler(None, [{"name": "find_patient"}])
+    assert len(queued) == 3
+    assert isinstance(queued[-1], TTSSpeakFrame)
+
+
+def test_user_aggregator_params_carry_idle_and_stop_timeouts() -> None:
+    """Acceptance: the idle timeout follows settings; the stop safety net is 6 s."""
+    pytest.importorskip("pipecat")
+    from vortex.conversation.turns import TurnSettings
+    from vortex.line.pipecat_voice import _user_aggregator_params
+
+    turns = TurnSettings()
+    params = _user_aggregator_params(turns)
+    assert params.user_idle_timeout == turns.user_idle_secs
+    assert params.user_turn_stop_timeout == 6.0
 
 
 def test_vad_mode_wires_our_turn_strategies() -> None:
@@ -935,6 +1050,227 @@ def test_smart_turn_is_built_only_where_the_vad_mode_asks_for_it() -> None:
     assert count(TurnSettings(soniox_turn_detection=False)) == 1, "VAD mode wants it"
 
 
+def test_soniox_endpoint_knobs_are_the_conservative_pair(voice_settings) -> None:
+    """The pipeline's Soniox settings endpoint conservatively, not eagerly.
+
+    Evidence CA-voicetest-1789811447: sensitivity 0.3 with latency adjustment 2
+    endpointed the caller after every breath group, the agent answered the
+    fragments and talked over the rest of the sentence. The builder pins the
+    knobs to the conservative pair regardless of the turn settings' tuning.
+    """
+    pytest.importorskip("pipecat")
+    from pipecat.services.soniox.stt import SonioxSTTService
+    from pipecat.transcriptions.language import Language
+
+    from vortex.line.pipecat_voice import _soniox_stt_settings
+
+    class Ctx:
+        from vortex.clinic.client import FakeClinicClient
+
+        clinic = FakeClinicClient()
+
+    built = _soniox_stt_settings(voice_settings(), default_turn_settings(), Ctx())
+    assert isinstance(built, SonioxSTTService.Settings)
+    assert built.endpoint_sensitivity == 0.0
+    assert built.endpoint_latency_adjustment_level == 0
+    # The acoustic fallback keeps its ceiling: a true stall cannot hold the
+    # line longer than this, even with the semantic endpointer set loose.
+    assert built.max_endpoint_delay_ms == default_turn_settings().stt_max_endpoint_delay_ms
+    assert built.language_hints == [Language.EN, Language.ES, Language.CA]
+
+
+async def test_the_stall_guard_finalizes_a_starved_turn() -> None:
+    """No inbound audio with a turn open: the guard asks Soniox to flush.
+
+    Soniox emits ``<end>`` only while audio flows, so a caller that stops
+    streaming mid-turn holds the transcript open forever (evidence
+    CA-voicetest-1789811079: every turn was lost this way). After half a
+    second of starvation the guard sends the same finalize message the service
+    sends on a VAD stop, and logs that it did.
+    """
+    pytest.importorskip("pipecat")
+    from vortex.line.soniox_stall import make_stall_guarded_soniox_stt
+
+    events: list[tuple[str, dict]] = []
+    sent: list[str] = []
+
+    class FakeWS:
+        state = None  # not OPEN is checked; any object passes
+
+        async def send(self, data: str) -> None:
+            sent.append(data)
+
+    from websockets.protocol import State
+
+    now = [0.0]
+    stt_cls = make_stall_guarded_soniox_stt(
+        on_event=lambda kind, **kw: events.append((kind, kw)), clock=lambda: now[0]
+    )
+    svc = stt_cls(api_key="test", vad_force_turn_endpoint=False)
+    svc._websocket = FakeWS()
+    FakeWS.state = State.OPEN
+
+    # Audio flows at t=4.0 with no turn open: however long the silence, there
+    # is nothing to finalize.
+    now[0] = 4.0
+    svc.note_audio()
+    now[0] = 4.6
+    assert svc.stall_due() is False
+
+    # The turn opens; audio is still fresh, so not due yet.
+    await svc._user_turn_started()
+    now[0] = 4.1
+    assert svc.stall_due() is False
+
+    # Half a second of starvation with the turn open: due.
+    now[0] = 4.6
+    assert svc.stall_due() is True
+    finalize = asyncio.create_task(svc.request_finalize())
+    await asyncio.sleep(0.01)  # the finalize goes out; the wait loop spins
+    assert sent == ['{"type": "finalize"}']
+    assert events[0][0] == "voice.stt_stall_finalize"
+    assert events[0][1]["silence_secs"] == 0.6
+    now[0] = 10.0  # Soniox answered, the turn closed, the window runs out
+    await finalize
+
+    # One episode per starvation: no second finalize without new audio.
+    assert svc.stall_due() is False
+
+
+async def test_the_stall_guard_promotes_the_last_interim_when_soniox_is_dead() -> None:
+    """A finalize Soniox never answers: the last interim becomes the final.
+
+    The words the caller said must reach the model even when the STT socket
+    died mid-turn. After the fallback window the guard pushes the interim text
+    as a final transcript plus the turn-stop proposal, so the strategies close
+    the turn with the text in hand.
+    """
+    pytest.importorskip("pipecat")
+    from pipecat.frames.frames import ProposedUserStoppedSpeakingFrame, TranscriptionFrame
+
+    from vortex.line.soniox_stall import make_stall_guarded_soniox_stt
+
+    events: list[tuple[str, dict]] = []
+    pushed: list[object] = []
+    sent: list[str] = []
+
+    class FakeWS:
+        from websockets.protocol import State
+
+        state = State.OPEN
+
+        async def send(self, data: str) -> None:
+            sent.append(data)
+
+    now = [0.0]
+    stt_cls = make_stall_guarded_soniox_stt(
+        on_event=lambda kind, **kw: events.append((kind, kw)), clock=lambda: now[0]
+    )
+    svc = stt_cls(api_key="test")
+    svc._websocket = FakeWS()
+    svc._user_turn_open = True
+    svc.note_audio()
+    svc.note_interim("Hola, buenos días.")
+    now[0] = 1.0
+
+    async def capture(frame: object, direction: object = None) -> None:
+        pushed.append(frame)
+
+    svc.push_frame = capture  # type: ignore[method-assign]
+
+    finalize = asyncio.create_task(svc.request_finalize())
+    await asyncio.sleep(0.01)  # the finalize goes out, then the wait loop spins
+    now[0] = 10.0  # past the fallback window: Soniox never answered
+    await finalize
+
+    assert sent == ['{"type": "finalize"}']
+    assert [kind for kind, _ in events] == ["voice.stt_stall_finalize", "voice.stt_stall_fallback"]
+    assert isinstance(pushed[0], TranscriptionFrame)
+    assert pushed[0].text == "Hola, buenos días."
+    assert isinstance(pushed[1], ProposedUserStoppedSpeakingFrame)
+
+
+async def test_the_stall_guard_stays_quiet_when_a_final_arrives() -> None:
+    """A real final consumes the interim: no synthesized duplicate can fire."""
+    pytest.importorskip("pipecat")
+    from vortex.line.soniox_stall import make_stall_guarded_soniox_stt
+
+    events: list[tuple[str, dict]] = []
+    now = [0.0]
+    stt_cls = make_stall_guarded_soniox_stt(
+        on_event=lambda kind, **kw: events.append((kind, kw)), clock=lambda: now[0]
+    )
+    svc = stt_cls(api_key="test", vad_force_turn_endpoint=False)
+    svc._user_turn_open = True
+    svc.note_audio()
+    svc.note_interim("Hola.")
+    svc.note_final()
+    await svc._user_turn_stopped()  # the <end> closed the turn, as the real path does
+    now[0] = 5.0
+    assert svc.stall_due() is False  # the turn closed; nothing to do
+    await svc.request_finalize()
+    assert [kind for kind, _ in events] == ["voice.stt_stall_finalize"]
+    assert not any(kind == "voice.stt_stall_fallback" for kind, _ in events)
+
+
+async def test_the_reply_latency_probe_reports_the_wait(voice_settings) -> None:
+    """End of speech -> turn closed -> first audio, logged once per turn.
+
+    Both legs land on ``voice.reply_latency``: detection (endpointing) and
+    total (end of speech to first agent audio), so the post-mortem can see
+    where a slow answer spent its time.
+    """
+    pytest.importorskip("pipecat")
+    from pipecat.frames.frames import (
+        OutputAudioRawFrame,
+        UserStoppedSpeakingFrame,
+        VADUserStoppedSpeakingFrame,
+    )
+    from pipecat.observers.base_observer import FramePushed
+    from pipecat.processors.frame_processor import FrameDirection
+
+    from vortex.line.pipecat_voice import _CallLogObserver
+
+    settings = voice_settings()
+    events: list[tuple[str, dict]] = []
+    fake = _session(settings, events)
+    fake.memory = type("Memory", (), {"prepared": None})()
+    fake.confirm_prepared = lambda why: None
+    fake.media_frames_in = 0
+    fake.media_frames_out = 0
+
+    now = [0.0]
+    observer = _CallLogObserver(fake, clock=lambda: now[0])
+
+    async def push(frame: object) -> None:
+        await observer.on_push_frame(
+            FramePushed(
+                source=None,
+                destination=None,
+                frame=frame,
+                direction=FrameDirection.DOWNSTREAM,
+                timestamp=0,
+            )
+        )
+
+    # The caller stops speaking at t=1.0; detection closes the turn at 1.6;
+    # the first agent audio leaves at 2.9.
+    now[0] = 1.0
+    await push(VADUserStoppedSpeakingFrame(stop_secs=0.4))
+    now[0] = 1.6
+    await push(UserStoppedSpeakingFrame())
+    now[0] = 2.9
+    await push(OutputAudioRawFrame(audio=b"", sample_rate=8000, num_channels=1))
+    assert [kind for kind, _ in events] == ["voice.reply_latency"]
+    assert events[-1][1]["detection_secs"] == 0.6
+    assert events[-1][1]["total_secs"] == 1.9
+
+    # Further audio of the same reply does not re-report the turn.
+    now[0] = 3.5
+    await push(OutputAudioRawFrame(audio=b"", sample_rate=8000, num_channels=1))
+    assert [kind for kind, _ in events] == ["voice.reply_latency"]
+
+
 def _noop_handler(tool_name: str):
     async def handler(params: object) -> None:  # pragma: no cover - never invoked
         raise AssertionError("the handler is not called in this test")
@@ -993,3 +1329,200 @@ def test_the_real_llm_service_records_the_tools_as_async() -> None:
         assert llm.has_function(schema.name)
         item = llm._functions[schema.name]
         assert item.cancel_on_interruption is False, f"{schema.name} dies on barge-in"
+
+
+# --- usage metering ----------------------------------------------------------
+
+
+def _pipeline_params_kwargs() -> dict[str, object]:
+    """The keywords ``run_pipecat_call`` builds ``PipelineParams`` with.
+
+    Read off the source, like the hangup wiring test: building the real
+    pipeline needs the four provider keys. The keywords are then handed to the
+    real ``PipelineParams``, so a flag pipecat renamed fails here too.
+    """
+    import ast
+    import inspect
+
+    from vortex.line import pipecat_voice
+
+    tree = ast.parse(inspect.getsource(pipecat_voice.run_pipecat_call))
+    for node in ast.walk(tree):
+        is_params = isinstance(node, ast.Call) and getattr(node.func, "id", "") == "PipelineParams"
+        if not is_params:
+            continue
+        kwargs: dict[str, object] = {}
+        for keyword in node.keywords:
+            assert keyword.arg is not None, "**kwargs would hide the flags"
+            if isinstance(keyword.value, ast.Constant):
+                kwargs[keyword.arg] = keyword.value.value
+            elif isinstance(keyword.value, ast.Name):
+                kwargs[keyword.arg] = getattr(pipecat_voice, keyword.value.id)
+            else:
+                raise AssertionError(f"unreadable PipelineParams keyword {keyword.arg}")
+        return kwargs
+    raise AssertionError("run_pipecat_call builds no PipelineParams")
+
+
+def test_pipeline_enables_usage_metrics() -> None:
+    """Without both flags pipecat measures nothing the wall can price a call with.
+
+    ``enable_metrics`` alone gives latencies only: the three
+    ``start_*_usage_metrics`` hooks are gated on ``enable_usage_metrics`` and
+    return silently without it, so no STT second, no token and no character is
+    ever pushed as a frame.
+    """
+    pytest.importorskip("pipecat")
+    from pipecat.pipeline.task import PipelineParams
+
+    params = PipelineParams(**_pipeline_params_kwargs())
+
+    assert params.enable_metrics is True
+    assert params.enable_usage_metrics is True
+
+
+def test_the_lane_marks_the_call_as_metered() -> None:
+    """``metered`` is the flag's echo, so it is set where the flag is."""
+    pytest.importorskip("pipecat")
+    import inspect
+
+    from vortex.line.pipecat_voice import run_pipecat_call
+
+    assert "session.usage.metered = True" in inspect.getsource(run_pipecat_call)
+
+
+def _metrics_frame(*data: object):
+    from pipecat.frames.frames import MetricsFrame
+
+    return MetricsFrame(data=list(data))
+
+
+def _pushed(frame: object):
+    from pipecat.processors.frame_processor import FrameDirection
+
+    return type(
+        "FramePushed",
+        (),
+        {"frame": frame, "direction": FrameDirection.DOWNSTREAM},
+    )()
+
+
+async def test_the_observer_meters_stt_llm_and_each_tts_service(offline_settings) -> None:
+    """Usage frames in, one ``call.usage`` line out, split per TTS service.
+
+    Chirp 3 HD and Gemini-TTS bill at different rates, so their characters may
+    never land in the same bucket. Every frame is pushed twice here because
+    pipecat pushes it at every link it crosses: the totals must not double.
+    """
+    pytest.importorskip("pipecat")
+    import json
+    from pathlib import Path
+
+    from pipecat.metrics.metrics import (
+        LLMTokenUsage,
+        LLMUsageMetricsData,
+        STTUsage,
+        STTUsageMetricsData,
+        TTFBMetricsData,
+        TTSUsageMetricsData,
+    )
+
+    from vortex.line.pipecat_voice import _CallLogObserver
+    from vortex.line.session import CallSession
+    from vortex.line.twilio import StartPayload
+
+    call_id = "CA-usage"
+    start = StartPayload(streamSid="MZ-usage", callSid=call_id, customParameters={})
+    session = CallSession.open(start, settings=offline_settings)
+    session.usage.metered = True
+    observer = _CallLogObserver(session)
+
+    soniox = "SonioxSTTService#0"
+    frames = [
+        _metrics_frame(STTUsageMetricsData(processor=soniox, value=STTUsage(audio_seconds=30.25))),
+        _metrics_frame(STTUsageMetricsData(processor=soniox, value=STTUsage(audio_seconds=17.05))),
+        _metrics_frame(
+            LLMUsageMetricsData(
+                processor="OpenAILLMService#0",
+                model="whatever-the-host-called-it",
+                value=LLMTokenUsage(
+                    prompt_tokens=11840,
+                    completion_tokens=512,
+                    total_tokens=12352,
+                    cache_read_input_tokens=64,
+                ),
+            )
+        ),
+        _metrics_frame(
+            TTSUsageMetricsData(processor="GoogleHttpTTSService#0", model="", value=1000)
+        ),
+        _metrics_frame(
+            TTSUsageMetricsData(processor="GoogleHttpTTSService#0", model="", value=180)
+        ),
+        _metrics_frame(
+            TTSUsageMetricsData(
+                processor="GeminiTTSService#1", model="gemini-2.5-flash-tts", value=90
+            )
+        ),
+        # A latency frame: measured, not billed.
+        _metrics_frame(TTFBMetricsData(processor="OpenAILLMService#0", value=0.4)),
+    ]
+    for frame in frames:
+        await observer.on_push_frame(_pushed(frame))
+        await observer.on_push_frame(_pushed(frame))
+
+    usage = session.usage
+    assert usage.stt_audio_seconds == pytest.approx(47.3)
+    assert usage.stt_requests == 2
+    assert usage.prompt_tokens == 11840
+    assert usage.completion_tokens == 512
+    assert usage.reasoning_tokens == 0
+    assert usage.cache_read_input_tokens == 64
+    assert usage.llm_requests == 1
+    assert usage.tts_characters == 1270
+
+    await session.close(reason="test")
+
+    log_lines = Path(offline_settings.calls_log_path).read_text().splitlines()
+    lines = [json.loads(line) for line in log_lines]
+    kinds = [line["kind"] for line in lines if line["call_id"] == call_id]
+    assert kinds.index("call.usage") == kinds.index("call.ended") - 1
+
+    event = next(line for line in lines if line["kind"] == "call.usage")
+    event.pop("ts")
+    assert event == {
+        "call_id": call_id,
+        "kind": "call.usage",
+        "metered": True,
+        "stt": {
+            "provider": "soniox",
+            "model": offline_settings.soniox_stt_model,
+            "audio_seconds": 47.3,
+            "requests": 2,
+        },
+        "llm": {
+            "provider": offline_settings.llm_provider,
+            "model": offline_settings.llm_model,
+            "prompt_tokens": 11840,
+            "completion_tokens": 512,
+            "reasoning_tokens": 0,
+            "cache_read_input_tokens": 64,
+            "requests": 1,
+        },
+        "tts": [
+            {
+                "provider": "google",
+                "service": "GoogleHttpTTSService",
+                "model": offline_settings.google_tts_voice_es,
+                "characters": 1180,
+                "requests": 2,
+            },
+            {
+                "provider": "google",
+                "service": "GeminiTTSService",
+                "model": "gemini-2.5-flash-tts",
+                "characters": 90,
+                "requests": 1,
+            },
+        ],
+    }

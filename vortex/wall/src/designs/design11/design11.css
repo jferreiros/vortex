@@ -18,6 +18,8 @@
   position: fixed;
   inset: 0;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
   background: var(--d11-bg);
   color: var(--d11-ink);
   font-family: "Manrope", ui-sans-serif, system-ui, sans-serif;
@@ -27,8 +29,44 @@
   font-family: ui-monospace, monospace;
 }
 
+/* Top bar: the back button stays put at the far left, the call's own
+   duration bar fills the rest of the width next to it. */
+.design11-root .d11-topbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 20px 28px 0;
+}
+
+.design11-root .d11-back {
+  flex: 0 0 auto;
+  appearance: none;
+  cursor: pointer;
+  padding: 10px 18px;
+  border-radius: 999px;
+  background: var(--d11-panel);
+  border: 1px solid var(--d11-border);
+  color: var(--d11-ink);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  box-shadow: var(--d11-shadow);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.design11-root .d11-back:hover {
+  transform: translateY(-1px);
+}
+
+.design11-root .d11-topbar .d11-duration {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .design11-root .d11-shell {
-  height: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
   display: flex;
 }
 
@@ -48,13 +86,13 @@
 /* Left ----------------------------------------------------------------*/
 
 .design11-root .d11-left {
-  flex: 0 0 27%;
-  max-width: 400px;
+  flex: 0 0 22%;
+  max-width: 340px;
   height: 100%;
   padding: 32px 26px;
   display: flex;
   flex-direction: column;
-  gap: 30px;
+  gap: 20px;
   overflow: hidden;
 }
 
@@ -95,12 +133,6 @@
   background: var(--d11-warn);
 }
 
-.design11-root .d11-duration-chips {
-  display: flex;
-  gap: 8px;
-  margin-top: 12px;
-}
-
 .design11-root .d11-chip {
   font-size: 11.5px;
   font-weight: 600;
@@ -110,136 +142,129 @@
   color: var(--d11-green-deep);
 }
 
-.design11-root .d11-chip.warn {
-  background: rgba(182, 84, 63, 0.12);
-  color: var(--d11-warn);
-}
-
-.design11-root .d11-orb-wrap {
-  position: relative;
-  flex: 0 0 auto;
+/* The tool log: every call, oldest on top, replacing the phase orb and the
+   tool demo square entirely. */
+.design11-root .tool-log {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 14px;
-  padding: 16px 0 4px;
+  gap: 8px;
+  padding-right: 4px;
 }
 
-.design11-root .d11-orb-halo {
-  position: absolute;
-  top: 2px;
-  width: 148px;
-  height: 148px;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(47, 125, 92, 0.4), transparent 70%);
-}
-
-.design11-root .d11-orb {
-  position: relative;
-  width: 110px;
-  height: 110px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--d11-panel);
-  border: 1px solid var(--d11-border);
-  box-shadow: var(--d11-shadow);
-  color: var(--d11-green);
-}
-
-.design11-root .d11-orb.phase-speaking,
-.design11-root .d11-orb.phase-working {
-  background: var(--d11-green);
-  color: #fff;
-  border-color: var(--d11-green);
-}
-
-.design11-root .d11-orb-label {
+.design11-root .tool-log-empty {
+  margin: auto;
+  color: var(--d11-mute);
   font-size: 13px;
-  font-weight: 600;
-  color: var(--d11-mute);
+  text-align: center;
 }
 
-.design11-root .d11-tool-card {
-  flex: 1 1 auto;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  padding: 22px;
-  border-radius: 16px;
+.design11-root .used-tool {
+  flex: 0 0 auto;
+  border-radius: 10px;
+  padding: 7px 10px;
   background: var(--d11-panel);
   border: 1px solid var(--d11-border);
-  box-shadow: var(--d11-shadow);
 }
 
-.design11-root .d11-tool-card-body {
-  flex: 1 1 auto;
-  min-height: 0;
-  display: flex;
+@keyframes used-tool-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(47, 125, 92, 0.35);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(47, 125, 92, 0);
+  }
 }
 
-.design11-root .stage-head,
-.design11-root .tool-live-label,
-.design11-root .recent-tools-title {
-  display: none;
-}
-
-.design11-root .stage,
-.design11-root .tool-live,
-.design11-root .recent-tools {
-  width: 100%;
-}
-
-.design11-root .stage-ring {
-  border-color: var(--d11-green);
-}
-
-.design11-root .stage-icon,
-.design11-root .tool-live-icon svg,
-.design11-root .recent-tool-name svg {
-  color: var(--d11-green);
-}
-
-.design11-root .stage-label,
-.design11-root .stage-record-name,
-.design11-root .recent-tool-name {
-  color: var(--d11-ink);
-  font-weight: 600;
-}
-
-.design11-root .stage-section h4 {
-  color: var(--d11-mute);
-  font-weight: 600;
-}
-
-.design11-root .chip,
-.design11-root .stage-record,
-.design11-root .stage-cal-day,
-.design11-root .recent-tool-row {
-  background: var(--d11-bg);
-  border: 1px solid var(--d11-border);
-  border-radius: 10px;
-}
-
-.design11-root .stage-cal-day.has-slots {
+.design11-root .used-tool.status-running {
   background: var(--d11-green-soft);
   border-color: var(--d11-green);
+  animation: used-tool-pulse 1.6s ease-in-out infinite;
 }
 
-.design11-root .recent-tool-ms {
+.design11-root .used-tool.status-fail {
+  border-color: var(--d11-warn);
+}
+
+.design11-root .used-tool-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.design11-root .used-tool-icon {
+  display: flex;
+  flex: 0 0 auto;
+  color: var(--d11-green);
+}
+
+.design11-root .used-tool-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.design11-root .used-tool-ms {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--d11-mute);
+}
+
+.design11-root .used-tool.status-running .used-tool-ms {
   color: var(--d11-green-deep);
 }
 
-.design11-root .stage-empty,
-.design11-root .stage-empty-inline {
+.design11-root .used-tool-body {
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.design11-root .used-tool-row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+.design11-root .used-tool-tag {
+  flex: 0 0 auto;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
   color: var(--d11-mute);
+  letter-spacing: 0.04em;
+}
+
+.design11-root .used-tool-kv {
+  color: var(--d11-mute);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.design11-root .used-tool-kv b {
+  color: var(--d11-ink);
+  font-weight: 600;
 }
 
 /* Middle -----------------------------------------------------------------*/
 
 .design11-root .d11-main {
-  flex: 1 1 46%;
+  flex: 1 1 56%;
   min-width: 0;
   height: 100%;
   padding: 32px 10px;
@@ -257,7 +282,7 @@
   display: flex;
   align-items: center;
   gap: 9px;
-  padding: 0 26px 20px;
+  padding: 0 10px 20px;
   font-size: 14px;
   font-weight: 700;
 }
@@ -278,7 +303,7 @@
   flex-direction: column;
   justify-content: flex-end;
   gap: 16px;
-  padding: 0 26px 70px;
+  padding: 0 10px 70px;
 }
 
 .design11-root .d11-empty {
@@ -289,14 +314,46 @@
 
 .design11-root .d11-row {
   display: flex;
+  align-items: flex-end;
+  gap: 6px;
 }
 
 .design11-root .d11-row.user {
-  justify-content: flex-end;
+  /* row-reverse flips which physical edge is the flex "end", so flex-start
+     (not flex-end) is what actually pushes this row against the right
+     edge of the transcript. */
+  justify-content: flex-start;
+  flex-direction: row-reverse;
+}
+
+.design11-root .d11-avatar {
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--d11-green-soft);
+  color: var(--d11-green-deep);
+}
+
+.design11-root .d11-row.assistant .d11-avatar {
+  background: none;
+  border-radius: 0;
+  overflow: visible;
+}
+
+.design11-root .d11-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
 }
 
 .design11-root .d11-bubble {
-  max-width: 64%;
+  max-width: 74%;
   padding: 14px 18px;
   border-radius: 14px;
   font-size: 14.5px;
@@ -331,14 +388,20 @@
 /* Right --------------------------------------------------------------------*/
 
 .design11-root .d11-right {
-  flex: 0 0 27%;
-  max-width: 400px;
+  flex: 0 0 22%;
+  max-width: 340px;
   height: 100%;
   padding: 32px 26px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 20px;
   overflow: hidden;
+}
+
+.design11-root .d11-col-head {
+  flex: 0 0 auto;
+  font-size: 14px;
+  font-weight: 700;
 }
 
 .design11-root .d11-insight-list {
@@ -350,33 +413,108 @@
   gap: 14px;
 }
 
-.design11-root .d11-insight-card {
-  padding: 16px 18px;
-  border-radius: 14px;
+/* Scaffolds: a fixed box per piece of the flow, present from the start and
+   filled in field by field — see ScaffoldBox/Field in Design11.jsx. */
+.design11-root .d11-scaffold {
+  padding: 12px 14px;
+  border-radius: 12px;
   background: var(--d11-panel);
-  border: 1px solid var(--d11-border);
-  box-shadow: var(--d11-shadow);
+  border: 1px dashed var(--d11-border);
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 6px;
+  transition: border-color 0.25s ease, box-shadow 0.25s ease;
 }
 
-.design11-root .d11-insight-title {
-  font-size: 11.5px;
-  font-weight: 600;
+.design11-root .d11-scaffold.ready {
+  border-style: solid;
+  border-color: var(--d11-green);
+  box-shadow: var(--d11-shadow);
+}
+
+.design11-root .d11-scaffold-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
   color: var(--d11-mute);
 }
 
-.design11-root .d11-insight-value {
-  font-size: 17px;
-  font-weight: 700;
+.design11-root .d11-scaffold-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.design11-root .d11-field {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.design11-root .d11-field-label {
+  color: var(--d11-mute);
+}
+
+.design11-root .d11-field-value {
+  font-weight: 600;
+  color: var(--d11-border);
+  text-align: right;
+  transition: color 0.2s ease;
+}
+
+.design11-root .d11-field.filled .d11-field-value {
   color: var(--d11-ink);
 }
 
-.design11-root .d11-insight-rule {
-  font-size: 12px;
+.design11-root .d11-scaffold-note {
+  font-size: 11.5px;
   color: var(--d11-mute);
-  line-height: 1.45;
+  line-height: 1.4;
+}
+
+/* The detection box: a dashed frame around every scaffold this intent
+   produced, with the intent itself as a small tag straddling the top
+   edge — the same shape a computer-vision box draws around what it just
+   found, so it reads at a glance as "these exist because of that". */
+.design11-root .d11-intent-group {
+  position: relative;
+  border: 1.5px dashed var(--d11-border);
+  border-radius: 10px;
+  padding: 14px 12px 12px;
+  display: flex;
+  flex-direction: column;
+}
+
+.design11-root .d11-intent-group.known {
+  border-color: var(--d11-green);
+}
+
+.design11-root .d11-intent-tag {
+  position: absolute;
+  top: -10px;
+  left: 12px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  background: var(--d11-bg);
+  border: 1.5px solid var(--d11-border);
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--d11-mute);
+}
+
+.design11-root .d11-intent-group.known .d11-intent-tag {
+  background: var(--d11-green);
+  border-color: var(--d11-green);
+  color: #fff;
+}
+
+.design11-root .d11-intent-group-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .design11-root .d11-final {

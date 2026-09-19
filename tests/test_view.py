@@ -70,3 +70,37 @@ def test_build_call_folds_turns_and_clears_stale_decline_on_book() -> None:
     assert [turn.text for turn in card.turns] == ["Hello.", "Hi"]
     assert card.status == "booked"
     assert card.decline_reason is None
+
+
+def test_build_call_folds_the_usage_event_into_the_card() -> None:
+    """The line lane writes call.usage just before call.ended; the card keeps it
+    whole, minus the envelope, so pricing reads one payload."""
+    card = build_call(
+        "CA-2",
+        [
+            {"kind": "call.started", "call_id": "CA-2", "ts": "t1"},
+            {
+                "kind": "call.usage",
+                "call_id": "CA-2",
+                "ts": "t2",
+                "metered": True,
+                "stt": {"provider": "soniox", "model": "stt-rt-v5", "audio_seconds": 47.3},
+                "llm": {"provider": "helmcode", "model": "deepseek-v4-flash"},
+                "tts": [{"provider": "google", "model": "es-ES-Chirp3-HD-A", "characters": 1180}],
+            },
+            {"kind": "call.ended", "call_id": "CA-2", "ts": "t3"},
+        ],
+    )
+    assert card.usage is not None
+    assert card.usage["metered"] is True
+    assert card.usage["stt"]["audio_seconds"] == 47.3
+    assert card.usage["tts"][0]["characters"] == 1180
+    # The envelope stays out: pricing reads counters, not routing fields.
+    assert "call_id" not in card.usage
+    assert "kind" not in card.usage
+    assert "ts" not in card.usage
+
+
+def test_a_call_with_no_usage_event_has_no_usage() -> None:
+    card = build_call("CA-3", [{"kind": "call.started", "call_id": "CA-3"}])
+    assert card.usage is None

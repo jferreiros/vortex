@@ -16,6 +16,7 @@ once the socket is gone. ``close()`` runs the 30-second-window logic.
 from __future__ import annotations
 
 import asyncio
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
@@ -29,8 +30,11 @@ from vortex.contract import (
     INSURERS,
     MADRID,
     Action,
+    Appointment,
+    AppointmentList,
     BookAction,
     CallerLineMatch,
+    CancelAction,
     DeclineReason,
     EligibilityVerdict,
     EscalateAction,
@@ -39,24 +43,49 @@ from vortex.contract import (
     NoAction,
     PatientRecord,
     Rejection,
+    RescheduleAction,
     Slot,
     SubmitInput,
     SubmitResult,
     ToolContext,
     action_route,
 )
-from vortex.diary.tools import find_slots
+from vortex.conversation.language import DEFAULT_LANGUAGE, normalise_language
+from vortex.diary.tools import _is_dead, find_slots
 from vortex.identity.tools import PATIENT_PREFERENCES_KEY, resolve_caller_line
+from vortex.line.confirmation_calls import (
+    cancel_confirmation_calls,
+    confirmation_store_from_settings,
+    handoff_from_parameters,
+    schedule_confirmation_call,
+)
+from vortex.line.sms import (
+    SMS_BUDGET_SECS,
+    SMS_DETAILS_BUDGET_SECS,
+    SmsClient,
+    action_fingerprint,
+    make_sms_client,
+    notification_payload,
+    render_confirmation_text,
+    resolve_details,
+)
+from vortex.line.sms_reminders import (
+    cancel_book_reminders,
+    reminder_store_from_settings,
+    schedule_book_reminder,
+)
 from vortex.line.submit import (
     DryRunSubmitClient,
     SubmitApi,
     SubmitClient,
     submit_action,
+    submitted_action,
     with_verdict_reason,
 )
 from vortex.line.twilio import StartPayload
+from vortex.line.usage import UsageTotals
 from vortex.observability.calllog import CallLog
-from vortex.observability.tracing import observe_span
+from vortex.observability.tracing import mask_phone, observe_span
 from vortex.rules.triage import DEFAULT_SPECIALTY
 from vortex.settings import Settings, get_settings
 
@@ -97,6 +126,53 @@ UNSCORED_REFUSAL = NoAction(reason="out_of_scope")
 # is the longest span ``/availability`` answers in one request, and a slot past
 # it is not what a caller who asked for nothing in particular wanted anyway.
 COLD_BOOKING_HORIZON_DAYS = 14
+
+# How long ``close`` will wait for in-flight SMS confirmations before giving up.
+# Twilio is usually well under a second; this only bounds a hung send. It is the
+# whole ``SMS_BUDGET_SECS``, the detail lookup included, because a shorter drain
+# would cancel a POST that is still inside the client's own timeout and throw
+# away a valid Twilio response.
+SMS_DRAIN_TIMEOUT_SECS = SMS_BUDGET_SECS
+
+# What a caller asks for when the conversation never resolves it. The last word
+# wins: "move it — actually, cancel it" ends on cancel. Spanish and Catalan come
+# through Soniox's transcript, which lower-cases, so case does not matter.
+_CANCEL_INTENT = re.compile(r"\bcancel\w*\b|\banul\w*\b", re.IGNORECASE)
+_MOVE_INTENT = re.compile(
+    r"\b(?:move|moved|moving|reschedul\w*|rebook|postpon\w*|"
+    r"put (?:it )?back|bring (?:it )?forward|push (?:it )?back|"
+    r"mover|mueva|movedlo|moverla|moverlo|traslad\w*|aplaz\w*|pospon\w*|"
+    r"adelant\w*|cambi\w*|canviar|canvi|endarrer\w*|avan\w*|"
+    r"chang\w*)\b",
+    re.IGNORECASE,
+)
+#: Words that take an intent back: "I don't want to cancel" is not a cancel ask.
+#: A plain ``nt`` suffix is not here on purpose - "want" and "appointment" end
+#: in it, and both are words a cancel or move ask uses.
+_NEGATION = re.compile(
+    r"\b(?:not|no|never|don't|dont|didn't|didnt|can't|cant|cannot|won't|wont|"
+    r"sin|sense|ni|tampoco)\b",
+    re.IGNORECASE,
+)
+
+
+def _last_intent(words: str) -> str | None:
+    """``"cancel"`` or ``"move"``: the caller's last un-negated ask, if any.
+
+    A clause is negated only inside its own segment - "no, that's not right,
+    cancel it" still counts, because punctuation cuts the segment before the
+    ask. The last surviving match wins, so a changed mind submits what the
+    caller settled on.
+    """
+    best: tuple[int, str] | None = None
+    for kind, pattern in (("cancel", _CANCEL_INTENT), ("move", _MOVE_INTENT)):
+        for match in pattern.finditer(words):
+            segment = re.split(r"[.!?;,\u2014\u2013]", words[: match.start()])[-1]
+            if _NEGATION.search(segment):
+                continue
+            if best is None or match.start() > best[0]:
+                best = (match.start(), kind)
+    return best[1] if best else None
 
 
 def refusal_for(reason: DeclineReason) -> Action:
@@ -181,6 +257,10 @@ class CallMemory:
     # conversation makes always wins; this is only what the call started with.
     caller_line: CallerLineMatch | None = None
     free_slot: Slot | None = None
+    # What ``list_appointments`` read, for the caller-intent fallback: a caller
+    # who asked to cancel or move a visit the conversation never resolved is
+    # better served by acting on it than by a booking nobody asked for.
+    diary: list[Appointment] = field(default_factory=list)
     prepared: Action | None = None
     prepared_tool: str = ""
     # Set by the conversation lane when the caller agrees to ``prepared``. It
@@ -301,6 +381,9 @@ class CallMemory:
             if result.patient is not None and result.status == "found":
                 self.identified_patient = result.patient
 
+        if isinstance(result, AppointmentList):
+            self.diary = result.appointments
+
         # A recheck the rules allow proves the earlier refusal gone, exactly as
         # free slots do. Left standing, its verdict would rewrite the reason of
         # every later refusal with a rule that no longer bites.
@@ -342,6 +425,10 @@ class CallSession:
     submitter: SubmitApi
     media_frames_in: int = 0
     media_frames_out: int = 0
+    # What this call spent at Soniox, the LLM host and Google TTS. Filled by
+    # the pipecat observer from pipecat's own usage metrics; left at zero with
+    # ``metered`` False by the lanes that do not measure. One per socket.
+    usage: UsageTotals = field(default_factory=UsageTotals)
     submitted: list[SubmitResult] = field(default_factory=list)
     # Every action this call sent, in order, whatever the platform answered.
     # The fallback reads it to log whether a silent-call retry is a re-send.
@@ -356,6 +443,28 @@ class CallSession:
     # one mid-flight, and so ``close`` waits for them before deciding a call
     # submitted nothing.
     _pending: set[asyncio.Task[Any]] = field(default_factory=set)
+    # A refusal submission ``accept_refusal`` has already spawned. Nothing in
+    # ``submit_accepted_refusal`` is true until its POST comes back, so two
+    # acceptance frames in a row both pass its guards and both send the same
+    # refusal. Reserved before the task starts, and never given back: a send
+    # the platform did not take is the end-of-call fallback's to retry.
+    _refusal_spawned: bool = False
+    # SMS client for post-accept book/cancel texts. Built in ``open`` from
+    # settings (Twilio when configured, dry-run otherwise). Tests swap it.
+    sms: SmsClient = field(default_factory=lambda: make_sms_client(get_settings()))
+    # In-flight SMS tasks. Drained in ``close`` so a hangup does not cancel them.
+    _sms_pending: set[asyncio.Task[Any]] = field(default_factory=set)
+    # Fingerprints of actions we already texted, so a 409 duplicate does not
+    # SMS the caller twice for the same booking or cancel.
+    _sms_notified: set[str] = field(default_factory=set)
+    # The language this call is spoken in. The pipecat language watcher moves
+    # it when the caller switches; the confirmation-call scheduling reads it so
+    # tomorrow's outbound call speaks the language this caller actually used.
+    language: str = DEFAULT_LANGUAGE
+    # Set when the call arrives through an outbound-call handoff (a patient
+    # who asked to move their appointment mid-confirmation-call): the
+    # pipeline opens with the rebooking loop instead of the plain greeting.
+    handoff: dict[str, str] | None = None
 
     @property
     def call_id(self) -> str:
@@ -396,7 +505,24 @@ class CallSession:
         )
         ctx.settings = settings  # type: ignore[attr-defined]
         CallMemory.of(ctx)  # attach it before any tool runs
-        session = cls(settings=settings, start=start, ctx=ctx, submitter=submitter)
+        session = cls(
+            settings=settings,
+            start=start,
+            ctx=ctx,
+            submitter=submitter,
+            sms=make_sms_client(settings),
+        )
+        handoff = handoff_from_parameters(start.custom_parameters)
+        if handoff is not None:
+            session.handoff = handoff
+            if handoff.get("language"):
+                session.language = handoff["language"]
+            log.event(
+                "call.handoff",
+                appointment_id=handoff["appointment_id"],
+                patient_id=handoff["patient_id"],
+                language=handoff["language"],
+            )
         log.event(
             "call.started",
             stream_sid=start.stream_sid,
@@ -445,6 +571,7 @@ class CallSession:
         result = await registry.call_tool(name, self.ctx, raw_args)
         if name == SUBMIT_TOOL and isinstance(result, SubmitResult):
             self.submitted.append(result)
+            sent: Action | None = None
             try:
                 sent = SubmitInput.model_validate(raw_args).action
             except ValidationError:  # pragma: no cover - the registry validated it already
@@ -455,6 +582,9 @@ class CallSession:
                 self.sent_actions.append(with_verdict_reason(self.ctx, sent))
             if result.status in ACCEPTED_STATUSES:
                 self.arm_hangup("submit_accepted")
+                if sent is not None:
+                    self._queue_sms(submitted_action(self.ctx, sent))
+                    self._queue_confirmation_call(submitted_action(self.ctx, sent))
         else:
             self.memory.observe(name, result)
             if self.memory.superseded_slot:
@@ -493,6 +623,54 @@ class CallSession:
         )
         if memory.prepared is not None:
             self._spawn(self.submit_confirmed_prepared("affirmation"))
+
+    def accept_refusal(self, why: str) -> None:
+        """The caller accepted a rule that already bit. Do not ask again.
+
+        Call ``6d537b3a``: eligibility refused, they said "Ah, I see", and the
+        model asked about another policy until they hung up. The refusal was
+        already the ending. A booking still on the table is not this path.
+        """
+        memory = self.memory
+        if self.has_accepted_submission or self._refusal_spawned:
+            return
+        if memory.prepared is not None or memory.last_rejection is None:
+            return
+        self.ctx.log.event(
+            "refusal.accepted",
+            why=why,
+            reason=memory.last_rejection.reason,
+            tool=memory.last_rejection_tool,
+        )
+        self._refusal_spawned = True
+        self._spawn(self.submit_accepted_refusal())
+
+    async def submit_accepted_refusal(self) -> SubmitResult | None:
+        """Send the stored refusal once, the moment the caller accepted it.
+
+        A refusal the caller has accepted is the whole ending of the call: there
+        is no second action to draw up and no question left to ask. So unlike
+        ``submit_confirmed_prepared`` this arms the hangup as soon as the
+        platform holds it, and the pipeline ends after the goodbye instead of
+        running to the three-minute cap.
+        """
+        memory = self.memory
+        if self.has_accepted_submission or memory.last_rejection is None:
+            return None
+        if memory.prepared is not None:
+            return None
+        action = with_verdict_reason(self.ctx, refusal_for(memory.last_rejection.reason))
+        if action in self.sent_actions:
+            return None
+        self.ctx.log.event(
+            "submit.on_refusal_accepted",
+            reason=memory.last_rejection.reason,
+            route=action_route(action),
+        )
+        result = await self.submit(action)
+        if result.status in ACCEPTED_STATUSES:
+            self.arm_hangup("submit_accepted")
+        return result
 
     async def submit_confirmed_prepared(self, trigger: str) -> SubmitResult | None:
         """Send the prepared action the caller has agreed to, once.
@@ -558,6 +736,9 @@ class CallSession:
         result = await submit_action(self.ctx, SubmitInput(action=action))
         self.submitted.append(result)
         self.sent_actions.append(with_verdict_reason(self.ctx, action))
+        if result.status in ACCEPTED_STATUSES:
+            self._queue_sms(submitted_action(self.ctx, action))
+            self._queue_confirmation_call(submitted_action(self.ctx, action))
         return result
 
     @property
@@ -580,6 +761,11 @@ class CallSession:
             return
         self._closed = True
         self.end_reason = reason
+        # Before ``call.ended``, and on every close reason including a crash:
+        # the dashboard prices a call in euros and an unpriced call is a hole
+        # in the total. A lane that does not measure still writes the line,
+        # with ``metered`` false, so "no cost" never reads as "no data".
+        self.ctx.log.event("call.usage", **self.usage.payload(self.settings))
         self.ctx.log.event(
             "call.ended",
             reason=reason,
@@ -596,8 +782,239 @@ class CallSession:
         except TimeoutError:
             self.ctx.log.event("submit.fallback_timed_out")
         finally:
-            self.ctx.log.summary(reason=reason)
+            await self._drain_sms()
+            self.ctx.log.summary(reason=reason, usage=self.usage.summary_extras())
+            await self.sms.aclose()
             await self.submitter.aclose()
+
+    def _queue_confirmation_call(self, action: Action) -> None:
+        """Queue the day-before confirmation call off the submit path.
+
+        Same discipline as ``_queue_sms``: never blocks the call, never raises
+        into it, and a 409 duplicate does not schedule twice (the store dedupes
+        a pending row for the same number and slot).
+        """
+        if not isinstance(action, (BookAction, CancelAction)):
+            return
+        if not self.settings.confirmation_calls:
+            self.ctx.log.event(
+                "confirmation_call.skipped", reason="disabled", action_kind=action.kind
+            )
+            return
+        try:
+            task = asyncio.get_running_loop().create_task(self._sync_confirmation_call(action))
+        except RuntimeError:
+            return
+        self._sms_pending.add(task)
+        task.add_done_callback(self._sms_pending_done)
+
+    async def _sync_confirmation_call(self, action: Action) -> None:
+        """Schedule (book) or drop (cancel) the confirmation call. Never raises."""
+        try:
+            forced = bool(self.settings.confirmation_force_to or self.settings.sms_force_to)
+            to = (
+                self.settings.confirmation_force_to
+                or self.settings.sms_force_to
+                or self.ctx.from_number
+                or ""
+            ).strip()
+            if not to:
+                self.ctx.log.event(
+                    "confirmation_call.skipped", reason="no_from_number", action_kind=action.kind
+                )
+                return
+            store = confirmation_store_from_settings(self.settings)
+            lead = timedelta(hours=float(self.settings.confirmation_lead_hours))
+            if isinstance(action, BookAction):
+                details = await resolve_details(self.ctx, action)
+                when = details.when
+                if when is None:
+                    self.ctx.log.event("confirmation_call.skipped", reason="no_when")
+                    return
+                call = await schedule_confirmation_call(
+                    store,
+                    to=to,
+                    when=when,
+                    language=normalise_language(self.language) or "",
+                    provider_name=details.provider_name,
+                    location_name=details.location_name,
+                    provider_id=details.provider_id,
+                    location_id=details.location_id,
+                    patient_id=action.patient_id,
+                    appointment_id=await self._booked_appointment_id(action),
+                    now=self.ctx.now,
+                    lead=lead,
+                )
+                if call is None:
+                    self.ctx.log.event("confirmation_call.skipped", reason="within_lead_window")
+                    return
+                self.ctx.log.event(
+                    "confirmation_call.scheduled",
+                    call_at=call.call_at,
+                    appointment_at=call.appointment_at,
+                    language=call.language,
+                    to=mask_phone(to),
+                    forced=forced,
+                )
+                return
+            if isinstance(action, CancelAction):
+                details = await resolve_details(self.ctx, action)
+                count = await cancel_confirmation_calls(
+                    store,
+                    to=to,
+                    appointment_at=details.when,
+                    appointment_id=action.appointment_id,
+                )
+                self.ctx.log.event(
+                    "confirmation_call.cancelled",
+                    count=count,
+                    appointment_id=action.appointment_id,
+                )
+        except Exception as exc:  # noqa: BLE001 - never break the call for this
+            self.ctx.log.event("confirmation_call.failed", error=repr(exc))
+
+    def _queue_sms(self, action: Action) -> None:
+        """Fire a confirmation SMS off the submit path. Never blocks the call."""
+        if not isinstance(action, (BookAction, CancelAction)):
+            return
+        if not self.settings.sms_confirmations:
+            self.ctx.log.event("sms.skipped", reason="disabled", action_kind=action.kind)
+            return
+        fingerprint = action_fingerprint(action)
+        if fingerprint in self._sms_notified:
+            self.ctx.log.event("sms.skipped", reason="already_notified", action_kind=action.kind)
+            return
+        self._sms_notified.add(fingerprint)
+        try:
+            task = asyncio.get_running_loop().create_task(self._send_sms(action))
+        except RuntimeError:
+            self._sms_notified.discard(fingerprint)
+            return
+        self._sms_pending.add(task)
+        task.add_done_callback(self._sms_pending_done)
+
+    def _sms_pending_done(self, task: asyncio.Task[Any]) -> None:
+        self._sms_pending.discard(task)
+        if not task.cancelled() and task.exception() is not None:
+            self.ctx.log.event("sms.failed", error=repr(task.exception()))
+
+    async def _send_sms(self, action: Action) -> None:
+        forced = bool(self.settings.sms_force_to)
+        to = (self.settings.sms_force_to or self.ctx.from_number or "").strip()
+        if not to:
+            self.ctx.log.event("sms.skipped", reason="no_from_number", action_kind=action.kind)
+            return
+        details = await resolve_details(self.ctx, action)
+        body = render_confirmation_text(action, details)
+        payload = notification_payload(action, details)
+        self.ctx.log.event(
+            "sms.sending",
+            to=mask_phone(to),
+            forced=forced,
+            **payload,
+        )
+        result = await self.sms.send(to=to, body=body)
+        self.ctx.log.event(
+            f"sms.{result.status}",
+            to=mask_phone(result.to or to),
+            detail=result.detail,
+            sid=result.sid,
+            forced=forced,
+            **payload,
+        )
+        if self.settings.sms_day_before_reminders:
+            await self._sync_reminders(action, to=to, details=details)
+
+    async def _booked_appointment_id(self, action: BookAction) -> str:
+        """The platform id of the visit a ``BookAction`` just created.
+
+        Best effort with the SMS details budget: the confirmation call still
+        schedules without it, but a handed-off reschedule needs the real id -
+        ``prepare_reschedule`` rejects anything the clinic API never issued.
+        """
+        try:
+            items = await asyncio.wait_for(
+                self.ctx.clinic.appointments(action.patient_id), SMS_DETAILS_BUDGET_SECS
+            )
+        except Exception as exc:  # noqa: BLE001 - never breaks the call
+            self.ctx.log.event(
+                "confirmation_call.appointment_lookup_failed", error=type(exc).__name__
+            )
+            return ""
+        for item in items:
+            if (
+                item.provider_id == action.provider_id
+                and item.location_id == action.location_id
+                and item.start == action.slot
+            ):
+                return item.appointment_id
+        return ""
+
+    async def _sync_reminders(self, action: Action, *, to: str, details: object) -> None:
+        """Queue or drop the day-before reminder. Never raises into the call."""
+        try:
+            store = reminder_store_from_settings(self.settings)
+            lead = timedelta(hours=float(self.settings.sms_reminder_lead_hours))
+            if isinstance(action, BookAction):
+                when = getattr(details, "when", None)
+                if when is None:
+                    self.ctx.log.event(
+                        "sms.reminder_skipped",
+                        reason="no_when",
+                        action_kind=action.kind,
+                    )
+                    return
+                reminder = await schedule_book_reminder(
+                    store,
+                    to=to,
+                    when=when,
+                    provider_name=getattr(details, "provider_name", "") or "",
+                    location_name=getattr(details, "location_name", "") or "",
+                    provider_id=getattr(details, "provider_id", "") or "",
+                    location_id=getattr(details, "location_id", "") or "",
+                    patient_id=getattr(action, "patient_id", "") or "",
+                    now=self.ctx.now,
+                    lead=lead,
+                )
+                if reminder is None:
+                    self.ctx.log.event(
+                        "sms.reminder_skipped",
+                        reason="within_lead_window",
+                        action_kind=action.kind,
+                    )
+                    return
+                self.ctx.log.event(
+                    "sms.reminder_scheduled",
+                    send_at=reminder.send_at,
+                    appointment_at=reminder.appointment_at,
+                    to=mask_phone(to),
+                )
+                return
+            if isinstance(action, CancelAction):
+                count = await cancel_book_reminders(
+                    store,
+                    to=to,
+                    appointment_at=getattr(details, "when", None),
+                    appointment_id=action.appointment_id,
+                )
+                self.ctx.log.event(
+                    "sms.reminder_cancelled",
+                    count=count,
+                    appointment_id=action.appointment_id,
+                )
+        except Exception as exc:  # noqa: BLE001 - reminders must not break the call
+            self.ctx.log.event("sms.reminder_failed", error=repr(exc))
+
+    async def _drain_sms(self) -> None:
+        if not self._sms_pending:
+            return
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*tuple(self._sms_pending), return_exceptions=True),
+                timeout=SMS_DRAIN_TIMEOUT_SECS,
+            )
+        except TimeoutError:
+            self.ctx.log.event("sms.drain_timed_out", pending=len(self._sms_pending))
 
     async def _fallback_if_silent(self) -> None:
         """Submitting nothing always fails. A typed refusal never scores worse.
@@ -616,11 +1033,17 @@ class CallSession:
             return
         branch, action, why = self.fallback_action()
         if action == UNSCORED_REFUSAL:
-            booking = await self.cold_booking()
-            if booking is not None:
-                branch = "cold_booking"
-                why = f"{why}, and out_of_scope wins no case: booked what the line points at"
-                action = booking
+            intent_action = await self._caller_intent_action()
+            if intent_action is not None:
+                branch = "caller_intent"
+                why = f"{why}; the caller's own words asked to change or cancel a known visit"
+                action = intent_action
+            else:
+                booking = await self.cold_booking()
+                if booking is not None:
+                    branch = "cold_booking"
+                    why = f"{why}, and out_of_scope wins no case: booked what the line points at"
+                    action = booking
         with observe_span(
             "submit-fallback",
             input={"branch": branch, "why": why, "route": action_route(action)},
@@ -719,6 +1142,89 @@ class CallSession:
             if result.slots:
                 return result.slots[0]
         return None
+
+    async def _caller_intent_action(self) -> Action | None:
+        """The cancel or reschedule the caller asked for and never got.
+
+        Reached where the fallback would send ``out_of_scope`` - a certain
+        zero, so a wrong guess here costs nothing the refusal was keeping. The
+        record comes from ``list_appointments``, filtered to the caller's own
+        visits that are still live, and it acts only on exactly one: with two
+        or more the visit to act on is the caller's to say, and guessing there
+        loses the same zero anyway.
+        """
+        patient = self.memory.patient_on_record
+        if patient is None:
+            return None
+        live = [
+            appointment
+            for appointment in self.memory.diary
+            if appointment.patient_id == patient.patient_id
+            and appointment.start > self.ctx.now
+            and not _is_dead(appointment)
+        ]
+        if len(live) != 1:
+            return None
+        intent = _last_intent(self.ctx.log.caller_words())
+        if intent is None:
+            return None
+        appointment = live[0]
+        if intent == "cancel":
+            action: Action = CancelAction(appointment_id=appointment.appointment_id)
+        else:
+            action = await self._reschedule_guess(appointment)
+            if action is None:
+                return None
+        self.ctx.log.event(
+            "submit.caller_intent",
+            intent=intent,
+            appointment_id=appointment.appointment_id,
+            route=action_route(action),
+        )
+        return action
+
+    async def _reschedule_guess(self, appointment: Appointment) -> RescheduleAction | None:
+        """First slot after theirs, same doctor and site - the move the case asks for.
+
+        The search runs through the diary lane's ``find_slots`` so closures and
+        the same-day rule stay in one place; the floor is the visit's own day
+        because a later hour that same day is still "after it". No slot found
+        is ``None``, not a different guess: the refusal already chosen stands.
+        """
+        day = appointment.start.astimezone(MADRID).date()
+        patient = self.memory.patient_on_record
+        assert patient is not None  # the caller checked before this was reached
+        try:
+            result = await asyncio.wait_for(
+                find_slots(
+                    self.ctx,
+                    FindSlotsInput(
+                        provider_id=appointment.provider_id,
+                        location_id=appointment.location_id,
+                        patient_id=patient.patient_id,
+                        insurer=patient.insurer or None,
+                        date_from=day,
+                        date_to=day + timedelta(days=COLD_BOOKING_HORIZON_DAYS),
+                    ),
+                ),
+                timeout=self.settings.cold_booking_timeout_secs,
+            )
+        except TimeoutError:
+            self.ctx.log.event("submit.caller_intent_timed_out")
+            return None
+        except Exception as exc:
+            self.ctx.log.event("submit.caller_intent_failed", detail=f"{type(exc).__name__}: {exc}")
+            return None
+        later = next((slot for slot in result.slots if slot.start > appointment.start), None)
+        if later is None:
+            return None
+        return RescheduleAction(
+            appointment_id=appointment.appointment_id,
+            provider_id=later.provider_id,
+            location_id=later.location_id,
+            slot=later.start,
+            policy_id=policy_for(patient, later),
+        )
 
     def _habits_of(self, patient: PatientRecord) -> tuple[str | None, str | None]:
         """The doctor and site this patient has always used, or ``(None, None)``.

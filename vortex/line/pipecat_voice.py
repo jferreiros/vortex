@@ -45,12 +45,14 @@ TODO(line):
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable
 from typing import Any
 
 from fastapi import WebSocket
 
 from vortex import tools as registry
+from vortex.contract import action_route
 from vortex.conversation.language import (
     DEFAULT_LANGUAGE,
     detect_language,
@@ -59,21 +61,25 @@ from vortex.conversation.language import (
 )
 from vortex.conversation.prompt import (
     GREETING,
+    handoff_greeting_for,
+    idle_submit_line_for,
     initial_messages,
     wait_prompt_for,
 )
-from vortex.conversation.stt_context import stt_context_text, stt_terms
 from vortex.conversation.turns import (
     ConfirmationPolicy,
     IdlePolicy,
     TurnSettings,
     default_turn_settings,
     effective_vad_stop_secs,
+    is_refusal_acceptance,
     user_turn_strategies,
 )
+from vortex.line import voice_config
 from vortex.line.aic_filter import build_audio_in_filter
 from vortex.line.llm_timeout import first_token_guard
 from vortex.line.session import CallSession
+from vortex.line.soniox_stall import make_stall_guarded_soniox_stt
 from vortex.observability.tracing import traced_openai_llm_service
 from vortex.settings import GEMINI_TTS_LANGUAGES
 
@@ -82,6 +88,25 @@ log = logging.getLogger(__name__)
 # Both the line in and the voice out are 8 kHz: the platform speaks µ-law at
 # 8 kHz and the serializer does the companding.
 LINE_SAMPLE_RATE = 8000
+
+# Soniox endpoint knobs, back at Soniox's own defaults. The pair the turn
+# settings carry (sensitivity 0.3, latency adjustment 2) was tuned for speed
+# and measured on the 2026-09-19 live-audio run (CA-voicetest-1789811447) to
+# endpoint the caller's telephony audio after every breath group - "Hola." /
+# "Buenos días." / ... - so the agent answered each fragment and talked over
+# the caller mid-sentence. Half the turns of that call were eaten this way.
+# The conservative pair holds the turn while the caller breathes; the acoustic
+# fallback (``stt_max_endpoint_delay_ms``) still bounds a true stall, and the
+# stall guard in ``vortex.line.soniox_stall`` bounds the no-audio case.
+SONIOX_ENDPOINT_SENSITIVITY = 0.0
+SONIOX_ENDPOINT_LATENCY_ADJUSTMENT_LEVEL = 0
+
+# The tool filler masks LLM latency, but a tool chain runs several completions
+# in a row and each one started a batch: the same call spoke "Un momento."
+# six times in seven seconds (CA-voicetest-1789811447), which masks nothing
+# and floods the line. One filler per interaction: the guard speaks the first
+# batch after the caller said something, and after that only once per cooldown.
+FILLER_REPEAT_COOLDOWN_SECS = 4.0
 
 # Spoken the instant a tool call starts, so the caller hears something while
 # the LLM waits on the clinic API (~1.3 s p50). Keep each line under ~1 s of
@@ -113,6 +138,29 @@ def _language_hints(codes: tuple[str, ...]) -> list[Any]:
         except ValueError:
             log.warning("unknown STT language hint %r, ignored", code)
     return hints
+
+
+def _soniox_stt_settings(settings: Any, turns: Any, ctx: Any) -> Any:
+    """The Soniox settings the pipeline runs, endpoint knobs included.
+
+    The endpoint knobs come from this module, not from the turn settings: the
+    eager pair the turn settings carry fragments telephony audio (see the
+    constants above for the measurement). Everything else stays the turn
+    settings' call.
+    """
+    from pipecat.services.soniox.stt import SonioxContextObject, SonioxSTTService
+
+    from vortex.conversation.stt_context import stt_context_text, stt_terms
+
+    return SonioxSTTService.Settings(
+        model=settings.soniox_stt_model,
+        language_hints=_language_hints(turns.stt_language_hints),
+        enable_language_identification=True,
+        context=SonioxContextObject(text=stt_context_text(), terms=stt_terms(ctx)),
+        max_endpoint_delay_ms=turns.stt_max_endpoint_delay_ms,
+        endpoint_sensitivity=SONIOX_ENDPOINT_SENSITIVITY,
+        endpoint_latency_adjustment_level=SONIOX_ENDPOINT_LATENCY_ADJUSTMENT_LEVEL,
+    )
 
 
 def register_call_tools(
@@ -175,7 +223,6 @@ async def run_pipecat_call(
     from pipecat.serializers.twilio import TwilioFrameSerializer
     from pipecat.services.llm_service import FunctionCallParams
     from pipecat.services.openai.llm import OpenAILLMService
-    from pipecat.services.soniox.stt import SonioxContextObject, SonioxSTTService
     from pipecat.transports.websocket.fastapi import (
         FastAPIWebsocketParams,
         FastAPIWebsocketTransport,
@@ -213,17 +260,10 @@ async def run_pipecat_call(
 
     # ---- STT: Soniox. Language identification tags every transcription frame,
     # which is what the language watcher below switches the voice on. ----------
-    stt = SonioxSTTService(
+    stt_cls = make_stall_guarded_soniox_stt(on_event=ctx.log.event)
+    stt = stt_cls(
         api_key=settings.soniox_api_key,
-        settings=SonioxSTTService.Settings(
-            model=settings.soniox_stt_model,
-            language_hints=_language_hints(turns.stt_language_hints),
-            enable_language_identification=True,
-            context=SonioxContextObject(text=stt_context_text(), terms=stt_terms(ctx)),
-            max_endpoint_delay_ms=turns.stt_max_endpoint_delay_ms,
-            endpoint_sensitivity=turns.stt_endpoint_sensitivity,
-            endpoint_latency_adjustment_level=turns.stt_endpoint_latency_adjustment_level,
-        ),
+        settings=_soniox_stt_settings(settings, turns, ctx),
         # False hands the end of the turn to Soniox's own endpoint detection.
         vad_force_turn_endpoint=not turns.soniox_turn_detection,
         should_interrupt=turns.enable_interruptions,
@@ -231,7 +271,12 @@ async def run_pipecat_call(
 
     # The language this call is in, shared by the watcher that updates it and
     # the router that reads it. Per call: a closure, never a module global.
+    # A call that arrives through an outbound-call handoff already has its
+    # language: the patient picked it during the confirmation call.
     language_state = _LanguageState()
+    if session.handoff:
+        if handoff_language := normalise_language(session.handoff.get("language")):
+            language_state.language = handoff_language
 
     # ---- LLM: any OpenAI-compatible endpoint, as long as it is in the EU. ----
     llm_settings = OpenAILLMService.Settings(
@@ -251,13 +296,17 @@ async def run_pipecat_call(
         settings=llm_settings,
         first_token_timeout_secs=settings.llm_first_token_timeout_secs,
         llm_retries=settings.llm_retries,
+        retry_model=settings.llm_alt_model,
         # Read at fire time, so a mid-call language switch moves the line and
         # the TTS router sends it down the branch that can say it.
         timeout_fallback_text=lambda: wait_prompt_for(language_state.language),
         timeout_log_event=ctx.log.event,
     )
 
-    tts = _make_tts_stage(settings, language_state)
+    # The wall's "Voz del agente" card, read per socket: a change lands on the
+    # next call, never mid-flight.
+    voice_cfg = voice_config.load(settings)
+    tts = _make_tts_stage(settings, language_state, voice_cfg)
 
     # ---- tools: every registry entry becomes a function the model can call ----
     def make_handler(tool_name: str):
@@ -279,9 +328,12 @@ async def run_pipecat_call(
     # prompt can open knowing who the line belongs to instead of spending the
     # first minute of the call asking.
     caller = await session.resolve_caller_line()
-    context = LLMContext(
-        initial_messages(ctx.now, caller=caller), tools=ToolsSchema(standard_tools=schemas)
-    )
+    messages = initial_messages(ctx.now, caller=caller, handoff=session.handoff)
+    # Tono/Amabilidad are not TTS fields: they arrive as one extra line on the
+    # system prompt. Empty at neutral, so an untouched card changes nothing.
+    if directive := voice_config.style_directive(voice_cfg):
+        messages[0]["content"] += f"\n{directive}"
+    context = LLMContext(messages, tools=ToolsSchema(standard_tools=schemas))
     aggregators = LLMContextAggregatorPair(context, user_params=_user_aggregator_params(turns))
 
     # Ends the call from our side once the platform holds an action and the
@@ -294,11 +346,15 @@ async def run_pipecat_call(
     hangup = _make_hangup_watcher(session)
     aggregators.user().add_event_handler("on_user_turn_idle", hangup.on_user_idle)
 
+    # One filler guard per call, shared by the speaker and the observer: the
+    # observer marks caller turns, the speaker spends the filler slot.
+    filler_guard = _ToolFillerGuard()
+
     stages: list[Any] = [transport.input(), stt]
     if settings.tts_supports_language_switch:
         # Only worth a processor when the pair can say more than one language.
         # ElevenLabs alone is Spanish-only, so the watcher would be a no-op.
-        stages.append(_LanguageWatcher(session, language_state))
+        stages.append(_LanguageWatcher(session, language_state, voice_cfg))
     stages += [
         aggregators.user(),
         llm,
@@ -314,15 +370,25 @@ async def run_pipecat_call(
             audio_in_sample_rate=LINE_SAMPLE_RATE,
             audio_out_sample_rate=LINE_SAMPLE_RATE,
             enable_metrics=True,
+            # The one flag behind all three usage emitters: without it
+            # ``FrameProcessor.start_{llm,stt,tts}_usage_metrics`` return
+            # silently and no ``MetricsFrame`` carrying usage is ever pushed,
+            # so the jury wall has no quantities to price a call with.
+            enable_usage_metrics=True,
         ),
-        observers=[_CallLogObserver(session), hangup],
+        observers=[_CallLogObserver(session, filler_guard=filler_guard), hangup],
     )
+    # The params above are what makes the counters real; say so on the session
+    # so ``call.usage`` can tell a measured zero from an unmeasured lane.
+    session.usage.metered = True
     hangup.bind(task)
+
+    greeting = handoff_greeting_for(language_state.language) if session.handoff else GREETING
 
     @transport.event_handler("on_client_connected")
     async def _on_connected(transport: Any, client: Any) -> None:
-        ctx.log.assistant_turn(GREETING)
-        await task.queue_frames([TTSSpeakFrame(GREETING)])
+        ctx.log.assistant_turn(greeting)
+        await task.queue_frames([TTSSpeakFrame(greeting)])
 
     @transport.event_handler("on_client_disconnected")
     async def _on_disconnected(transport: Any, client: Any) -> None:
@@ -338,7 +404,7 @@ async def run_pipecat_call(
     )
     llm.add_event_handler(
         "on_function_calls_started",
-        _make_tool_filler_speaker(session, language_state, task),
+        _make_tool_filler_speaker(session, language_state, task, guard=filler_guard),
     )
 
     async def _on_user_turn_started(aggregator: Any, *args: Any) -> None:
@@ -395,6 +461,7 @@ def _user_aggregator_params(turns: TurnSettings) -> Any:
             )
         ),
         user_idle_timeout=turns.user_idle_secs,
+        user_turn_stop_timeout=turns.user_turn_stop_secs,
         user_turn_strategies=user_turn_strategies(turns),
     )
 
@@ -414,13 +481,51 @@ class _LanguageState:
         self.language = language
 
 
-def _make_tts_stage(settings: Any, state: _LanguageState) -> Any:
+class _ToolFillerGuard:
+    """At most one tool filler per interaction, not one per tool batch.
+
+    A tool chain runs one LLM completion per hop and every completion that
+    starts a batch fires ``on_function_calls_started``; without a guard the
+    caller hears the phrase once per hop. The rule: speak the first batch
+    after the caller said anything, then stay quiet for the cooldown unless
+    the caller spoke again.
+    """
+
+    __slots__ = ("_clock", "_cooldown", "_last_spoken_at", "_caller_spoke")
+
+    def __init__(
+        self,
+        cooldown_secs: float = FILLER_REPEAT_COOLDOWN_SECS,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._cooldown = cooldown_secs
+        self._clock = clock
+        self._last_spoken_at = float("-inf")
+        self._caller_spoke = True  # the call's first batch may always speak
+
+    def on_caller_turn(self) -> None:
+        """The caller said something. The next tool batch may speak again."""
+        self._caller_spoke = True
+
+    def wants_to_speak(self) -> bool:
+        """Consume one filler slot. ``True`` means the phrase should go out."""
+        now = self._clock()
+        if self._caller_spoke or now - self._last_spoken_at >= self._cooldown:
+            self._caller_spoke = False
+            self._last_spoken_at = now
+            return True
+        return False
+
+
+def _make_tts_stage(
+    settings: Any, state: _LanguageState, vcfg: voice_config.VoiceConfig | None = None
+) -> Any:
     """One TTS service, or a router over two when primary and alternate differ."""
-    primary = _make_tts(settings, settings.tts_provider, state)
+    primary = _make_tts(settings, settings.tts_provider, state, vcfg)
     if not settings.tts_is_routed:
         return primary
     return _TTSRouter(
-        settings, state, primary, _make_tts(settings, settings.tts_provider_alt, state)
+        settings, state, primary, _make_tts(settings, settings.tts_provider_alt, state, vcfg)
     )
 
 
@@ -444,7 +549,10 @@ def _llm_extra_body(settings: Any) -> dict[str, Any]:
 
 
 def _make_tts(
-    settings: Any, provider: str | None = None, state: _LanguageState | None = None
+    settings: Any,
+    provider: str | None = None,
+    state: _LanguageState | None = None,
+    vcfg: voice_config.VoiceConfig | None = None,
 ) -> Any:
     """Build one TTS service (or a Chirp|Gemini pair for Google).
 
@@ -453,7 +561,10 @@ def _make_tts(
     never changes with the provider.
     """
     name = provider or settings.tts_provider
-    voice, language = tts_voice_for(DEFAULT_LANGUAGE, settings, name)
+    start_language = state.language if state is not None else DEFAULT_LANGUAGE
+    voice, language = tts_voice_for(start_language, settings, name)
+    if vcfg:
+        voice = voice_config.apply_gender(voice, vcfg.voice)
     if not voice:
         # Builds fine, then fails on every utterance. Say so once, loudly.
         log.warning("TTS provider %s has no Spanish voice configured", name)
@@ -471,10 +582,11 @@ def _make_tts(
                 voice=voice,
                 model=settings.elevenlabs_model,
                 language=language,
+                **({"speed": voice_config.elevenlabs_speed(vcfg)} if vcfg else {}),
             ),
         )
 
-    return _make_google_tts(settings, voice, language, state)
+    return _make_google_tts(settings, voice, language, state, vcfg)
 
 
 def _make_google_tts(
@@ -482,6 +594,7 @@ def _make_google_tts(
     voice: str,
     language: Any,
     state: _LanguageState | None,
+    vcfg: voice_config.VoiceConfig | None = None,
 ) -> Any:
     """Chirp HTTP for en/es; Gemini-TTS for ca/gl/eu unless Standard fallback."""
     from pipecat.services.google.tts import GoogleHttpTTSService
@@ -491,7 +604,11 @@ def _make_google_tts(
         credentials=settings.google_tts_credentials_json or None,
         credentials_path=settings.google_application_credentials or None,
         sample_rate=LINE_SAMPLE_RATE,
-        settings=GoogleHttpTTSService.Settings(voice=voice, language=language),
+        settings=GoogleHttpTTSService.Settings(
+            voice=voice,
+            language=language,
+            **({"speaking_rate": voice_config.speaking_rate(vcfg)} if vcfg else {}),
+        ),
     )
     if not settings.google_tts_uses_gemini:
         # Research 06 fallback: one HTTP service, Standard-* for ca/gl/eu.
@@ -500,6 +617,8 @@ def _make_google_tts(
     from pipecat.services.google.tts import GeminiTTSService
 
     gemini_voice, gemini_language = tts_voice_for("ca", settings, "google")
+    if vcfg:
+        gemini_voice = voice_config.apply_gender(gemini_voice, vcfg.voice)
     gemini = GeminiTTSService(
         credentials=settings.google_tts_credentials_json or None,
         credentials_path=settings.google_application_credentials or None,
@@ -508,6 +627,8 @@ def _make_google_tts(
             model=settings.google_tts_gemini_model,
             voice=gemini_voice,
             language=gemini_language,
+            # No speaking_rate on this service: pace goes in its prompt.
+            **({"prompt": voice_config.gemini_prompt(vcfg)} if vcfg else {}),
         ),
     )
     language_state = state if state is not None else _LanguageState()
@@ -655,7 +776,9 @@ def _PrivacyGuard(  # noqa: N802 - factory that returns a processor
 
 
 def _LanguageWatcher(  # noqa: N802 - factory that returns a processor
-    session: CallSession, state: _LanguageState | None = None
+    session: CallSession,
+    state: _LanguageState | None = None,
+    vcfg: voice_config.VoiceConfig | None = None,
 ):
     """Switch the voice when the caller switches language.
 
@@ -707,7 +830,12 @@ def _LanguageWatcher(  # noqa: N802 - factory that returns a processor
                     return
                 provider = settings.tts_provider_for(language)
                 voice, tts_language = tts_voice_for(language, settings, provider)
+                if vcfg:
+                    voice = voice_config.apply_gender(voice, vcfg.voice)
                 previous, self._state.language = self._state.language, language
+                # The session carries it too: the day-before confirmation call
+                # is dialled in the language this caller actually spoke.
+                session.language = language
                 session.ctx.log.event(
                     "voice.language_switch",
                     was=previous,
@@ -734,10 +862,13 @@ def _make_idle_speaker(
     """The handler the user aggregator fires when the caller goes quiet.
 
     The line comes from ``conversation.turns.IdlePolicy``: the short nudge
-    first, a "take your time" line second, then silence. The platform cuts a
-    call that goes quiet, so the first silence has to answer — but answering
-    every silence is what put 147 nudges into the 20 calls of 2026-09-18, each
-    one restarting a sentence the caller was already saying.
+    first. The platform cuts a call that goes quiet, so the first silence has
+    to answer — but answering every silence is what put 147 nudges into the
+    20 calls of 2026-09-18, each one restarting a sentence the caller was
+    already saying. So the second silence does not nudge again: it speaks
+    ``prompt.idle_submit_line_for`` and submits the best known action (a
+    prepared booking counts as confirmed by the second silence; anything else
+    sends the same refusal ``close()`` would). Further idles are silent.
 
     The language is read at fire time, so a mid-call switch moves the line, and
     the TTS router reads the same state, so it comes out on the right voice.
@@ -757,24 +888,70 @@ def _make_idle_speaker(
             spoke=decision.speaks,
             suppressed=decision.suppressed,
         )
+        if decision.level == 2:
+            # Second silence: no more nudging. Say we are noting what the call
+            # has and send it - a quiet call still counts on the platform.
+            await task.queue_frames([TTSSpeakFrame(idle_submit_line_for(state.language))])
+            await _submit_best_known_on_idle(session)
+            return
         if decision.text is not None:
             await task.queue_frames([TTSSpeakFrame(decision.text)])
 
     return _on_user_idle
 
 
-def _make_tool_filler_speaker(session: CallSession, state: _LanguageState, task: Any) -> Any:
+async def _submit_best_known_on_idle(session: CallSession) -> None:
+    """Second idle: send prepared work, or the fallback refusal, once."""
+    if session.has_accepted_submission:
+        return
+    memory = session.memory
+    if memory.prepared is not None:
+        memory.mark_confirmed()
+        branch, action, why = (
+            "prepared_on_idle",
+            memory.prepared,
+            f"{memory.prepared_tool} prepared; second idle confirms",
+        )
+    else:
+        branch, action, why = session.fallback_action()
+    repeat = action in session.sent_actions
+    session.ctx.log.event(
+        "submit.idle",
+        branch=branch,
+        why=why,
+        route=action_route(action),
+        skipped=repeat,
+    )
+    if repeat:
+        return
+    await session.submit(action)
+
+
+def _make_tool_filler_speaker(
+    session: CallSession, state: _LanguageState, task: Any, guard: _ToolFillerGuard | None = None
+) -> Any:
     """Speak one short filler when the LLM starts executing tool calls.
 
-    Wired to ``LLMService.on_function_calls_started``. One phrase per batch,
-    read at fire time so a mid-call language switch moves it. ``TTSSpeakFrame``
-    is bot speech: ``MinWordsUserTurnStartStrategy`` guards it and the idle
-    timer does not run during it.
+    Wired to ``LLMService.on_function_calls_started``. One phrase per
+    interaction, read at fire time so a mid-call language switch moves it.
+    ``TTSSpeakFrame`` is bot speech: ``MinWordsUserTurnStartStrategy`` guards it
+    and the idle timer does not run during it. The guard keeps a tool chain
+    that runs batch after batch from re-speaking the phrase every second.
     """
     from pipecat.frames.frames import TTSSpeakFrame
 
+    filler_guard = guard if guard is not None else _ToolFillerGuard()
+
     async def _on_function_calls_started(service: Any, function_calls: Any = None) -> None:
         phrase = tool_filler_for(state.language)
+        if not filler_guard.wants_to_speak():
+            session.ctx.log.event(
+                "voice.tool_filler",
+                language=state.language,
+                tools=len(function_calls or ()),
+                suppressed="cooldown",
+            )
+            return
         session.ctx.log.event(
             "voice.tool_filler",
             language=state.language,
@@ -787,36 +964,98 @@ def _make_tool_filler_speaker(session: CallSession, state: _LanguageState, task:
 
 
 def _CallLogObserver(  # noqa: N802 - factory that returns an observer
-    session: CallSession, confirmations: ConfirmationPolicy | None = None
+    session: CallSession,
+    confirmations: ConfirmationPolicy | None = None,
+    filler_guard: _ToolFillerGuard | None = None,
+    clock: Callable[[], float] = time.monotonic,
 ):
-    """Log user and assistant text, count media frames, and watch for the yes.
+    """Log user and assistant text, count media frames, meter the providers.
 
     The frame stream is where both sides of the call already pass in order, so
     the confirmation guard reads it here: TTS text is the agent's turn, a
     transcription is the caller's reply to it. When that reply is an agreement
     to a read-back, ``CallSession.confirm_prepared`` submits what is prepared
     instead of letting the model ask a second time.
+
+    It is also where the providers' own usage lands. With
+    ``enable_usage_metrics`` on, Soniox, the LLM service and each TTS service
+    push a ``MetricsFrame`` with what they just billed; the observer sums them
+    into ``session.usage`` for the ``call.usage`` line. A frame is pushed at
+    every link it crosses, so each one is counted once, keyed by frame id -
+    pipecat's own ``MetricsLogObserver`` de-duplicates the same way.
+
+    The observer also measures how long the caller waited for an answer. The
+    VAD's end-of-speech frame is the moment the caller finished; the turn-end
+    frame closes detection; the first outbound audio frame is the reply
+    starting. Each answered turn logs ``voice.reply_latency`` with both legs,
+    so the post-mortem can see whether waiting went into endpointing or into
+    the pipeline behind it.
     """
     from pipecat.frames.frames import (
         InputAudioRawFrame,
+        MetricsFrame,
         OutputAudioRawFrame,
         TranscriptionFrame,
         TTSTextFrame,
+        UserStoppedSpeakingFrame,
+        VADUserStoppedSpeakingFrame,
+    )
+    from pipecat.metrics.metrics import (
+        LLMUsageMetricsData,
+        STTUsageMetricsData,
+        TTSUsageMetricsData,
     )
     from pipecat.observers.base_observer import BaseObserver, FramePushed
 
     policy = confirmations if confirmations is not None else ConfirmationPolicy()
+    # Frame ids already counted. Per observer, so per socket.
+    metered_frames: set[int] = set()
+
+    def record_usage(frame: Any) -> None:
+        if frame.id in metered_frames:
+            return
+        counted = False
+        for item in frame.data or ():
+            if isinstance(item, LLMUsageMetricsData):
+                session.usage.add_llm(item.value)
+            elif isinstance(item, STTUsageMetricsData):
+                session.usage.add_stt(item.value.audio_seconds)
+            elif isinstance(item, TTSUsageMetricsData):
+                session.usage.add_tts(item.processor, item.model, item.value)
+            else:
+                # TTFB, processing time, turn predictions: timings, not money.
+                continue
+            counted = True
+        if counted:
+            metered_frames.add(frame.id)
+
+    guard = filler_guard
 
     class Observer(BaseObserver):
+        def __init__(self) -> None:
+            super().__init__()
+            self._speech_end: float | None = None
+            self._turn_end: float | None = None
+
         async def on_push_frame(self, data: FramePushed) -> None:
             frame = data.frame
-            if isinstance(frame, TranscriptionFrame):
+            if isinstance(frame, MetricsFrame):
+                record_usage(frame)
+            elif isinstance(frame, TranscriptionFrame):
                 session.ctx.log.user_turn(frame.text)
+                if guard is not None:
+                    guard.on_caller_turn()
                 decision = policy.on_user_text(
                     frame.text, prepared=session.memory.prepared is not None
                 )
                 if decision.confirmed:
                     session.confirm_prepared(decision.why)
+                elif (
+                    session.memory.prepared is None
+                    and session.memory.last_rejection is not None
+                    and is_refusal_acceptance(frame.text)
+                ):
+                    session.accept_refusal(f"caller accepted the refusal: {frame.text.strip()}")
             elif isinstance(frame, TTSTextFrame):
                 session.ctx.log.assistant_turn(frame.text)
                 policy.on_assistant_text(frame.text)
@@ -824,6 +1063,26 @@ def _CallLogObserver(  # noqa: N802 - factory that returns an observer
                 session.media_frames_in += 1
             elif isinstance(frame, OutputAudioRawFrame):
                 session.media_frames_out += 1
+                self._on_reply_audio()
+            elif isinstance(frame, VADUserStoppedSpeakingFrame):
+                self._speech_end = clock()
+            elif isinstance(frame, UserStoppedSpeakingFrame):
+                if self._speech_end is not None:
+                    self._turn_end = clock()
+
+        def _on_reply_audio(self) -> None:
+            """First agent audio after a turn closed: report what the wait was."""
+            if self._turn_end is None:
+                return
+            now, speech_end, turn_end = clock(), self._speech_end, self._turn_end
+            self._turn_end = None
+            if speech_end is None:
+                return
+            session.ctx.log.event(
+                "voice.reply_latency",
+                detection_secs=round(turn_end - speech_end, 3),
+                total_secs=round(now - speech_end, 3),
+            )
 
     return Observer()
 

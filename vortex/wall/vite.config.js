@@ -18,6 +18,10 @@ export default defineConfig(({ command }) => ({
     proxy: {
       "/api/wall": "http://127.0.0.1:8080",
       "/wall/avatar2d": "http://127.0.0.1:8080",
+      "/wall/vorty-face": "http://127.0.0.1:8080",
+      "/wall/vorty-face-no-headphones": "http://127.0.0.1:8080",
+      "/wall/accessories": "http://127.0.0.1:8080",
+      "/wall/personalities": "http://127.0.0.1:8080",
     },
   },
 }));

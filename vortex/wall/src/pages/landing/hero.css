@@ -80,7 +80,7 @@
 }
 
 .landing-hero-text-col p {
-  max-width: 30ch;
+  max-width: 34ch;
   font-size: clamp(18px, 1.8vw, 26px);
   line-height: var(--leading-relaxed);
   color: rgba(31, 92, 67, 0.75);
@@ -127,12 +127,12 @@
 }
 
 .landing-hero-cta svg {
-  animation: landing-bob 2s ease-in-out infinite;
+  animation: landing-bob 1.8s ease-in-out infinite;
 }
 
 @keyframes landing-bob {
   0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(5px); }
+  50% { transform: translateY(8px); }
 }
 
 /* Responsive -----------------------------------------------------------------------*/
