@@ -502,6 +502,12 @@
       "why": "El bench compara Deepgram, OpenAI y Cartesia, y el STT de producción no está. Sin esta cifra nadie puede decidir un filtro de ruido ni un cambio de proveedor. Ver docs/research/01-noise-suppression.md y 02-stt-landscape.md."
 
     {
+      "id": "T56", "wave": "w4", "lane": "ident", "kind": "infra",
+      "title": "Voz · Mapear el email y el teléfono dictados (arroba, punto, guion bajo)",
+      "problems": [4], "weight": 2, "size": "2 h", "blocked_by": [],
+      "files": ["vortex/identity/dictation.py", "vortex/identity/tools.py", "tests/"],
+      "done": "\"ana punto garcia arroba gmail punto com\" → ana.garcia@gmail.com, en es/ca/en, validado con email-validator sin DNS; el teléfono pasa por phonenumbers región ES. Tests con diez dictados.",
+      "why": "El reto 4 falla con un carácter mal. Hoy no hay ningún mapeador de formas habladas en vortex/. Las librerías están probadas en docs/research/05-structured-data.md."
       "id": "T55", "wave": "w6", "lane": "conv", "kind": "voz",
       "title": "Voz · Protocolo de lectura en voz alta en el prompt",
       "problems": [4, 12, 13], "weight": 4, "size": "1 h", "blocked_by": [],
