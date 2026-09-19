@@ -176,18 +176,6 @@ svg {
   display: block;
 }
 
-.icon {
-  width: 16px;
-  height: 16px;
-  max-width: 16px;
-  stroke: currentColor;
-  fill: none;
-  stroke-width: 1.75;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  flex: 0 0 auto;
-}
-
 :focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
@@ -569,9 +557,6 @@ svg {
   font: var(--text-caption-sm);
   color: var(--body);
   margin-top: var(--space-xs);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 /* Key/value row inside a card or column. */
@@ -872,15 +857,15 @@ table.ds td.num {
 }
 
 .page-head .title {
-  font: var(--text-heading-lg);
+  font: var(--text-display-lg);
   color: var(--ink);
 }
 
 .page-head .sub {
-  font: var(--text-body-sm);
+  font: var(--text-body-md);
   color: var(--body);
   margin-top: var(--space-xs);
-  max-width: 56ch;
+  max-width: 70ch;
 }
 
 /* The four stages of a call. `.done` is behind us, `.now` is in progress. */
@@ -1206,17 +1191,12 @@ table.ds td.num {
 .app {
   display: grid;
   grid-template-columns: 240px minmax(0, 1fr);
-  height: 100dvh;
-  min-height: 100dvh;
-  overflow: hidden;
+  min-height: 100vh;
 }
 
 @media (max-width: 850px) {
   .app {
     grid-template-columns: 1fr;
-    height: auto;
-    min-height: 0;
-    overflow: visible;
   }
 }
 
@@ -1227,8 +1207,10 @@ table.ds td.num {
   display: flex;
   flex-direction: column;
   gap: var(--space-xs);
-  height: 100dvh;
-  overflow: hidden;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow: auto;
 }
 
 @media (max-width: 850px) {
@@ -1356,15 +1338,6 @@ table.ds td.num {
 
 .content {
   min-width: 0;
-  height: 100dvh;
-  overflow: auto;
-}
-
-@media (max-width: 850px) {
-  .content {
-    height: auto;
-    overflow: visible;
-  }
 }
 
 /* Preview chip: sample or roadmap surface. Always next to the thing it labels. */
@@ -1610,32 +1583,11 @@ table.ds td.num {
   margin-bottom: var(--space-xl);
 }
 
-.wf-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
-  gap: var(--space-xl);
-  align-items: start;
-}
-
-.wf-side {
-  position: sticky;
-  top: 0;
-}
-
-@media (max-width: 1024px) {
-  .wf-layout {
-    grid-template-columns: 1fr;
-  }
-
-  .wf-side {
-    position: static;
-  }
-}
-
 .workflow {
   display: flex;
   flex-direction: column;
   gap: var(--space-md);
+  max-width: 720px;
 }
 
 .wf-card {
