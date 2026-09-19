@@ -34,13 +34,13 @@
 .settings-groups {
   display: flex;
   flex-direction: column;
-  gap: var(--space-5);
+  gap: var(--space-4);
 }
 
 .settings-group {
   display: grid;
-  grid-template-columns: 260px 1fr;
-  gap: var(--space-6);
+  grid-template-columns: 220px 1fr;
+  gap: var(--space-5);
 }
 
 .settings-group-head h3 {
@@ -54,29 +54,7 @@
 .settings-group-head p {
   font-size: var(--text-sm);
   color: var(--color-mute);
-  line-height: var(--leading-relaxed);
-}
-
-.settings-badge {
-  display: inline-block;
-  margin-left: var(--space-2);
-  padding: 2px 8px;
-  font-size: var(--text-xs);
-  font-weight: var(--weight-bold);
-  color: var(--color-warn);
-  background: var(--color-warn-soft);
-  border-radius: var(--radius-full);
-}
-
-.settings-lock {
-  margin-left: var(--space-2);
-  font-size: var(--text-xs);
-  cursor: help;
-}
-
-.settings-divider {
-  margin: var(--space-4) 0;
-  border-top: 1px solid var(--color-border);
+  line-height: var(--leading-normal);
 }
 
 .settings-rows {
@@ -84,16 +62,12 @@
   flex-direction: column;
 }
 
-.settings-rows.settings-safety .settings-row {
-  opacity: 0.7;
-}
-
 .settings-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-5);
-  padding: var(--space-4) 0;
+  padding: var(--space-3) 0;
   border-bottom: 1px solid var(--color-border);
 }
 
@@ -242,20 +216,18 @@
 .settings-knobs {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: var(--space-5);
+  gap: var(--space-4);
   grid-column: 2;
 }
 
-.settings-voice-knob,
-.settings-name-knob {
+.settings-voice-knob {
   display: flex;
   flex-direction: column;
   align-items: stretch;
   gap: var(--space-2);
 }
 
-.ui-voice-select,
-.ui-name-input {
+.ui-voice-select {
   width: 100%;
   min-height: 44px;
 }
@@ -278,15 +250,6 @@
   gap: var(--space-3);
   padding: var(--space-4) var(--space-5);
   border-top: 1px solid var(--color-border);
-}
-
-.ui-modal-warning {
-  font-size: var(--text-xs);
-  color: var(--color-warn);
-  background: var(--color-warn-soft);
-  padding: var(--space-3);
-  border-radius: var(--radius-md);
-  margin-top: var(--space-3);
 }
 
 .ui-modal-body ul {

@@ -23,87 +23,23 @@ const DEFAULTS = {
     friendliness: 50,
     speechRate: 50,
     voice: "female",
-    agentName: "Vortex",
   },
 };
 
-const SAFETY_RULES = [
-  {
-    key: "privacy",
-    label: "Privacidad de datos",
-    desc: "Nunca leer en voz alta DNI/NIE, teléfono, fecha de nacimiento ni datos sensibles.",
-  },
-  {
-    key: "noMedicalAdvice",
-    label: "Sin consejo médico",
-    desc: "El agente no diagnostica ni recomienda tratamientos; deriva a triaje/escalado.",
-  },
-  {
-    key: "noFabrication",
-    label: "No inventar datos",
-    desc: "Nunca inventar pacientes, médicos, slots, precios ni disponibilidad.",
-  },
-  {
-    key: "antiInjection",
-    label: "Protección anti-inyección",
-    desc: "Validación estricta de entradas y sanitización de prompts del usuario.",
-  },
-  {
-    key: "consent",
-    label: "Consentimiento antes de confirmar",
-    desc: "Confirmación explícita del paciente antes de cualquier acción con efectos reales.",
-  },
-  {
-    key: "emergencyEscalation",
-    label: "Escalado de emergencias reales",
-    desc: "Síntomas de riesgo vital derivan inmediatamente a humano/servicios de urgencia.",
-  },
-];
-
 const PERMISSIONS_CONFIG = [
-  {
-    key: "canBook",
-    label: "Reservar citas",
-    desc: "Permite crear citas nuevas sin intervención humana adicional.",
-  },
-  {
-    key: "canReschedule",
-    label: "Reprogramar citas",
-    desc: "Permite mover citas existentes a otro horario/día.",
-  },
-  {
-    key: "canCancel",
-    label: "Cancelar citas",
-    desc: "Permite anular citas existentes por teléfono.",
-  },
-  {
-    key: "canRegister",
-    label: "Registrar pacientes nuevos",
-    desc: "Permite crear fichas de pacientes que no existen en el directorio.",
-  },
-  {
-    key: "canInfo",
-    label: "Dar información de clínica",
-    desc: "Horarios, sedes, especialidades, requisitos, etc.",
-  },
-  {
-    key: "canEscalate",
-    label: "Escalar emergencias médicas",
-    desc: "Derivar a humano/servicios de urgencia ante síntomas de riesgo vital.",
-  },
+  { key: "canBook", label: "Reservar citas", desc: "Crear citas nuevas." },
+  { key: "canReschedule", label: "Reprogramar citas", desc: "Mover citas a otro horario." },
+  { key: "canCancel", label: "Cancelar citas", desc: "Anular citas por teléfono." },
+  { key: "canRegister", label: "Registrar pacientes", desc: "Dar de alta pacientes nuevos." },
+  { key: "canInfo", label: "Información de clínica", desc: "Horarios, sedes y requisitos." },
+  { key: "canEscalate", label: "Escalar urgencias", desc: "Derivar a un humano." },
 ];
 
-const LEAD_DAYS_HELP =
-  "1 = la primera cita disponible es mañana. 0 solo si el reto permite same-day (hoy no).";
+const LEAD_DAYS_HELP = "Días mínimos entre la llamada y la cita. 1 = la primera cita es mañana.";
 
-const ID_FIELDS_HELP =
-  "Para pacientes existentes: 1 dato (nombre) busca y, si hay ambigüedad, pide un segundo. " +
-  "Con 2 datos, exige dos campos independientes (nombre, DNI/NIE, teléfono, fecha de nacimiento) " +
-  "antes de confiar la identidad. El alta de paciente nuevo siempre pide: nombre completo con dos apellidos, " +
-  "DNI/NIE, fecha de nacimiento, email, aseguradora; teléfono de la línea si está disponible.";
+const ID_FIELDS_HELP = "Datos que debe confirmar un paciente existente. Con 1, se pide un segundo solo si hay ambigüedad.";
 
-const CAP_HELP =
-  "Límite impuesto por la plataforma; no se puede cambiar desde Vortex.";
+const CAP_HELP = "Fijado por la plataforma.";
 
 const PERSONALIZATION_CONFIG = [
   {
@@ -128,7 +64,7 @@ const PERSONALIZATION_CONFIG = [
         ? "«Le informo de su cita. ¿Confirma?»"
         : v <= 66
         ? "«Tenemos una cita para usted. ¿Le viene bien confirmarla?»"
-        : "«¡Tenemos una cita genial para usted! ¿Le encaja? 😊»",
+        : "«¡Tenemos una cita genial para usted! ¿Le encaja?»",
   },
   {
     key: "speechRate",
@@ -233,11 +169,11 @@ export default function Settings() {
       <SectionHeader
         eyebrow="Configuración"
         title="Reglas del agente"
-        subtitle="Estos controles definen qué puede decidir Vortex por sí solo, cómo se identifica a los pacientes y cómo suena el agente. Los cambios aplican a llamadas nuevas."
+        subtitle="Qué puede hacer Vortex y cómo suena. Aplica a llamadas nuevas."
         action={
           <>
             <Button variant="secondary" onClick={() => setShowDefaultConfirm(true)} disabled={!hasChanges && deepEqual(settings, DEFAULTS)}>
-              Set as default
+              Por defecto
             </Button>
             <Button variant="primary" onClick={handleSave} disabled={!hasChanges || isSaving}>
               {isSaving ? "Guardando..." : hasChanges ? "Guardar cambios" : "Sin cambios"}
@@ -250,11 +186,11 @@ export default function Settings() {
       {saveStatus === "defaulted" && <div className="settings-toast defaulted">Valores por defecto restaurados</div>}
 
       <div className="settings-groups">
-        {/* 1. Permisos del agente + Safety rules */}
+        {/* 1. Permisos del agente */}
         <Card padding="lg" className="settings-group">
           <div className="settings-group-head">
-            <h3>Permisos del agente</h3>
-            <p>Activa o desactiva qué capacidades tiene el agente. Si una está desactivada, no se expone la tool correspondiente y el agente responde con NO_ACTION y motivo válido.</p>
+            <h3>Permisos</h3>
+            <p>Lo que el agente puede hacer por sí solo.</p>
           </div>
           <div className="settings-rows">
             {PERMISSIONS_CONFIG.map((p) => (
@@ -271,39 +207,18 @@ export default function Settings() {
               </div>
             ))}
           </div>
-          <div className="settings-divider" />
-          <div className="settings-group-head">
-            <h3>Safety rules <span className="settings-badge">No editables</span></h3>
-            <p>Reglas de seguridad duras que no pueden desactivarse. Se muestran para transparencia.</p>
-          </div>
-          <div className="settings-rows settings-safety">
-            {SAFETY_RULES.map((r) => (
-              <div className="settings-row" key={r.key}>
-                <div>
-                  <span className="settings-row-label">{r.label} <span className="settings-lock" title="No editable">🔒</span></span>
-                  <span className="settings-row-desc">{r.desc}</span>
-                </div>
-                <Switch
-                  checked={true}
-                  onChange={() => {}}
-                  disabled={true}
-                  label={r.label}
-                />
-              </div>
-            ))}
-          </div>
         </Card>
 
-        {/* 2. Antelación mínima */}
+        {/* 2. Reserva y duración de llamada */}
         <Card padding="lg" className="settings-group">
           <div className="settings-group-head">
-            <h3>Antelación mínima para reservar</h3>
-            <p>{LEAD_DAYS_HELP}</p>
+            <h3>Reserva</h3>
+            <p>Agenda y duración de la llamada.</p>
           </div>
           <div className="settings-rows">
             <div className="settings-row settings-row-stepper">
               <div>
-                <span className="settings-row-label">Mínimo días de antelación</span>
+                <span className="settings-row-label">Antelación mínima</span>
                 <span className="settings-row-desc">{LEAD_DAYS_HELP}</span>
               </div>
               <div className="settings-stepper">
@@ -335,20 +250,35 @@ export default function Settings() {
                 <span className="settings-stepper-unit">días</span>
               </div>
             </div>
+            <div className="settings-row settings-row-cap">
+              <div>
+                <span className="settings-row-label">Duración máx. de llamada</span>
+                <span className="settings-row-desc">{CAP_HELP}</span>
+              </div>
+              <div className="settings-cap-display">
+                <input
+                  type="text"
+                  value={`${settings.callTimeCapMinutes} min`}
+                  readOnly
+                  disabled={true}
+                  className="ui-cap-input"
+                  title={CAP_HELP}
+                />
+              </div>
+            </div>
           </div>
         </Card>
 
-        {/* 3. Cantidad de identificación */}
+        {/* 3. Identificación */}
         <Card padding="lg" className="settings-group">
           <div className="settings-group-head">
-            <h3>Cantidad de identificación</h3>
+            <h3>Identificación</h3>
             <p>{ID_FIELDS_HELP}</p>
           </div>
           <div className="settings-rows">
             <div className="settings-row settings-row-segmented">
               <div>
-                <span className="settings-row-label">Campos requeridos para pacientes existentes</span>
-                <span className="settings-row-desc">{ID_FIELDS_HELP}</span>
+                <span className="settings-row-label">Campos requeridos</span>
               </div>
               <div className="ui-segmented" role="radiogroup" aria-label="Campos de identificación requeridos">
                 <label className={`ui-segmented-btn ${settings.patientIdentificationFieldsRequired === 1 ? "active" : ""}`}>
@@ -376,37 +306,11 @@ export default function Settings() {
           </div>
         </Card>
 
-        {/* 4. Límite de duración de llamada */}
-        <Card padding="lg" className="settings-group">
-          <div className="settings-group-head">
-            <h3>Límite de duración de llamada</h3>
-            <p>{CAP_HELP}</p>
-          </div>
-          <div className="settings-rows">
-            <div className="settings-row settings-row-cap">
-              <div>
-                <span className="settings-row-label">Call time cap</span>
-                <span className="settings-row-desc">{CAP_HELP}</span>
-              </div>
-              <div className="settings-cap-display">
-                <input
-                  type="text"
-                  value={`${settings.callTimeCapMinutes} min`}
-                  readOnly
-                  disabled={true}
-                  className="ui-cap-input"
-                  title={CAP_HELP}
-                />
-              </div>
-            </div>
-          </div>
-        </Card>
-
-        {/* 5. Personalización del agente (roscas) */}
+        {/* 4. Voz del agente (roscas) */}
         <Card padding="lg" className="settings-group settings-group-wide">
           <div className="settings-group-head">
-            <h3>Personalización del agente</h3>
-            <p>Ajusta cómo suena y se presenta el agente. Los valores son una guía; el comportamiento final depende del modelo.</p>
+            <h3>Voz del agente</h3>
+            <p>Cómo suena el agente.</p>
           </div>
           <div className="settings-knobs">
             {PERSONALIZATION_CONFIG.map((k) => (
@@ -438,19 +342,6 @@ export default function Settings() {
                 {settings.personalization.voice === "female" ? "Voz femenina seleccionada" : "Voz masculina seleccionada"}
               </div>
             </div>
-            <div className="ui-knob settings-name-knob">
-              <div className="ui-knob-label">Nombre del agente</div>
-              <input
-                type="text"
-                className="ui-select ui-name-input"
-                value={settings.personalization.agentName}
-                onChange={(e) => handlePersonalizationChange("agentName", e.target.value)}
-                placeholder="Nombre del agente"
-              />
-              <div className="ui-knob-preview">
-                «Hola, soy {settings.personalization.agentName}. ¿En qué le ayudo?»
-              </div>
-            </div>
           </div>
         </Card>
       </div>
@@ -463,16 +354,14 @@ export default function Settings() {
               <button className="ui-modal-close" onClick={() => setShowDefaultConfirm(false)}>✕</button>
             </div>
             <div className="ui-modal-body">
-              <p>Esto restablecerá <strong>todos</strong> los controles a los valores por defecto del sistema:</p>
+              <p>Esto restablecerá todos los controles a los valores por defecto:</p>
               <ul>
-                <li>Todos los permisos: <strong>ON</strong></li>
+                <li>Permisos: <strong>ON</strong></li>
                 <li>Antelación mínima: <strong>1 día</strong></li>
-                <li>Identificación: <strong>1 dato</strong> (segundo solo si ambigüedad)</li>
-                <li>Tono / Amabilidad / Ritmo: <strong>punto medio (50)</strong></li>
+                <li>Identificación: <strong>1 dato</strong></li>
+                <li>Tono / Amabilidad / Ritmo: <strong>50</strong></li>
                 <li>Voz: <strong>Mujer</strong></li>
-                <li>Nombre del agente: <strong>Vortex</strong></li>
               </ul>
-              <p className="ui-modal-warning">Las Safety rules no se modifican.</p>
             </div>
             <div className="ui-modal-actions">
               <Button variant="ghost" onClick={() => setShowDefaultConfirm(false)}>Cancelar</Button>
