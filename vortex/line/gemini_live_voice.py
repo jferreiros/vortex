@@ -165,12 +165,13 @@ async def run_gemini_live_call(
         ),
     )
 
+    caller = await session.resolve_caller_line()
     schemas = tool_schemas_for(turns.exposed_tools)
     llm = build_gemini_live_service(
         api_key=settings.google_api_key,
         model=model,
         voice=voice,
-        system_instruction=build_system_prompt(ctx.now),
+        system_instruction=build_system_prompt(ctx.now, caller=caller),
         schemas=schemas,
         session=session,
     )
