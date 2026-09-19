@@ -30,6 +30,15 @@ export function readServerPathId() {
 // straight on that call inside the app shell, not on the marketing
 // landing page. Call once, before the router mounts.
 export function bootstrapEntryHash() {
+  // Local Vite uses BrowserRouter (real paths). A copied "#/clinic/home"
+  // would otherwise land on the landing page. Fold the hash into the path
+  // before the router mounts.
+  if (import.meta.env.DEV) {
+    if (window.location.hash.startsWith("#/")) {
+      window.history.replaceState(null, "", window.location.hash.slice(1));
+    }
+    return;
+  }
   if (window.location.hash) return; // an explicit route was requested — respect it
   const { callId, isDemo } = resolveRawId(readServerPathId());
   if (!isDemo && callId) {

@@ -24,7 +24,7 @@ const ICONS = {
 const NAV_ITEMS = [
   { to: "/clinic/home", label: "Home", icon: "home" },
   { to: "/clinic/settings", label: "Settings", icon: "settings" },
-  { to: "/clinic/insights", label: "Insights", icon: "insights" },
+  { to: "/clinic/insights", label: "Statistics", icon: "insights" },
   { to: "/clinic/live-calls", label: "Live Calls", icon: "liveCalls" },
 ];
 
