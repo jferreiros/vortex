@@ -26,6 +26,7 @@ from nicegui import app, ui
 from vortex.observability import auth, explain, insights
 from vortex.observability.calllog import read_recent
 from vortex.observability.demo import write_scripted_call
+from vortex.observability.icons import icon
 from vortex.observability.view import CallCard, build_calls, flatten_grouped
 from vortex.observability.wall_timeline import build_timeline, call_summary, latest_intent
 from vortex.settings import REPO_ROOT, get_settings
@@ -336,17 +337,17 @@ def _kpis(cards: list[CallCard]) -> None:
     s = explain.stats_for(cards)
     rate = "—" if s.submit_rate is None else f"{s.submit_rate * 100:.0f}%"
     with ui.element("div").classes("stat-grid"):
-        _stat(str(s.calls), "calls on the line")
-        _stat(str(s.live), "on a call now", "live" if s.live else None)
-        _stat(str(s.booked), "booked", "ok")
-        _stat(str(s.refused), "no action, with a reason", "warn")
-        _stat(str(s.escalated), "escalated to a human", "warn")
-        _stat(rate, "ended with a submission")
+        _stat(str(s.calls), explain.KPI_LABEL["calls"])
+        _stat(str(s.live), explain.KPI_LABEL["live"], "live" if s.live else None)
+        _stat(str(s.booked), explain.KPI_LABEL["booked"], "ok")
+        _stat(str(s.refused), explain.KPI_LABEL["refused"], "warn")
+        _stat(str(s.escalated), explain.KPI_LABEL["escalated"], "warn")
+        _stat(rate, explain.KPI_LABEL["submitted"])
         _stat(
             "—" if s.median_duration_s is None else f"{s.median_duration_s:.0f} s",
-            "median handle time",
+            explain.KPI_LABEL["handle"],
         )
-        _stat(_ms(s.median_tool_ms), "median tool latency")
+        _stat(_ms(s.median_tool_ms), explain.KPI_LABEL["tool"])
 
 
 def _stages(card: CallCard | None) -> None:
@@ -378,19 +379,20 @@ def _transcript(card: CallCard | None) -> None:
             ui.label("Nothing said yet").classes("t")
             ui.label("The transcript streams here as the call goes on.").classes("d")
         return
-    for turn in card.turns:
-        with ui.element("div").classes(f"turn {turn.role}"):
-            ui.label("Patient" if turn.role == "user" else "Vortex").classes("who")
-            ui.label(turn.text).classes("bubble")
-            stamp = _turn_time(card, turn.ts)
-            if stamp:
-                ui.label(stamp).classes("caption-sm mono")
-    if card.live:
-        with ui.element("div").classes("turn assistant"):
-            ui.label("Vortex").classes("who")
-            with ui.element("div").classes("typing"):
-                for _ in range(3):
-                    ui.element("i")
+    with ui.element("div").classes("transcript"):
+        for turn in card.turns:
+            with ui.element("div").classes(f"turn {turn.role}"):
+                ui.label("Patient" if turn.role == "user" else "Vortex").classes("who")
+                ui.label(turn.text).classes("bubble")
+                stamp = _turn_time(card, turn.ts)
+                if stamp:
+                    ui.label(stamp).classes("caption-sm mono")
+        if card.live:
+            with ui.element("div").classes("turn assistant"):
+                ui.label("Vortex").classes("who")
+                with ui.element("div").classes("typing"):
+                    for _ in range(3):
+                        ui.element("i")
 
 
 def _decisions(card: CallCard | None, *, verbose: bool = False) -> None:
@@ -478,7 +480,7 @@ def _outcome(card: CallCard | None) -> None:
             _dot(_status_dot(status) if card else "off")
             ui.label(explain.outcome_title(card))
         ui.label(explain.outcome_text(card)).classes("text")
-        if card and card.decline_reason:
+        if card and card.decline_reason and card.status in {"refused", "escalated", "ended"}:
             ui.label(card.decline_reason).classes("reason")
         rows = [(k, v) for k, v in explain.payload_rows(card) if k != "reason"] if card else []
         if rows:
@@ -531,6 +533,29 @@ def _call_panel(card: CallCard | None, *, verbose: bool, public: bool = False) -
             _record(card, public=public)
 
 
+def _workflow_card(beat: explain.Beat, card: CallCard | None) -> None:
+    classes = f"wf-card {beat.kind}"
+    if beat.speaking:
+        classes += " speaking"
+    with ui.element("article").classes(classes):
+        with ui.element("div").classes("wf-meta"):
+            if beat.kind in {"patient", "agent", "tool", "start", "submit"}:
+                icon(beat.kind)
+            else:
+                _dot(beat.dot)
+            ui.label(beat.title).classes("wf-who")
+            if beat.tool:
+                ui.label(beat.tool).classes("command-tag")
+            ui.element("div").classes("grow")
+            if beat.ms is not None:
+                ui.label(_ms(beat.ms)).classes("caption-sm")
+            elif card is not None:
+                stamp = _turn_time(card, beat.ts)
+                if stamp:
+                    ui.label(stamp).classes("caption-sm mono")
+        ui.label(beat.text).classes("wf-text")
+
+
 def _workflow_panel(card: CallCard | None, *, public: bool = False) -> None:
     """The jury demo: one card per turn and tool, pulsing while someone speaks."""
     beats = explain.workflow_beats(card)
@@ -556,35 +581,33 @@ def _workflow_panel(card: CallCard | None, *, public: bool = False) -> None:
             ui.label("No call on the line").classes("t")
             ui.label("The next inbound call builds this workflow card by card.").classes("d")
         return
-    with ui.element("div").classes("workflow"):
-        for beat in beats:
-            if beat.kind == "outcome":
+    stream = [beat for beat in beats if beat.kind != "outcome"]
+    ending = next((beat for beat in beats if beat.kind == "outcome"), None)
+    with ui.element("div").classes("wf-layout"):
+        with ui.element("div").classes("workflow"):
+            for beat in stream:
+                _workflow_card(beat, card)
+        with ui.element("aside").classes("wf-side"):
+            if ending is not None:
                 with ui.element("div").classes("outcome"):
                     ui.label("Outcome").classes("label")
                     with ui.element("div").classes("title"):
-                        _dot(beat.dot)
-                        ui.label(beat.title)
-                    ui.label(beat.text).classes("text")
-                    if card and card.decline_reason:
+                        _dot(ending.dot)
+                        ui.label(ending.title)
+                    ui.label(ending.text).classes("text")
+                    if (
+                        card
+                        and card.decline_reason
+                        and card.status
+                        in {
+                            "refused",
+                            "escalated",
+                            "ended",
+                        }
+                    ):
                         ui.label(card.decline_reason).classes("reason")
-                continue
-            classes = f"wf-card {beat.kind}"
-            if beat.speaking:
-                classes += " speaking"
-            with ui.element("article").classes(classes):
-                with ui.element("div").classes("wf-meta"):
-                    _dot(beat.dot)
-                    ui.label(beat.title).classes("wf-who")
-                    if beat.tool:
-                        ui.label(beat.tool).classes("command-tag")
-                    ui.element("div").classes("grow")
-                    if beat.ms is not None:
-                        ui.label(_ms(beat.ms)).classes("caption-sm")
-                    elif card is not None:
-                        stamp = _turn_time(card, beat.ts)
-                        if stamp:
-                            ui.label(stamp).classes("caption-sm mono")
-                ui.label(beat.text).classes("wf-text")
+                ui.element("div").style("height: 24px")
+            _record(card, public=public)
 
 
 def _live_strip(cards: list[CallCard], featured: CallCard | None, *, public: bool = False) -> None:
@@ -654,7 +677,12 @@ def _calls_table(
                         _dot(_status_dot(card.status))
                         ui.label(explain.STATUS_LABEL.get(card.status, card.status))
                     with ui.element("td").classes("mute"):
-                        ui.label(explain.reason_text(card.decline_reason) or "—")
+                        why = (
+                            explain.reason_text(card.decline_reason) or "—"
+                            if card.status in {"refused", "escalated", "ended"}
+                            else "—"
+                        )
+                        ui.label(why)
                     with ui.element("td").classes("num narrow-hide"):
                         ui.label(str(len(card.tools)))
                     with ui.element("td").classes("num narrow-hide"):
@@ -717,8 +745,6 @@ def wall_page() -> None:
             slot = _nav("/wall/classic", team=False)
             with slot:
                 _line_pill(health)
-                zoom_id = featured.call_id if featured else "demo"
-                ui.link("Demo", f"/call/{zoom_id}/zoom", new_tab=True).classes("pill mute")
             with ui.element("main").classes("page"):
                 with ui.element("div").classes("page-head"):
                     with ui.element("div"):
@@ -762,16 +788,17 @@ def call_page(call_id: str) -> None:
         rendered["sig"] = sig
         stage.clear()
         with stage:
+            # Session flag only. _ops_ok() is true when auth is off, and this route is public.
+            team = bool(app.storage.user.get("ops"))
             slot = _nav("", team=False)
             with slot:
                 _line_pill(health)
-                ui.link("Demo", f"/call/{call_id}/zoom", new_tab=True).classes("pill mute")
             with ui.element("main").classes("page"):
                 with ui.element("div").classes("page-head"):
                     with ui.element("div"):
                         ui.link("← Live", "/wall").classes("caption-sm")
                         ui.label(
-                            _caller(card, public=not _ops_ok()) if card else "Unknown call"
+                            _caller(card, public=not team) if card else "Unknown call"
                         ).classes("title")
                         ui.label(call_id).classes("sub mono")
                     if card:
@@ -785,7 +812,6 @@ def call_page(call_id: str) -> None:
                         ui.label("No call with this id yet").classes("t")
                         ui.label("It appears here as soon as the socket opens.").classes("d")
                 else:
-                    team = _ops_ok()
                     _call_panel(card, verbose=team, public=not team)
             _footer()
 
@@ -860,6 +886,9 @@ if WALL_APP_DIST.exists():
 
 
 def _login_form() -> None:
+    slot = _nav("/", team=False)
+    with slot:
+        ui.link("Open the wall", "/wall").classes("pill mute")
     with ui.element("main").classes("page"):
         with ui.element("div").classes("card login"):
             ui.label("Team sign-in").classes("heading-lg")

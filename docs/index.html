@@ -70,11 +70,6 @@
     overflow-x:auto; scrollbar-width:none; -webkit-overflow-scrolling:touch;
   }
   .nav ol::-webkit-scrollbar{display:none}
-  .nav a{
-    display:inline-flex; align-items:center; height:32px; padding:0 14px; white-space:nowrap; text-decoration:none;
-    color:var(--ink); font:var(--text-body-sm-strong); border:1px solid var(--hairline-strong); border-radius:var(--rounded-full); background:var(--canvas);
-  }
-  .nav a:active{background:var(--primary); border-color:var(--primary); color:var(--on-primary)}
 
   /* ---------- score strip ---------- */
   .score{
@@ -315,13 +310,13 @@
 
   <nav class="nav" aria-label="Secciones">
     <ol>
-      <li><a href="#carriles">Carriles</a></li>
-      <li><a href="#llamada">La llamada</a></li>
-      <li><a href="#retos">18 retos</a></li>
-      <li><a href="#contrato">Contrato</a></li>
-      <li><a href="#bloques">3 bloques</a></li>
-      <li><a href="#hablar">Cómo hablamos</a></li>
-      <li><a href="#numeros">Números</a></li>
+      <li><a class="chip" href="#carriles">Carriles</a></li>
+      <li><a class="chip" href="#llamada">La llamada</a></li>
+      <li><a class="chip" href="#retos">18 retos</a></li>
+      <li><a class="chip" href="#contrato">Contrato</a></li>
+      <li><a class="chip" href="#bloques">3 bloques</a></li>
+      <li><a class="chip" href="#hablar">Cómo hablamos</a></li>
+      <li><a class="chip" href="#numeros">Números</a></li>
     </ol>
   </nav>
 

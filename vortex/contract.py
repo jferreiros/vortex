@@ -505,6 +505,28 @@ class FindPatientResult(BaseModel):
     ask_for: Literal["date_of_birth", "national_id", "phone", "name", ""] = ""
 
 
+class CallerLineMatch(BaseModel):
+    """Who the dialling line belongs to, resolved before the caller speaks.
+
+    The directory takes a phone on its own, so the number Twilio hands us is a
+    free exact query: one match names the line's owner, none says the line is on
+    no record. It is a *hint about the line*, never an identification of the
+    person holding it - the owner of the phone and the patient being booked for
+    are different people on a third-party call.
+
+    ``looked_up`` is False when there was no caller id, the lookup failed or it
+    did not answer in time. The prompt renders no CALLER block for those, so the
+    call behaves exactly as it did before the lookup existed.
+    """
+
+    looked_up: bool = False
+    from_number: str = ""
+    patient: PatientRecord | None = None
+    #: Several records share the line (a family). Never one identity, so the
+    #: prompt says nothing; the ordering hint still helps ``find_patient``.
+    candidates: list[PatientRecord] = Field(default_factory=list)
+
+
 class ValidateNationalIdInput(BaseModel):
     value: str = Field(description="DNI or NIE as heard, letters and digits")
 
@@ -527,7 +549,11 @@ class BuildRegistrationInput(BaseModel):
     second_surname: str
     national_id: str
     date_of_birth: date
-    phone: str
+    #: Empty or absent means the line they are calling from. A new patient
+    #: registers themselves, so the number they would dictate is the number
+    #: Twilio already handed us, and a registration has eight fields to collect
+    #: inside three minutes. ``build_registration`` fills it.
+    phone: str = ""
     email: str
     insurer: str
 
@@ -654,13 +680,26 @@ class EligibilityVerdict(BaseModel):
 
 
 class TriageInput(BaseModel):
-    complaint: str = Field(description="The symptom, in the caller's words")
+    complaint: str = Field(
+        description=(
+            "Why they are calling, in the caller's own words, verbatim and never "
+            "a summary: the symptom and any specialty they named. Dropping "
+            "'gynaecology' from 'a gynaecology appointment for contraception "
+            "questions' routes them to a GP."
+        )
+    )
+    provider_name: str | None = Field(
+        default=None,
+        description="The doctor the caller named, as said. Their specialty is the one to book.",
+    )
 
 
 class TriageResult(BaseModel):
     specialty_id: str | None = None
     emergency: bool = False
     rejection: Rejection | None = None  # medical_emergency when emergency
+    #: Set when a named doctor decided the specialty — the id to pass onward.
+    provider_id: str | None = None
 
 
 class NearestLocationInput(BaseModel):

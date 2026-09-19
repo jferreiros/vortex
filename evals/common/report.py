@@ -382,15 +382,6 @@ text-align:left;vertical-align:top}
 th{font:var(--text-body-sm-strong);color:var(--body)}
 td.num{text-align:right;font-variant-numeric:tabular-nums}
 code{background:var(--surface-soft);padding:1px 6px;border-radius:var(--rounded-sm)}
-.pill{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 10px;
-border:1px solid var(--hairline-strong);border-radius:var(--rounded-full);
-font:var(--text-caption-sm);font-weight:500;color:var(--ink);white-space:nowrap}
-.pill::before{content:"";width:8px;height:8px;border-radius:var(--rounded-full);
-background:var(--hairline-strong)}
-.p-pass::before{background:var(--terminal-green)}
-.p-fail::before,.p-error::before{background:var(--terminal-red)}
-.p-unverified::before{background:var(--terminal-yellow)}
-.p-skipped{color:var(--body)}.p-hollow{color:var(--body)}
 .note{font:var(--text-body-sm);color:var(--ink);background:var(--surface-soft);
 border-radius:var(--rounded-lg);padding:var(--space-md) var(--space-lg);margin:var(--space-sm) 0}
 .diff{display:flex;gap:var(--space-lg);flex-wrap:wrap;margin:var(--space-sm) 0}
@@ -407,12 +398,23 @@ def _h(text: Any) -> str:
     return html.escape(str(text))
 
 
+_PILL_DOT = {
+    "pass": "ok",
+    "fail": "bad",
+    "error": "bad",
+    "unverified": "warn",
+    "skipped": "off",
+    "hollow": "off",
+}
+
+
 def _pill(case: Any) -> str:
-    cls = f"p-{case.status}"
     label = case.status
     if case.status == "pass" and case.hollow:
-        cls, label = "p-hollow", "hollow"
-    return f'<span class="pill {cls}">{label}</span>'
+        label = "hollow"
+    mute = " mute" if label in ("hollow", "skipped") else ""
+    dot = _PILL_DOT.get(label, "off")
+    return f'<span class="pill{mute}"><span class="dot {dot}"></span>{label}</span>'
 
 
 def _html_diff(diff: Diff) -> str:
