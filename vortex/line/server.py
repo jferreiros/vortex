@@ -22,10 +22,11 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import Body, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, PlainTextResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
+from pydantic import ValidationError
 
 from vortex.line import confirmation_calls as confirmations
-from vortex.line import twilio, voice_config
+from vortex.line import personalities, twilio, voice_config
 from vortex.line.confirmation_calls import ConfirmationWorker, confirmation_worker_status
 from vortex.line.session import CallSession
 from vortex.line.sms_reminders import ReminderWorker, reminder_worker_status
@@ -41,6 +42,19 @@ DESIGN_CSS = Path(__file__).resolve().parent.parent / "observability" / "design.
 
 class HandshakeError(RuntimeError):
     pass
+
+
+def _no_such_personality(slug: str) -> JSONResponse:
+    """Same body shape as a validation failure, so the page reads one field."""
+    return JSONResponse({"error": f"no personality named {slug}"}, status_code=404)
+
+
+def _first_error(exc: ValidationError) -> str:
+    """The first complaint, as a sentence: the form shows one line, and the
+    validators already say which field and why."""
+    first = exc.errors()[0]
+    field = ".".join(str(part) for part in first["loc"]) or "payload"
+    return f"{field}: {first['msg'].removeprefix('Value error, ')}"
 
 
 async def read_handshake(ws: WebSocket, *, max_messages: int = 5) -> twilio.StartPayload:
@@ -169,6 +183,61 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except Exception as exc:
             raise HTTPException(503, f"voice preview unavailable: {exc}") from exc
         return Response(content=audio, media_type="audio/mpeg")
+
+    # ---- the Clinic View's "Personalidades" picker --------------------------
+    # Same shape as the voice card above: the board proxies these four and the
+    # personalities.db file lives on this process's log volume. Foundation
+    # only — activating a persona stores the choice; reading it on the call
+    # (prompt tone, greeting, TTS voice) is a separate change.
+
+    @app.get("/personalities")
+    async def get_personalities() -> dict[str, object]:
+        people = personalities.list_all(settings)
+        return {
+            "items": [person.to_dict() for person in people],
+            "active": next((p.slug for p in people if p.active), None),
+            **personalities.catalog(),
+        }
+
+    @app.post("/personalities")
+    async def post_personality(
+        payload: Annotated[dict | None, Body()] = None,
+    ) -> Response:
+        try:
+            return JSONResponse(personalities.create(settings, payload).to_dict(), status_code=201)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=422)
+        except ValidationError as exc:
+            return JSONResponse({"error": _first_error(exc)}, status_code=422)
+
+    @app.get("/personalities/{slug}")
+    async def get_personality(slug: str) -> Response:
+        person = personalities.get(settings, slug)
+        if person is None:
+            return _no_such_personality(slug)
+        return JSONResponse(person.to_dict())
+
+    @app.put("/personalities/{slug}")
+    async def put_personality(
+        slug: str,
+        payload: Annotated[dict | None, Body()] = None,
+    ) -> Response:
+        try:
+            return JSONResponse(personalities.update(settings, slug, payload).to_dict())
+        except KeyError:
+            return _no_such_personality(slug)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=422)
+        except ValidationError as exc:
+            # One sentence the form can show, not pydantic's whole report.
+            return JSONResponse({"error": _first_error(exc)}, status_code=422)
+
+    @app.post("/personalities/{slug}/activate")
+    async def activate_personality(slug: str) -> Response:
+        try:
+            return JSONResponse(personalities.activate(settings, slug).to_dict())
+        except KeyError:
+            return _no_such_personality(slug)
 
     # ---- outbound confirmation calls (Twilio fetches these) -----------------
     # Twilio posts application/x-www-form-urlencoded; parsed by hand so the app

@@ -21,6 +21,13 @@
   transform: scale(0.97);
 }
 
+.ui-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
 .ui-button-primary {
   background: var(--color-primary);
   color: var(--color-on-primary);
@@ -187,6 +194,11 @@
 @keyframes ui-modal-fade {
   from { opacity: 0; }
   to { opacity: 1; }
+}
+
+.ui-modal.wide {
+  max-width: 720px;
+  max-height: min(860px, 90vh);
 }
 
 .ui-modal {
