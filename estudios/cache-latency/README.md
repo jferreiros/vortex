@@ -119,3 +119,11 @@ HTTP/serialization and produces deterministic request and byte counts. Live
 scenarios call the production API with the supplied key and report real
 end-to-end timings. The storage study uses 3,000 synthetic patients in the real
 payload shape. Exact WAN and server timings naturally vary by run and host.
+
+Every clinic-side identifier a recipe needs (slot, `patient_id`,
+`appointment_id`, specialty, location, provider, insurance plan) is resolved
+against the client the scenario runs against, so a live run times production
+ids. `/directory` only answers an exact field, so a live run can only reuse a
+fixture patient production also knows: when it knows none, the recipes that
+need a patient or an appointment are reported as `SKIPPED` rather than timed on
+an id the platform would reject.
