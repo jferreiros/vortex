@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -92,3 +93,106 @@ def test_async_openai_client_is_plain_openai_when_off(clean_langfuse) -> None:
 
     client = tracing.async_openai_client(api_key="x", base_url="https://example.invalid/v1")
     assert type(client) is AsyncOpenAI
+
+
+def test_async_openai_client_stays_uninstrumented_when_tracing_is_on(
+    clean_langfuse, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from openai import AsyncOpenAI
+
+    monkeypatch.setattr(tracing, "enabled", lambda: True)
+    client = tracing.async_openai_client(api_key="x", base_url="https://example.invalid/v1")
+    assert type(client) is AsyncOpenAI
+    assert client.chat.completions.create.__qualname__.startswith("content_free_create")
+
+
+class _RecordingObservation:
+    def __init__(self) -> None:
+        self.updates: list[dict] = []
+
+    def update(self, **kwargs) -> None:
+        self.updates.append(kwargs)
+
+
+class _RecordingLangfuseClient:
+    def __init__(self) -> None:
+        self.observations: list[dict] = []
+        self.last: _RecordingObservation | None = None
+
+    @contextmanager
+    def start_as_current_observation(self, **kwargs):
+        self.observations.append(kwargs)
+        self.last = _RecordingObservation()
+        yield self.last
+
+
+class _Usage:
+    prompt_tokens = 700
+    completion_tokens = 20
+    total_tokens = 720
+
+
+class _Response:
+    usage = _Usage()
+
+
+async def test_generation_records_metadata_but_never_prompts_or_completions(
+    clean_langfuse, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recorder = _RecordingLangfuseClient()
+    monkeypatch.setattr(tracing, "_client", lambda: recorder)
+
+    async def original(**kwargs):
+        return _Response()
+
+    create = tracing.content_free_create(original)
+    response = await create(
+        model="qwen3.6",
+        messages=[{"role": "system", "content": "DNI 12345678Z, +34600111222"}],
+        tools=[{"type": "function", "function": {"name": "find_patient"}}],
+        temperature=0.2,
+        stream=False,
+    )
+
+    assert response is not None
+    observation = recorder.observations[0]
+    assert observation["as_type"] == "generation"
+    assert observation["name"] == "generate-response"
+    assert observation["model"] == "qwen3.6"
+    assert observation["model_parameters"] == {"temperature": 0.2, "stream": False}
+    assert observation["metadata"] == {"message_count": 1, "tool_count": 1}
+    assert "input" not in observation
+    assert "output" not in observation
+    assert recorder.last is not None
+    assert recorder.last.updates == [{"usage_details": {"input": 700, "output": 20, "total": 720}}]
+
+
+async def test_generation_marks_an_error_without_the_request_body(
+    clean_langfuse, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recorder = _RecordingLangfuseClient()
+    monkeypatch.setattr(tracing, "_client", lambda: recorder)
+
+    async def original(**kwargs):
+        raise RuntimeError("provider said no")
+
+    create = tracing.content_free_create(original)
+    with pytest.raises(RuntimeError):
+        await create(model="qwen3.6", messages=[{"role": "user", "content": "12345678Z"}])
+
+    assert recorder.last is not None
+    assert recorder.last.updates == [
+        {"level": "ERROR", "status_message": "RuntimeError: provider said no"}
+    ]
+
+
+async def test_generation_is_skipped_when_tracing_is_off(clean_langfuse) -> None:
+    seen: list[dict] = []
+
+    async def original(**kwargs):
+        seen.append(kwargs)
+        return _Response()
+
+    create = tracing.content_free_create(original)
+    await create(model="qwen3.6", messages=[{"role": "user", "content": "hello"}])
+    assert seen == [{"model": "qwen3.6", "messages": [{"role": "user", "content": "hello"}]}]
