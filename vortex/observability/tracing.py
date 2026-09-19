@@ -2,7 +2,10 @@
 
 One trace per socket (one agent run). Concurrent Run All calls stay isolated
 because each WebSocket handler is its own asyncio task and Langfuse uses
-contextvars. Phone numbers and national ids are masked; audio is never sent.
+contextvars. What leaves the process is an allowlist: names, contact details,
+dates of birth, addresses and clinical free text never go out, phones and
+national ids are masked, the identifiers that tie a record to a person or a
+call go out as keyed pseudonyms, and audio is never sent.
 
 The OpenAI drop-in records each completion as a generation (model, tokens,
 latency, errors). Tool calls nest as ``tool`` or ``retriever`` observations.
@@ -10,6 +13,8 @@ latency, errors). Tool calls nest as ``tool`` or ``retriever`` observations.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import os
 import re
 from collections.abc import Iterator
@@ -38,6 +43,133 @@ _PII_KEYS = frozenset(
         "document",
     }
 )
+
+#: What ties an observation to a person or to a call. It leaves the process as a
+#: pseudonym keyed on a secret this process invents at import, so one trace still
+#: reads as one story and nothing outside can turn the value back into an id.
+_PSEUDONYM_KEYS = frozenset(
+    {
+        "appointment_id",
+        "call_id",
+        "patient_id",
+        "stream_sid",
+    }
+)
+
+#: The only keys exported as they are. Everything this set does not name - every
+#: name, contact detail, date of birth, address, clinical note, and every field a
+#: model grows tomorrow - is replaced by ``_REDACTED``. An allowlist because the
+#: cost of forgetting a key here is a duller trace, and the cost of forgetting it
+#: in a deny list is patient data in a third party's database.
+_EXPORTED_KEYS = frozenset(
+    {
+        # What happened.
+        "action",
+        "actions",
+        "allowed",
+        "ask_digit_positions",
+        "ask_for",
+        "blocked",
+        "branch",
+        "emergency",
+        "end_reason",
+        "http_status",
+        "kind",
+        "level",
+        "looked_up",
+        "moved_from_closed_day",
+        "payload",
+        "reason",
+        "rejection",
+        "restriction",
+        "result",
+        "route",
+        "rule_id",
+        "skipped_checks",
+        "status",
+        "submitted",
+        "tool",
+        "valid",
+        "why",
+        "widened",
+        # Clinic identifiers that name a resource, never a patient.
+        "appointment_type",
+        "appointment_type_id",
+        "appointment_type_ids",
+        "insurer",
+        "insurer_id",
+        "insurer_ids",
+        "insurer_ids_accepted",
+        "insurer_ids_excluded",
+        "insurer_ids_refused",
+        "location_id",
+        "location_ids",
+        "location_ids_excluded",
+        "policy_id",
+        "provider_id",
+        "provider_ids",
+        "provider_ids_refused",
+        "specialty_id",
+        "specialty_ids",
+        "specialty_ids_excluded",
+        # Dates, times and counts. Never a date of birth.
+        "bookable_from",
+        "bookable_to",
+        "closes",
+        "closure_days",
+        "date_from",
+        "date_to",
+        "distance_km",
+        "duration_minutes",
+        "duration_ms",
+        "hours",
+        "max_age_months",
+        "max_span_days",
+        "min_age_months",
+        "on_leave_until",
+        "open_days",
+        "opens",
+        "part_of_day",
+        "slot",
+        "slot_minutes",
+        "slots",
+        "start",
+        "time_from",
+        "time_to",
+        "tool_calls",
+        "turns",
+        "user_turns",
+        "weekday",
+        "when",
+        "widen_days",
+        # The shape of a record, never its content.
+        "appointments",
+        "candidates",
+        "custom_parameters",
+        "for_new_patients",
+        "has_visited_before",
+        "language",
+        "languages",
+        "leave",
+        "match_score",
+        "matched_fields",
+        "patient",
+        "payable_with",
+        "providers",
+        "redirect_to",
+        "referral_required",
+        "referrals",
+        "schedules",
+        "sites",
+        # Which case the platform is playing.
+        "case_id",
+        "caseId",
+        "problem_id",
+        "problemId",
+    }
+)
+_REDACTED = "[redacted]"
+_PSEUDONYM_SECRET = os.urandom(32)
 _DNI_RE = re.compile(r"\b\d{8}[A-Za-z]\b")
 _NIE_RE = re.compile(r"\b[XYZxyz]\d{7}[A-Za-z]\b")
 _PHONE_RE = re.compile(r"\+?\d[\d\s-]{7,}\d")
@@ -97,20 +229,36 @@ def mask_phone(value: str | None) -> str:
     return f"***{digits[-4:]}"
 
 
+def pseudonym(value: Any) -> str:
+    """A stand-in for one identifier, the same one all call long, keyed per process."""
+    text = "" if value is None else str(value)
+    if not text:
+        return "unknown"
+    digest = hmac.new(_PSEUDONYM_SECRET, text.encode("utf-8"), hashlib.sha256)
+    return f"anon-{digest.hexdigest()[:16]}"
+
+
+def _redact_field(key: str, value: Any) -> Any:
+    if key in _PII_KEYS:
+        return mask_phone(str(value))
+    if key in _PSEUDONYM_KEYS:
+        return pseudonym(value)
+    if key in _EXPORTED_KEYS:
+        return redact(value)
+    return _REDACTED
+
+
 def redact(value: Any) -> Any:
+    if hasattr(value, "model_dump"):
+        return redact(value.model_dump(mode="json"))
     if isinstance(value, dict):
-        return {
-            key: mask_phone(str(item)) if key.lower() in _PII_KEYS else redact(item)
-            for key, item in value.items()
-        }
+        return {key: _redact_field(str(key).lower(), item) for key, item in value.items()}
     if isinstance(value, list):
         return [redact(item) for item in value]
     if isinstance(value, str):
         text = _DNI_RE.sub("********X", value)
         text = _NIE_RE.sub("X*******X", text)
         return _PHONE_RE.sub(lambda match: mask_phone(match.group(0)), text)
-    if hasattr(value, "model_dump"):
-        return redact(value.model_dump(mode="json"))
     return value
 
 
@@ -200,24 +348,22 @@ def _problem_id(session: Any) -> str:
 
 def _call_input(session: Any) -> dict[str, Any]:
     return {
-        "call_id": session.call_id,
+        "call_id": pseudonym(session.call_id),
         "from_number": mask_phone(session.start.from_number),
         "custom_parameters": redact(dict(session.start.custom_parameters or {})),
     }
 
 
 def _call_output(session: Any) -> dict[str, Any]:
-    submitted = []
-    for result in session.submitted:
-        payload = result.model_dump(mode="json") if hasattr(result, "model_dump") else dict(result)
-        submitted.append(redact(payload))
-    return {
-        "reason": getattr(session, "end_reason", ""),
-        "submitted": submitted,
-        "user_turns": session.ctx.log.user_turns,
-        "tool_calls": session.ctx.log.tool_calls,
-        "actions": redact(list(session.ctx.log.actions)),
-    }
+    return redact(
+        {
+            "reason": getattr(session, "end_reason", ""),
+            "submitted": list(session.submitted),
+            "user_turns": session.ctx.log.user_turns,
+            "tool_calls": session.ctx.log.tool_calls,
+            "actions": list(session.ctx.log.actions),
+        }
+    )
 
 
 @contextmanager
@@ -233,9 +379,10 @@ def trace_call(session: Any) -> Iterator[Any]:
     problem = _problem_id(session)
     if problem:
         tags.append(problem)
+    call_ref = pseudonym(session.call_id)
     metadata = {
-        "call_id": session.call_id,
-        "stream_sid": session.stream_sid,
+        "call_id": call_ref,
+        "stream_sid": pseudonym(session.stream_sid),
         "llm_provider": session.settings.llm_provider,
         "llm_model": session.settings.llm_model,
         "voice": "pipecat" if session.settings.voice_is_pipecat else "stub",
@@ -248,7 +395,7 @@ def trace_call(session: Any) -> Iterator[Any]:
         metadata=metadata,
     ) as observation:
         with propagate_attributes(
-            session_id=session.call_id,
+            session_id=call_ref,
             user_id=mask_phone(session.start.from_number),
             tags=tags,
             metadata=metadata,
@@ -281,10 +428,10 @@ def observe_tool(name: str, raw_args: dict[str, Any]) -> Iterator[Any]:
         try:
             yield observation
         except Exception as exc:
-            observation.update(
-                output={"error": f"{type(exc).__name__}: {exc}"},
-                level="ERROR",
-            )
+            # The type, never the message: a ValidationError quotes the raw
+            # arguments back, patient data included. ``logs/calls.jsonl`` keeps
+            # the full error, and that file never leaves the machine.
+            observation.update(output={"error": type(exc).__name__}, level="ERROR")
             raise
 
 
