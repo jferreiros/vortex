@@ -28,6 +28,14 @@ LINKED = (
     "  The submit returned 503 and the loop moved on.\n"
 )
 
+# Path only inside the OSC-8 URI; display text has no file:line.
+LINKED_URI_ONLY = (
+    "  major [Data Integrity & Integration]\n"
+    "  → \x1b]8;;vscode://file//home/runner/work/vortex/vortex/"
+    "scripts/ci/coderabbit_issues.py:33\x07\x1b]8;;\x07\n"
+    "  Extract the location before stripping OSC-8 links.\n"
+)
+
 # What the workflow actually hands the script: the escapes are already gone.
 PLAIN = (
     "  major [Stability & Availability]\n"
@@ -41,6 +49,13 @@ def test_the_linked_shape_yields_a_location_and_a_title() -> None:
     (found,) = cr.parse(LINKED)
     assert found["location"] == "vortex/line/session.py:297"
     assert found["title"] == "Retry an unaccepted action instead of skipping it."
+
+
+def test_location_is_read_from_the_osc8_uri_before_stripping() -> None:
+    """ANSI strip removes the URI; location must be taken from the raw line."""
+    (found,) = cr.parse(LINKED_URI_ONLY)
+    assert found["location"] == "scripts/ci/coderabbit_issues.py:33"
+    assert found["title"] == "Extract the location before stripping OSC-8 links."
 
 
 def test_the_plain_shape_yields_the_same_thing() -> None:
