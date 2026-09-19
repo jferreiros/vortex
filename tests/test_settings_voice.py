@@ -37,6 +37,7 @@ VOICE_KEYS = (
     "VORTEX_TTS_PROVIDER",
     "VORTEX_TTS_PROVIDER_ALT",
     "VORTEX_VOICE_MODE",
+    "VORTEX_GEOCODER",
     "VORTEX_GEOCODER_URL",
     "LANGFUSE_PUBLIC_KEY",
     "LANGFUSE_SECRET_KEY",
@@ -354,10 +355,23 @@ def test_elevenlabs_has_no_default_voice(clean_env) -> None:
 # --- geocoder ----------------------------------------------------------------
 
 
-def test_geocoder_url_is_off_by_default(clean_env) -> None:
+def test_geocoder_is_off_by_default(clean_env) -> None:
     """Off by default: evals and offline work never depend on a network call."""
     s = _settings(clean_env)
+    assert s.geocoder == ""
     assert s.geocoder_url == ""
+
+
+def test_geocoder_reads_cartociudad_and_nominatim_url(clean_env) -> None:
+    s = _settings(clean_env, VORTEX_GEOCODER="cartociudad")
+    assert s.geocoder == "cartociudad"
+    s = _settings(
+        clean_env,
+        VORTEX_GEOCODER="nominatim",
+        VORTEX_GEOCODER_URL="https://nominatim.example.invalid/search",
+    )
+    assert s.geocoder == "nominatim"
+    assert s.geocoder_url == "https://nominatim.example.invalid/search"
 
 
 def test_geocoder_url_reads_the_env_var(clean_env) -> None:
