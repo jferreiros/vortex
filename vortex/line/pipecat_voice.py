@@ -61,6 +61,7 @@ from vortex.conversation.language import (
 )
 from vortex.conversation.prompt import (
     GREETING,
+    handoff_greeting_for,
     idle_submit_line_for,
     initial_messages,
     wait_prompt_for,
@@ -270,7 +271,12 @@ async def run_pipecat_call(
 
     # The language this call is in, shared by the watcher that updates it and
     # the router that reads it. Per call: a closure, never a module global.
+    # A call that arrives through an outbound-call handoff already has its
+    # language: the patient picked it during the confirmation call.
     language_state = _LanguageState()
+    if session.handoff:
+        if handoff_language := normalise_language(session.handoff.get("language")):
+            language_state.language = handoff_language
 
     # ---- LLM: any OpenAI-compatible endpoint, as long as it is in the EU. ----
     llm_settings = OpenAILLMService.Settings(
@@ -322,7 +328,7 @@ async def run_pipecat_call(
     # prompt can open knowing who the line belongs to instead of spending the
     # first minute of the call asking.
     caller = await session.resolve_caller_line()
-    messages = initial_messages(ctx.now, caller=caller)
+    messages = initial_messages(ctx.now, caller=caller, handoff=session.handoff)
     # Tono/Amabilidad are not TTS fields: they arrive as one extra line on the
     # system prompt. Empty at neutral, so an untouched card changes nothing.
     if directive := voice_config.style_directive(voice_cfg):
@@ -377,10 +383,12 @@ async def run_pipecat_call(
     session.usage.metered = True
     hangup.bind(task)
 
+    greeting = handoff_greeting_for(language_state.language) if session.handoff else GREETING
+
     @transport.event_handler("on_client_connected")
     async def _on_connected(transport: Any, client: Any) -> None:
-        ctx.log.assistant_turn(GREETING)
-        await task.queue_frames([TTSSpeakFrame(GREETING)])
+        ctx.log.assistant_turn(greeting)
+        await task.queue_frames([TTSSpeakFrame(greeting)])
 
     @transport.event_handler("on_client_disconnected")
     async def _on_disconnected(transport: Any, client: Any) -> None:
@@ -553,7 +561,8 @@ def _make_tts(
     never changes with the provider.
     """
     name = provider or settings.tts_provider
-    voice, language = tts_voice_for(DEFAULT_LANGUAGE, settings, name)
+    start_language = state.language if state is not None else DEFAULT_LANGUAGE
+    voice, language = tts_voice_for(start_language, settings, name)
     if vcfg:
         voice = voice_config.apply_gender(voice, vcfg.voice)
     if not voice:
@@ -824,6 +833,9 @@ def _LanguageWatcher(  # noqa: N802 - factory that returns a processor
                 if vcfg:
                     voice = voice_config.apply_gender(voice, vcfg.voice)
                 previous, self._state.language = self._state.language, language
+                # The session carries it too: the day-before confirmation call
+                # is dialled in the language this caller actually spoke.
+                session.language = language
                 session.ctx.log.event(
                     "voice.language_switch",
                     was=previous,

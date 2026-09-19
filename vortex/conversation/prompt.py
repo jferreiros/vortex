@@ -250,11 +250,59 @@ def caller_note_for(match: CallerLineMatch | None) -> str:
     )
 
 
+def handoff_note_for(handoff: dict[str, str] | None) -> str:
+    """The HANDOFF block: a colleague has just transferred this call to you.
+
+    The confirmation agent called the patient about tomorrow's appointment,
+    they asked to move it, and the call was handed over mid-conversation -
+    "te paso con mi compañero, que te agenda las citas". You are that
+    colleague: the scheduling agent. The conversation opens mid-task, with
+    the rebooking flow and the diary tools, in the patient's language.
+    """
+    if not handoff:
+        return ""
+    language = language_name(handoff.get("language") or DEFAULT_LANGUAGE)
+    lines = [
+        "HANDOFF: A colleague has just transferred this call to you. You called the patient",
+        "to confirm tomorrow's appointment and they said they want to move it "
+        f"(appointment_id: {handoff.get('appointment_id', 'unknown')}, "
+        f"patient_id: {handoff.get('patient_id', 'unknown')}).",
+        "The patient is ALREADY IDENTIFIED - we placed this call to their registered number,",
+        "so the Identify step is done. Never ask for their name, national id, birth date or",
+        "any personal data again on this call; if a tool needs the patient, use the patient_id",
+        "above. The patient knows you are the colleague who books the appointments. Do not ask",
+        "who is calling or what they need: go straight to rescheduling that appointment with",
+        "the diary tools and submit the change.",
+        f"The patient speaks {language}; continue in {language}.",
+    ]
+    return "\n".join(lines)
+
+
+HANDOFF_GREETINGS: dict[str, str] = {
+    "es": "Hola, soy el compañero que le agenda las citas. Vamos a mover la suya: "
+    "¿qué día le viene mejor?",
+    "ca": "Hola, sóc el company que li agenda les cites. Anem a moure la seva: "
+    "quin dia li va millor?",
+    "gl": "Ola, son o compañeiro que lle axenda as citas. Imos mover a súa: "
+    "que día lle ven mellor?",
+    "eu": "Kaixo, hitzorduak kudeatzen dituen kidea naiz. Zurea mugituko dugu: "
+    "zein egun datorkizun ondo?",
+    "en": "Hello, I'm the colleague who books your appointments. Let's move yours: "
+    "which day suits you best?",
+}
+
+
+def handoff_greeting_for(language: str | None = None) -> str:
+    """The line a handoff call opens with: mid-task, straight to rescheduling."""
+    return _line(HANDOFF_GREETINGS, language)
+
+
 def build_system_prompt(
     now: datetime,
     *,
     language: str | None = None,
     caller: CallerLineMatch | None = None,
+    handoff: dict[str, str] | None = None,
     version: str | None = None,
 ) -> str:
     """The system prompt for one call, with the clock rendered in.
@@ -274,7 +322,9 @@ def build_system_prompt(
         language=language_name(language or DEFAULT_LANGUAGE),
         sites_brief=SITES_BRIEF,
         specialties_brief=SPECIALTIES_BRIEF,
-        caller_note=caller_note_for(caller),
+        caller_note="\n".join(
+            part for part in (caller_note_for(caller), handoff_note_for(handoff)) if part
+        ),
         tool_guide=TOOL_GUIDE,
     )
 
@@ -284,10 +334,14 @@ def initial_messages(
     *,
     language: str | None = None,
     caller: CallerLineMatch | None = None,
+    handoff: dict[str, str] | None = None,
 ) -> list[dict[str, str]]:
     """The context the LLM starts with. The first assistant turn is the greeting."""
     return [
-        {"role": "system", "content": build_system_prompt(now, language=language, caller=caller)}
+        {
+            "role": "system",
+            "content": build_system_prompt(now, language=language, caller=caller, handoff=handoff),
+        }
     ]
 
 

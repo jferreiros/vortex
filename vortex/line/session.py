@@ -50,10 +50,18 @@ from vortex.contract import (
     ToolContext,
     action_route,
 )
+from vortex.conversation.language import DEFAULT_LANGUAGE, normalise_language
 from vortex.diary.tools import _is_dead, find_slots
 from vortex.identity.tools import PATIENT_PREFERENCES_KEY, resolve_caller_line
+from vortex.line.confirmation_calls import (
+    cancel_confirmation_calls,
+    confirmation_store_from_settings,
+    handoff_from_parameters,
+    schedule_confirmation_call,
+)
 from vortex.line.sms import (
     SMS_BUDGET_SECS,
+    SMS_DETAILS_BUDGET_SECS,
     SmsClient,
     action_fingerprint,
     make_sms_client,
@@ -449,6 +457,14 @@ class CallSession:
     # Fingerprints of actions we already texted, so a 409 duplicate does not
     # SMS the caller twice for the same booking or cancel.
     _sms_notified: set[str] = field(default_factory=set)
+    # The language this call is spoken in. The pipecat language watcher moves
+    # it when the caller switches; the confirmation-call scheduling reads it so
+    # tomorrow's outbound call speaks the language this caller actually used.
+    language: str = DEFAULT_LANGUAGE
+    # Set when the call arrives through an outbound-call handoff (a patient
+    # who asked to move their appointment mid-confirmation-call): the
+    # pipeline opens with the rebooking loop instead of the plain greeting.
+    handoff: dict[str, str] | None = None
 
     @property
     def call_id(self) -> str:
@@ -496,6 +512,17 @@ class CallSession:
             submitter=submitter,
             sms=make_sms_client(settings),
         )
+        handoff = handoff_from_parameters(start.custom_parameters)
+        if handoff is not None:
+            session.handoff = handoff
+            if handoff.get("language"):
+                session.language = handoff["language"]
+            log.event(
+                "call.handoff",
+                appointment_id=handoff["appointment_id"],
+                patient_id=handoff["patient_id"],
+                language=handoff["language"],
+            )
         log.event(
             "call.started",
             stream_sid=start.stream_sid,
@@ -557,6 +584,7 @@ class CallSession:
                 self.arm_hangup("submit_accepted")
                 if sent is not None:
                     self._queue_sms(submitted_action(self.ctx, sent))
+                    self._queue_confirmation_call(submitted_action(self.ctx, sent))
         else:
             self.memory.observe(name, result)
             if self.memory.superseded_slot:
@@ -710,6 +738,7 @@ class CallSession:
         self.sent_actions.append(with_verdict_reason(self.ctx, action))
         if result.status in ACCEPTED_STATUSES:
             self._queue_sms(submitted_action(self.ctx, action))
+            self._queue_confirmation_call(submitted_action(self.ctx, action))
         return result
 
     @property
@@ -757,6 +786,92 @@ class CallSession:
             self.ctx.log.summary(reason=reason, usage=self.usage.summary_extras())
             await self.sms.aclose()
             await self.submitter.aclose()
+
+    def _queue_confirmation_call(self, action: Action) -> None:
+        """Queue the day-before confirmation call off the submit path.
+
+        Same discipline as ``_queue_sms``: never blocks the call, never raises
+        into it, and a 409 duplicate does not schedule twice (the store dedupes
+        a pending row for the same number and slot).
+        """
+        if not isinstance(action, (BookAction, CancelAction)):
+            return
+        if not self.settings.confirmation_calls:
+            self.ctx.log.event(
+                "confirmation_call.skipped", reason="disabled", action_kind=action.kind
+            )
+            return
+        try:
+            task = asyncio.get_running_loop().create_task(self._sync_confirmation_call(action))
+        except RuntimeError:
+            return
+        self._sms_pending.add(task)
+        task.add_done_callback(self._sms_pending_done)
+
+    async def _sync_confirmation_call(self, action: Action) -> None:
+        """Schedule (book) or drop (cancel) the confirmation call. Never raises."""
+        try:
+            forced = bool(self.settings.confirmation_force_to or self.settings.sms_force_to)
+            to = (
+                self.settings.confirmation_force_to
+                or self.settings.sms_force_to
+                or self.ctx.from_number
+                or ""
+            ).strip()
+            if not to:
+                self.ctx.log.event(
+                    "confirmation_call.skipped", reason="no_from_number", action_kind=action.kind
+                )
+                return
+            store = confirmation_store_from_settings(self.settings)
+            lead = timedelta(hours=float(self.settings.confirmation_lead_hours))
+            if isinstance(action, BookAction):
+                details = await resolve_details(self.ctx, action)
+                when = details.when
+                if when is None:
+                    self.ctx.log.event("confirmation_call.skipped", reason="no_when")
+                    return
+                call = await schedule_confirmation_call(
+                    store,
+                    to=to,
+                    when=when,
+                    language=normalise_language(self.language) or "",
+                    provider_name=details.provider_name,
+                    location_name=details.location_name,
+                    provider_id=details.provider_id,
+                    location_id=details.location_id,
+                    patient_id=action.patient_id,
+                    appointment_id=await self._booked_appointment_id(action),
+                    now=self.ctx.now,
+                    lead=lead,
+                )
+                if call is None:
+                    self.ctx.log.event("confirmation_call.skipped", reason="within_lead_window")
+                    return
+                self.ctx.log.event(
+                    "confirmation_call.scheduled",
+                    call_at=call.call_at,
+                    appointment_at=call.appointment_at,
+                    language=call.language,
+                    to=mask_phone(to),
+                    forced=forced,
+                )
+                return
+            if isinstance(action, CancelAction):
+                details = await resolve_details(self.ctx, action)
+                count = await cancel_confirmation_calls(
+                    store,
+                    to=to,
+                    appointment_at=details.when,
+                    appointment_id=action.appointment_id,
+                )
+                self.ctx.log.event(
+                    "confirmation_call.cancelled",
+                    count=count,
+                    appointment_id=action.appointment_id,
+                )
+        except Exception as exc:  # noqa: BLE001 - never break the call for this
+            self.ctx.log.event("confirmation_call.failed", error=repr(exc))
 
     def _queue_sms(self, action: Action) -> None:
         """Fire a confirmation SMS off the submit path. Never blocks the call."""
@@ -810,6 +925,31 @@ class CallSession:
         if self.settings.sms_day_before_reminders:
             await self._sync_reminders(action, to=to, details=details)
 
+    async def _booked_appointment_id(self, action: BookAction) -> str:
+        """The platform id of the visit a ``BookAction`` just created.
+
+        Best effort with the SMS details budget: the confirmation call still
+        schedules without it, but a handed-off reschedule needs the real id -
+        ``prepare_reschedule`` rejects anything the clinic API never issued.
+        """
+        try:
+            items = await asyncio.wait_for(
+                self.ctx.clinic.appointments(action.patient_id), SMS_DETAILS_BUDGET_SECS
+            )
+        except Exception as exc:  # noqa: BLE001 - never breaks the call
+            self.ctx.log.event(
+                "confirmation_call.appointment_lookup_failed", error=type(exc).__name__
+            )
+            return ""
+        for item in items:
+            if (
+                item.provider_id == action.provider_id
+                and item.location_id == action.location_id
+                and item.start == action.slot
+            ):
+                return item.appointment_id
+        return ""
+
     async def _sync_reminders(self, action: Action, *, to: str, details: object) -> None:
         """Queue or drop the day-before reminder. Never raises into the call."""
         try:
@@ -833,6 +973,7 @@ class CallSession:
                     provider_id=getattr(details, "provider_id", "") or "",
                     location_id=getattr(details, "location_id", "") or "",
                     patient_id=getattr(action, "patient_id", "") or "",
+                    now=self.ctx.now,
                     lead=lead,
                 )
                 if reminder is None:
