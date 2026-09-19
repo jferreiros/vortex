@@ -52,7 +52,9 @@ def _slot(hour: int, minute: int) -> str:
     return datetime(2026, 10, 5, hour, minute, tzinfo=MADRID).isoformat()
 
 
-def _book_event(hour: int, minute: int, *, patient: str = "P00001") -> dict:
+def _book_event(
+    hour: int, minute: int, *, patient: str = "P00001", appointment_id: str = ""
+) -> dict:
     return {
         "kind": "submit.result",
         "call_id": "roster:x",
@@ -62,6 +64,7 @@ def _book_event(hour: int, minute: int, *, patient: str = "P00001") -> dict:
             "provider_id": "PR01",
             "location_id": "centro",
             "appointment_type_id": "review",
+            "appointment_id": appointment_id,
             "slot": _slot(hour, minute),
         },
     }
@@ -130,6 +133,21 @@ def test_cancel_frees_the_slot_via_appointment_id() -> None:
     ]
     calendar = _only_calendar(events, {"A1": _appt("A1", 9, 30)})
     assert _cell_at(calendar, 9, 30).status == "free"
+    assert calendar.booked == 0
+
+
+def test_cancel_frees_a_slot_booked_earlier_in_the_same_stream() -> None:
+    # A3 is created by the BOOK itself, so it is absent from appt_index.
+    events = [
+        _book_event(9, 45, appointment_id="A3"),
+        {
+            "kind": "submit.result",
+            "call_id": "roster:y",
+            "payload": {"action": "CANCEL", "appointment_id": "A3"},
+        },
+    ]
+    calendar = _only_calendar(events)
+    assert _cell_at(calendar, 9, 45).status == "free"
     assert calendar.booked == 0
 
 
