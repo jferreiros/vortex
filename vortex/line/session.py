@@ -152,9 +152,10 @@ class CallMemory:
 
     last_rejection: Rejection | None = None
     last_rejection_tool: str = ""
-    # The subset of ``last_rejection`` that came from a rule, not from prose:
-    # an eligibility verdict or a provider ``find_slots`` reported as blocked.
-    # It is the reason a refusal must carry, so ``submit_action`` forces it.
+    # The subset of ``last_rejection`` the rules themselves answered: an
+    # eligibility refusal or a provider ``find_slots`` reported as blocked. Both
+    # are the reason a refusal must carry, so ``submit_action`` forces them; this
+    # one goes first, because a later rejection is often its consequence.
     last_verdict: Rejection | None = None
     last_verdict_tool: str = ""
     # The same reason, kept across the action a tool later prepares around it.
