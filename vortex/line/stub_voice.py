@@ -37,6 +37,10 @@ async def _send_ulaw(ws: WebSocket, session: CallSession, audio: bytes, *, paced
 async def run_stub_call(ws: WebSocket, session: CallSession) -> str:
     """Drive one call. Returns the reason the loop ended."""
     session.ctx.log.event("voice.mode", mode="stub")
+    # The stub says nothing a prompt could use, but the lookup is what the real
+    # pipelines do first and it is what the end-of-call fallback reads, so the
+    # offline rehearsal opens the same way a scored call does.
+    await session.resolve_caller_line()
     session.ctx.log.assistant_turn("[stub] greeting tone")
     await _send_ulaw(ws, session, ulaw.tone(660, GREETING_TONE_MS), paced=False)
     await ws.send_text(twilio.mark_message(session.stream_sid, "greeting"))
