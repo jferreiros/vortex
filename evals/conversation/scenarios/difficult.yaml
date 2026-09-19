@@ -215,6 +215,25 @@ scenarios:
           slot: {$earliest_slot: {specialty_id: orthopaedics, patient_id: P00042}}
       privacy_of: [P00042]
 
+  - id: p13.two_silences_submits_the_stated_request
+    problem: 13
+    caller:
+      - says: "Hello, I'd like the earliest Orthopaedics appointment. Marta Ruiz López, born the twelfth of March eighty-five."
+        means: {identify: {name: "Marta Ruiz López", date_of_birth: "1985-03-12"}, request: {intent: book, specialty_id: orthopaedics}}
+      - says: ""
+        silence_secs: 5
+        means: {silence_secs: 5}
+      - says: ""
+        silence_secs: 5
+        means: {silence_secs: 5}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00042
+          provider_id: PR05
+          slot: {$earliest_slot: {specialty_id: orthopaedics, patient_id: P00042}}
+      privacy_of: [P00042]
+
   - id: p13.day_corrected_from_tuesday_to_thursday
     problem: 13
     caller:

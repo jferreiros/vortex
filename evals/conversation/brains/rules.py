@@ -27,6 +27,7 @@ from vortex.conversation.prompt import (
     emergency_line_for,
     goodbye_for,
     idle_prompt_for,
+    idle_submit_line_for,
     refusal_line_for,
 )
 from vortex.tools import ToolError
@@ -47,6 +48,7 @@ class _State:
     record: dict[str, Any] | None = None  # the identified patient record
     record_of: str | None = None  # "caller" or "patient": whose details found the record
     decided: bool = False
+    idle_count: int = 0
     #: The sites the last clinic_facts answer named, for a caller who then
     #: says "book me there" (problem 16: they act on what we told them).
     told_sites: list[str] = field(default_factory=list)
@@ -75,6 +77,12 @@ class RulesBrain:
             s.refuse = "out_of_scope"
             return self._reply(trace, refusal_line_for("en"))
         if m.get("silence_secs") or turn.silence_secs:
+            # Same policy as the voice idle handler: first silence re-prompts,
+            # second silence submits whatever the call already knows.
+            s.idle_count += 1
+            if s.idle_count >= 2:
+                await self._decide(trace)
+                return self._reply(trace, idle_submit_line_for("en"))
             return self._reply(trace, idle_prompt_for("en"))
         if m.get("off_topic"):
             return self._reply(
@@ -342,19 +350,30 @@ class RulesBrain:
             "language": req.get("language"),
         }
         avail = await trace.call("find_slots", {k: v for k, v in args.items() if v is not None})
-        if avail.get("rejection"):
-            await self._submit(trace, {"kind": "no-action", "reason": avail["rejection"]["reason"]})
-            return
         if not avail["slots"]:
-            if avail.get("blocked"):
+            # The prompt's rule for problem 7: an empty window is an offer while
+            # there is something near to take. Yes books the nearest; no, or
+            # nothing near, submits the reason the tool gave for the window.
+            if avail.get("nearest") and s.accepted and not s.declined:
+                trace.notes.append("asked window empty: booking the nearest alternative")
+                await self._book(trace, patient_id, avail["nearest"][0], insurer)
+                return
+            if avail.get("rejection"):
+                reason = avail["rejection"]["reason"]
+            elif avail.get("blocked"):
                 reason = avail["blocked"][0]["reason"]
             else:
                 reason = "no_availability"
             await self._submit(trace, {"kind": "no-action", "reason": reason})
             return
+        await self._book(trace, patient_id, avail["slots"][0], insurer)
+
+    async def _book(
+        self, trace: Trace, patient_id: str, slot: dict[str, Any], insurer: str | None
+    ) -> None:
         booking = await trace.call(
             "prepare_booking",
-            {"patient_id": patient_id, "slot": avail["slots"][0], "policy_id": insurer or ""},
+            {"patient_id": patient_id, "slot": slot, "policy_id": insurer or ""},
         )
         if booking.get("action"):
             await self._submit(trace, booking["action"])

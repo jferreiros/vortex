@@ -270,7 +270,9 @@ CANCELLATION_PACK = REPO_ROOT / "synthetic-data" / "logs" / "cancellation_demo.j
 #: book into two of those exact (provider, minute) pairs — which is precisely
 #: what business_insights.cancellation_slots counts as "relocated". The other
 #: three stay freed: two whose appointment day already passed ("lost") and one
-#: still ahead ("pending"). Five freed slots also unlock the per-day chart.
+#: still ahead ("pending"). A last caller asks for the very doctor whose slots
+#: got lost and goes away empty — the implicit waiting list. Five freed slots
+#: also unlock the per-day chart.
 async def write_cancellation_pack(path: Path, *, delay_s: float = 0.0) -> list[str]:
     """Write the demo batch to ``path`` — the synthetic-data pack file."""
     now = datetime.now(MADRID)
@@ -280,13 +282,65 @@ async def write_cancellation_pack(path: Path, *, delay_s: float = 0.0) -> list[s
             hour=hour, minute=minute, second=0, microsecond=0
         )
 
-    # caller, patient_id, insurer, appointment_id, provider_id, provider, slot
+    # caller, patient_id, insurer, appointment_id, provider_id, provider, slot,
+    # from_number, reason — one of each cancel-reason bucket, and two callers
+    # sharing a number so the repeat-canceller count has something to count.
     cancellations = [
-        ("Nadia Prats Vidal", "P00071", "sanitas", "APT-901", "PR01", "Dra. Ortiz", at(1, 10, 15)),
-        ("Óscar Vidal Roca", "P00072", "mapfre", "APT-902", "PR02", "Dr. Sáez", at(-1, 12, 30)),
-        ("Elena Marín Sola", "P00073", "asisa", "APT-903", "PR04", "Dra. Iglesias", at(4, 17)),
-        ("Pau Bosch Llopis", "P00074", "sanitas", "APT-904", "PR02", "Dr. Sáez", at(-2, 9)),
-        ("Sara Gil Martos", "P00075", "dkv", "APT-905", "PR01", "Dra. Ortiz", at(2, 11)),
+        (
+            "Nadia Prats Vidal",
+            "P00071",
+            "sanitas",
+            "APT-901",
+            "PR01",
+            "Dra. Ortiz",
+            at(1, 10, 15),
+            "+34611000001",
+            "es que me ha surgido una reunión en el trabajo",
+        ),
+        (
+            "Óscar Vidal Roca",
+            "P00072",
+            "mapfre",
+            "APT-902",
+            "PR02",
+            "Dr. Sáez",
+            at(-1, 12, 30),
+            "+34611000002",
+            "me equivoqué de día",
+        ),
+        (
+            "Elena Marín Sola",
+            "P00073",
+            "asisa",
+            "APT-903",
+            "PR04",
+            "Dra. Iglesias",
+            at(4, 17),
+            "+34611000003",
+            "ya estoy mejor, ya se me ha pasado",
+        ),
+        (
+            "Pau Bosch Llopis",
+            "P00074",
+            "sanitas",
+            "APT-904",
+            "PR02",
+            "Dr. Sáez",
+            at(-2, 9),
+            "+34611000001",
+            "porque al final no me hace falta",
+        ),
+        (
+            "Sara Gil Martos",
+            "P00075",
+            "dkv",
+            "APT-905",
+            "PR01",
+            "Dra. Ortiz",
+            at(2, 11),
+            "+34611000004",
+            None,
+        ),
     ]
     # Same provider and exact minute as two freed slots — the relocations.
     bookings = [
@@ -295,7 +349,9 @@ async def write_cancellation_pack(path: Path, *, delay_s: float = 0.0) -> list[s
     ]
 
     written: list[str] = []
-    for i, (name, pid, insurer, aid, provider_id, provider, start) in enumerate(cancellations):
+    for i, (name, pid, insurer, aid, provider_id, provider, start, phone, reason) in enumerate(
+        cancellations
+    ):
         written.append(
             await _cancel_call(
                 path,
@@ -308,6 +364,8 @@ async def write_cancellation_pack(path: Path, *, delay_s: float = 0.0) -> list[s
                 provider,
                 start,
                 delay_s,
+                from_number=phone,
+                reason=reason,
             )
         )
     for i, (name, pid, insurer, provider_id, provider, start) in enumerate(bookings):
@@ -324,6 +382,21 @@ async def write_cancellation_pack(path: Path, *, delay_s: float = 0.0) -> list[s
                 delay_s,
             )
         )
+    # One caller asks for Dr. Sáez — whose two slots ended up lost — and
+    # leaves with nothing: the waiting-list line in the panel counts him.
+    written.append(
+        await _unmet_call(
+            path,
+            f"demo-unmet-{int(time.time())}",
+            "Marc Vidal Serra",
+            "P00078",
+            "sanitas",
+            "PR02",
+            "Dr. Sáez",
+            cancellations[1][6].date().isoformat(),  # same day one of the lost slots was
+            delay_s,
+        )
+    )
     return written
 
 
@@ -338,6 +411,9 @@ async def _cancel_call(
     provider_name: str,
     start: datetime,
     delay_s: float,
+    *,
+    from_number: str = "+34612345678",
+    reason: str | None = None,
 ) -> str:
     """One caller cancelling one appointment — the same tool chain a real
     cancel runs: identify, list the appointments, prepare, submit."""
@@ -345,7 +421,7 @@ async def _cancel_call(
     log.event(
         "call.started",
         stream_sid=f"MZ-{call_id}",
-        from_number="+34612345678",
+        from_number=from_number,
         voice="demo",
         clinic="fake",
     )
@@ -408,7 +484,7 @@ async def _cancel_call(
                 f"Veo su cita con {provider_name} el {start.strftime('%d/%m')} "
                 f"a las {start.strftime('%H:%M')}. ¿Se la cancelo?",
             ),
-            ("user", "Sí, cancélemela por favor."),
+            ("user", f"Sí, cancélemela por favor{', ' + reason if reason else ''}."),
             ("assistant", "Hecho, ya está cancelada. ¿Puedo ayudarle en algo más?"),
             ("user", "No, muchas gracias. Adiós."),
         ],
@@ -561,6 +637,89 @@ async def _book_into(
     return call_id
 
 
+async def _unmet_call(
+    path: Path,
+    call_id: str,
+    name: str,
+    patient_id: str,
+    insurer: str,
+    provider_id: str,
+    provider_name: str,
+    day: str,
+    delay_s: float,
+) -> str:
+    """One caller asking for a doctor who has nothing left — the demand the
+    waiting-list metric matches against the lost slots."""
+    log = CallLog(call_id, path)
+    log.event(
+        "call.started",
+        stream_sid=f"MZ-{call_id}",
+        from_number="+34611000005",
+        voice="demo",
+        clinic="fake",
+    )
+    await asyncio.sleep(delay_s)
+    await _turns(
+        log,
+        [
+            ("assistant", "Clínica Arenal, buenos días. ¿En qué puedo ayudarle?"),
+            ("user", f"Quisiera pedir cita con {provider_name}, lo antes posible."),
+            ("assistant", "Por supuesto. ¿Me dice su nombre completo?"),
+            ("user", name),
+        ],
+        delay_s,
+    )
+    log.tool_called("find_patient", {"name": name})
+    await asyncio.sleep(delay_s)
+    given, *rest = name.split()
+    log.tool_returned(
+        "find_patient",
+        {
+            "status": "found",
+            "patient": {
+                "patient_id": patient_id,
+                "given_name": given,
+                "first_surname": rest[0] if rest else "",
+                "second_surname": rest[1] if len(rest) > 1 else "",
+                "insurer": insurer,
+            },
+        },
+        36.0,
+    )
+    await asyncio.sleep(delay_s)
+    log.tool_called(
+        "find_slots",
+        {
+            "patient_id": patient_id,
+            "provider_id": provider_id,
+            "date_from": day,
+            "date_to": day,
+            "time_from": "00:00:00",
+            "time_to": "14:00:00",
+        },
+    )
+    await asyncio.sleep(delay_s)
+    log.tool_returned("find_slots", {"slots": [], "blocked": []}, 48.0)
+    await asyncio.sleep(delay_s)
+    await _turns(
+        log,
+        [
+            ("assistant", f"Lo siento, no me queda ningún hueco con {provider_name}. ¿Otro día?"),
+            ("user", "No, solo podía ese día. Gracias igualmente."),
+        ],
+        delay_s,
+    )
+    log.action_submitted(
+        "/api/v1/submit/no-action",
+        {"call_id": call_id, "reason": "no_availability"},
+        {"status": "dry_run", "http_status": None, "detail": "demo"},
+    )
+    log.event("call.usage", **REFUSE_USAGE)
+    log.event("call.ended", reason="hangup", media_frames_in=0, media_frames_out=0)
+    log.summary(reason="hangup")
+    return call_id
+
+
 async def write_cancellation_demo(path: Path, *, delay_s: float = 0.0) -> list[str]:
     """Deprecated name kept for callers that still generate straight into the
     log; the pack-file path is ``write_cancellation_pack`` + ``replay_cancellation_demo``."""
@@ -588,7 +747,7 @@ async def replay_cancellation_demo(
     pack_path: Path = CANCELLATION_PACK,
     run_tag: str | None = None,
 ) -> list[str]:
-    """Drip the pack's seven calls into the live log — fresh timestamps and
+    """Drip the pack's eight calls into the live log — fresh timestamps and
     fresh call_ids via ``replay_call``, so every replay lands inside the
     Insights window and repeated clicks never collide."""
     calls = load_cancellation_pack(pack_path)

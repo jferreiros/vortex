@@ -666,6 +666,13 @@ def _load_json_list(path: Path) -> list[dict[str, Any]]:
     return []
 
 
+def fixtures_catalogue() -> Catalogue:
+    """``fixtures.CLINIC`` as a ``Catalogue`` — the same adapted shape a live
+    ``/clinic`` response produces. For offline readers (``FakeClinicClient``,
+    the Insights board's site hours) that need the catalogue without a call."""
+    return Catalogue.model_validate(_adapt_catalogue(fixtures.CLINIC))
+
+
 class FakeClinicClient:
     """Offline client over ``fixtures``. Deterministic; no network.
 
@@ -680,7 +687,7 @@ class FakeClinicClient:
     """
 
     def __init__(self, *, data_dir: Path | None = None) -> None:
-        self._catalogue = Catalogue.model_validate(_adapt_catalogue(fixtures.CLINIC))
+        self._catalogue = fixtures_catalogue()
         self._availability_cache: dict[tuple[Any, ...], AvailabilityResponse] = {}
         self._availability_generation = 0
         self._directory_cache: OrderedDict[tuple[Any, ...], list[PatientRecord]] = OrderedDict()
@@ -699,6 +706,9 @@ class FakeClinicClient:
         self._appointments = [
             Appointment.model_validate(_adapt_appointment(a)) for a in appointment_rows
         ]
+        self._appointments_by_patient: dict[str, list[Appointment]] = {}
+        for item in self._appointments:
+            self._appointments_by_patient.setdefault(item.patient_id, []).append(item)
 
     async def health(self) -> bool:
         return True
@@ -939,7 +949,7 @@ class FakeClinicClient:
     ) -> list[Appointment]:
         check_when(when)
         now = datetime.now(tz=self._appointments[0].start.tzinfo) if self._appointments else None
-        items = [a for a in self._appointments if a.patient_id == patient_id]
+        items = list(self._appointments_by_patient.get(patient_id, []))
         if when == "upcoming":
             items = [a for a in items if now is None or a.start >= now]
         elif when == "past":

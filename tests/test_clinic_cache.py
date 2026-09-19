@@ -229,7 +229,17 @@ async def test_invalidation_during_an_offline_miss_drops_the_stale_response() ->
         ),
     ],
 )
-async def test_accepted_diary_writes_invalidate_availability(tmp_path: Path, action) -> None:
+async def test_accepted_diary_writes_invalidate_availability(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, action
+) -> None:
+    # This accepted book/cancel/reschedule also fires database/hooks.py's
+    # persist_submission (vortex/line/submit.py) — keep its writes in
+    # tmp_path, never the repo's real database/.
+    from vortex import settings as settings_module
+
+    monkeypatch.setenv("VORTEX_PRODUCT_DB", str(tmp_path / "vortex_product.db"))
+    settings_module.reset_settings()
+
     clinic = CountingFakeClinic()
     query = {
         "date_from": date(2026, 9, 19),
@@ -242,6 +252,7 @@ async def test_accepted_diary_writes_invalidate_availability(tmp_path: Path, act
     await clinic.availability(**query)
 
     assert clinic.availability_fetches == 2
+    settings_module.reset_settings()
 
 
 async def test_prepare_booking_rechecks_outside_the_snapshot(tmp_path: Path) -> None:

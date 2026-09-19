@@ -1,6 +1,6 @@
 """Business-facing insights for the Clinic View's Insights page.
 
-Four questions a clinic manager actually asks, all answered from
+Five questions a clinic manager actually asks, all answered from
 ``calls.jsonl`` through ``view.build_calls`` — no synthetic numbers, same
 rule as ``insights.py`` next to this file (read that one first; ``Bar`` and
 ``mask_phone`` live there and this module follows the same shape):
@@ -8,14 +8,20 @@ rule as ``insights.py`` next to this file (read that one first; ``Bar`` and
 1. ``unavailability_reasons`` — of the calls that tried to schedule and did
    not end up booked, why not: no slot in the window asked, a specific
    doctor unavailable, a specialty with no agenda here, an insurance/referral
-   rule, outside opening hours, or something else.
+   rule, or outside opening hours. Calls that fit none of those (``other``)
+   name no rule to act on, so they are dropped from what the page shows and
+   the remaining buckets renormalise to 100%.
 2. ``provider_ranking`` — which doctors get asked for by name, how often
-   that turns into a kept appointment, and the median wait to their next
-   slot when it does.
-3. ``demand_supply_heatmap`` — weekday x time-band grid of appointments
+   that turns into a kept appointment, the median wait to their next slot
+   when it does, and per doctor why the requests that failed did fail.
+3. ``service_occupancy`` — per specialty, appointment requests against slots
+   actually offered, whole-clinic or one site at a time. Over 100% means
+   real callers were told there was nothing, and ``extra_providers_needed``
+   turns that gap into a hiring number.
+4. ``demand_supply_heatmap`` — weekday x time-band grid of appointments
    *requested* against slots *actually offered*, to spot where demand has
    nowhere to land.
-4. ``cancellation_slots`` — every slot a cancellation freed this period:
+5. ``cancellation_slots`` — every slot a cancellation freed this period:
    picked up by another caller before the day arrived, or left empty. The
    platform only ever books for the day after the call, so a freed slot has
    one short window to be reused, never more.
@@ -34,6 +40,7 @@ capturing so this stops being a heuristic.
 
 from __future__ import annotations
 
+import math
 import unicodedata
 from collections import Counter, defaultdict
 from datetime import UTC, datetime
@@ -42,7 +49,9 @@ from statistics import median
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from vortex.clinic.client import fixtures_catalogue
 from vortex.clinic.fixtures import PROVIDERS, SPECIALTIES
+from vortex.contract import Catalogue, LocationRecord
 from vortex.observability.view import CallCard
 
 MADRID = ZoneInfo("Europe/Madrid")
@@ -103,6 +112,19 @@ SPECIALTY_ES_ALIASES: dict[str, tuple[str, ...]] = {
     "physiotherapy": ("fisioterap", "fisio"),
 }
 
+_CATALOGUE: Catalogue | None = None
+
+
+def site_catalogue() -> Catalogue:
+    """The fixtures catalogue stands in for the live ``/clinic`` payload — its
+    locations carry the per-site opening hours the heatmap paints as closed
+    cells, in the same ``Catalogue`` shape a live fetch would give."""
+    global _CATALOGUE
+    if _CATALOGUE is None:
+        _CATALOGUE = fixtures_catalogue()
+    return _CATALOGUE
+
+
 # ---------------------------------------------------------------------------
 # Reading a call's own words
 # ---------------------------------------------------------------------------
@@ -130,7 +152,8 @@ def mention_provider_ids(card: CallCard) -> set[str]:
     text = _user_text(card)
     if not text:
         return set()
-    words = set(text.split())
+    words = {w.strip(".,;:!?¿¡()\"'«»") for w in text.split()}
+    words.discard("")
     return {p.id for p in PROVIDER_DIRECTORY if p.tokens and p.tokens <= words}
 
 
@@ -340,11 +363,33 @@ def _band_for_hour(hour: int) -> str | None:
     return None
 
 
-def _requested_bands(card: CallCard) -> list[tuple[int, str | None]]:
-    """(weekday 0=Monday, band or None for "no hour given") for every
-    ``find_slots`` call this card made — the window the caller actually
+def _request_scope(catalogue: Catalogue, args: dict[str, Any]) -> frozenset[str]:
+    """The sites one ``find_slots`` request could land in, mirroring the diary
+    lane's ``_scope_sites``: the named site, else the sites of the provider or
+    specialty asked for, else every site — a caller who names no site could
+    have been served anywhere, so their demand counts against all of them."""
+    if loc := args.get("location_id"):
+        return frozenset({str(loc)})
+    if pid := args.get("provider_id"):
+        rec = next((p for p in catalogue.providers if p.provider_id == str(pid)), None)
+        if rec and rec.location_ids:
+            return frozenset(rec.location_ids)
+    if sid := args.get("specialty_id"):
+        sites = {
+            loc for p in catalogue.providers if p.specialty_id == str(sid) for loc in p.location_ids
+        }
+        if sites:
+            return frozenset(sites)
+    return frozenset(loc.location_id for loc in catalogue.locations)
+
+
+def _requested_bands(
+    card: CallCard, catalogue: Catalogue
+) -> list[tuple[int, str | None, frozenset[str]]]:
+    """(weekday 0=Monday, band or None for "no hour given", site scope) for
+    every ``find_slots`` call this card made — the window the caller actually
     asked for, read straight off ``FindSlotsInput.date_from``/``time_from``."""
-    out: list[tuple[int, str | None]] = []
+    out: list[tuple[int, str | None, frozenset[str]]] = []
     for step in card.tools:
         if step.name != "find_slots":
             continue
@@ -363,14 +408,14 @@ def _requested_bands(card: CallCard) -> list[tuple[int, str | None]]:
                 band = _band_for_hour(int(str(time_from).split(":")[0]))
             except (ValueError, IndexError):
                 band = None
-        out.append((day.weekday(), band))
+        out.append((day.weekday(), band, _request_scope(catalogue, args)))
     return out
 
 
-def _dominant_band(cards: list[CallCard]) -> tuple[str, str] | None:
+def _dominant_band(cards: list[CallCard], catalogue: Catalogue) -> tuple[str, str] | None:
     counter: Counter[tuple[int, str]] = Counter()
     for card in cards:
-        for weekday, band in _requested_bands(card):
+        for weekday, band, _scope in _requested_bands(card, catalogue):
             if band:
                 counter[(weekday, band)] += 1
     if not counter:
@@ -384,12 +429,16 @@ def _dominant_band(cards: list[CallCard]) -> tuple[str, str] | None:
 # ---------------------------------------------------------------------------
 
 
-def _unavailability_suggestion(unmet: list[CallCard], ranked: list[dict[str, Any]]) -> str | None:
+def _unavailability_suggestion(
+    unmet: list[CallCard], ranked: list[dict[str, Any]], catalogue: Catalogue
+) -> str | None:
     if not ranked:
         return None
     top = ranked[0]
     subset = [c for c in unmet if classify_unmet(c) == top["key"]]
-    total = len(unmet)
+    # Matches the denominator ``pct`` was computed against: the shown
+    # buckets, not every unmet call — "other" is excluded from both.
+    total = sum(r["count"] for r in ranked)
     pct = top["pct"]
     count = top["count"]
     base = f"El {pct:.0f}% de la demanda no cubierta ({count} de {total} llamadas)"
@@ -407,7 +456,7 @@ def _unavailability_suggestion(unmet: list[CallCard], ranked: list[dict[str, Any
                 "Ofrecer automáticamente otro médico de su especialidad cuando no tenga hueco."
             )
     if top["key"] == "no_slot_in_window":
-        band = _dominant_band(subset)
+        band = _dominant_band(subset, catalogue)
         if band:
             weekday, label = band
             return (
@@ -430,28 +479,42 @@ def _unavailability_suggestion(unmet: list[CallCard], ranked: list[dict[str, Any
     return f"{base} cae en «{top['label']}»: no sigue un patrón de agenda, revisar caso a caso."
 
 
-def unavailability_reasons(cards: list[CallCard]) -> dict[str, Any]:
-    """Ranking with count and % of unmet demand, most frequent first."""
+def unavailability_reasons(
+    cards: list[CallCard], *, catalogue: Catalogue | None = None
+) -> dict[str, Any]:
+    """Ranking with count and % of unmet demand, most frequent first.
+
+    "Otro" never appears: it names no clinic rule to act on, and because
+    every decline that fits none of the other five buckets lands there, it
+    would otherwise dominate the ranking with a bar that means nothing
+    actionable. It is dropped from what is shown and the remaining buckets'
+    percentages are renormalised over themselves, so they still sum to 100%.
+    ``unmet_total`` keeps counting every unmet call, "otro" included — it
+    answers "how many calls failed", not "how many the chart explains".
+    """
+    catalogue = catalogue or site_catalogue()
     unmet = [c for c in cards if is_unmet_demand(c)]
     counter: Counter[str] = Counter(classify_unmet(c) for c in unmet)
     total = sum(counter.values())
+    shown = {key: count for key, count in counter.items() if key != "other"}
+    shown_total = sum(shown.values())
     ranked: list[dict[str, Any]] = []
-    if total:
-        top_count = counter.most_common(1)[0][1]
-        for key, count in sorted(counter.items(), key=lambda kv: -kv[1]):
+    if shown_total:
+        top_count = max(shown.values())
+        for key, count in sorted(shown.items(), key=lambda kv: -kv[1]):
             ranked.append(
                 {
                     "key": key,
                     "label": BUCKET_LABELS[key],
                     "count": count,
                     "share": round(count / top_count, 3),
-                    "pct": round(100 * count / total, 1),
+                    "pct": round(100 * count / shown_total, 1),
                 }
             )
     return {
         "unmet_total": total,
         "buckets": ranked,
-        "suggested_action": _unavailability_suggestion(unmet, ranked),
+        "suggested_action": _unavailability_suggestion(unmet, ranked, catalogue),
     }
 
 
@@ -511,9 +574,16 @@ def _provider_suggestion(rows: list[dict[str, Any]]) -> str | None:
 def provider_ranking(
     cards: list[CallCard], *, min_requests: int = 2, low_success_pct: float = 50.0
 ) -> dict[str, Any]:
-    """Doctors asked for by name: volume, success rate, median wait."""
+    """Doctors asked for by name: volume, success rate, median wait — and,
+    per doctor, why the requests that did not end in a kept appointment
+    failed: ``unmet_reasons`` counts the same six buckets
+    ``classify_unmet`` produces for the page's drill-down, while
+    ``booked_elsewhere`` counts callers who asked for this doctor and were
+    booked with a colleague instead."""
     requests: Counter[str] = Counter()
     booked: Counter[str] = Counter()
+    booked_elsewhere: Counter[str] = Counter()
+    unmet: dict[str, list[str]] = defaultdict(list)
     waits: dict[str, list[float]] = defaultdict(list)
     for card in cards:
         wanted = requested_provider_ids(card)
@@ -522,9 +592,14 @@ def provider_ranking(
         if booked_pid and booked_pid in wanted:
             booked[booked_pid] += 1
         if booked_pid:
+            booked_elsewhere.update(wanted - {booked_pid})
             wait = _wait_days(card)
             if wait is not None:
                 waits[booked_pid].append(wait)
+        if is_unmet_demand(card):
+            bucket = classify_unmet(card)
+            for pid in wanted:
+                unmet[pid].append(bucket)
 
     rows: list[dict[str, Any]] = []
     for pid, n in requests.items():
@@ -533,6 +608,7 @@ def provider_ranking(
             continue
         b = booked.get(pid, 0)
         rate = round(100 * b / n, 1) if n else 0.0
+        unmet_buckets = Counter(unmet.get(pid, []))
         rows.append(
             {
                 "id": pid,
@@ -543,6 +619,16 @@ def provider_ranking(
                 "booked": b,
                 "success_rate": rate,
                 "median_wait_days": round(median(waits[pid]), 1) if waits.get(pid) else None,
+                "unmet": len(unmet.get(pid, [])),
+                "unmet_reasons": [
+                    {"key": k, "label": BUCKET_LABELS[k], "count": count}
+                    for k, count in sorted(unmet_buckets.items(), key=lambda kv: (-kv[1], kv[0]))
+                ],
+                "booked_elsewhere": booked_elsewhere.get(pid, 0),
+                #: The remainder — calls that named this doctor but ended in a
+                #: register, a cancel, or no submission at all. Keeps
+                #: booked + unmet + elsewhere + other == requests.
+                "other_outcomes": n - b - len(unmet.get(pid, [])) - booked_elsewhere.get(pid, 0),
                 "flagged": n >= min_requests and rate < low_success_pct,
             }
         )
@@ -551,15 +637,169 @@ def provider_ranking(
 
 
 # ---------------------------------------------------------------------------
-# 3. Demand vs. supply heatmap
+# 3. Service occupancy: demand vs. capacity by specialty, and the providers
+#    it would take to close the gap
+# ---------------------------------------------------------------------------
+
+#: Spanish display names for the specialty ids, mirroring
+#: ``home_overview.SPECIALTY_ES``: the catalogue itself is in English (it
+#: mirrors the platform's own field values).
+SERVICE_LABEL_ES: dict[str, str] = {
+    "general_practice": "Medicina general",
+    "paediatrics": "Pediatría",
+    "dermatology": "Dermatología",
+    "orthopaedics": "Traumatología",
+    "gynaecology": "Ginecología",
+    "physiotherapy": "Fisioterapia",
+}
+
+
+def _request_specialty_id(catalogue: Catalogue, args: dict[str, Any]) -> str | None:
+    """The specialty one ``find_slots`` request is actually about: the
+    specialty asked for directly, or the one the named doctor practises. A
+    request naming neither says nothing about which service was under
+    pressure, so it counts toward no service's occupancy — the same rule
+    the heatmap's ``all_day_demand`` bucket applies to an hour-less request."""
+    if sid := args.get("specialty_id"):
+        return str(sid)
+    if pid := args.get("provider_id"):
+        rec = next((p for p in catalogue.providers if p.provider_id == str(pid)), None)
+        if rec:
+            return rec.specialty_id
+    return None
+
+
+def _slot_specialty_id(catalogue: Catalogue, slot: dict[str, Any]) -> str | None:
+    """The specialty an offered slot belongs to, resolved through the slot's
+    own provider first — more reliable than trusting ``slot.specialty_id``
+    made it through every layer of a real payload."""
+    pid = slot.get("provider_id")
+    rec = next((p for p in catalogue.providers if p.provider_id == str(pid)), None) if pid else None
+    if rec:
+        return rec.specialty_id
+    sid = slot.get("specialty_id")
+    return str(sid) if sid else None
+
+
+def _extra_providers_needed(n_providers: int, occupancy_pct: float | None) -> int:
+    """How many more providers of this specialty, at today's slots-per-doctor
+    rate, would bring occupancy back to 100% — a straight-line estimate
+    (capacity scales with headcount), not a schedule, but enough to turn a
+    percentage into a hiring number."""
+    if occupancy_pct is None or n_providers <= 0 or occupancy_pct <= 100:
+        return 0
+    needed = math.ceil(n_providers * occupancy_pct / 100)
+    return needed - n_providers
+
+
+def _service_occupancy_rows(
+    cards: list[CallCard], catalogue: Catalogue, *, site_id: str | None = None
+) -> list[dict[str, Any]]:
+    """One row per specialty in the catalogue, scoped to one site when
+    ``site_id`` is given. A request without a named site counts against
+    every site it could have landed in (``_request_scope``), same as the
+    heatmap; a slot only counts against the site it was actually offered at.
+    """
+    requested: Counter[str] = Counter()
+    offered: Counter[str] = Counter()
+    declined_full: Counter[str] = Counter()
+    booked: Counter[str] = Counter()
+
+    for card in cards:
+        declined = is_unmet_demand(card) and classify_unmet(card) == "no_slot_in_window"
+        for step in card.tools:
+            if step.name != "find_slots":
+                continue
+            args = _as_dict(step.args)
+            scope = _request_scope(catalogue, args)
+            if site_id is not None and site_id not in scope:
+                continue
+            specialty_id = _request_specialty_id(catalogue, args)
+            if not specialty_id:
+                continue
+            requested[specialty_id] += 1
+            if declined:
+                declined_full[specialty_id] += 1
+            result = _as_dict(step.result)
+            for slot in result.get("slots") or []:
+                slot_d = slot if isinstance(slot, dict) else _as_dict(slot)
+                if site_id is not None and str(slot_d.get("location_id")) != site_id:
+                    continue
+                slot_specialty = _slot_specialty_id(catalogue, slot_d) or specialty_id
+                offered[slot_specialty] += 1
+        pid = _booked_provider_id(card)
+        info = PROVIDER_BY_ID.get(pid) if pid else None
+        if info:
+            loc_id = (card.action_payload or {}).get("location_id")
+            if site_id is None or str(loc_id) == site_id:
+                booked[info.specialty_id] += 1
+
+    rows: list[dict[str, Any]] = []
+    for specialty_id, specialty_name in SPECIALTY_NAME_BY_ID.items():
+        n_providers = len(
+            [
+                p
+                for p in catalogue.providers
+                if p.specialty_id == specialty_id and (site_id is None or site_id in p.location_ids)
+            ]
+        )
+        req, off = requested.get(specialty_id, 0), offered.get(specialty_id, 0)
+        if off > 0:
+            occupancy_pct: float | None = round(100 * req / off, 1)
+        elif req > 0:
+            occupancy_pct = None  # asked for, nothing was ever on offer to divide by
+        else:
+            occupancy_pct = 0.0
+        rows.append(
+            {
+                "id": specialty_id,
+                "name": SERVICE_LABEL_ES.get(specialty_id, specialty_name),
+                "requested": req,
+                "offered": off,
+                "booked": booked.get(specialty_id, 0),
+                "declined_full": declined_full.get(specialty_id, 0),
+                "providers": n_providers,
+                "occupancy_pct": occupancy_pct,
+                "extra_providers_needed": _extra_providers_needed(n_providers, occupancy_pct),
+            }
+        )
+    rows.sort(key=lambda r: (-(r["occupancy_pct"] or -1), r["name"]))
+    return rows
+
+
+def service_occupancy(
+    cards: list[CallCard], *, catalogue: Catalogue | None = None
+) -> dict[str, Any]:
+    """Occupancy per specialty, network-wide and per site: how many
+    appointment requests landed against how many slots were actually
+    offered. The platform only ever offers a slot that exists, so a request
+    with nothing to match is exactly a rejection for being full — over 100%
+    reads as "we turned real callers away here", not a rounding artefact.
+    """
+    catalogue = catalogue or site_catalogue()
+    return {
+        "all": _service_occupancy_rows(cards, catalogue),
+        "sites": [
+            {
+                "id": loc.location_id,
+                "name": loc.name,
+                "services": _service_occupancy_rows(cards, catalogue, site_id=loc.location_id),
+            }
+            for loc in catalogue.locations
+        ],
+    }
+
+
+# ---------------------------------------------------------------------------
+# 4. Demand vs. supply heatmap
 # ---------------------------------------------------------------------------
 
 
-def _offered_bands(card: CallCard) -> list[tuple[int, str]]:
-    """(weekday, band) for every slot a ``find_slots`` call actually
-    returned — the availability really on offer, independent of what was
-    asked, read straight off ``AvailabilityResult.slots[].start``."""
-    out: list[tuple[int, str]] = []
+def _offered_bands(card: CallCard) -> list[tuple[int, str, str | None]]:
+    """(weekday, band, location_id) for every slot a ``find_slots`` call
+    actually returned — the availability really on offer, independent of what
+    was asked, read straight off ``AvailabilityResult.slots[].start``."""
+    out: list[tuple[int, str, str | None]] = []
     for step in card.tools:
         if step.name != "find_slots":
             continue
@@ -576,7 +816,8 @@ def _offered_bands(card: CallCard) -> list[tuple[int, str]]:
             local = dt.astimezone(MADRID) if dt.tzinfo else dt
             band = _band_for_hour(local.hour)
             if band:
-                out.append((local.weekday(), band))
+                loc_id = slot_d.get("location_id")
+                out.append((local.weekday(), band, str(loc_id) if loc_id else None))
     return out
 
 
@@ -589,25 +830,58 @@ def _hottest_gap(
     return max(candidates, key=lambda kv: kv[1] - supply.get(kv[0], 0))
 
 
-def demand_supply_heatmap(cards: list[CallCard]) -> dict[str, Any]:
-    """Weekday x band grid: appointments requested vs. slots offered."""
-    demand: Counter[tuple[int, str]] = Counter()
-    demand_all_day: Counter[int] = Counter()
-    supply: Counter[tuple[int, str]] = Counter()
+def _band_is_open(loc: LocationRecord, weekday: int, band_start: int, band_end: int) -> bool:
+    """Whether the site's published hours cover any minute of the band. A
+    band that only half overlaps (Sur's Friday 09:00–14:00 inside the 12–15
+    "Mediodía" band) counts as open — it is closed cells that say "Cerrado"."""
+    for h in loc.hours:
+        if h.weekday != weekday:
+            continue
+        opens_m = h.opens.hour * 60 + h.opens.minute
+        closes_m = h.closes.hour * 60 + h.closes.minute
+        if opens_m < band_end * 60 and closes_m > band_start * 60:
+            return True
+    return False
 
-    for card in cards:
-        for weekday, band in _requested_bands(card):
-            if band:
-                demand[(weekday, band)] += 1
-            else:
-                demand_all_day[weekday] += 1
-        for weekday, band in _offered_bands(card):
-            supply[(weekday, band)] += 1
 
-    rows = [
+def _open_matrix(loc: LocationRecord) -> list[list[bool]]:
+    """7 weekdays x 4 bands, True where the site takes appointments."""
+    return [[_band_is_open(loc, wd, start, end) for _label, start, end in BANDS] for wd in range(7)]
+
+
+_DAY_SHORT = ("L", "M", "X", "J", "V", "S", "D")
+
+
+def _hours_label(loc: LocationRecord) -> str:
+    """The site's weekly pattern in one line: "L–V 09:00–20:00 · S 09:00–14:00"."""
+    by_day: list[list[str]] = [[] for _ in range(7)]
+    for h in loc.hours:
+        by_day[h.weekday].append(f"{h.opens:%H:%M}–{h.closes:%H:%M}")
+    parts: list[str] = []
+    wd = 0
+    while wd < 7:
+        ivs = sorted(by_day[wd])
+        if not ivs:
+            wd += 1
+            continue
+        end = wd
+        while end + 1 < 7 and sorted(by_day[end + 1]) == ivs:
+            end += 1
+        days_label = _DAY_SHORT[wd] if wd == end else f"{_DAY_SHORT[wd]}–{_DAY_SHORT[end]}"
+        parts.append(f"{days_label} {' + '.join(ivs)}")
+        wd = end + 1
+    return " · ".join(parts)
+
+
+def _heatmap_grid(
+    demand: Counter[tuple[int, str]],
+    all_day: Counter[int],
+    supply: Counter[tuple[int, str]],
+) -> list[dict[str, Any]]:
+    return [
         {
             "weekday": WEEKDAYS_ES[wd],
-            "all_day_demand": demand_all_day.get(wd, 0),
+            "all_day_demand": all_day.get(wd, 0),
             "cells": [
                 {
                     "band": label,
@@ -618,6 +892,66 @@ def demand_supply_heatmap(cards: list[CallCard]) -> dict[str, Any]:
             ],
         }
         for wd in range(7)
+    ]
+
+
+def demand_supply_heatmap(
+    cards: list[CallCard], *, catalogue: Catalogue | None = None
+) -> dict[str, Any]:
+    """Weekday x band grid: appointments requested vs. slots offered.
+
+    ``rows`` is the whole network; ``sites`` repeats the same grid per
+    location for the page's clinic picker. A request counts against every
+    site it could have landed in (``_request_scope``), a slot only against
+    its own site. ``open`` marks the (weekday, band) cells each site actually
+    opens — the page paints the rest as "Cerrado".
+    """
+    catalogue = catalogue or site_catalogue()
+    locations = list(catalogue.locations)
+    site_ids = {loc.location_id for loc in locations}
+
+    demand: Counter[tuple[int, str]] = Counter()
+    demand_all_day: Counter[int] = Counter()
+    supply: Counter[tuple[int, str]] = Counter()
+    site_demand: dict[str, Counter[tuple[int, str]]] = defaultdict(Counter)
+    site_all_day: dict[str, Counter[int]] = defaultdict(Counter)
+    site_supply: dict[str, Counter[tuple[int, str]]] = defaultdict(Counter)
+
+    for card in cards:
+        for weekday, band, scope in _requested_bands(card, catalogue):
+            if band:
+                demand[(weekday, band)] += 1
+            else:
+                demand_all_day[weekday] += 1
+            for site in scope & site_ids:
+                if band:
+                    site_demand[site][(weekday, band)] += 1
+                else:
+                    site_all_day[site][weekday] += 1
+        for weekday, band, loc_id in _offered_bands(card):
+            supply[(weekday, band)] += 1
+            if loc_id in site_ids:
+                site_supply[loc_id][(weekday, band)] += 1
+
+    open_by_site = {loc.location_id: _open_matrix(loc) for loc in locations}
+    combined_open = [
+        [any(open_by_site[s][wd][bi] for s in site_ids) for bi in range(len(BANDS))]
+        for wd in range(7)
+    ]
+
+    sites = [
+        {
+            "id": loc.location_id,
+            "name": loc.name,
+            "hours_label": _hours_label(loc),
+            "open": open_by_site[loc.location_id],
+            "rows": _heatmap_grid(
+                site_demand[loc.location_id],
+                site_all_day[loc.location_id],
+                site_supply[loc.location_id],
+            ),
+        }
+        for loc in locations
     ]
 
     suggestion = None
@@ -632,11 +966,17 @@ def demand_supply_heatmap(cards: list[CallCard]) -> dict[str, Any]:
             "mayor bolsa de demanda sin horario."
         )
 
-    return {"rows": rows, "bands": list(BAND_LABELS), "suggested_action": suggestion}
+    return {
+        "rows": _heatmap_grid(demand, demand_all_day, supply),
+        "bands": list(BAND_LABELS),
+        "open": combined_open,
+        "sites": sites,
+        "suggested_action": suggestion,
+    }
 
 
 # ---------------------------------------------------------------------------
-# 4. Cancellations: slots reused vs. slots lost
+# 5. Cancellations: slots reused vs. slots lost
 # ---------------------------------------------------------------------------
 
 
@@ -664,8 +1004,154 @@ def _appointment_lookup(cards: list[CallCard]) -> dict[str, dict[str, Any]]:
                     start_dt = datetime.fromisoformat(str(start))
                 except ValueError:
                     continue
+                if start_dt.tzinfo is None:
+                    start_dt = start_dt.replace(tzinfo=UTC)
                 out[str(aid)] = {"provider_id": str(provider_id), "start": start_dt}
     return out
+
+
+def _started_dt(card: CallCard) -> datetime | None:
+    """The call's start as an aware datetime (naive stamps read as UTC)."""
+    if not card.started_at:
+        return None
+    try:
+        stamp = datetime.fromisoformat(str(card.started_at))
+    except ValueError:
+        return None
+    return stamp if stamp.tzinfo else stamp.replace(tzinfo=UTC)
+
+
+#: Lead-time buckets, by the edge a notice falls under. The story the panel
+#: tells: last-minute cancellations are the ones that get lost — nobody has
+#: the hours to take the freed slot.
+LEAD_BUCKETS: tuple[tuple[str, str, float], ...] = (
+    ("under_24h", "< 24 h", 24 * 3600),
+    ("h24_48", "24–48 h", 48 * 3600),
+    ("h48_7d", "48 h – 7 d", 7 * 86400),
+    ("over_7d", "> 7 d", float("inf")),
+)
+
+CANCEL_REASON_LABELS: dict[str, str] = {
+    "scheduling": "Horario o imprevisto",
+    "no_longer_needed": "Ya no le hacía falta",
+    "health": "Ya está mejor",
+    "mistake": "Se equivocó",
+    "other": "Otro motivo",
+    "unknown": "Sin motivo dicho",
+}
+
+#: The two catch-all buckets. However many cancellations they carry, they
+#: never outrank a specific reason in the list the clinic reads — a pile of
+#: "no idea why" is a data-quality problem, not the clinic's top cancellation
+#: driver. Order matters: "other" (a reason was given, just not one we know)
+#: prints above "unknown" (no reason at all).
+RESIDUAL_CANCEL_REASONS: tuple[str, ...] = ("other", "unknown")
+
+#: Fixed print order for the specific (non-residual) buckets — the
+#: declaration order of ``CANCEL_REASON_LABELS``, not a count. The count a
+#: bucket happens to have this week is not a reason to reshuffle the list
+#: every time someone reads it; only the two residual buckets are pinned
+#: below these regardless of their own count (see ``_cancel_reason_sort_key``).
+_CANCEL_REASON_ORDER: dict[str, int] = {
+    key: i
+    for i, key in enumerate(k for k in CANCEL_REASON_LABELS if k not in RESIDUAL_CANCEL_REASONS)
+}
+
+
+def _cancel_reason_sort_key(item: tuple[str, int]) -> tuple[int, int]:
+    """Specific reasons in a fixed order, never by count; the residual
+    buckets always last, in ``RESIDUAL_CANCEL_REASONS`` order, no matter
+    their count."""
+    key, _count = item
+    if key in RESIDUAL_CANCEL_REASONS:
+        return (1, RESIDUAL_CANCEL_REASONS.index(key))
+    return (0, _CANCEL_REASON_ORDER.get(key, 0))
+
+
+#: Folded keywords, same pattern as ``_KEYWORD_BUCKETS``: first bucket with
+#: a hit wins. "me equivoqué" beats "no puedo" — a mistaken booking gets
+#: cancelled however the caller frames the rest of the sentence.
+#:
+#: ``no_longer_needed`` was added by reading every call in ``logs/calls.jsonl``
+#: that ``classify_cancel_reason`` put in "Otro motivo": "porque al final no
+#: me hace falta" was the only real phrase there, appearing twice, so it
+#: clears the "at least 2 real cases" bar this file's cancellation panel
+#: applies before a bucket earns its own row. The seven other candidates a
+#: clinic manager might expect — work/schedule (already covered by
+#: ``scheduling``'s "trabajo"/"me ha surgido"/"imprevisto"), transport, family
+#: care, another clinic, price/insurance, forgetting, and fear/nerves — have
+#: zero occurrences anywhere in the log (checked with a plain substring
+#: search over the whole file, not just unmet-demand or cancel calls), so
+#: none of them get a bucket: a bucket with no real backing would just be an
+#: empty row forever, which is worse than leaving that phrasing in "Otro
+#: motivo" until a real case shows up.
+_CANCEL_REASON_BUCKETS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (
+        "mistake",
+        ("me equivoque", "me he equivocado", "no era asi", "me confundi", "era otro dia"),
+    ),
+    (
+        "health",
+        (
+            "estoy mejor",
+            "se me ha pasado",
+            "ya no me duele",
+            "me encuentro mejor",
+            "me siento mejor",
+            "me he curado",
+        ),
+    ),
+    (
+        "no_longer_needed",
+        ("no me hace falta", "ya no me hace falta", "no lo necesito", "ya no lo necesito"),
+    ),
+    (
+        "scheduling",
+        (
+            "no puedo",
+            "me ha surgido",
+            "me surge",
+            "trabajo",
+            "imprevisto",
+            "me tengo que ir",
+            "de viaje",
+            "no me viene",
+        ),
+    ),
+)
+
+#: Cue words meaning the caller *did* give a reason, just none we know — the
+#: difference between "other" and "unknown".
+_REASON_CUES = ("porque", "es que", "ya que", "por culpa", "al final")
+
+
+def classify_cancel_reason(card: CallCard) -> str:
+    """Why the caller said they cancel — folded keyword match on their own
+    turns, ``unknown`` when they never gave one. Same offline pattern as
+    ``classify_unmet``."""
+    text = _user_text(card)
+    if not text:
+        return "unknown"
+    for bucket, keywords in _CANCEL_REASON_BUCKETS:
+        if any(kw in text for kw in keywords):
+            return bucket
+    return "other" if any(cue in text for cue in _REASON_CUES) else "unknown"
+
+
+def _lead_time_suggestion(leads: list[float]) -> str | None:
+    if not leads:
+        return None
+    last_minute = sum(1 for s in leads if s < 24 * 3600)
+    if last_minute * 2 >= len(leads):
+        return (
+            f"La mayoría de las cancelaciones ({last_minute} de {len(leads)}) llegan con "
+            "menos de 24 h de antelación: ofrecer el hueco a la lista de espera en el "
+            "instante de la cancelación es lo único que les da salida."
+        )
+    return (
+        f"La cancelación mediana avisa con {median(leads) / 3600:.0f} h de antelación: hay "
+        "margen para reofrecer el hueco si el aviso a la lista de espera es automático."
+    )
 
 
 def _cancel_event_ts(card: CallCard) -> datetime | None:
@@ -719,9 +1205,20 @@ def _cancellation_suggestion(
     )
 
 
-def cancellation_slots(cards: list[CallCard], *, now: datetime | None = None) -> dict[str, Any]:
+def cancellation_slots(
+    cards: list[CallCard],
+    *,
+    now: datetime | None = None,
+    catalogue: Catalogue | None = None,
+) -> dict[str, Any]:
     """Every slot a cancellation freed this period: reused by another
-    caller, or still empty once the appointment day arrived.
+    caller, or still empty once the appointment day arrived — plus the
+    detail around it: how far ahead the caller cancelled (``lead_time``),
+    how fast a freed slot was taken again (``relocation_speed``), the
+    cancellation rate over all appointment actions (``cancel_rate``), the
+    doctors losing the most slots (``by_provider``), why callers said they
+    cancelled (``reasons``), the unmet callers who had asked for the lost
+    slots (``waitlist``) and repeat cancellers by number (``repeat_callers``).
 
     A cancellation only frees the exact (provider, minute) an earlier
     ``list_appointments`` call showed for that ``appointment_id``; without
@@ -731,8 +1228,12 @@ def cancellation_slots(cards: list[CallCard], *, now: datetime | None = None) ->
     not count against itself.
     """
     now = now or datetime.now(UTC)
+    catalogue = catalogue or site_catalogue()
     lookup = _appointment_lookup(cards)
-    bookings = [(*slot, card.call_id) for card in cards if (slot := _booked_slot(card))]
+    bookings: list[tuple[str, datetime, str, datetime | None]] = []
+    for card in cards:
+        if slot := _booked_slot(card):
+            bookings.append((*slot, card.call_id, _started_dt(card)))
 
     freed: list[dict[str, Any]] = []
     for card in cards:
@@ -742,11 +1243,15 @@ def cancellation_slots(cards: list[CallCard], *, now: datetime | None = None) ->
         info = lookup.get(str(appointment_id)) if appointment_id else None
         if not info:
             continue
-        relocated = any(
-            pid == info["provider_id"] and start == info["start"] and cid != card.call_id
-            for pid, start, cid in bookings
-        )
-        if relocated:
+        started = _started_dt(card)
+        freed_at = _cancel_event_ts(card) or started
+        rebookers = [
+            booked_at
+            for pid, start, cid, booked_at in bookings
+            if pid == info["provider_id"] and start == info["start"] and cid != card.call_id
+        ]
+        relocated_at = min((b for b in rebookers if b is not None), default=None)
+        if rebookers:
             status = "relocated"
         elif info["start"] < now:
             status = "lost"
@@ -757,8 +1262,16 @@ def cancellation_slots(cards: list[CallCard], *, now: datetime | None = None) ->
                 "call_id": card.call_id,
                 "provider_id": info["provider_id"],
                 "start": info["start"].isoformat(),
-                "freed_at": (_cancel_event_ts(card) or now).isoformat(),
+                "freed_at": (freed_at or now).isoformat(),
                 "status": status,
+                "start_dt": info["start"],
+                "lead_s": (info["start"] - started).total_seconds() if started else None,
+                "relocated_in_s": (
+                    (relocated_at - freed_at).total_seconds()
+                    if relocated_at is not None and freed_at is not None
+                    else None
+                ),
+                "reason": classify_cancel_reason(card),
             }
         )
 
@@ -779,12 +1292,145 @@ def cancellation_slots(cards: list[CallCard], *, now: datetime | None = None) ->
                 by_day[day][f["status"]] += 1
         daily = [{"date": d, **counts} for d, counts in sorted(by_day.items())]
 
+    # How far ahead of the slot the cancel call came in. A slot cancelled
+    # after its own start lands in the <24 h bucket — retroactive, which in
+    # practice is zero notice.
+    leads = [f["lead_s"] for f in freed if f["lead_s"] is not None]
+    lead_counts = {key: 0 for key, _label, _edge in LEAD_BUCKETS}
+    for s in leads:
+        for key, _label, edge in LEAD_BUCKETS:
+            if s < edge:
+                lead_counts[key] += 1
+                break
+    top_lead = max(lead_counts.values(), default=0) or 1
+    lead_time = {
+        "count": len(leads),
+        "median_hours": round(median(leads) / 3600, 1) if leads else None,
+        "buckets": [
+            {
+                "key": key,
+                "label": label,
+                "count": lead_counts[key],
+                "share": round(lead_counts[key] / top_lead, 3),
+            }
+            for key, label, _edge in LEAD_BUCKETS
+        ],
+        "suggested_action": _lead_time_suggestion(leads),
+    }
+
+    # How fast a freed slot got taken again, from the cancel's submit event
+    # to the rebooking call's start. A negative delta means the "rebooking"
+    # call was already on the line when the cancel landed — real concurrency,
+    # so it counts as relocated but says nothing about speed.
+    reloc_deltas = [
+        f["relocated_in_s"]
+        for f in freed
+        if f["relocated_in_s"] is not None and f["relocated_in_s"] >= 0
+    ]
+    relocation_speed = {
+        "count": len(reloc_deltas),
+        "median_minutes": round(median(reloc_deltas) / 60, 1) if reloc_deltas else None,
+    }
+
+    # Cancellations over every appointment action in the range — the
+    # context the recovery rate needs.
+    actions = Counter(c.action_kind for c in cards if c.action_kind)
+    cancels = actions.get("cancel", 0)
+    appointments = cancels + actions.get("book", 0) + actions.get("reschedule", 0)
+    cancel_rate = {
+        "cancels": cancels,
+        "appointments": appointments,
+        "pct": round(100 * cancels / appointments, 1) if appointments else None,
+    }
+
+    per_provider: dict[str, dict[str, int]] = {}
+    for f in freed:
+        row = per_provider.setdefault(f["provider_id"], {"freed": 0, "lost": 0})
+        row["freed"] += 1
+        row["lost"] += f["status"] == "lost"
+    by_provider = sorted(
+        (
+            {
+                "id": pid,
+                "name": PROVIDER_BY_ID[pid].name if pid in PROVIDER_BY_ID else pid,
+                **counts,
+            }
+            for pid, counts in per_provider.items()
+        ),
+        key=lambda r: (-r["freed"], r["name"]),
+    )
+
+    reason_counts = Counter(f["reason"] for f in freed)
+    reasons = [
+        {"key": k, "label": CANCEL_REASON_LABELS[k], "count": n}
+        for k, n in sorted(reason_counts.items(), key=_cancel_reason_sort_key)
+    ]
+
+    # The implicit waiting list: unmet callers in the range who had asked
+    # for the very doctor or the very (weekday, band) of a slot that ended
+    # up lost — they are the patients the freed minute could have gone to.
+    unmet_info = {
+        c.call_id: {
+            "providers": requested_provider_ids(c),
+            "bands": {
+                (weekday, band) for weekday, band, _scope in _requested_bands(c, catalogue) if band
+            },
+        }
+        for c in cards
+        if is_unmet_demand(c)
+    }
+    lost_with_demand = 0
+    waitlist_callers: set[str] = set()
+    for f in freed:
+        if f["status"] != "lost":
+            continue
+        local = f["start_dt"].astimezone(MADRID)
+        band = _band_for_hour(local.hour)
+        matched = {
+            cid
+            for cid, info in unmet_info.items()
+            if f["provider_id"] in info["providers"]
+            or (band is not None and (local.weekday(), band) in info["bands"])
+        }
+        if matched:
+            lost_with_demand += 1
+            waitlist_callers |= matched
+    waitlist_n = len(waitlist_callers)
+    waitlist = {
+        "lost_with_demand": lost_with_demand,
+        "callers": waitlist_n,
+        "suggested_action": (
+            f"{lost_with_demand} de los huecos perdidos tenían {waitlist_n} "
+            f"{'paciente' if waitlist_n == 1 else 'pacientes'} que los habían pedido: "
+            "ofrecérselos al cancelar los habría recuperado."
+            if waitlist_n
+            else None
+        ),
+    }
+
+    # Repeat cancellers by caller number — count only, the number itself
+    # never leaves this function.
+    cancel_by_number = Counter(
+        c.from_number for c in cards if c.action_kind == "cancel" and c.from_number
+    )
+    repeat_callers = {
+        "callers": sum(1 for n in cancel_by_number.values() if n > 1),
+        "cancellations": sum(n for n in cancel_by_number.values() if n > 1),
+    }
+
     return {
         "freed_total": len(freed),
         "relocated": relocated_n,
         "lost": lost_n,
         "pending": pending_n,
         "recovery_rate_pct": round(100 * relocated_n / decided, 1) if decided else None,
+        "lead_time": lead_time,
+        "relocation_speed": relocation_speed,
+        "cancel_rate": cancel_rate,
+        "by_provider": by_provider,
+        "reasons": reasons,
+        "waitlist": waitlist,
+        "repeat_callers": repeat_callers,
         "daily": daily,
         "suggested_action": _cancellation_suggestion(freed, relocated_n, lost_n),
     }
@@ -802,9 +1448,10 @@ DATA_GAPS: list[str] = [
     "structured event — only inferable from turn.user keywords. An explicit "
     "`slot.declined_by_caller` event carrying the offered slot would replace the NLP fallback "
     "in classify_unmet with a real signal.",
-    "The provider/specialty directory this page matches mentions against comes from the local "
-    "clinic fixtures, not a cached snapshot of the real /providers and /specialties responses "
-    "for this call — in live mode the roster can drift from what the API actually returned.",
+    "The provider/specialty directory this page matches mentions against — and the per-site "
+    "opening hours behind the heatmap's Cerrado cells — comes from the local clinic fixtures, "
+    "not a cached snapshot of the real /providers, /specialties and /clinic responses for this "
+    "call — in live mode the roster and the hours can drift from what the API actually returned.",
     "A booked action's payload does not always carry provider_id (it depends on which tool built "
     "it); the ranking falls back to the provider name view.py already extracted, which can be "
     "missing if find_slots was not the last tool to touch that call's provider data.",
@@ -813,18 +1460,65 @@ DATA_GAPS: list[str] = [
     "tells the two apart.",
     "A `cancel` submission carries only the appointment_id, never the provider/slot it freed — "
     "cancellation_slots recovers it from a `list_appointments` call earlier in the same call and "
-    "drops the cancellation from the count when that lookup is missing from the log. A "
-    "`reschedule` frees its old slot the same way but is not counted here: only cancellations are.",
+    "drops the cancellation from the count when that lookup is missing from the log. The same gap "
+    "covers lead_time: a cancellation whose lookup is absent contributes no notice to the median. "
+    "A `reschedule` frees its old slot the same way but is not counted here: only cancellations.",
+    "The cancellation reason is a keyword read of the caller's own turns — the submit payload "
+    "carries no reason, so `unknown` covers both callers who never said why and reasons the "
+    "word list does not know.",
+    "Relocation speed measures submit-event to call-start — a rebooking call already on the "
+    "line when the cancel landed produces a negative delta and is kept out of the median.",
+    "The implicit waiting list matches unmet calls by named provider or requested "
+    "(weekday, band), not by whether the exact freed minute would have suited them — it "
+    "over-counts callers who wanted a different hour of the same band.",
+    "Repeat cancellers are keyed by caller phone number: one patient on two phones reads as "
+    "two callers, a shared phone as one.",
 ]
 
 
+def is_real_call(card: CallCard) -> bool:
+    """A call that actually dialled the line — a real caller or one of
+    ``scripts/fake_caller.py``'s practice runs — never an offline artefact
+    sharing the same log:
+
+    - eval smoke tests carry ``call_id`` prefixed ``probe:``
+      (``evals/corpus/hydrate.py``);
+    - both eval families (probes and the named corpus cases such as
+      ``adversarial-...`` or ``the_rules-...``) mark their own
+      ``call.started`` with ``clinic="synthetic-data"``, a value
+      ``Settings.describe()`` never produces (real calls get "live" or
+      "fake" there, meaning only whether the *clinic* API is live — not
+      whether the *call* is real);
+    - the console's "replay demo" button (``observability/demo.py``) marks
+      its scripted calls ``voice="demo"``, a value ``voice_label`` never
+      returns (real calls get "gemini-live", "pipecat" or "stub").
+
+    Any one of these three checks alone would catch most of the log; kept
+    together because either offline family evolving its ``call_id`` shape
+    must not let its calls sneak back into what the board counts.
+    """
+    if card.call_id.startswith("probe:"):
+        return False
+    if card.clinic == "synthetic-data":
+        return False
+    return card.voice != "demo"
+
+
 def business_insights(cards: list[CallCard], *, now: datetime | None = None) -> dict[str, Any]:
-    """The full payload the Insights page's business-insights endpoint returns."""
+    """The full payload the Insights page's business-insights endpoint
+    returns. ``cards`` is filtered to ``is_real_call`` first: eval probes,
+    synthetic corpus cases and scripted "replay demo" calls share this same
+    log for visibility elsewhere in the console, but they are not a call a
+    clinic manager should see counted as business volume.
+    """
+    cards = [c for c in cards if is_real_call(c)]
+    catalogue = site_catalogue()
     return {
         "calls_considered": len(cards),
-        "unavailability": unavailability_reasons(cards),
+        "unavailability": unavailability_reasons(cards, catalogue=catalogue),
         "providers": provider_ranking(cards),
-        "heatmap": demand_supply_heatmap(cards),
-        "cancellations": cancellation_slots(cards, now=now),
+        "occupancy": service_occupancy(cards, catalogue=catalogue),
+        "heatmap": demand_supply_heatmap(cards, catalogue=catalogue),
+        "cancellations": cancellation_slots(cards, now=now, catalogue=catalogue),
         "data_gaps": DATA_GAPS,
     }

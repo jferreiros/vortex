@@ -8,6 +8,7 @@ import Insights from "../pages/clinic/insights/Insights";
 import LiveCalls from "../pages/clinic/live-calls/LiveCalls";
 import LiveCallDetail from "../pages/clinic/live-calls/LiveCallDetail";
 import Calls from "../pages/clinic/calls/Calls";
+import Agenda from "../pages/clinic/agenda/Agenda";
 
 // Hash-based on purpose: this SPA is served by FastAPI from a single
 // registered path (/call/{call_id}/zoom — see vortex/observability/live.py)
@@ -30,6 +31,8 @@ export default function AppRouter() {
         <Route path="/clinic" element={<ClinicShell />}>
           <Route index element={<Navigate to="home" replace />} />
           <Route path="home" element={<Home />} />
+          <Route path="doctor" element={<Agenda />} />
+          <Route path="agenda" element={<Navigate to="/clinic/doctor" replace />} />
           <Route path="settings" element={<Settings />} />
           <Route path="insights" element={<Insights />} />
           <Route path="live-calls" element={<LiveCalls />} />
