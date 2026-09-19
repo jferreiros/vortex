@@ -30,6 +30,7 @@ from vortex.contract import (
     action_payload,
     action_route,
 )
+from vortex.settings import get_settings
 
 
 class SubmitApi(Protocol):
@@ -125,6 +126,17 @@ async def submit_action(ctx: ToolContext, args: SubmitInput) -> SubmitResult:
     if ctx.submitter is None:
         return SubmitResult(status="error", detail="no submitter on this call context")
     action = with_verdict_reason(ctx, args.action)
+    if get_settings().jev_arbiter:
+        from vortex.jev.arbiter import review
+
+        reviewed = await review(ctx, action)
+        if reviewed is not action:
+            ctx.log.event(
+                "submit.jev_override",
+                route=action_route(action),
+                decided=action_route(reviewed),
+            )
+            action = reviewed
     if action is not args.action:
         ctx.log.event(
             "submit.reason_override",
