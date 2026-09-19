@@ -1,4 +1,4 @@
-import { HashRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, HashRouter, Routes, Route, Navigate } from "react-router-dom";
 import Landing from "../pages/landing/Landing";
 import ClinicShell from "../pages/clinic/ClinicShell";
 import Home from "../pages/clinic/home/Home";
@@ -15,14 +15,14 @@ import LiveCallDetail from "../pages/clinic/live-calls/LiveCallDetail";
 // lib/callRoute.js for how a real call_id in that server path becomes the
 // hash's initial entry.
 export default function AppRouter() {
+  // Dev: real paths so http://127.0.0.1:5173/clinic/home works in a normal
+  // address bar. Prod stays on HashRouter because FastAPI only serves the
+  // SPA from /wall and /call/{id}/zoom.
+  const Router = import.meta.env.DEV ? BrowserRouter : HashRouter;
   return (
-    <HashRouter>
+    <Router>
       <Routes>
         <Route path="/" element={<Landing />} />
-
-        {/* Full-bleed, outside ClinicShell's sidebar layout on purpose —
-            see the comment in LiveCallDetail.jsx. */}
-        <Route path="/clinic/live-calls/:callId" element={<LiveCallDetail />} />
 
         <Route path="/clinic" element={<ClinicShell />}>
           <Route index element={<Navigate to="home" replace />} />
@@ -30,10 +30,11 @@ export default function AppRouter() {
           <Route path="settings" element={<Settings />} />
           <Route path="insights" element={<Insights />} />
           <Route path="live-calls" element={<LiveCalls />} />
+          <Route path="live-calls/:callId" element={<LiveCallDetail />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
-    </HashRouter>
+    </Router>
   );
 }

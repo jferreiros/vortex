@@ -27,6 +27,7 @@ from vortex.observability import auth, explain, insights
 from vortex.observability.business_insights import business_insights
 from vortex.observability.calllog import read_recent
 from vortex.observability.demo import write_scripted_call
+from vortex.observability.home_overview import home_overview
 from vortex.observability.icons import icon
 from vortex.observability.view import CallCard, build_calls, flatten_grouped
 from vortex.observability.wall_timeline import build_timeline, call_summary, latest_intent
@@ -897,7 +898,7 @@ def _card_started(card: CallCard) -> datetime | None:
 @app.get("/api/wall/business-insights")
 def wall_business_insights_api(days: int = 30) -> JSONResponse:
     """Unavailability reasons, doctor ranking, the demand/supply heatmap and
-    cancellation recovery for the Insights page's "7 / 30 / 90 días" pills.
+    cancellation recovery for the Statistics page's 7 / 30 / 90 day pills.
     ``days`` is one of those three; anything else is clamped to the nearest.
     """
     days = min((7, 30, 90), key=lambda d: abs(d - days))
@@ -909,6 +910,17 @@ def wall_business_insights_api(days: int = 30) -> JSONResponse:
     payload = business_insights(in_range, now=now)
     payload["range_days"] = days
     return JSONResponse(payload)
+
+
+@app.get("/api/wall/home-overview")
+def wall_home_overview_api() -> JSONResponse:
+    """Today's diary mix, desk containment, human queue, plus seven-day
+    unmet demand and cancellation recovery for the Clinic Home page.
+    """
+    now = datetime.now(UTC)
+    events, _health = _load_events()
+    cards = build_calls(events)
+    return JSONResponse(home_overview(cards, now=now))
 
 
 @app.get("/wall/avatar2d")

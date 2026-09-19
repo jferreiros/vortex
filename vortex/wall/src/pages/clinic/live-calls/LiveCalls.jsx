@@ -1,22 +1,11 @@
 import { useNavigate } from "react-router-dom";
 import SectionHeader from "../../../components/ui/SectionHeader";
 import Card from "../../../components/ui/Card";
+import { PLACEHOLDER_CALLS } from "./placeholderCalls";
 import "./live-calls.css";
 
-// PLACEHOLDER: live call feed. There is no "list every active call" endpoint
-// yet — vortex/observability's API exposes one call's timeline at a time
-// (GET /api/wall/timeline/{call_id}). Only the first row uses the real
-// scripted demo (call_id "demo") so clicking through actually works end to
-// end; the rest are illustrative cards with no live data behind them yet,
-// which is exactly what they should look like until that endpoint exists.
-const PLACEHOLDER_CALLS = [
-  { id: "demo", patient: "Lucía Ruiz López", phase: "Hablando", status: "live", duration: "00:32", language: "Español" },
-  { id: "call-2", patient: "Sin identificar", phase: "Escuchando", status: "live", duration: "00:08", language: "Català" },
-  { id: "call-3", patient: "Antonio Pérez Gil", phase: "Ejecutando herramienta", status: "live", duration: "01:14", language: "Español" },
-  { id: "call-4", patient: "Ana Salas Ferrer", phase: "Escalada", status: "escalated", duration: "02:03", language: "Español" },
-];
-
-const STATUS_LABEL = { live: "En llamada", escalated: "Escalada" };
+const STATUS_LABEL = { live: "On a call", escalated: "Escalated" };
+const DIRECTION_LABEL = { inbound: "Inbound", outbound: "Outbound" };
 
 export default function LiveCalls() {
   const navigate = useNavigate();
@@ -47,7 +36,7 @@ export default function LiveCalls() {
             </div>
             <span className="live-call-patient">{call.patient}</span>
             <div className="live-call-card-bottom">
-              <span className="live-call-chip">{call.language}</span>
+              <span className="live-call-chip">{DIRECTION_LABEL[call.direction]}</span>
               <span className="live-call-phase">{call.phase}</span>
             </div>
           </Card>
