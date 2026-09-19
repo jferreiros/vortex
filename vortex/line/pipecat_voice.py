@@ -190,6 +190,7 @@ async def run_pipecat_call(
     stages += [
         aggregators.user(),
         llm,
+        _PrivacyGuard(session, language_state),
         tts,
         transport.output(),
         aggregators.assistant(),
@@ -401,6 +402,50 @@ def _TTSRouter(  # noqa: N802 - factory that returns a processor
         )
 
     return ParallelPipeline([gate(to_primary), primary], [gate(to_alternate), alternate])
+
+
+def _PrivacyGuard(  # noqa: N802 - factory that returns a processor
+    session: CallSession, state: _LanguageState | None = None
+):
+    """Block national_id and phone values before they reach TTS.
+
+    Every ``TextFrame`` and ``TTSSpeakFrame`` is normalised and compared to the
+    national ids and phones this call has already seen (directory records on
+    the session, plus ``from_number``). A match replaces the phrase with a
+    safe refusal and logs ``voice.privacy_block``. The call stays open.
+    """
+    from pipecat.frames.frames import Frame, TextFrame, TTSSpeakFrame
+    from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+
+    from vortex.conversation.prompt import refusal_line_for
+    from vortex.line.privacy import PRIVACY_BLOCK_LINE, scrub_session_text
+
+    language_state = state if state is not None else _LanguageState()
+
+    class PrivacyGuard(FrameProcessor):
+        async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+            await super().process_frame(frame, direction)
+            if direction == FrameDirection.DOWNSTREAM and isinstance(
+                frame, (TextFrame, TTSSpeakFrame)
+            ):
+                await self._scrub(frame)
+            await self.push_frame(frame, direction)
+
+        async def _scrub(self, frame: TextFrame | TTSSpeakFrame) -> None:
+            text = frame.text or ""
+            if not text.strip():
+                return
+            _, leaks = scrub_session_text(session.ctx, text)
+            if not leaks:
+                return
+            frame.text = refusal_line_for(language_state.language) or PRIVACY_BLOCK_LINE
+            session.ctx.log.event(
+                "voice.privacy_block",
+                kinds=sorted({leak.split(" ", 1)[0] for leak in leaks}),
+                leaks=len(leaks),
+            )
+
+    return PrivacyGuard()
 
 
 def _LanguageWatcher(  # noqa: N802 - factory that returns a processor
