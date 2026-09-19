@@ -75,6 +75,7 @@ from vortex.conversation.turns import (
 from vortex.line import voice_config
 from vortex.line.aic_filter import build_audio_in_filter
 from vortex.line.llm_timeout import first_token_guard
+from vortex.line.recording import recording_serializer
 from vortex.line.session import CallSession
 from vortex.observability.tracing import traced_openai_llm_service
 from vortex.settings import GEMINI_TTS_LANGUAGES
@@ -174,7 +175,6 @@ async def run_pipecat_call(
     from pipecat.pipeline.task import PipelineParams, PipelineTask
     from pipecat.processors.aggregators.llm_context import LLMContext
     from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
-    from pipecat.serializers.twilio import TwilioFrameSerializer
     from pipecat.services.llm_service import FunctionCallParams
     from pipecat.services.openai.llm import OpenAILLMService
     from pipecat.services.soniox.stt import SonioxContextObject, SonioxSTTService
@@ -188,11 +188,9 @@ async def run_pipecat_call(
     ctx = session.ctx
     ctx.log.event("voice.mode", mode="pipecat", **_providers(settings))
 
-    serializer = TwilioFrameSerializer(
-        stream_sid=session.stream_sid,
-        call_sid=session.call_id,
-        params=TwilioFrameSerializer.InputParams(auto_hang_up=False),
-    )
+    # The standard Twilio serializer, teeing every inbound media frame into
+    # this call's recording buffer before it decodes for the pipeline.
+    serializer = recording_serializer(session)
     # Optional AICFilter (Quail 8 kHz) before Silero/Soniox. Default off —
     # only enable after entity CER drops on the T54 5 dB bench.
     audio_in_filter = build_audio_in_filter(settings)

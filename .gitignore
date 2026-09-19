@@ -29,6 +29,7 @@ venv/
 # Runtime
 logs/*
 !logs/.gitkeep
+recordings/
 api_results/
 database/processed/*
 !database/processed/.gitkeep

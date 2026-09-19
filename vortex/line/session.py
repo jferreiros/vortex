@@ -49,6 +49,7 @@ from vortex.contract import (
 )
 from vortex.diary.tools import find_slots
 from vortex.identity.tools import PATIENT_PREFERENCES_KEY, resolve_caller_line
+from vortex.line.recording import write_wav
 from vortex.line.sms import (
     SMS_BUDGET_SECS,
     SmsClient,
@@ -426,6 +427,9 @@ class CallSession:
     # The last intent this call logged, so ``call.intent`` is written only when
     # the best guess changes - a re-classification, not a repeat.
     _intent: str = ""
+    # Every inbound µ-law frame, in the bytes it arrived in. Flushed to
+    # ``recordings/{call_id}.wav`` by ``close``. Per socket, like everything.
+    _recording: bytearray = field(default_factory=bytearray)
 
     @property
     def call_id(self) -> str:
@@ -742,6 +746,7 @@ class CallSession:
             media_frames_out=self.media_frames_out,
             **extra,
         )
+        await self._write_recording()
         try:
             await asyncio.wait_for(
                 self._fallback_if_silent(),
@@ -755,6 +760,32 @@ class CallSession:
             self.ctx.log.summary(reason=reason, usage=self.usage.summary_extras())
             await self.sms.aclose()
             await self.submitter.aclose()
+
+    def record_frame(self, ulaw_bytes: bytes) -> None:
+        """Append one inbound media frame to the recording buffer, as µ-law."""
+        self._recording += ulaw_bytes
+
+    async def _write_recording(self) -> None:
+        """Flush the buffered µ-law to ``recordings/{call_id}.wav``.
+
+        Written right after ``call.ended`` on every close reason - a crashed
+        call still produced audio worth hearing. Decoding a three-minute call
+        is ~1.4 MB of samples through a pure-Python codec, so it runs off the
+        event loop. An empty buffer writes nothing: a call that never heard a
+        frame has no recording to point at.
+        """
+        if not self._recording:
+            return
+        try:
+            path, duration_ms, size = await asyncio.to_thread(
+                write_wav, self.call_id, bytes(self._recording)
+            )
+        except OSError as exc:
+            self.ctx.log.event("call.recording_failed", error=str(exc))
+            return
+        self.ctx.log.event(
+            "call.recording", path=str(path), format="wav", duration_ms=duration_ms, bytes=size
+        )
 
     def _queue_sms(self, action: Action) -> None:
         """Fire a confirmation SMS off the submit path. Never blocks the call."""
