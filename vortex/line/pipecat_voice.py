@@ -57,6 +57,7 @@ from vortex.conversation.stt_context import stt_context_text, stt_terms
 from vortex.conversation.turns import (
     TurnSettings,
     default_turn_settings,
+    effective_vad_stop_secs,
     user_turn_strategies,
 )
 from vortex.line.llm_timeout import first_token_guard
@@ -261,10 +262,11 @@ def _providers(settings: Any) -> dict[str, object]:
 def _user_aggregator_params(turns: TurnSettings) -> Any:
     """The user aggregator's params: VAD, idle timeout and the turn strategies.
 
-    Strategies always come from the conversation lane. In VAD mode that keeps
-    the aggregator off its smart-turn v3 defaults. In Soniox mode it overrides
-    the STT's ``ExternalUserTurnStrategies`` with a word-count start gate plus
-    an external stop, so ``interrupt_min_words`` actually runs.
+    Strategies always come from the conversation lane. In VAD+Smart Turn mode
+    that installs ``LocalSmartTurnAnalyzerV3`` and shortens VAD ``stop_secs``
+    to 0.2 s. In Soniox mode it overrides the STT's
+    ``ExternalUserTurnStrategies`` with a word-count start gate plus an
+    external stop, so ``interrupt_min_words`` actually runs.
 
     Imports pipecat lazily so the server starts without the keys.
     """
@@ -277,7 +279,7 @@ def _user_aggregator_params(turns: TurnSettings) -> Any:
             params=VADParams(
                 confidence=turns.vad_confidence,
                 start_secs=turns.vad_start_secs,
-                stop_secs=turns.vad_stop_secs,
+                stop_secs=effective_vad_stop_secs(turns),
                 min_volume=turns.vad_min_volume,
             )
         ),

@@ -259,8 +259,14 @@ def test_soniox_mode_keeps_the_min_words_barge_in_gate() -> None:
 
 def test_vad_mode_builds_strategies_that_honour_the_settings() -> None:
     pytest.importorskip("pipecat")
+    from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
     from pipecat.turns.user_start import MinWordsUserTurnStartStrategy, VADUserTurnStartStrategy
-    from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
+    from pipecat.turns.user_stop import (
+        SpeechTimeoutUserTurnStopStrategy,
+        TurnAnalyzerUserTurnStopStrategy,
+    )
+
+    from vortex.conversation.turns import effective_vad_stop_secs
 
     strategies = user_turn_strategies(
         TurnSettings(soniox_turn_detection=False, interrupt_min_words=2)
@@ -268,8 +274,17 @@ def test_vad_mode_builds_strategies_that_honour_the_settings() -> None:
     assert strategies is not None
     assert isinstance(strategies.start[0], VADUserTurnStartStrategy)
     assert isinstance(strategies.start[1], MinWordsUserTurnStartStrategy)
-    assert isinstance(strategies.stop[0], SpeechTimeoutUserTurnStopStrategy)
+    assert isinstance(strategies.stop[0], TurnAnalyzerUserTurnStopStrategy)
+    assert isinstance(strategies.stop[0]._turn_analyzer, LocalSmartTurnAnalyzerV3)
+    assert strategies.stop[0]._turn_analyzer.params.stop_secs == 2.0
+    assert effective_vad_stop_secs(TurnSettings(soniox_turn_detection=False)) == 0.2
 
     single = user_turn_strategies(TurnSettings(soniox_turn_detection=False, interrupt_min_words=1))
     assert single is not None
     assert len(single.start) == 1
+
+    timeout = user_turn_strategies(
+        TurnSettings(soniox_turn_detection=False, use_smart_turn=False, interrupt_min_words=2)
+    )
+    assert timeout is not None
+    assert isinstance(timeout.stop[0], SpeechTimeoutUserTurnStopStrategy)

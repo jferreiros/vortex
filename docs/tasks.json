@@ -1177,6 +1177,26 @@
       "why": "El reto 4 falla con un carácter mal. Hoy no hay ningún mapeador de formas habladas en vortex/. Las librerías están probadas en docs/research/05-structured-data.md."
     },
     {
+<<<<<<< HEAD
+      "id": "T65",
+      "wave": "w6",
+      "lane": "linea",
+      "kind": "voz",
+      "title": "Voz · A/B del modo VAD con Smart Turn v3.2",
+      "problems": [
+        13
+      ],
+      "weight": 4,
+      "size": "2 h",
+      "blocked_by": [],
+      "files": [
+        "vortex/conversation/turns.py",
+        "vortex/line/pipecat_voice.py",
+        "vortex/line/smart_turn_ab.py"
+      ],
+      "done": "Con soniox_turn_detection=False, LocalSmartTurnAnalyzerV3 (stop_secs=2.0, VAD stop_secs=0.2) frente al modo Soniox sobre los clips de id y corrección. Gana el que corte menos turnos a medias.",
+      "why": "Smart Turn v3.2 viene con pipecat 1.11, soporta español, remuestrea 8 kHz solo y es más robusto al ruido. Espera a #128. Ver docs/research/03-turn-detection.md."
+=======
       "id": "T64",
       "wave": "w6",
       "lane": "linea",
@@ -1194,6 +1214,7 @@
       ],
       "done": "GeminiTTSService con gemini-2.5-flash-tts habla ca/gl/eu; Standard-B queda tras GOOGLE_TTS_STANDARD_FALLBACK. Comparado a oído por Twilio con dos frases.",
       "why": "Chirp 3 HD no tiene catalán. El scorer no nos oye, pero el jurado sí. Ver docs/research/06-google-and-tts.md."
+>>>>>>> origin/main
     }
   ]
 }
