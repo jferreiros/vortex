@@ -43,6 +43,18 @@
   gap: var(--space-5);
 }
 
+.settings-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+}
+
+.settings-pair .settings-group {
+  grid-template-columns: 1fr;
+  gap: var(--space-3);
+  align-content: start;
+}
+
 .settings-group-head h3 {
   font-family: var(--font-display);
   font-size: var(--text-lg);
@@ -233,6 +245,9 @@
 }
 
 @media (max-width: 900px) {
+  .settings-pair {
+    grid-template-columns: 1fr;
+  }
   .settings-group {
     grid-template-columns: 1fr;
   }
