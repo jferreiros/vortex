@@ -172,7 +172,13 @@ def make_sms_client(settings: Settings) -> SmsClient:
 
 
 def format_slot_es(when: datetime) -> str:
-    """``jueves 24 de septiembre a las 16:30`` in Europe/Madrid."""
+    """``jueves 24 de septiembre a las 16:30`` in Europe/Madrid.
+
+    A naive ``when`` is refused: ``astimezone`` would read it in the machine's
+    timezone and text the caller an hour the clinic never offered.
+    """
+    if when.utcoffset() is None:
+        raise ValueError(f"appointment datetime must carry an offset: {when.isoformat()}")
     local = when.astimezone(MADRID)
     weekday = WEEKDAYS_ES[local.weekday()]
     month = MONTHS_ES[local.month - 1]
@@ -269,7 +275,10 @@ async def resolve_details(ctx: ToolContext, action: Action) -> AppointmentDetail
         if known is None:
             details.missing.append("appointment_details")
             return details
-        details.when = known.start
+        if known.start.utcoffset() is not None:
+            details.when = known.start
+        else:
+            details.missing.append("naive_appointment_start")
         details.provider_id = known.provider_id
         details.location_id = known.location_id
     else:
