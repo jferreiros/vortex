@@ -55,7 +55,7 @@ MADRID = ZoneInfo("Europe/Madrid")
 #: A call with no event for this long is over, whatever the log says.
 STALE_AFTER_S = 180
 
-NAV_PUBLIC = (("Live", "/wall"), ("Console", "/"))
+NAV_PUBLIC = (("Live", "/wall"), ("Calendar", "/calendar"), ("Console", "/"))
 
 # ---------------------------------------------------------------------------
 # Data
@@ -1264,7 +1264,9 @@ def main() -> None:
 
 # The clinic console (Overview, Agents, Patients, Insights, Settings) registers
 # its pages on import. It imports this module, so it must come last.
-from vortex.observability import console  # noqa: E402, F401
+# The doctor calendar (/calendar) registers its page on import; it reuses this
+# module's chrome, so it comes after everything above is defined.
+from vortex.observability import calendar_view, console  # noqa: E402, F401
 
 if __name__ in {"__main__", "__mp_main__"}:
     main()
