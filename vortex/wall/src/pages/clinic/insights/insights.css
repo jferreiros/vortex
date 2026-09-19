@@ -203,68 +203,162 @@
   white-space: nowrap;
 }
 
+/* Panel head with the site picker pinned right (Horas pico sin horario) ----*/
+
+.insights-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.insights-panel-head h2 {
+  margin-bottom: var(--space-1);
+}
+
+.insights-panel-head .insights-panel-sub {
+  margin: 0;
+}
+
+/* Demand vs. supply heatmap: 7 day columns x 4 bands -----------------------*/
+
 .heatmap-grid {
   display: grid;
-  gap: 6px;
+  gap: 4px;
   align-items: stretch;
 }
 
-.heatmap-band-label,
-.heatmap-weekday {
+.heatmap-corner {
+  grid-column: 1;
+}
+
+.heatmap-col-label,
+.heatmap-row-label {
   display: flex;
   align-items: center;
   font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
   color: var(--color-mute);
 }
 
-.heatmap-band-label {
+.heatmap-col-label {
   justify-content: center;
+  padding-bottom: var(--space-2);
+}
+
+.heatmap-row-label {
+  padding-right: var(--space-2);
 }
 
 .heatmap-cell {
   position: relative;
-  min-height: 36px;
-  border-radius: var(--radius-sm);
-  background: var(--color-primary-soft);
-  color: var(--color-ink);
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  font-weight: var(--weight-semibold);
+  gap: 2px;
+  min-height: 52px;
+  border-radius: var(--radius-sm);
+  background: var(--color-primary-soft);
+  overflow: hidden;
 }
 
 .heatmap-cell::before {
   content: "";
   position: absolute;
   inset: 0;
-  border-radius: inherit;
   background: var(--color-primary);
-  opacity: calc(0.08 + var(--intensity, 0) * 0.45);
-}
-
-.heatmap-cell span {
-  position: relative;
-}
-
-.heatmap-cell span em {
-  font-style: normal;
-  font-weight: var(--weight-regular);
-  color: var(--color-mute);
+  opacity: calc(var(--intensity, 0) * 0.85);
 }
 
 .heatmap-cell.gap {
-  box-shadow: inset 0 0 0 1.5px var(--color-warn);
-  background: var(--color-warn-soft);
+  box-shadow: inset 0 0 0 2px var(--color-warn);
 }
 
-.heatmap-cell.gap::before {
+/* A (weekday, band) the selected centre does not open — the red "Cerrado"
+   box the site picker exists to show. Urgent, not warn: a shut door is
+   harder than demand without supply. */
+.heatmap-cell.closed {
+  background: var(--color-urgent-soft);
+  box-shadow: inset 0 0 0 2px var(--color-urgent);
+}
+
+.heatmap-cell.closed::before {
   display: none;
+}
+
+.heatmap-closed-label {
+  position: relative;
+  z-index: 1;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--color-urgent);
+}
+
+.heatmap-hours {
+  margin: 0 0 var(--space-4);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-mute);
+}
+
+.heatmap-demand,
+.heatmap-availability {
+  position: relative;
+  z-index: 1;
+  font-family: var(--font-mono);
+}
+
+.heatmap-demand {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+  color: var(--color-ink);
+}
+
+.heatmap-availability {
+  font-size: 10px;
+  color: var(--color-mute);
+}
+
+.heatmap-legend {
+  display: flex;
+  gap: var(--space-5);
+  margin-top: var(--space-4);
+  font-size: var(--text-xs);
+  color: var(--color-mute);
+}
+
+.heatmap-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.heatmap-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--color-primary);
+}
+
+.heatmap-swatch.gap {
+  background: transparent;
+  box-shadow: inset 0 0 0 2px var(--color-warn);
+}
+
+.heatmap-swatch.closed {
+  background: var(--color-urgent-soft);
+  box-shadow: inset 0 0 0 2px var(--color-urgent);
 }
 
 @media (max-width: 900px) {
   .insights-grid {
     grid-template-columns: 1fr;
+  }
+
+  .insights-panel-head {
+    flex-direction: column;
   }
 }
