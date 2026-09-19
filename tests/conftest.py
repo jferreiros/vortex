@@ -31,11 +31,22 @@ def offline_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> setting
         "DISCORD_NOTIFY_IN_TESTS",
         "VORTEX_JEV_ARBITER",
         "TYPESAFE_API_KEY",
+        "TWILIO_ACCOUNT_SID",
+        "TWILIO_AUTH_TOKEN",
+        "TWILIO_MESSAGING_SERVICE_SID",
+        "TWILIO_FROM_NUMBER",
+        "VORTEX_SMS_CONFIRMATIONS",
+        "VORTEX_SMS_FORCE_TO",
+        "VORTEX_SMS_DAY_BEFORE",
+        "VORTEX_SMS_REMINDER_LEAD_HOURS",
+        "VORTEX_SMS_REMINDER_POLL_SECS",
+        "VORTEX_SMS_REMINDERS_PATH",
     ):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("VORTEX_VOICE_MODE", "stub")
     monkeypatch.setenv("VORTEX_CLINIC_MODE", "fake")
     monkeypatch.setenv("VORTEX_CALLS_LOG", str(tmp_path / "calls.jsonl"))
+    monkeypatch.setenv("VORTEX_PRODUCT_DB", str(tmp_path / "vortex_product.db"))
     settings_module.reset_settings()
     yield settings_module.get_settings()
     settings_module.reset_settings()
@@ -62,6 +73,16 @@ def _unset_dotenv_keys() -> None:
         "DISCORD_NOTIFY_IN_TESTS",
         "VORTEX_JEV_ARBITER",
         "TYPESAFE_API_KEY",
+        "TWILIO_ACCOUNT_SID",
+        "TWILIO_AUTH_TOKEN",
+        "TWILIO_MESSAGING_SERVICE_SID",
+        "TWILIO_FROM_NUMBER",
+        "VORTEX_SMS_CONFIRMATIONS",
+        "VORTEX_SMS_FORCE_TO",
+        "VORTEX_SMS_DAY_BEFORE",
+        "VORTEX_SMS_REMINDER_LEAD_HOURS",
+        "VORTEX_SMS_REMINDER_POLL_SECS",
+        "VORTEX_SMS_REMINDERS_PATH",
     ):
         os.environ.pop(key, None)
 

@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="500" height="500" viewBox="59.87 13.32 125.3 125.3" fill="none">
+  <!-- Vorty accessory: knit beanie covering the crown down to ear level -->
+  <g id="accessory-beanie">
+    <path d="m71 58c1-24 22-40 52-40s51 16 52 40c-17-7-34-10-52-10s-35 3-52 10z" fill="url(#bn-dome)"/>
+    <path d="m71 58c17-6 34-9 52-9s35 3 52 9v6c-17-6-34-9-52-9s-35 3-52 9z" fill="url(#bn-cuff)"/>
+    <path d="m88 33c5-7 12-11 18-13" stroke="#5C3A1E" stroke-linecap="round" stroke-width="1.5" opacity=".4"/>
+    <path d="m158 33c-5-7-12-11-18-13" stroke="#5C3A1E" stroke-linecap="round" stroke-width="1.5" opacity=".4"/>
+    <circle cx="123" cy="21" r="5" fill="url(#bn-pom)"/>
+  </g>
+  <defs>
+    <linearGradient id="bn-dome" x1="123" x2="123" y1="18" y2="58" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#E0983B" offset="0"/>
+      <stop stop-color="#B5711E" offset="1"/>
+    </linearGradient>
+    <linearGradient id="bn-cuff" x1="123" x2="123" y1="49" y2="64" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#CB8129" offset="0"/>
+      <stop stop-color="#9C5F16" offset="1"/>
+    </linearGradient>
+    <radialGradient id="bn-pom" cx="0" cy="0" r="1" gradientTransform="translate(123 21) scale(5)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FEFEFF" offset="0"/>
+      <stop stop-color="#D8D8D8" offset="1"/>
+    </radialGradient>
+  </defs>
+</svg>
