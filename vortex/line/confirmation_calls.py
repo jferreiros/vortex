@@ -424,6 +424,196 @@ def handoff_from_parameters(params: dict[str, str]) -> dict[str, str] | None:
     }
 
 
+# --- Twilio-only in-call rebooking -----------------------------------------
+# When no live voice pipeline runs behind this server (stub/demo), a "change
+# it" answer still moves the appointment inside the same call: the clinic's
+# availability feeds a short offer-and-pick loop over Gather. The live-voice
+# handoff above stays the full rebooking experience; this loop keeps the
+# script's promise - "la movemos ahora mismo" - true on every setup.
+
+_PICK_ORDINALS: dict[str, list[list[str]]] = {
+    "es": [["uno", "primera", "el uno", "la primera"], ["dos", "segunda"], ["tres", "tercera"]],
+    "ca": [["u", "primera"], ["dos", "segona"], ["tres", "tercera"]],
+    "gl": [["un", "primeiro"], ["dous", "segundo"], ["tres", "terceiro"]],
+    "eu": [["bat", "lehena"], ["bi", "bigarrena"], ["hiru", "hirugarrena"]],
+    "en": [["one", "first"], ["two", "second"], ["three", "third"]],
+}
+
+_WEEKDAY_WORDS: dict[str, list[str]] = {
+    "es": ["lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "domingo"],
+    "en": ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"],
+}
+
+_PICK_NONE = {
+    "es": ["ninguna", "ninguno", "no me viene", "no me vale"],
+    "ca": ["cap"],
+    "gl": ["ningun", "ningunha"],
+    "eu": ["bat ere ez"],
+    "en": ["none", "neither", "no thanks"],
+}
+
+_RESCHEDULE_OFFER = {
+    "es": (
+        "De acuerdo, la movemos ahora mismo. Tengo estos huecos: {options}. "
+        "Diga uno, dos o tres, o ninguna si ninguna le viene bien."
+    ),
+    "ca": (
+        "D'acord, la movem ara mateix. Tinc aquests forats: {options}. "
+        "Digui u, dos o tres, o cap si cap li va bé."
+    ),
+    "gl": (
+        "De acordo, movémola agora mesmo. Teño estes ocos: {options}. "
+        "Diga un, dous ou tres, ou ningún se ningún lle ven ben."
+    ),
+    "eu": (
+        "Ondo, oraintxe mugituko dugu. Tarteko hauek ditut: {options}. "
+        "Esan bat, bi edo hiru, edo bat ere ez ezean."
+    ),
+    "en": (
+        "Of course, let's move it right now. I have these openings: {options}. "
+        "Say one, two or three, or none if none of them works for you."
+    ),
+}
+
+_PICK_UNKNOWN = {
+    "es": "Perdone, no le he entendido. Diga uno, dos o tres.",
+    "ca": "Perdó, no li he entès. Digui u, dos o tres.",
+    "gl": "Perdón, non o entendín. Diga un, dous ou tres.",
+    "eu": "Barkatu, ez zaitut ulertu. Esan bat, bi edo hiru.",
+    "en": "Sorry, I didn't catch that. Say one, two or three.",
+}
+
+_RESCHEDULE_DONE = {
+    "es": "Perfecto, su cita queda movida a {stamp}. Gracias, adiós.",
+    "ca": "Perfecte, la seva cita queda moguda a {stamp}. Gràcies, adéu.",
+    "gl": "Perfecto, a súa cita queda movida a {stamp}. Grazas, adeus.",
+    "eu": "Primerik, zure hitzordua {stamp} datara mugitu da. Eskerrik asko, agur.",
+    "en": "Perfect, your appointment is moved to {stamp}. Thank you, goodbye.",
+}
+
+
+async def pick_reschedule_slots(
+    clinic: Any, call: ConfirmationCall, *, days: int = 7, limit: int = 3
+) -> list[Any]:
+    """The first bookable slots after the current appointment, same provider.
+
+    The platform's availability endpoint needs a provider or a specialty; the
+    confirmation row carries the provider id, so an appointment seeded without
+    one simply cannot be moved this way and the caller gets the callback.
+    """
+    if not call.provider_id:
+        return []
+    start_day = call.appointment_dt.date() + timedelta(days=1)
+    try:
+        availability = await clinic.availability(
+            date_from=start_day,
+            date_to=start_day + timedelta(days=days),
+            provider_id=call.provider_id,
+        )
+    except Exception:
+        log.warning("confirmation %s: availability lookup failed", call.confirmation_id)
+        return []
+    return availability.slots[:limit]
+
+
+def offered_slots_payload(slots: list[Any]) -> str:
+    """The offered slots, persisted on the row so the pick webhook can score."""
+    return json.dumps(
+        [
+            {
+                "start": slot.start.isoformat(),
+                "provider_id": slot.provider_id,
+                "location_id": slot.location_id,
+                "appointment_type_id": slot.appointment_type_id,
+            }
+            for slot in slots
+        ]
+    )
+
+
+def parse_offered_slots(payload: str) -> list[datetime]:
+    """What the call offered, as start datetimes in offer order."""
+    try:
+        rows = json.loads(payload) if payload else []
+    except json.JSONDecodeError:
+        return []
+    starts = []
+    for row in rows:
+        try:
+            starts.append(datetime.fromisoformat(row["start"]))
+        except (KeyError, ValueError):
+            return []
+    return starts
+
+
+def reschedule_offer_text(language: str, starts: list[datetime]) -> str:
+    lang = call_language(language)
+    options = "; ".join(
+        f"{_PICK_ORDINALS[lang][i][0]}: {_stamp_for(lang, start)}"
+        for i, start in enumerate(starts)
+    )
+    return _RESCHEDULE_OFFER[lang].format(options=options)
+
+
+def twiml_reschedule_offer(
+    call: ConfirmationCall, base_url: str, starts: list[datetime], *, attempt: int = 1,
+    reprompt: bool = False,
+) -> str:
+    """The offer TwiML: the openings plus a speech-or-one-key Gather."""
+    base = base_url.rstrip("/")
+    lang = call_language(call.language)
+    locale = twilio_locale(call.language)
+    say = (
+        _PICK_UNKNOWN[lang]
+        if reprompt
+        else reschedule_offer_text(call.language, starts)
+    )
+    action = f"{base}/confirmation/reschedule-pick?cid={call.confirmation_id}&attempt={attempt}"
+    gather = (
+        f'<Gather input="speech dtmf" numDigits="1" language="{locale}" '
+        f'action="{escape(action)}" method="POST" speechTimeout="auto" timeout="10">'
+        f'<Say language="{locale}">{escape(say)}</Say></Gather>'
+    )
+    noresult = (
+        f"{base}/confirmation/reschedule-pick"
+        f"?cid={call.confirmation_id}&attempt={attempt + 1}"
+    )
+    return twiml_response(gather + f'<Redirect method="POST">{escape(noresult)}</Redirect>')
+
+
+def classify_slot_pick(
+    transcript: str, digits: str, starts: list[datetime], language: str
+) -> int | None | str:
+    """Which offered slot the caller picked: an index, "none", or None (retry).
+
+    Accepts the one-key DTMF answer, the ordinal in the call's language, and -
+    in Spanish and English - the weekday the slot falls on ("martes").
+    """
+    lang = call_language(language)
+    if digits.isdigit():
+        index = int(digits) - 1
+        if 0 <= index < len(starts):
+            return index
+    folded = _fold(transcript)
+    if any(word in folded for word in _PICK_NONE[lang]):
+        return "none"
+    for index, words in enumerate(_PICK_ORDINALS[lang][: len(starts)]):
+        if any(word in folded for word in words):
+            return index
+    for weekday_words in _WEEKDAY_WORDS.values():
+        for weekday, word in enumerate(weekday_words):
+            if word in folded:
+                matches = [i for i, start in enumerate(starts) if start.weekday() == weekday]
+                if len(matches) == 1:
+                    return matches[0]
+    return None
+
+
+def reschedule_done_text(language: str, start: datetime) -> str:
+    lang = call_language(language)
+    return _RESCHEDULE_DONE[lang].format(stamp=_stamp_for(lang, start))
+
+
 def twiml_response(inner: str) -> str:
     return f'<?xml version="1.0" encoding="UTF-8"?><Response>{inner}</Response>'
 
@@ -547,6 +737,10 @@ class ConfirmationCall:
     twilio_call_sid: str = ""
     transcript: str = ""
     attempts: int = 0
+    # Twilio-only rebooking (no live voice pipeline): the slots the call
+    # offered, as a JSON list, and the start the patient picked, ISO-8601.
+    offered_slots: str = ""
+    rescheduled_to: str = ""
 
     @property
     def appointment_dt(self) -> datetime:
