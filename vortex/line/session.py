@@ -66,7 +66,7 @@ from vortex.line.submit import (
 from vortex.line.twilio import StartPayload
 from vortex.line.usage import UsageTotals
 from vortex.observability.calllog import CallLog
-from vortex.observability.tracing import observe_span
+from vortex.observability.tracing import mask_phone, observe_span
 from vortex.rules.triage import DEFAULT_SPECIALTY
 from vortex.settings import Settings, get_settings
 
@@ -730,12 +730,11 @@ class CallSession:
         details = await resolve_details(self.ctx, action)
         body = render_confirmation_text(action, details)
         payload = notification_payload(action, details)
-        self.ctx.log.event("sms.sending", to=to, body=body, **payload)
+        self.ctx.log.event("sms.sending", to=mask_phone(to), **payload)
         result = await self.sms.send(to=to, body=body)
         self.ctx.log.event(
             f"sms.{result.status}",
-            to=result.to or to,
-            body=result.body or body,
+            to=mask_phone(result.to or to),
             detail=result.detail,
             sid=result.sid,
             **payload,
