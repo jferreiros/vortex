@@ -51,6 +51,7 @@ from vortex.contract import (
     ValidateNationalIdInput,
     remember_patient,
 )
+from vortex.identity.dictation import check_email, check_phone, spoken_email
 
 _CHECK_LETTERS = "TRWAGMYFPDXBNJZSQVHLCKE"
 _NIE_PREFIX_DIGIT = {"X": "0", "Y": "1", "Z": "2"}
@@ -97,24 +98,6 @@ _INSURER_ALIASES: dict[str, str] = {
     "sin seguro": "privado",
     "privat": "privado",
 }
-
-#: Spoken email punctuation, longest phrase first so "guion bajo" beats "guion".
-_EMAIL_SPOKEN: tuple[tuple[str, str], ...] = (
-    ("guion bajo", "_"),
-    ("guio baix", "_"),
-    ("underscore", "_"),
-    ("arroba", "@"),
-    ("at sign", "@"),
-    ("at", "@"),
-    ("dot", "."),
-    ("punto", "."),
-    ("punt", "."),
-    ("hyphen", "-"),
-    ("dash", "-"),
-    ("minus", "-"),
-    ("guion", "-"),
-    ("guio", "-"),
-)
 
 PATIENT_POSTPROCESS_KEY = "patient_postprocess"
 PATIENT_PREFERENCES_KEY = "patient_preferences"
@@ -176,31 +159,18 @@ def _fold(text: str) -> str:
 
 
 def normalize_phone(phone: str) -> str:
-    """As dictated -> E.164. A bare 9-digit Spanish number gets the +34 prefix."""
-    digits = _NON_DIGIT.sub("", phone)
-    if phone.strip().startswith("+") and len(digits) > 9:
-        return f"+{digits}"
-    if digits.startswith("0034") and len(digits) == 13:
-        return f"+{digits[2:]}"
-    if digits.startswith("34") and len(digits) == 11:
-        return f"+{digits}"
-    if len(digits) == 9:
-        return f"+34{digits}"
-    return digits
+    """As dictated -> E.164 via ``phonenumbers`` (region ES). Digits and spoken
+    forms both work; a bare nine-digit Spanish number gets ``+34``.
+    """
+    return check_phone(phone).normalized
 
 
 def normalize_email(email: str) -> str:
-    """As dictated -> an address. ``ana dot garcia at gmail dot com`` -> ``ana.garcia@gmail.com``.
-
-    Spoken punctuation is only translated when the text carries no ``@`` yet; an
-    address that is already an address just loses its spaces and its case, which
-    is exactly what the scorer does to it.
+    """As dictated -> an address. ``ana punto garcia arroba gmail punto com`` ->
+    ``ana.garcia@gmail.com``. Uses the spoken mapper in ``dictation``; syntax is
+    checked separately by ``check_email`` / ``build_registration``.
     """
-    text = _fold(email)
-    if "@" not in text:
-        for spoken, symbol in _EMAIL_SPOKEN:
-            text = re.sub(rf"(?<![a-z0-9]){re.escape(spoken)}(?![a-z0-9])", symbol, text)
-    return _WS.sub("", text)
+    return spoken_email(email)
 
 
 def resolve_insurer(spoken: str, catalogue: Catalogue | None = None) -> str | None:
@@ -289,16 +259,26 @@ async def build_registration(ctx: ToolContext, args: BuildRegistrationInput) -> 
                 rejection=ask_again(field_name, "is empty; the record needs two surnames")
             )
 
-    email = normalize_email(args.email)
-    if "@" not in email or "." not in email.split("@")[-1]:
+    email_check = check_email(args.email)
+    if not email_check.valid:
         return RegistrationResult(
-            rejection=ask_again("email", f"{email!r} is not an address; read it back and ask again")
+            rejection=ask_again(
+                "email",
+                f"{email_check.normalized!r} is not an address"
+                + (f" ({email_check.detail})" if email_check.detail else "")
+                + "; read it back and ask again",
+            )
         )
 
-    phone = normalize_phone(args.phone)
-    if len(_NON_DIGIT.sub("", phone)) < 9:
+    phone_check = check_phone(args.phone)
+    if not phone_check.possible:
         return RegistrationResult(
-            rejection=ask_again("phone", f"{args.phone!r} has fewer than nine digits")
+            rejection=ask_again(
+                "phone",
+                f"{args.phone!r} is not a Spanish number"
+                + (f" ({phone_check.detail})" if phone_check.detail else "")
+                + "; ask the caller to repeat it",
+            )
         )
 
     return RegistrationResult(
@@ -308,8 +288,8 @@ async def build_registration(ctx: ToolContext, args: BuildRegistrationInput) -> 
             second_surname=second,
             national_id=check.normalized,
             date_of_birth=args.date_of_birth,
-            phone=phone,
-            email=email,
+            phone=phone_check.normalized,
+            email=email_check.normalized,
             insurer=insurer,
         )
     )
