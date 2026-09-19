@@ -183,6 +183,21 @@ async def test_free_slots_drop_the_verdict(offline_settings) -> None:
     assert submitter.sent[0][1]["reason"] == "no_availability"
 
 
+async def test_an_allowed_recheck_drops_the_verdict(offline_settings) -> None:
+    """The caller moved site: the rule that bit is gone, so it names nothing."""
+    session, submitter = make_session(offline_settings, "CA-rechecked")
+    session.memory.observe("check_eligibility", blocked_on_location())
+    session.memory.observe("check_eligibility", EligibilityVerdict(allowed=True))
+
+    assert session.memory.last_verdict is None
+    assert session.memory.stored_reason is None
+    await session.call_tool(
+        "submit_action", {"action": {"kind": "no-action", "reason": "no_availability"}}
+    )
+
+    assert submitter.sent[0][1]["reason"] == "no_availability"
+
+
 async def test_the_session_records_the_action_that_went_out(offline_settings) -> None:
     """sent_actions drives the fallback's re-send check, so it must not lie."""
     session, _ = make_session(offline_settings, "CA-recorded")
