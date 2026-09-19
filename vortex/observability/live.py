@@ -21,12 +21,15 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+import httpx
+from fastapi import Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from nicegui import app, ui
 
+from vortex.line import voice_config
 from vortex.observability import auth, callfeed, explain, insights, pricing
 from vortex.observability.business_insights import business_insights
-from vortex.observability.demo import write_cancellation_demo, write_scripted_call
+from vortex.observability.demo import replay_cancellation_demo, write_scripted_call
 from vortex.observability.home_overview import home_overview, load_synthetic_cards, occupancy
 from vortex.observability.icons import icon
 from vortex.observability.view import CallCard, build_calls
@@ -209,8 +212,16 @@ async def _replay(scenario: str) -> None:
 
 async def _replay_cancellations() -> None:
     try:
-        await write_cancellation_demo(_log_path(), delay_s=0.05)
+        await replay_cancellation_demo(_log_path())
+    except FileNotFoundError:
+        ui.notify(
+            "synthetic-data/logs/cancellation_demo.jsonl is missing — "
+            "regenerate it with scripts/make_cancellation_pack.py",
+            type="warning",
+        )
     except OSError:
+        # In production the board mounts the line's log read-only — scripted
+        # calls are a local demo tool, not something to mix into live metrics.
         ui.notify("The call log is read-only here — replay demos locally.", type="warning")
 
 
@@ -1000,6 +1011,49 @@ def wall_occupancy_api(site: str = "", specialty: str = "") -> JSONResponse:
     """Occupancy calendar for the Home page's site/specialty filters — read
     straight off ``wall-cache/occupancy.json``, precomputed at start-up."""
     return JSONResponse(occupancy(site=site, specialty=specialty))
+
+
+# ---- "Voz del agente" settings ---------------------------------------------
+# The card's store lives on the line (a voiceconfig.db next to its calls log);
+# the board only has that volume read-only, so these proxy to the line's API.
+# When the line is down the GET falls back to defaults so the page still loads.
+
+
+@app.get("/api/wall/voice-config")
+async def wall_voice_config() -> JSONResponse:
+    try:
+        r = httpx.get(f"{callfeed.LINE_URL}/voice-config", timeout=callfeed.LINE_HEALTH_TIMEOUT_S)
+        if r.status_code == 200:
+            return JSONResponse(r.json())
+    except Exception as exc:
+        log.warning("voice-config fetch failed: %s", exc)
+    return JSONResponse(voice_config.DEFAULTS)
+
+
+@app.put("/api/wall/voice-config")
+async def wall_voice_config_put(request: Request) -> JSONResponse:
+    payload = await request.json()
+    try:
+        r = httpx.put(f"{callfeed.LINE_URL}/voice-config", json=payload, timeout=5)
+        return JSONResponse(r.json(), status_code=r.status_code)
+    except Exception as exc:
+        return JSONResponse({"error": f"line unreachable: {exc}"}, status_code=502)
+
+
+@app.post("/api/wall/voice-preview")
+async def wall_voice_preview(request: Request) -> Response:
+    """The Try button: streams back the line's MP3 of the greeting."""
+    payload = await request.json()
+    try:
+        r = httpx.post(f"{callfeed.LINE_URL}/voice-preview", json=payload, timeout=20)
+    except Exception as exc:
+        return JSONResponse({"error": f"line unreachable: {exc}"}, status_code=502)
+    if r.status_code == 200:
+        return Response(content=r.content, media_type="audio/mpeg")
+    try:
+        return JSONResponse(r.json(), status_code=r.status_code)
+    except Exception:
+        return JSONResponse({"error": r.text}, status_code=r.status_code)
 
 
 @app.get("/wall/avatar2d")
