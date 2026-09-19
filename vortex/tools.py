@@ -13,10 +13,12 @@ Only add a row here when the contract grows a new tool.
 
 from __future__ import annotations
 
+import json
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from typing import Any
+from types import UnionType
+from typing import Any, Union, get_args, get_origin
 
 from pydantic import BaseModel, ValidationError
 
@@ -25,6 +27,7 @@ from vortex.contract import ToolContext
 from vortex.diary import tools as diary
 from vortex.identity import tools as identity
 from vortex.line import submit as line_submit
+from vortex.observability.tracing import observe_tool, redact
 from vortex.rules import tools as rules
 
 ToolFn = Callable[[ToolContext, Any], Awaitable[BaseModel]]
@@ -157,6 +160,16 @@ TOOLS: dict[str, ToolSpec] = {
             contract.ProviderMatch,
             rules.find_provider,
         ),
+        ToolSpec(
+            "clinic_facts",
+            "rules",
+            "Answer a question about the clinic from its catalogue: which sites open on a "
+            "day, who consults at a site, whether there is a site in a town. Never answer "
+            "these from memory; the caller books on what you say.",
+            contract.ClinicFactsInput,
+            contract.ClinicFacts,
+            rules.clinic_facts,
+        ),
         # ---- line -------------------------------------------------------
         ToolSpec(
             "submit_action",
@@ -175,13 +188,80 @@ class ToolError(Exception):
     """Raised when a tool name is unknown or its input does not validate."""
 
 
+def _json_shapes(annotation: Any) -> frozenset[type]:
+    """Which JSON container shapes — ``dict``, ``list`` — this annotation accepts.
+
+    Unions are walked, so ``Action`` (six models) reports ``{dict}``; so does a
+    nested model, a ``dict[...]`` and an optional one. Everything else — ``str``,
+    ints, enums, literals — reports nothing and is never rewritten.
+    """
+    origin = get_origin(annotation)
+    if origin in (Union, UnionType):
+        return frozenset[type]().union(*(_json_shapes(arg) for arg in get_args(annotation)))
+    if origin is not None:
+        annotation = origin
+    if not isinstance(annotation, type) or issubclass(annotation, (str, bytes)):
+        return frozenset()
+    if issubclass(annotation, (BaseModel, Mapping)):
+        return frozenset({dict})
+    if issubclass(annotation, (list, tuple, set, frozenset)):
+        return frozenset({list})
+    return frozenset()
+
+
+def _parse_stringified(model: type[BaseModel], raw_args: dict[str, Any]) -> dict[str, Any]:
+    """Parse a nested argument the model sent as a JSON *string*.
+
+    Small tool-calling models fill a nested schema with the right content in the
+    wrong type. qwen3.6 does it on both nested inputs in the contract —
+    ``prepare_booking.slot`` (a ``Slot``) and the ``submit_action.action``
+    union::
+
+        {"patient_id": "P00042", "slot": "{\\"start\\": \\"2026-09-19T09:30...\\"}"}
+
+    Pydantic rejects that, the model is told "validation error", and it retries
+    the identical shape until the call runs out of turns — measured on a text
+    rehearsal, it never submits a BOOK at all. Since the flat calls succeed, the
+    failure looks like a prompt problem and is not one.
+
+    A value is rewritten only when the declared field is a model, mapping or
+    sequence *and* the string parses as JSON of that same shape, so a name, a
+    national id or a date phrase is never touched — nor is a string field that
+    happens to hold JSON. Anything that does not parse is passed through for the
+    validation below to reject with its real error.
+    """
+    out = dict(raw_args)
+    for name, value in raw_args.items():
+        field = model.model_fields.get(name)
+        if not isinstance(value, str) or field is None:
+            continue
+        shapes = _json_shapes(field.annotation)
+        if not shapes:
+            continue
+        try:
+            parsed = json.loads(value)
+        except ValueError:  # covers JSONDecodeError; never raise on a plain string
+            continue
+        if type(parsed) in shapes:
+            out[name] = parsed
+    return out
+
+
 async def call_tool(name: str, ctx: ToolContext, raw_args: dict[str, Any]) -> BaseModel:
     """Validate, run, validate, log. The one path every tool call goes through."""
+    with observe_tool(name, raw_args) as observation:
+        result = await _run_tool(name, ctx, raw_args)
+        if observation is not None:
+            observation.update(output=redact(result.model_dump(mode="json")))
+        return result
+
+
+async def _run_tool(name: str, ctx: ToolContext, raw_args: dict[str, Any]) -> BaseModel:
     spec = TOOLS.get(name)
     if spec is None:
         raise ToolError(f"unknown tool: {name}")
     try:
-        args = spec.input_model.model_validate(raw_args)
+        args = spec.input_model.model_validate(_parse_stringified(spec.input_model, raw_args))
     except ValidationError as exc:
         ctx.log.tool_failed(name, f"invalid input: {exc.errors()}")
         raise ToolError(f"invalid input for {name}: {exc}") from exc
@@ -196,6 +276,12 @@ async def call_tool(name: str, ctx: ToolContext, raw_args: dict[str, Any]) -> Ba
     if not isinstance(result, spec.output_model):
         result = spec.output_model.model_validate(result)
     ctx.log.tool_returned(name, result, (time.monotonic() - started) * 1000)
+
+    if name == "prepare_booking" and isinstance(result, contract.BookingResult) and result.action:
+        identity.note_target_patient(ctx, result.action.patient_id)
+    elif name == "prepare_cancel" and isinstance(result, contract.CancelResult) and result.action:
+        identity.note_target_patient(ctx, args.patient_id)
+
     return result
 
 

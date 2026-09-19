@@ -275,7 +275,8 @@ looks different from the others, it is wrong, not different.
 | Surface | Who sees it | Code | How it loads the tokens |
 | --- | --- | --- | --- |
 | Jury wall, `/wall` | the jury, on a projector | `vortex/observability/live.py`, `board.css` | `ui.add_css(design.css)` then `board.css` |
-| Ops board, `/` | the team | same | same |
+| Console: `/` Overview, `/agents`, `/calls`, `/calls/live`, `/patients`, `/insights`, `/settings/*` | the team | `console.py`, `shell.py`, `live.py` | same |
+| One call, `/call/{id}` | the jury, a shared link | same | same |
 | Mic test, `/mic` on the line server | the team | `vortex/line/mic.html` | `<link href="/design.css">`, served by `server.py` |
 | Evals report | the team, CI artifact | `evals/common/report.py` | inlines `design.css` at render time |
 | Plan and task board | the team, GitHub Pages | `docs/index.html`, `docs/tasks.html` | `<link href="design.css">`, the synced copy |
@@ -484,6 +485,58 @@ In NiceGUI: `ui.button("Play").classes("button-primary")` with
 
 - `.turn.user` and `.turn.assistant` with `.who` and `.bubble`. The agent's
   bubble is soft grey. The patient's bubble is white with a hairline.
+- `.typing` with three `<i>`: the agent is about to speak.
+
+### Console
+
+The console (`live.py`) is built from these. Reuse them before you draw a new one.
+
+- `.tabs` and `.tab` / `.tab.on`: the section nav inside `.primary-nav`.
+- `.page-head` with `.title` and `.sub`: every page opens with a name and one
+  sentence that says what the page is for.
+- `.stages` and `.stage` / `.done` / `.now`: the four steps of a call
+  (Listen, Identify, Decide, Submit). The dot says where the call is.
+- `.timeline` and `.tl-row` with `.what`, `.tool`, `.said`, `.ms`: one row per
+  tool call, in words first and the tool name second.
+- `.outcome` with `.label`, `.title`, `.text`, `.reason`: the page's dark
+  surface. The verdict is the biggest thing on the page.
+- `.table` with `td.num`, `td.mute`, `td.id` and `tr.pick` / `.on`: dense rows
+  for lists. Never a card per row.
+- `.live-badge`: "N on the line", dark, pulsing.
+- `.empty-state` with `.t` and `.d`: what will appear here and how to make it.
+- `.section-title` with `.t` and `.m`: a heading and a quiet count at the right.
+- `.facts`: the trust strip. Plain facts, bold values, no icons.
+
+### App shell
+
+Team pages live inside a sidebar shell (`shell.py`); public pages keep the
+top nav because a projector has no room for a sidebar.
+
+- `.app`: 240px sidebar plus content. Under 850px the sidebar becomes a
+  wrapping row and hides the clinic switcher, sub-items and the foot.
+- `.sidebar` with `.brand`, `.clinic-switcher`, `.nav-item` / `.on`,
+  `.nav-sub`, `.foot`. The active item is the page's black pill.
+- `.chip-preview` and `.preview-note`: the label for a roadmap or sample
+  surface. Never show sample data without one.
+- `.agent-card` / `.live` with `.role`, `.name`, `.summary`, `.kpis`.
+- `.bars` / `.bar-row` and `.hours`: Insights charts. A hairline track, an ink
+  fill, the count at the right. No chart library, no colour.
+- `.attn`: a "needs attention" row: dot, title and detail, time at the right.
+- `.def`: a definition list for settings. `.matrix td.yes` / `.no`.
+- `.cols-2`, `.cols-3`: section columns that stack under 1024px.
+
+## Words
+
+The console speaks the clinic's language and the platform's, never the code's.
+
+- **Patient**, never caller or member. "Unidentified patient" when the
+  directory has no match yet.
+- Outcomes: **Booked, Registered, Rescheduled, Cancelled, No action,
+  Escalated**. These are the platform's six actions.
+- **Why not booked** is a first-class column. The typed reason stays as a
+  `code-sm` chip and `explain.REASON_TEXT` says it in one sentence.
+- Every status is a dot **and** a word. Colour alone never carries meaning.
+- Tool names appear in `code-sm` after their plain description, never alone.
 
 ## The wall, specifically
 

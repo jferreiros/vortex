@@ -1,0 +1,77 @@
+# Problem 16: the caller asks about the clinic and acts on whatever we say.
+# Scored through the booking, never the transcript: a site or a day we named
+# from memory and got wrong is an unbookable request. The call connects Friday
+# 18 September 2026, 09:00 Europe/Madrid, so "Saturday" is the 19th.
+group: questions
+now: "2026-09-18T09:00:00+02:00"
+
+scenarios:
+  - id: p16.which_site_opens_saturday_then_books_there
+    problem: 16
+    # Only Centro opens on a Saturday. The answer has to come from clinic_facts:
+    # said from memory as "Norte", the booking that follows has no slot at all
+    # (find_slots at Norte on the 19th returns clinic_closed) and the case is lost.
+    caller:
+      - says: "Hi, Marta Ruiz, born the twelfth of March eighty-five. Which of your clinics is open on a Saturday?"
+        means: {identify: {name: "Marta Ruiz", date_of_birth: "1985-03-12"}, ask: {weekday: saturday}}
+      - says: "Perfect, then book me general practice there this Saturday morning."
+        means: {request: {intent: book, specialty_id: general_practice, location_id: as_told, when: "on Saturday morning"}}
+      - says: "Yes, the earliest one is fine."
+        means: {accept: true}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00042
+          location_id: centro
+          appointment_type_id: review
+          slot: {$earliest_slot: {specialty_id: general_practice, location_id: centro, "on": "2026-09-19", part_of_day: morning, patient_id: P00042}}
+          policy_id: sanitas
+      trajectory_contains: [clinic_facts, find_slots, prepare_booking, submit_action]
+      transcript_must_contain: ["arenal centro"]
+      transcript_must_not_contain: ["norte"]
+      privacy_of: [P00042]
+
+  - id: p16.no_site_opens_sunday_so_the_caller_takes_saturday
+    problem: 16
+    # "Sunday?" is answered with no site at all, from the catalogue. The caller
+    # then asks which day works and books the Saturday the answer named.
+    caller:
+      - says: "Marta Ruiz, the twelfth of March nineteen eighty-five. Do any of your clinics open on a Sunday?"
+        means: {identify: {name: "Marta Ruiz", date_of_birth: "1985-03-12"}, ask: {weekday: sunday}}
+      - says: "And on a Saturday?"
+        means: {ask: {weekday: saturday}}
+      - says: "Then general practice there on Saturday, first thing."
+        means: {request: {intent: book, specialty_id: general_practice, location_id: as_told, when: "on Saturday morning"}}
+      - says: "Yes please."
+        means: {accept: true}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00042
+          location_id: centro
+          slot: {$earliest_slot: {specialty_id: general_practice, location_id: centro, "on": "2026-09-19", part_of_day: morning, patient_id: P00042}}
+      trajectory_contains: [clinic_facts, clinic_facts, find_slots, prepare_booking, submit_action]
+      transcript_must_contain: ["no site"]
+      privacy_of: [P00042]
+
+  - id: p16.is_there_a_clinic_in_getafe_then_books_the_physio_there
+    problem: 16
+    # Getafe is Sur, and the physiotherapist sits only there. Answered from
+    # memory as Centro, physiotherapy at Centro is an empty diary.
+    caller:
+      - says: "Hello, Marta Ruiz, twelve of March eighty-five. Do you have a clinic in Getafe?"
+        means: {identify: {name: "Marta Ruiz", date_of_birth: "1985-03-12"}, ask: {town: Getafe, specialty_id: physiotherapy}}
+      - says: "Great, physiotherapy there then, the earliest you have."
+        means: {request: {intent: book, specialty_id: physiotherapy, location_id: as_told}}
+      - says: "Yes, book it."
+        means: {accept: true}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00042
+          provider_id: PR06
+          location_id: sur
+          slot: {$earliest_slot: {specialty_id: physiotherapy, location_id: sur, patient_id: P00042}}
+      trajectory_contains: [clinic_facts, find_slots, prepare_booking, submit_action]
+      transcript_must_contain: ["arenal sur"]
+      privacy_of: [P00042]

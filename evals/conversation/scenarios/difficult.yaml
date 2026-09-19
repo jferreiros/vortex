@@ -64,6 +64,49 @@ scenarios:
       must_not_call: [build_registration]
       privacy_of: [P00042, P00107]
 
+  - id: p9.daughter_gives_her_details_first_then_books_her_father
+    problem: 9
+    from_number: "+34612345678"
+    caller:
+      # The daughter is on file and identifies herself fully before naming the patient.
+      - says: "Hola, buenos días. Soy Marta Ruiz López, del doce de marzo del ochenta y cinco."
+        means: {identify: {name: "Marta Ruiz López", date_of_birth: "1985-03-12"}}
+      - says: "Llamo por mi padre, Antonio Pérez Martín. Nació el treinta de enero del cincuenta y ocho. Necesita cita de medicina general."
+        means: {patient: {name: "Antonio Pérez Martín", date_of_birth: "1958-01-30", relation: father}, request: {intent: book, specialty_id: general_practice}}
+      - says: "Sí, la primera que tenga."
+        means: {accept: true}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00200
+          appointment_type_id: review
+          slot: {$earliest_slot: {specialty_id: general_practice, patient_id: P00200}}
+          policy_id: dkv
+      must_not_call: [build_registration]
+      privacy_of: [P00042, P00200]
+
+  - id: p9.carer_gives_her_details_first_then_books_the_man_in_her_care
+    problem: 9
+    from_number: "+34699000111"
+    caller:
+      # The carer is on file but never seen. Her chart must not turn into a
+      # registration or a first visit: the booking follows the patient's record.
+      - says: "Hola, soy Marta Ruiz García, mi DNI es ocho siete seis cinco cuatro tres dos uno equis. Soy la cuidadora de un señor mayor."
+        means: {identify: {name: "Marta Ruiz García", national_id: "87654321X"}}
+      - says: "Es para él, Antonio Pérez Martín, del treinta de enero de mil novecientos cincuenta y ocho. Está muy cansado y con dolores de cabeza desde hace semanas."
+        means: {patient: {name: "Antonio Pérez Martín", date_of_birth: "1958-01-30", relation: carer}, request: {intent: book, complaint: "tired all the time and headaches for weeks"}}
+      - says: "Vale, la primera que haya."
+        means: {accept: true}
+    expect:
+      actions:
+        - kind: book
+          patient_id: P00200
+          appointment_type_id: review
+          slot: {$earliest_slot: {specialty_id: general_practice, patient_id: P00200}}
+          policy_id: dkv
+      must_not_call: [build_registration]
+      privacy_of: [P00043, P00200]
+
   - id: p8.cancel_mine_and_my_sons
     problem: 8
     from_number: "+34612345678"

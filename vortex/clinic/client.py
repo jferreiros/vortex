@@ -593,6 +593,21 @@ class FakeClinicClient:
         asked = list(insurer or []) or ([patient.insurer] if patient and patient.insurer else [])
         slots: list[Slot] = []
         blocked: list[BlockedProvider] = []
+        # The plan rules the catalogue never publishes. Like the platform, a
+        # provider they stop is named in ``blocked`` and offers no slot.
+        for p in providers:
+            restriction = _standing_restriction(p, patient, asked)
+            if restriction:
+                blocked.append(
+                    BlockedProvider(
+                        provider_id=p.provider_id,
+                        reason=restriction_reason(restriction),
+                        restriction=restriction,
+                    )
+                )
+        providers = [
+            p for p in providers if not any(b.provider_id == p.provider_id for b in blocked)
+        ]
         day = date_from
         while day <= date_to:
             for p in providers:
@@ -658,6 +673,46 @@ class FakeClinicClient:
 
     async def aclose(self) -> None:
         return None
+
+
+def _standing_restriction(
+    provider: Any, patient: PatientRecord | None, asked: list[str]
+) -> str | None:
+    """The restriction id ``blocked`` would carry for this provider, if any.
+
+    Reads ``fixtures.PLAN_REFERRALS`` and ``fixtures.EXHAUSTED_ALLOWANCES``,
+    the two rules ``/clinic`` has no field for. A provider is stopped only when
+    every plan the query is priced against stops them: a slot payable with
+    another named plan is still a slot.
+    """
+    if not asked:
+        return None
+    held = {r.lower() for r in patient.referrals} if patient else set()
+    found: list[str] = []
+    for insurer in asked:
+        hit = next(
+            (
+                r["restriction"]
+                for r in fixtures.PLAN_REFERRALS
+                if r["insurer"] == insurer
+                and r["specialty_id"] == provider.specialty_id
+                and provider.specialty_id not in held
+            ),
+            None,
+        )
+        if hit is None and patient is not None:
+            hit = next(
+                (
+                    r["restriction"]
+                    for r in fixtures.EXHAUSTED_ALLOWANCES
+                    if r["insurer"] == insurer and r["patient_id"] == patient.patient_id
+                ),
+                None,
+            )
+        if hit is None:
+            return None
+        found.append(hit)
+    return found[0]
 
 
 def _name_matches(spoken: str, patient: PatientRecord) -> bool:

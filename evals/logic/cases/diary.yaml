@@ -149,6 +149,13 @@ cases:
       # Dr. Sáez (PR02) is the only Catalan-speaking GP in the fixtures.
       slots: {$all: {provider_id: {$in: [PR02]}}}
 
+  - id: diary.slots.language_filter_empty_when_nobody_speaks_it
+    problem: 11
+    tool: find_slots
+    # The one dermatologist in the fixtures speaks Spanish and English only.
+    args: {specialty_id: dermatology, date_from: "2026-09-21", date_to: "2026-10-02", language: ca}
+    expect: {slots: {$len: 0}}
+
   - id: diary.slots.span_over_14_days_is_split_not_422
     problem: 7
     tool: find_slots
@@ -173,6 +180,39 @@ cases:
     tool: find_slots
     args: {specialty_id: general_practice, date_from: "2026-10-12", date_to: "2026-10-12"}
     expect: {slots: {$len: 0}}
+
+  - id: diary.slots.widen_days_finds_the_nearest_alternative
+    problem: 7
+    tool: find_slots
+    # Same empty Friday afternoon at Sur as sur_closes_friday_lunchtime, but now
+    # free to look further out for the nearest thing that works.
+    args:
+      location_id: sur
+      specialty_id: orthopaedics
+      date_from: "2026-09-25"
+      date_to: "2026-09-25"
+      time_from: "14:00"
+      widen_days: 7
+    expect:
+      slots: {$min_len: 1}
+      rejection: {$absent: true}
+      widened: true
+
+  - id: diary.slots.widen_days_still_no_availability_when_it_isnt_there
+    problem: 7
+    tool: find_slots
+    # No site opens past 20:00; dermatology has one provider, never on leave, so
+    # this stays a pure no_availability case that widening cannot fix.
+    args:
+      specialty_id: dermatology
+      date_from: "2026-09-21"
+      date_to: "2026-09-25"
+      time_from: "21:00"
+      widen_days: 30
+    expect:
+      slots: {$len: 0}
+      widened: true
+      rejection: {reason: no_availability}
 
   # ---- list_appointments: the only source of an appointment_id ------------
   - id: diary.appointments.upcoming_by_default
