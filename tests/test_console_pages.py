@@ -21,10 +21,14 @@ def seeded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     asyncio.run(write_scripted_call(log, scenario="refuse", delay_s=0))
     asyncio.run(write_scripted_call(log, scenario="book", delay_s=0))
     monkeypatch.setenv("VORTEX_CALLS_LOG", str(log))
-    monkeypatch.setenv("VORTEX_LINE_URL", "http://127.0.0.1:1")
     from vortex import settings
 
     settings.reset_settings()
+
+    def _offline_get(*_args: object, **_kwargs: object) -> object:
+        raise OSError("offline")
+
+    monkeypatch.setattr("httpx.get", _offline_get)
     return log
 
 
