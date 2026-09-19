@@ -224,6 +224,18 @@ IDLE_PROMPTS: dict[str, str] = {
     "eu": "Hor zaude oraindik?",
 }
 
+# Said when *we* are the ones who went quiet: the model's completion produced
+# no first token and the line gave up on it (vortex/line/llm_timeout.py). It
+# has to be a finished sentence — the TTS flushes on sentence boundaries, and
+# a fragment would sit in the aggregator unsaid.
+WAIT_LINES: dict[str, str] = {
+    "en": "One moment, please.",
+    "es": "Un momento, por favor.",
+    "ca": "Un moment, si us plau.",
+    "gl": "Un momento, por favor.",
+    "eu": "Momentu bat, mesedez.",
+}
+
 # Said the moment triage flags a red flag. "112" is the check the harness runs.
 EMERGENCY_LINES: dict[str, str] = {
     "en": "This sounds like an emergency. Please hang up and call 112 right now.",
@@ -263,6 +275,10 @@ def greeting_for(language: str | None = None) -> str:
 
 def idle_prompt_for(language: str | None = None) -> str:
     return _line(IDLE_PROMPTS, language)
+
+
+def wait_prompt_for(language: str | None = None) -> str:
+    return _line(WAIT_LINES, language)
 
 
 def emergency_line_for(language: str | None = None) -> str:
