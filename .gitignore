@@ -35,6 +35,8 @@ database/processed/*
 database/vortex.db
 database/vortex.db-*
 wall-cache/*.json
+scripts/video/output/*
+!scripts/video/output/.gitkeep
 
 # Coverage (CI job `coverage`, and local `pytest --cov`)
 .coverage

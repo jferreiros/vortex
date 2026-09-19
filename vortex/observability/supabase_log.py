@@ -29,6 +29,9 @@ FLUSH_EVERY = 50
 FLUSH_TIMEOUT_S = 0.4
 HTTP_TIMEOUT_S = 30.0
 PAGE_SIZE = 1000
+#: Cap for one window read. Above this the function's jsonb_agg is slower
+#: than the timeout allows; below it, 600 calls come back in about 5 s.
+WINDOW_MAX_CALLS = 1000
 
 _queue: queue.Queue[dict[str, Any]] = queue.Queue()
 _worker_started = False
@@ -153,7 +156,12 @@ def fetch_window(
     if not configured():
         return None
     payload: dict[str, Any] = {
-        "p_max_calls": max_calls,
+        # Never null. The function's own default is `limit 100000`, which
+        # makes Postgres aggregate every event in the table into a single
+        # jsonb value and hit the statement timeout (57014) — the whole
+        # window read then fails and the board silently drops back to its
+        # local JSONL, showing one container's calls instead of every run.
+        "p_max_calls": max_calls or WINDOW_MAX_CALLS,
         "p_since": None,
     }
     if since is not None:
@@ -170,10 +178,16 @@ def fetch_window(
             json=payload,
             timeout=HTTP_TIMEOUT_S,
         )
-        if response.status_code == 404:
+        if response.status_code >= 400:
+            # 404 = the function was never installed; 500 = it ran and
+            # failed. Both mean "ask PostgREST directly" rather than give
+            # up: the paginated read needs no database function at all.
+            log.warning(
+                "call_events_for_window unusable (HTTP %s), paginating instead",
+                response.status_code,
+            )
             events = _fetch_all_paginated()
         else:
-            response.raise_for_status()
             body = response.json()
             events = body if isinstance(body, list) else []
         if not events:

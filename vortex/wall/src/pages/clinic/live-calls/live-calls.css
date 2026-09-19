@@ -1,13 +1,17 @@
 .live-calls-page {
-  --feed-panel-width: 420px;
   max-width: var(--content-max-width);
-  padding-right: calc(var(--feed-panel-width) + var(--space-7));
 }
 
 .live-calls-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: var(--space-5);
+}
+
+.live-calls-empty {
+  margin: var(--space-6) 0;
+  color: var(--color-mute);
+  font-size: var(--text-sm);
 }
 
 /* Active call card ----------------------------------------------------------*/
@@ -62,6 +66,27 @@
   color: var(--color-faint);
 }
 
+.live-call-history-btn {
+  appearance: none;
+  border: none;
+  cursor: pointer;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  color: var(--color-mute);
+  background: var(--color-bg);
+  transition: background-color var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
+}
+
+.live-call-history-btn:hover {
+  background: var(--color-primary-soft);
+  color: var(--color-primary-deep);
+}
+
 .live-call-patient {
   font-family: var(--font-display);
   font-size: var(--text-lg);
@@ -99,42 +124,10 @@
   color: var(--color-mute);
 }
 
-/* Review panel ----------------------------------------------------------------
-   A fixed, full-height rail docked to the right edge — the mirror of the
-   clinic sidebar on the left, not a card floating in the content column. */
-
-.feed-panel {
-  position: fixed;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: var(--feed-panel-width);
-  z-index: 40;
-  display: flex;
-  flex-direction: column;
-  background: var(--color-panel);
-  border-left: 1px solid var(--color-border);
-  padding: var(--space-7) var(--space-5) var(--space-5);
-}
-
-.feed-half {
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-/* Rechazadas and escaladas split the panel's height evenly. */
-.feed-half-rejected,
-.feed-half-escalated {
-  flex: 1 1 0;
-}
-
-.feed-divider {
-  flex: 0 0 auto;
-  height: 1px;
-  background: var(--color-border);
-  margin: var(--space-4) 0;
-}
+/* Review feed ------------------------------------------------------------
+   Rejected / escalated call rows. Rendered on the Home page's "Revisión"
+   section, not on this page — kept here since these classes originated
+   alongside the live-call card styles above. */
 
 .feed-panel-head {
   flex: 0 0 auto;
@@ -249,10 +242,16 @@
   color: var(--color-mute);
 }
 
-.feed-row-call {
+.feed-row-actions {
   grid-column: 2;
   grid-row: 2;
   justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.feed-row-call {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
@@ -270,34 +269,37 @@
   color: var(--color-on-primary);
 }
 
-/* Responsive -----------------------------------------------------------------
-   Below the breakpoint where the clinic sidebar itself gives up being a
-   full-height rail, the review panel does the same: it drops out of fixed
-   positioning and becomes a normal block under the grid. */
+.feed-row-history {
+  appearance: none;
+  border: none;
+  cursor: pointer;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  color: var(--color-mute);
+  background: var(--color-bg);
+  transition: background-color var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
+}
 
-@media (max-width: 1024px) {
-  .live-calls-page {
-    padding-right: 0;
-  }
-  .live-calls-grid {
-    margin-bottom: var(--space-6);
-  }
-  .feed-panel {
-    position: static;
-    width: auto;
-    height: 480px;
-    border-left: none;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-lg);
-    padding: var(--space-5);
-  }
+.feed-row-history:hover {
+  background: var(--color-primary-soft);
+  color: var(--color-primary-deep);
+}
+
+/* EscalatedRow has no call-back button, so its history icon sits alone in
+   the same cell .feed-row-actions occupies for RejectedRow. */
+li:not(:has(.feed-row-call)) .feed-row-history {
+  grid-column: 2;
+  grid-row: 2;
+  justify-self: end;
 }
 
 @media (max-width: 640px) {
   .live-calls-grid {
     grid-template-columns: 1fr;
-  }
-  .feed-panel {
-    height: 420px;
   }
 }

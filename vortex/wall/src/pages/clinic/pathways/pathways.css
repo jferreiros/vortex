@@ -1,0 +1,577 @@
+.pathways-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  max-width: var(--content-max-width);
+}
+
+/* Header actions — pathway picker, rename and create, at title height ------*/
+
+.pathways-header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1 1 auto;
+}
+
+/* Pushed to the row's own far right — the row spans the same width as
+   .pathways-main below, so this lines up with the canvas/tray's right edge. */
+.pathways-header-create-btn {
+  margin-left: auto;
+}
+
+/* Reuses .ui-section-eyebrow's type/colour, inline instead of stacked above
+   a title — the name itself isn't repeated here, it's already the
+   picker's own value right next to it. */
+.pathways-current-label {
+  display: inline;
+  margin-bottom: 0;
+  margin-right: var(--space-1);
+}
+
+.pathways-select {
+  min-width: 200px;
+  max-width: 260px;
+}
+
+.pathways-rename-btn {
+  appearance: none;
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-panel);
+  color: var(--color-mute);
+  cursor: pointer;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  transition: background-color var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard), border-color var(--duration-fast) var(--ease-standard);
+}
+
+.pathways-rename-btn:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary-deep);
+  background: var(--color-primary-soft);
+}
+
+.pathways-save-btn {
+  appearance: none;
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-panel);
+  color: var(--color-mute);
+  cursor: pointer;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard), border-color var(--duration-fast) var(--ease-standard);
+}
+
+.pathways-save-btn:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary-deep);
+  background: var(--color-primary-soft);
+}
+
+.pathways-save-btn.saved {
+  border-color: var(--color-primary);
+  color: var(--color-primary-deep);
+  background: var(--color-primary-soft);
+}
+
+.pathways-delete-btn {
+  appearance: none;
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-panel);
+  color: var(--color-mute);
+  cursor: pointer;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard), border-color var(--duration-fast) var(--ease-standard);
+}
+
+.pathways-delete-btn:hover:not(:disabled) {
+  border-color: var(--color-warn);
+  color: var(--color-warn);
+  background: var(--color-warn-soft);
+}
+
+.pathways-delete-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Delete-confirm modal — ui-modal-overlay/ui-modal/etc. come from
+   components/ui/ui.css; .ui-modal-actions is only defined per-page (see
+   settings.css), so this page needs its own copy too. */
+.ui-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-top: 1px solid var(--color-border);
+}
+
+.pathways-rename-input {
+  min-width: 200px;
+  max-width: 260px;
+  font-family: var(--font-body);
+  font-weight: var(--weight-medium);
+  font-size: var(--text-sm);
+  color: var(--color-ink);
+  background: var(--color-bg);
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-full);
+  padding: 9px var(--space-4);
+}
+
+/* Main — full width -----------------------------------------------------------*/
+
+.pathways-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* Canvas — top ~2/3 of the main column ----------------------------------------*/
+
+.pathways-canvas {
+  flex: 4 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.pathways-canvas-track {
+  flex: 1 1 auto;
+  min-height: 340px;
+  display: flex;
+  /* Centered vertically as a block within the card, whatever the card's
+     height; .pathways-timeline keeps its own children (the nodes) aligned
+     to each other at their top regardless of a taller neighbor (e.g. a
+     proactive node with its extra fields). */
+  align-items: center;
+  gap: var(--space-6);
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  border: 1.5px dashed transparent;
+  transition: border-color var(--duration-fast) var(--ease-standard), background-color var(--duration-fast) var(--ease-standard);
+}
+
+.pathways-canvas-track.over {
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
+}
+
+.pathways-canvas-empty {
+  width: 100%;
+  min-height: 120px;
+}
+
+.pathways-drop-marker {
+  position: relative;
+  z-index: 1;
+  flex: 0 0 auto;
+  width: 3px;
+  align-self: stretch;
+  border-radius: var(--radius-full);
+  background: var(--color-primary);
+}
+
+/* Timeline background — a flat arrow running behind every node, entry point
+   to the last one, to read as "this is a sequence moving right". Sized by
+   its own flex children (the nodes), never measured in JS: .pathways-timeline
+   wraps only the node row (not the canvas arrow / suggestion slot that may
+   follow it), so it shrinks to exactly their combined width. The two hidden
+   spacers inside .pathways-timeline-bg mirror a node's index-label and
+   description rows so the bar itself lands on the same 108px icon band as
+   every shape, without hardcoding pixel offsets. */
+.pathways-timeline {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-6);
+}
+
+.pathways-timeline-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  pointer-events: none;
+}
+
+.pathways-timeline-bar {
+  flex: 0 0 108px;
+  background: var(--color-primary-soft);
+  clip-path: polygon(0 0, calc(100% - 28px) 0, 100% 50%, calc(100% - 28px) 100%, 0 100%);
+}
+
+/* Shape nodes placed on the canvas ---------------------------------------------*/
+
+.pathways-shape-node {
+  position: relative;
+  z-index: 1;
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  width: 188px;
+  cursor: grab;
+}
+
+.pathways-shape-node:active {
+  cursor: grabbing;
+}
+
+.pathways-shape-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  /* Fixed to match .pathways-shape's height — every shape's top and bottom
+     edge then lines up across the row, whatever its family. */
+  height: 108px;
+}
+
+.pathways-shape-remove {
+  position: absolute;
+  top: -8px;
+  right: 28px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  background: var(--color-panel);
+  color: var(--color-mute);
+  box-shadow: var(--shadow-sm);
+  line-height: 1;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  z-index: 1;
+  transition: opacity var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
+}
+
+.pathways-shape-node:hover .pathways-shape-remove {
+  opacity: 1;
+}
+
+.pathways-shape-remove:hover {
+  color: var(--color-warn);
+}
+
+.pathways-node-index {
+  font-size: 10px;
+  font-weight: var(--weight-semibold);
+  color: var(--color-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.pathways-shape-caption {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--color-mute);
+  text-align: center;
+  line-height: 1.3;
+  /* Fixed, not min — every node reserves the exact same height here, so the
+     shape below it starts at the same y regardless of description length. */
+  height: 2.6em;
+  overflow: hidden;
+}
+
+.pathways-shape-caption.above {
+  color: var(--color-ink);
+  font-weight: var(--weight-semibold);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.pathways-description-display {
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  width: 100%;
+}
+
+.pathways-description-display:hover,
+.pathways-description-display:focus-visible {
+  background: var(--color-bg);
+  outline: none;
+}
+
+/* Entry point description — larger, quoted, upper-case, since it's the
+   caller's own line rather than a caption. Height is pinned in px (not em,
+   like the base caption) so the bigger font doesn't grow the box and push
+   the icon out of line with every other node's. */
+.pathways-shape-caption.pathways-description-entry {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  height: 31.2px;
+}
+
+.pathways-description-input-entry {
+  font-size: var(--text-sm);
+  text-transform: uppercase;
+  height: 31.2px;
+}
+
+.pathways-description-input {
+  width: 100%;
+  height: 2.6em;
+  font-family: var(--font-body);
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-xs);
+  color: var(--color-ink);
+  text-align: center;
+  background: var(--color-bg);
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  padding: 0 6px;
+}
+
+/* When editor — below the shape ------------------------------------------------*/
+
+.pathways-when {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+}
+
+.pathways-when-kind {
+  width: 100%;
+  text-align: center;
+  font-size: 10.5px;
+  padding: 6px 22px 6px 10px;
+  background-position: right 8px center;
+}
+
+.pathways-when-row {
+  display: flex;
+  gap: 4px;
+  width: 100%;
+}
+
+.pathways-when-field {
+  flex: 1 1 0;
+  min-width: 0;
+  font-family: var(--font-body);
+  font-weight: var(--weight-semibold);
+  font-size: 10px;
+  color: var(--color-ink);
+  background: var(--color-panel);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-full);
+  padding: 5px 8px;
+  text-align: center;
+}
+
+.pathways-when-field:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+.pathways-when-entry {
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+}
+
+.pathways-entry-label {
+  font-size: 10.5px;
+  font-weight: var(--weight-semibold);
+  color: var(--color-entry);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Shapes — shared between the canvas and the tray. Every family is now the
+   same circular bubble holding its family emoji (☎️/💬/🏥); calls add a
+   small direction badge (top-right) and every node gets a mid-size badge
+   (bottom-right) for its exact type. */
+
+.pathways-shape {
+  position: relative;
+  flex: 0 0 auto;
+  width: 108px;
+  height: 108px;
+  border-radius: 50%;
+  background: var(--color-primary-soft);
+  border: 2px solid var(--color-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pathways-shape-main-emoji {
+  font-size: 52px;
+  line-height: 1;
+}
+
+/* Entry point — every pathway's fixed first node. Same bubble, its own
+   colour (yellow, not the primary green) since it's a trigger, not a step. */
+.pathways-shape-entry {
+  background: var(--color-entry-soft);
+  border-color: var(--color-entry);
+}
+
+/* Family emoji (call/message/visit) — bottom-right of the shape, bare (no
+   background/border shape around it), bigger than the main emoji's badge
+   used to be. The direction arrow is pinned to this wrapper's own corner,
+   not the main bubble's. */
+.pathways-shape-family-wrap {
+  position: absolute;
+  bottom: -4px;
+  right: -10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pathways-shape-family-badge {
+  font-size: 34px;
+  line-height: 1;
+}
+
+/* Direction badge — every call gets it now (calls are always outgoing),
+   pinned to the family emoji's own top-right corner (not the main bubble's).
+   Bare glyph, no bounding circle. */
+.pathways-shape-direction-badge {
+  position: absolute;
+  top: -6px;
+  right: -10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.pathways-tray-shape .pathways-shape-main-emoji {
+  font-size: 28px;
+}
+
+.pathways-tray-shape .pathways-shape-family-badge {
+  font-size: 19px;
+}
+
+.pathways-tray-shape .pathways-shape-direction-badge {
+  font-size: 10px;
+  top: -2px;
+  right: -4px;
+}
+
+/* Tray — bottom ~1/3 of the main column -----------------------------------------*/
+
+.pathways-tray {
+  flex: 2 1 0;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.pathways-tray-families {
+  flex: 0 0 150px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  overflow-y: auto;
+  border-right: 1px solid var(--color-border);
+  padding-right: var(--space-3);
+}
+
+.pathways-tray-family {
+  appearance: none;
+  border: none;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  color: var(--color-ink);
+  font-family: var(--font-body);
+  font-weight: var(--weight-medium);
+  font-size: var(--text-sm);
+  padding: 8px var(--space-3);
+  border-radius: var(--radius-md);
+  transition: background-color var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
+}
+
+.pathways-tray-family:hover {
+  background: var(--color-bg);
+}
+
+.pathways-tray-family.on {
+  background: var(--color-primary-soft);
+  color: var(--color-primary-deep);
+  font-weight: var(--weight-semibold);
+}
+
+.pathways-tray-types {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  /* Top-aligned like the canvas track, so every icon starts at the same
+     height regardless of a neighbor's label wrapping to a second line. */
+  align-items: flex-start;
+  gap: var(--space-5);
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: var(--space-2);
+}
+
+.pathways-tray-shape {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  width: 88px;
+  cursor: grab;
+}
+
+.pathways-tray-shape:active {
+  cursor: grabbing;
+}
+
+/* Tray shapes render smaller than the canvas ones; a dropped shape uses
+   .pathways-shape's full size on the canvas, so it visibly grows on landing. */
+.pathways-tray-shape .pathways-shape {
+  width: 60px;
+  height: 60px;
+}
+
+.pathways-tray-shape-label {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--color-mute);
+  text-align: center;
+  line-height: 1.25;
+}

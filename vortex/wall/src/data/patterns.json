@@ -1,0 +1,147 @@
+{
+  "_comment": "Deterministic pattern rules for patient-history matching. Each pattern has: (1) `match` — the machine-checkable rule (evaluated by matchPattern.js / PatientTimeline); (2) `nodes` — visual sequence in the Patterns editor (same catalog as Pathways, plus condition); (3) `suggestionNode` — ghosted suggestion when `match` fires. Evaluation is always per specialty (filter the patient's timeline to one specialty, then test the rule). `specialtyRecallDays` is the default recall interval used when a rule says gtSpecialtyRecall. Patterns 5–6 need a patient-indexed call log that does not exist yet (buildableToday: false).",
+  "dataSources": {
+    "visits": "GET /api/v1/patients/{patient_id}/appointments?when=all — past visits; appointment_type_id → specialty via GET /api/v1/appointment-types.",
+    "callOutcomes": "GET /api/v1/submissions?limit=50, filtered by patient_id — only book/reschedule/cancel carry patient_id today.",
+    "referrals": "patients.json[].referrals[] — open referral specialties on the directory record.",
+    "needsCallLog": "Future patient-indexed log of every call (including no_action/escalate). Patterns no-availability-unrecovered and repeat-callers-unresolved depend on it."
+  },
+  "specialtyRecallDays": {
+    "cardiology": 365,
+    "dermatology": 180,
+    "default": 365
+  },
+  "asOf": "2026-09-19",
+  "patterns": [
+    {
+      "id": "first-visit-then-gap",
+      "name": "First visit, then gap",
+      "enabled": true,
+      "buildableToday": true,
+      "match": {
+        "perSpecialty": true,
+        "visitCount": { "eq": 1 },
+        "noBookSinceLastVisit": true,
+        "daysSinceLastVisit": { "gtSpecialtyRecall": true }
+      },
+      "nodes": [
+        { "id": "n1", "shape": { "family": "visit", "type": "any visit" }, "description": "Exactly one visit in <specialty>" },
+        { "id": "n2", "shape": { "family": "condition", "type": "time gap" }, "description": "Days since that visit > specialty recall interval" },
+        { "id": "n3", "shape": { "family": "condition", "type": "no follow-up" }, "description": "No book in <specialty> since that visit" }
+      ],
+      "suggestionNode": {
+        "shape": { "family": "call", "subfamily": "outgoing", "type": "appointment suggestion" },
+        "description": "Offer to schedule the next visit in <specialty>.",
+        "chainLabel": "Follow-up call"
+      }
+    },
+    {
+      "id": "broken-cadence",
+      "name": "Broken cadence",
+      "enabled": true,
+      "buildableToday": true,
+      "match": {
+        "perSpecialty": true,
+        "visitCount": { "min": 2 },
+        "visitsFormRegularCadence": true,
+        "cadenceOverdue": true,
+        "noBookSinceLastVisit": true
+      },
+      "nodes": [
+        { "id": "n1", "shape": { "family": "visit", "type": "any visit" }, "description": "1st visit in <specialty>" },
+        { "id": "n2", "shape": { "family": "visit", "type": "any visit" }, "description": "2nd+ visit at a regular interval" },
+        { "id": "n3", "shape": { "family": "condition", "type": "time gap" }, "description": "Next visit by that cadence is overdue" },
+        { "id": "n4", "shape": { "family": "condition", "type": "no follow-up" }, "description": "No book in <specialty> since last visit" }
+      ],
+      "suggestionNode": {
+        "shape": { "family": "call", "subfamily": "outgoing", "type": "appointment suggestion" },
+        "description": "Offer to keep the cadence and book the next visit in <specialty>.",
+        "chainLabel": "Cadence call"
+      }
+    },
+    {
+      "id": "unfulfilled-referral",
+      "name": "Unfulfilled referral",
+      "enabled": true,
+      "buildableToday": true,
+      "match": {
+        "perSpecialty": true,
+        "hasOpenReferral": true,
+        "visitCount": { "eq": 0 },
+        "noBookEver": true
+      },
+      "nodes": [
+        { "id": "n1", "shape": { "family": "condition", "type": "open referral" }, "description": "Open referral to <specialty>" },
+        { "id": "n2", "shape": { "family": "condition", "type": "no follow-up" }, "description": "No book and no visit in <specialty>" }
+      ],
+      "suggestionNode": {
+        "shape": { "family": "call", "subfamily": "outgoing", "type": "appointment suggestion" },
+        "description": "Ask whether they'd like to book the <specialty> they were referred to.",
+        "chainLabel": "Referral call"
+      }
+    },
+    {
+      "id": "cancelled-without-replacement",
+      "name": "Cancelled without replacement",
+      "enabled": true,
+      "buildableToday": true,
+      "match": {
+        "perSpecialty": true,
+        "hasCall": { "type": "cancellation", "subfamily": "incoming" },
+        "noBookSince": "last_cancellation"
+      },
+      "nodes": [
+        { "id": "n1", "shape": { "family": "call", "subfamily": "incoming", "type": "cancellation" }, "description": "Cancel in <specialty>" },
+        { "id": "n2", "shape": { "family": "condition", "type": "no follow-up" }, "description": "No book in <specialty> since that cancel" }
+      ],
+      "suggestionNode": {
+        "shape": { "family": "call", "subfamily": "outgoing", "type": "rebooking offer" },
+        "description": "Offer to rebook the cancelled visit in <specialty>.",
+        "chainLabel": "Rebook call"
+      }
+    },
+    {
+      "id": "no-availability-unrecovered",
+      "name": "No-availability, unrecovered",
+      "enabled": true,
+      "buildableToday": false,
+      "needsCallLog": true,
+      "match": {
+        "perSpecialty": true,
+        "hasCall": { "type": "no availability", "subfamily": "incoming" },
+        "noCallOrVisitSince": { "ref": "last_no_availability", "withinDays": 14 }
+      },
+      "nodes": [
+        { "id": "n1", "shape": { "family": "call", "subfamily": "incoming", "type": "no availability" }, "description": "Call ended no_action / no_availability in <specialty>" },
+        { "id": "n2", "shape": { "family": "condition", "type": "no follow-up" }, "description": "No call or visit in <specialty> within 14 days since" }
+      ],
+      "suggestionNode": {
+        "shape": { "family": "call", "subfamily": "outgoing", "type": "waitlist alert" },
+        "description": "Offer the first newly-open slot in <specialty> (waitlist-style).",
+        "chainLabel": "Waitlist call"
+      }
+    },
+    {
+      "id": "repeat-callers-unresolved",
+      "name": "Repeat callers, unresolved",
+      "enabled": true,
+      "buildableToday": false,
+      "needsCallLog": true,
+      "match": {
+        "perSpecialty": false,
+        "incomingCallCount": { "min": 2, "withinDays": 14 },
+        "noSuccessfulBookInWindow": true
+      },
+      "nodes": [
+        { "id": "n1", "shape": { "family": "call", "subfamily": "incoming", "type": "general" }, "description": "Incoming call" },
+        { "id": "n2", "shape": { "family": "call", "subfamily": "incoming", "type": "general" }, "description": "Another incoming call within 14 days" },
+        { "id": "n3", "shape": { "family": "condition", "type": "no follow-up" }, "description": "No successful book in that window" }
+      ],
+      "suggestionNode": {
+        "shape": { "family": "call", "subfamily": "outgoing", "type": "rebooking offer" },
+        "description": "Offer an alternative (provider/site/time) or escalate for prioritized handling.",
+        "chainLabel": "Alternative call"
+      }
+    }
+  ]
+}

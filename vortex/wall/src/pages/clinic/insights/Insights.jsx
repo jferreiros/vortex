@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import Card from "../../../components/ui/Card";
-import { MOCK_OVERVIEW } from "../home/useHomeOverview";
+import { MOCK_STATS } from "./insightsData";
+import { selectHeatmapView, selectServices } from "./insightsSelectors";
 import "../home/home.css";
 import "./insights.css";
 
@@ -11,71 +12,6 @@ const RANGES = [
 ];
 
 const POLL_MS = 6000;
-
-// One mock row per catalogue specialty — the six Arenal services.
-const MOCK_SERVICES = [
-  { id: "general_practice", name: "Medicina general", requested: 21, offered: 18, booked: 15, declined_full: 3, providers: 3, occupancy_pct: 116.7, extra_providers_needed: 1 },
-  { id: "paediatrics", name: "Pediatría", requested: 9, offered: 12, booked: 8, declined_full: 0, providers: 2, occupancy_pct: 75.0, extra_providers_needed: 0 },
-  { id: "dermatology", name: "Dermatología", requested: 6, offered: 8, booked: 5, declined_full: 0, providers: 1, occupancy_pct: 75.0, extra_providers_needed: 0 },
-  { id: "orthopaedics", name: "Traumatología", requested: 5, offered: 10, booked: 4, declined_full: 0, providers: 2, occupancy_pct: 50.0, extra_providers_needed: 0 },
-  { id: "gynaecology", name: "Ginecología", requested: 3, offered: 6, booked: 3, declined_full: 0, providers: 1, occupancy_pct: 50.0, extra_providers_needed: 0 },
-  { id: "physiotherapy", name: "Fisioterapia", requested: 2, offered: 9, booked: 2, declined_full: 0, providers: 1, occupancy_pct: 22.2, extra_providers_needed: 0 },
-];
-
-const MOCK_STATS = {
-  calls_considered: 214,
-  unavailability: MOCK_OVERVIEW.unavailability,
-  cancellations: {
-    ...MOCK_OVERVIEW.cancellations,
-    daily: [
-      { date: "2026-09-15", freed: 3, relocated: 2, lost: 1 },
-      { date: "2026-09-16", freed: 2, relocated: 1, lost: 0 },
-      { date: "2026-09-17", freed: 1, relocated: 1, lost: 0 },
-      { date: "2026-09-18", freed: 3, relocated: 2, lost: 1 },
-      { date: "2026-09-19", freed: 2, relocated: 1, lost: 1 },
-    ],
-  },
-  // Same shape business_insights.service_occupancy serves: one row per
-  // specialty, network-wide ("all") and once per site.
-  occupancy: {
-    all: MOCK_SERVICES,
-    sites: [
-      { id: "centro", name: "Arenal Centro", services: MOCK_SERVICES },
-      { id: "norte", name: "Arenal Norte", services: MOCK_SERVICES },
-      { id: "sur", name: "Arenal Sur", services: MOCK_SERVICES },
-    ],
-  },
-  // Same shape business_insights.demand_supply_heatmap serves: 7 weekday
-  // rows x the 4 bands, an `open` matrix per site for the "Cerrado" cells,
-  // and `suggested_action` naming the hottest gap.
-  heatmap: {
-    bands: ["Mañana", "Mediodía", "Tarde", "Tarde-noche"],
-    open: [
-      [true, true, true, true],
-      [true, true, true, true],
-      [true, true, true, true],
-      [true, true, true, true],
-      [true, true, true, false],
-      [true, true, false, false],
-      [false, false, false, false],
-    ],
-    rows: [
-      { weekday: "Lunes", all_day_demand: 0, cells: [{ band: "Mañana", demand: 8, availability: 6 }, { band: "Mediodía", demand: 3, availability: 4 }, { band: "Tarde", demand: 12, availability: 5 }, { band: "Tarde-noche", demand: 4, availability: 2 }] },
-      { weekday: "Martes", all_day_demand: 0, cells: [{ band: "Mañana", demand: 6, availability: 6 }, { band: "Mediodía", demand: 2, availability: 4 }, { band: "Tarde", demand: 9, availability: 7 }, { band: "Tarde-noche", demand: 3, availability: 0 }] },
-      { weekday: "Miércoles", all_day_demand: 0, cells: [{ band: "Mañana", demand: 5, availability: 5 }, { band: "Mediodía", demand: 1, availability: 3 }, { band: "Tarde", demand: 7, availability: 8 }, { band: "Tarde-noche", demand: 2, availability: 1 }] },
-      { weekday: "Jueves", all_day_demand: 0, cells: [{ band: "Mañana", demand: 7, availability: 4 }, { band: "Mediodía", demand: 4, availability: 2 }, { band: "Tarde", demand: 14, availability: 0 }, { band: "Tarde-noche", demand: 6, availability: 0 }] },
-      { weekday: "Viernes", all_day_demand: 0, cells: [{ band: "Mañana", demand: 9, availability: 7 }, { band: "Mediodía", demand: 2, availability: 3 }, { band: "Tarde", demand: 8, availability: 6 }, { band: "Tarde-noche", demand: 0, availability: 0 }] },
-      { weekday: "Sábado", all_day_demand: 0, cells: [{ band: "Mañana", demand: 4, availability: 3 }, { band: "Mediodía", demand: 1, availability: 1 }, { band: "Tarde", demand: 0, availability: 0 }, { band: "Tarde-noche", demand: 0, availability: 0 }] },
-      { weekday: "Domingo", all_day_demand: 0, cells: [{ band: "Mañana", demand: 0, availability: 0 }, { band: "Mediodía", demand: 0, availability: 0 }, { band: "Tarde", demand: 0, availability: 0 }, { band: "Tarde-noche", demand: 0, availability: 0 }] },
-    ],
-    sites: [
-      { id: "centro", name: "Arenal Centro", hours_label: "L–V 09:00–20:00", open: null, rows: null },
-      { id: "norte", name: "Arenal Norte", hours_label: "L–V 09:00–20:00 · S 09:00–14:00", open: null, rows: null },
-      { id: "sur", name: "Arenal Sur", hours_label: "L–V 10:00–14:00", open: null, rows: null },
-    ],
-    suggested_action: "Los jueves en la franja de tarde concentran 14 peticiones de cita con solo 0 huecos ofrecidos ese tramo: abrir agenda ahí capturaría la mayor bolsa de demanda sin horario.",
-  },
-};
 
 function isStatsPayload(json) {
   return Boolean(json && json.unavailability && json.cancellations);
@@ -256,7 +192,7 @@ function ServiceOccupancy({ occupancy }) {
   const [site, setSite] = useState("all");
   const [openId, setOpenId] = useState(null);
   const sites = occupancy?.sites ?? [];
-  const services = site === "all" ? occupancy?.all ?? [] : sites.find((s) => s.id === site)?.services ?? [];
+  const services = selectServices(occupancy, site);
   const active = services.find((s) => s.id === openId) ?? null;
 
   return (
@@ -386,23 +322,16 @@ export default function Insights() {
   const cancel = data.cancellations ?? {};
   const calls = data.calls_considered ?? 0;
   const heatmap = data.heatmap;
-  const siteView = site !== "all" ? heatmap?.sites?.find((s) => s.id === site) : null;
-  const heatmapView = {
-    rows: siteView?.rows ?? heatmap?.rows,
-    bands: heatmap?.bands,
-    open: siteView?.open ?? heatmap?.open,
-    hoursLabel: siteView?.hours_label ?? null,
-    suggestion: site === "all" ? heatmap?.suggested_action : null,
-  };
+  const heatmapView = selectHeatmapView(heatmap, site);
   const unmetPct = calls ? Math.round((100 * (unmet.unmet_total ?? 0)) / calls) : 0;
   const topReason = unmet.buckets?.[0];
 
   return (
     <div className="insights-page">
       <header className="home-hero">
-        <p className="home-crumb">Clínica Arenal / Statistics</p>
+        <p className="home-crumb">Clínica Arenal / Insights</p>
         <div className="home-hero-row">
-          <h1 className="home-title insights-title">Statistics</h1>
+          <h1 className="home-title insights-title">Insights</h1>
           <div className="home-toolbar" role="tablist" aria-label="Period">
             {RANGES.map((r) => (
               <button

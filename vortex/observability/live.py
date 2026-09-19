@@ -15,6 +15,7 @@ import logging
 import os
 import subprocess
 import sys
+import threading
 import time
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -28,7 +29,8 @@ from nicegui import app, ui
 
 from vortex.clinic.client import FakeClinicClient
 from vortex.line import personalities, voice_config
-from vortex.observability import auth, callfeed, explain, insights, pricing
+from vortex.observability import analytics as analytics_pack_module
+from vortex.observability import auth, callfeed, explain, insights, langfuse_metrics, pricing
 from vortex.observability import calendar as cal
 from vortex.observability.business_insights import business_insights, is_real_call
 from vortex.observability.demo import replay_cancellation_demo, write_scripted_call
@@ -36,6 +38,11 @@ from vortex.observability.home_overview import WINDOW_DAYS as HOME_WINDOW_DAYS
 from vortex.observability.home_overview import home_overview
 from vortex.observability.home_pack import occupancy
 from vortex.observability.icons import icon
+from vortex.observability.patient_timeline import (
+    events_from_appointments,
+    events_from_calls,
+    merge_events,
+)
 from vortex.observability.view import CallCard, build_calls
 from vortex.observability.wall_timeline import build_timeline, call_summary, latest_intent
 from vortex.settings import REPO_ROOT, get_settings
@@ -79,10 +86,9 @@ def _log_path() -> Path:
 
 
 #: Where the events a screen draws come from lives in ``callfeed`` (a leaf
-#: module, so it is importable in tests without pulling in these pages): the
-#: line's /calls first, then the last good fetch, then this process's own
-#: calls.jsonl — which in production is the line's log volume mounted into
-#: the board, not an empty private one.
+#: module, so it is importable in tests without pulling in these pages):
+#: hosted Supabase first, then the line's /calls, then the last good fetch,
+#: then this process's own calls.jsonl.
 
 
 def _load_events(
@@ -981,16 +987,77 @@ def wall_business_insights_api(days: int = 30) -> JSONResponse:
     cutoff = now - timedelta(days=days)
     # Ask the line for every call started inside the window — a fetch bounded
     # by date, so a busy day's worth of events can never push an in-range call
-    # out of the read the way the old 800-event tail did.
+    # out of the read the way the old 800-event tail did. Bounded by date, so
+    # this (like the Agenda roster) prefers the hosted Supabase log first.
     events, _health, source = _load_events(
         f"insights:{days}", since=cutoff, cache_ttl=callfeed.INSIGHTS_CACHE_TTL_S
     )
     cards = build_calls(events)
     in_range = [c for c in cards if (started := _card_started(c)) and started >= cutoff]
-    payload = business_insights(in_range, now=now)
+    # Same roster the Agenda page shows, not one rebuilt per window: a
+    # provider is a lasting fact about the clinic, so a doctor the log saw
+    # outside this "days" cut still belongs on it (_ensure_agenda's own
+    # AGENDA_ROSTER_DAYS is wider on purpose). Without this, a specialty
+    # the offline fixtures never modelled at all (there is no gynaecologist
+    # in vortex/clinic/fixtures.py) reads as "0 médicos" while its real,
+    # log-sourced demand still shows a non-zero occupancy.
+    _ensure_agenda()
+    payload = business_insights(in_range, now=now, catalogue=_AGENDA_CATALOGUE)
     payload["range_days"] = days
     payload["source"] = source
     return JSONResponse(payload)
+
+
+#: The Analytics pack is the most expensive read on the board: it needs every
+#: event in the window, and the hosted log serves those in pages of a
+#: thousand. callfeed's own 4-second TTL is tuned for the live cards, where a
+#: read is one request — here it expires before the read finishes, so every
+#: poll starts another full fetch and they queue. Two minutes is well inside
+#: how fast these aggregates move.
+ANALYTICS_CACHE_TTL_S = 120.0
+_analytics_cache: dict[int, tuple[float, dict[str, Any]]] = {}
+_analytics_lock = threading.Lock()
+
+
+@app.get("/api/wall/analytics")
+def wall_analytics_api(days: int = 30) -> JSONResponse:
+    """The Analytics page: the call funnel, latency, conversation shape,
+    tool and model usage, and the call table under them.
+
+    Same window pills and the same date-bounded read as
+    ``/api/wall/business-insights``, so both pages describe the same calls.
+    Langfuse is asked separately and is allowed to be absent — it is the
+    only source here we do not own, and the page drops its two panels
+    rather than block on it.
+    """
+    days = min((7, 30, 90), key=lambda d: abs(d - days))
+    # One builder at a time per window. Without the lock a page opened in
+    # three tabs starts three full log reads against the same window.
+    with _analytics_lock:
+        hit = _analytics_cache.get(days)
+        if hit and time.monotonic() - hit[0] < ANALYTICS_CACHE_TTL_S:
+            return JSONResponse(hit[1])
+        payload = _build_analytics(days)
+        _analytics_cache[days] = (time.monotonic(), payload)
+    return JSONResponse(payload)
+
+
+def _build_analytics(days: int) -> dict[str, Any]:
+    now = datetime.now(UTC)
+    cutoff = now - timedelta(days=days)
+    events, _health, source = _load_events(
+        f"analytics:{days}", since=cutoff, cache_ttl=ANALYTICS_CACHE_TTL_S
+    )
+    cards = build_calls(events)
+    in_range = [c for c in cards if (started := _card_started(c)) and started >= cutoff]
+    payload = analytics_pack_module.analytics_pack(
+        in_range,
+        days=days,
+        now=now,
+        langfuse=langfuse_metrics.metrics(days),
+    )
+    payload["source"] = source
+    return payload
 
 
 def _sync_clinic(coro: Any) -> Any:
@@ -1142,6 +1209,157 @@ def wall_doctor_agenda_api(
 
 def _wall_db_path() -> Path:
     return get_settings().product_db_path
+
+
+WALL_DATA_DIR = REPO_ROOT / "vortex" / "wall" / "src" / "data"
+
+
+def _product_db():
+    from database import db
+
+    return db.connection(_wall_db_path())
+
+
+def _clinic_settings_json(values: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "minimumBookingLeadHours": int(values["minimum_booking_lead_hours"]),
+        "patientIdentificationFieldsRequired": int(
+            values["patient_identification_fields_required"]
+        ),
+        "callTimeCapMinutes": int(values["call_time_cap_minutes"]),
+    }
+
+
+def _wall_document(kind: str, seed_file: str) -> dict[str, Any]:
+    from database import db
+
+    with _product_db() as conn:
+        body = db.get_wall_document(conn, kind)
+        if body is None:
+            seed = json.loads((WALL_DATA_DIR / seed_file).read_text(encoding="utf-8"))
+            seed.pop("_comment", None)
+            db.put_wall_document(conn, kind, seed)
+            body = seed
+        return body
+
+
+@app.get("/api/wall/clinic-settings")
+def wall_clinic_settings_get() -> JSONResponse:
+    from database import db
+
+    with _product_db() as conn:
+        return JSONResponse(_clinic_settings_json(db.get_clinic_settings(conn)))
+
+
+@app.put("/api/wall/clinic-settings")
+async def wall_clinic_settings_put(request: Request) -> JSONResponse:
+    from database import db
+    from vortex.clinic_policy import reset_cache
+
+    payload = await request.json()
+    if not isinstance(payload, dict):
+        return JSONResponse({"error": "object required"}, status_code=422)
+    try:
+        lead = payload.get("minimumBookingLeadHours", payload.get("minimum_booking_lead_hours", 24))
+        fields = payload.get(
+            "patientIdentificationFieldsRequired",
+            payload.get("patient_identification_fields_required", 1),
+        )
+        int(lead)
+        int(fields)
+    except (TypeError, ValueError):
+        return JSONResponse({"error": "numeric settings required"}, status_code=422)
+    with _product_db() as conn:
+        saved = db.put_clinic_settings(
+            conn,
+            {
+                "minimum_booking_lead_hours": lead,
+                "patient_identification_fields_required": fields,
+            },
+        )
+    reset_cache()
+    return JSONResponse(_clinic_settings_json(saved))
+
+
+@app.get("/api/wall/pathways")
+def wall_pathways_get() -> JSONResponse:
+    return JSONResponse(_wall_document("pathways", "pathways.json"))
+
+
+@app.put("/api/wall/pathways")
+async def wall_pathways_put(request: Request) -> JSONResponse:
+    from database import db
+
+    payload = await request.json()
+    if not isinstance(payload, dict) or not isinstance(payload.get("pathways"), list):
+        return JSONResponse({"error": "pathways list required"}, status_code=422)
+    with _product_db() as conn:
+        db.put_wall_document(conn, "pathways", payload)
+    return JSONResponse(payload)
+
+
+@app.get("/api/wall/patterns")
+def wall_patterns_get() -> JSONResponse:
+    return JSONResponse(_wall_document("patterns", "patterns.json"))
+
+
+@app.put("/api/wall/patterns")
+async def wall_patterns_put(request: Request) -> JSONResponse:
+    from database import db
+
+    payload = await request.json()
+    if not isinstance(payload, dict) or not isinstance(payload.get("patterns"), list):
+        return JSONResponse({"error": "patterns list required"}, status_code=422)
+    with _product_db() as conn:
+        db.put_wall_document(conn, "patterns", payload)
+    return JSONResponse(payload)
+
+
+@app.get("/api/wall/patient-timeline/{patient_id}")
+def wall_patient_timeline(patient_id: str) -> JSONResponse:
+    from database import db
+
+    with _product_db() as conn:
+        visits = db.list_appointments(conn, patient_id=patient_id, statuses=())
+        rejected = db.list_suggestion_rejections(conn, patient_id)
+    cutoff = datetime.now(UTC) - timedelta(days=400)
+    events, _, _ = _load_events(
+        f"timeline:{patient_id}", since=cutoff, cache_ttl=callfeed.INSIGHTS_CACHE_TTL_S
+    )
+    cards = build_calls(events)
+    events = merge_events(
+        events_from_appointments(visits),
+        events_from_calls(cards, patient_id=patient_id),
+    )
+    name = next((v.patient_name for v in visits if v.patient_name), None)
+    if not name:
+        name = next(
+            (c.patient_name for c in cards if c.patient_id == patient_id and c.patient_name), None
+        )
+    return JSONResponse(
+        {
+            "patientId": patient_id,
+            "name": name or patient_id,
+            "events": events,
+            "rejectedPatternIds": rejected,
+        }
+    )
+
+
+@app.post("/api/wall/patient-timeline/{patient_id}/reject")
+async def wall_patient_timeline_reject(patient_id: str, request: Request) -> JSONResponse:
+    from database import db
+
+    payload = await request.json()
+    if not isinstance(payload, dict):
+        return JSONResponse({"error": "object required"}, status_code=422)
+    pattern_id = str(payload.get("patternId") or payload.get("pattern_id") or "").strip()
+    if not pattern_id:
+        return JSONResponse({"error": "patternId required"}, status_code=422)
+    with _product_db() as conn:
+        db.add_suggestion_rejection(conn, patient_id, pattern_id)
+        rejected = db.list_suggestion_rejections(conn, patient_id)
+    return JSONResponse({"patientId": patient_id, "rejectedPatternIds": rejected})
 
 
 def _wall_cancelled_keys() -> set[cal.BookingKey]:
@@ -1423,6 +1641,85 @@ def wall_home_overview_api() -> JSONResponse:
     payload = home_overview(cards, now=datetime.now(UTC))
     payload["source"] = source
     return JSONResponse(payload)
+
+
+_PHASE_KEY = {
+    "listen": "listening",
+    "identify": "speaking",
+    "decide": "working",
+    "submit": "working",
+}
+
+
+def _live_tool(card: CallCard) -> str | None:
+    running = next((step for step in reversed(card.tools) if step.status == "running"), None)
+    if running is not None:
+        return running.name
+    return card.tools[-1].name if card.tools else None
+
+
+def _call_language(card: CallCard) -> str:
+    return analytics_pack_module._language(card) or "es"
+
+
+def _live_call_payload(card: CallCard) -> dict[str, Any]:
+    stage_i = max(explain.stage_of(card) - 1, 0)
+    stage_id, stage_label, _blurb = explain.STAGES[stage_i]
+    tool = _live_tool(card)
+    return {
+        "id": card.call_id,
+        "patient": card.patient_name or "Sin identificar",
+        "patient_id": card.patient_id or "",
+        "site": card.provider_name or "",
+        "phase": stage_label,
+        "phaseKey": _PHASE_KEY.get(stage_id, "listening"),
+        "phaseLabel": stage_label,
+        "tool": tool,
+        "status": card.status,
+        "duration": _duration(card),
+        "language": _call_language(card),
+        # Every socket connection is inbound (the platform only ever
+        # dials us — see .claude/skills/call-contract); the only
+        # outbound calls this product places are confirmation calls,
+        # which do not carry a live turn-by-turn transcript the same
+        # way and are not shown on this "in progress right now" list.
+        "direction": "inbound",
+        "phone": card.from_number or "",
+    }
+
+
+def _review_payload(card: CallCard) -> dict[str, Any]:
+    return {
+        "id": card.call_id,
+        "patient": card.patient_name or "Sin identificar",
+        "patient_id": card.patient_id or "",
+        "phone": card.from_number or "",
+        "time": _clock(card.last_ts or card.started_at),
+        "reason": card.decline_reason or card.reason or card.status,
+    }
+
+
+@app.get("/api/wall/live-calls")
+def wall_live_calls_api() -> JSONResponse:
+    """Calls in progress right now, plus today's refused / escalated tails.
+
+    Reads the same "recent" feed every other live card on the board does
+    (``_load_cards`` -> ``callfeed.load_events``): hosted Supabase first,
+    the line's ``/calls`` if that store is empty or unset, then this
+    process's local JSONL. Replaces the page's ``PLACEHOLDER_CALLS`` mock.
+    """
+    cards, _health = _load_cards()
+    real = [c for c in cards if is_real_call(c)]
+    live = [c for c in real if c.live]
+    refused = [c for c in real if c.status == "refused"][:12]
+    escalated = [c for c in real if c.status == "escalated"][:12]
+    return JSONResponse(
+        {
+            "calls": [_live_call_payload(c) for c in live],
+            "rejected": [_review_payload(c) for c in refused],
+            "escalated": [_review_payload(c) for c in escalated],
+        }
+    )
 
 
 @app.get("/api/wall/occupancy")

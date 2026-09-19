@@ -16,6 +16,7 @@
   --color-bg: #f6faf8;
   --color-bg-raised: #ffffff;
   --color-panel: #ffffff;
+  --color-bg-empty: #d9d9d9; /* sampled from the intro video's studio backdrop */
   --color-ink: #1b2420;
   --color-mute: #6d7a74;
   --color-faint: #9aa6a0;
@@ -31,6 +32,8 @@
   --color-warn-soft: #f7e6e2;
   --color-info: #3a6ea5;
   --color-info-soft: #e6eef6;
+  --color-entry: #b8860b;
+  --color-entry-soft: #fbf0d1;
 
   --color-urgent: #8a2620;
   --color-urgent-soft: #f5e0de;

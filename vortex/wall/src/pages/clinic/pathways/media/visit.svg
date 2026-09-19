@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120" fill="none">
+  <!-- Solid hospital silhouette: peaked roof over a rectangle body, maximized to fill the
+       canvas. No cutout — the exact-type emoji is overlaid on top in the app instead. -->
+  <path fill="#2f7d5c" d="M60 10 L10 50 L10 114 L110 114 L110 50 Z"/>
+</svg>
