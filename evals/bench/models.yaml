@@ -18,7 +18,10 @@ eur_per_usd: 0.92
 read_on: "2026-09-19"
 
 # What one scored call looks like, for €/call: the same profile the voice
-# layer uses (evals/voice/pricing.yaml).
+# layer uses (evals/voice/pricing.yaml). It prices a Run All, not a bench run:
+# the "per full run of N scenarios" figures in the notes below come from the
+# brake constants in evals/bench/runner.py, which bill a whole system prompt
+# per tool round.
 call_profile:
   llm_input_tokens: 12000
   llm_output_tokens: 600
@@ -109,21 +112,21 @@ models:
     default: false
     usd_per_1m_input: 1.00
     usd_per_1m_output: 5.00
-    notes: "Needs VERCEL_AI_GATEWAY_KEY ($50 perk). Verified 2026-09-19: tool calls, ~2.5 s, but 16% weighted with ten tool rounds per scenario and about 3.5 EUR per full run. Opt in with --models."
+    notes: "Needs VERCEL_AI_GATEWAY_KEY ($50 perk). Verified 2026-09-19: tool calls, ~2.5 s, but 16% weighted with ten tool rounds per scenario and about 5.5 EUR per full run of 65 scenarios. Opt in with --models."
 
   - id: vercel/google/gemini-2.5-flash
     label: "Gemini 2.5 Flash (Vercel AI Gateway)"
     default: true
     usd_per_1m_input: 0.30
     usd_per_1m_output: 2.50
-    notes: "Verified 2026-09-19: tool calls, ~1.8 s. About 1 EUR per full run."
+    notes: "Verified 2026-09-19: tool calls, ~1.8 s. About 1.7 EUR per full run of 65 scenarios."
 
   - id: vercel/anthropic/claude-sonnet-4.5
     label: "Claude Sonnet 4.5 (Vercel AI Gateway)"
     default: false
     usd_per_1m_input: 3.00
     usd_per_1m_output: 15.00
-    notes: "Verified 2026-09-19: tool calls, ~3.7 s. About 10 EUR per full run; run it on purpose with --models."
+    notes: "Verified 2026-09-19: tool calls, ~3.7 s. About 16.6 EUR per full run of 65 scenarios; run it on purpose with --models."
 
   - id: vercel/openai/gpt-4.1-mini
     label: "GPT-4.1 mini (Vercel AI Gateway)"
