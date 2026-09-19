@@ -12,6 +12,11 @@ Ids and people here are invented. They mirror the traps the docs describe
 (near-miss surnames, a provider on leave, a same-name pair) so the lanes can
 rehearse against them. Keep the set small.
 
+The published Problems-page cases live in ``synthetic-data/`` (same keys,
+separate folder). ``FakeClinicClient()`` keeps this small set;
+``FakeClinicClient(data_dir=...)`` reads the pack. Regenerate with
+``make evals-hydrate``.
+
 Owner: clinic/. Add fixtures here when a lane needs a new shape to test against.
 """
 
@@ -488,7 +493,9 @@ PATIENTS: list[dict[str, Any]] = [
         "sex": "M",
         "has_visited_before": True,
         "insurer": "cigna",
-        "referrals": [],
+        # Holds a dermatology referral: problem 6's control case, the referred
+        # adult whose booking goes through with nothing to refuse.
+        "referrals": ["dermatology"],
         "note": "Fake record. Published cases: orthopaedics Thursday, general practice Saturday.",
         "match_score": 1.0,
         "matched_fields": ["name"],

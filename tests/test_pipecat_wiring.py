@@ -933,3 +933,63 @@ def test_smart_turn_is_built_only_where_the_vad_mode_asks_for_it() -> None:
     assert count(TurnSettings()) == 0, "Soniox mode loaded a model it never uses"
     assert count(TurnSettings(soniox_turn_detection=False, use_smart_turn=False)) == 0
     assert count(TurnSettings(soniox_turn_detection=False)) == 1, "VAD mode wants it"
+
+
+def _noop_handler(tool_name: str):
+    async def handler(params: object) -> None:  # pragma: no cover - never invoked
+        raise AssertionError("the handler is not called in this test")
+
+    return handler
+
+
+def test_every_tool_is_registered_as_uncancellable_on_barge_in() -> None:
+    """No tool may be registered with pipecat's cancel-on-interruption default.
+
+    Observed on a live call: the caller gave name and DNI, the model called
+    ``find_patient``, the caller added one more sentence ~10 ms later, and the
+    interruption cancelled the in-flight call. The model then answered with no
+    result and told an existing patient they were not on file. A cancelled
+    ``submit_action`` is worse: the case is lost with nothing posted.
+    """
+    from vortex.line.pipecat_voice import register_call_tools
+
+    seen: dict[str, dict] = {}
+
+    class SpyLLM:
+        def register_function(self, name, handler, **kwargs):
+            seen[name] = kwargs
+
+    exposed = default_turn_settings().exposed_tools
+    schemas = register_call_tools(SpyLLM(), exposed, _noop_handler)
+
+    assert seen, "no tool was registered"
+    assert {s.name for s in schemas} == set(seen)
+    assert "find_patient" in seen
+    assert "submit_action" in seen
+    for name, kwargs in seen.items():
+        assert kwargs.get("cancel_on_interruption") is False, (
+            f"{name} would be cancelled when the caller talks over the lookup"
+        )
+
+
+def test_the_real_llm_service_records_the_tools_as_async() -> None:
+    """Pin it on pipecat's own registry, not just on the keyword we pass."""
+    pytest.importorskip("pipecat")
+    from pipecat.services.openai.llm import OpenAILLMService
+
+    from vortex.line.pipecat_voice import register_call_tools
+
+    class OfflineOpenAILLMService(OpenAILLMService):
+        """The registry lives on the service, so no credential and no client."""
+
+        def create_client(self, **kwargs: object) -> None:
+            return None
+
+    llm = OfflineOpenAILLMService()
+    exposed = default_turn_settings().exposed_tools
+    schemas = register_call_tools(llm, exposed, _noop_handler)
+
+    for schema in schemas:
+        assert llm.has_function(schema.name)
+        item = llm._functions[schema.name]
+        assert item.cancel_on_interruption is False, f"{schema.name} dies on barge-in"

@@ -206,6 +206,12 @@ review the PR and posts the result as one comment. It advises; `gate` decides.
 It is not required on `main`, the job has `continue-on-error`, and a red
 CodeRabbit changes nothing about whether you can merge.
 
+Every major finding also becomes an issue labelled `coderabbit`. That part
+runs in `.github/workflows/coderabbit-issues.yml`, a separate workflow that
+`workflow_run` starts from the default branch once the review has finished: it
+reads the review as an artifact, so the only token holding `issues: write` is
+never the one in the job that checks out and runs a pull request.
+
 ### Which integration, and why
 
 CodeRabbit has two ways in, and they are not interchangeable:
@@ -288,7 +294,7 @@ Pick the smallest one:
 | No review on this one PR | Open it as a draft and mark it ready only when done; or just ignore the comment. |
 | Pause it for the weekend | `gh workflow disable coderabbit`. `gh workflow enable coderabbit` brings it back. |
 | Stop it spending quota at all | `gh secret delete CODERABBIT_API_KEY`. The job then skips green on every PR. |
-| Remove it | Delete `.github/workflows/coderabbit.yml` and `.coderabbit.yaml`, and this section. |
+| Remove it | Delete `.github/workflows/coderabbit.yml`, `.github/workflows/coderabbit-issues.yml` and `.coderabbit.yaml`, and this section. |
 
 ### If the team wants the GitHub App instead
 

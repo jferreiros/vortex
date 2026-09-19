@@ -40,14 +40,12 @@ def clean_env(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv("VORTEX_GEOCODER", raising=False)
     monkeypatch.delenv("VORTEX_GEOCODER_URL", raising=False)
     settings_module.reset_settings()
-    geo.clear_geocode_cache()
     yield monkeypatch
-    geo.clear_geocode_cache()
     settings_module.reset_settings()
 
 
 async def test_geocode_live_is_off_by_default(clean_env) -> None:
-    assert await geo.geocode_live("Calle Mayor 1, Madrid") is None
+    assert await geo.geocode_live("Calle Mayor 1, Madrid", settings_module.Settings()) is None
 
 
 async def test_geocode_live_reads_the_url_from_settings_not_os_environ(
@@ -55,21 +53,27 @@ async def test_geocode_live_reads_the_url_from_settings_not_os_environ(
 ) -> None:
     """A raw os.environ write must not reach geocode_live: only Settings does."""
     monkeypatch.setenv("VORTEX_GEOCODER_URL", "https://nominatim.example.invalid/search")
-    # geo.py no longer reads os.environ directly, so the stale cached Settings
-    # (with no geocoder configured) still wins here.
-    assert await geo.geocode_live("Calle Mayor 1, Madrid") is None
+    # Settings must be passed explicitly; env alone never enables the live path.
+    assert await geo.geocode_live("Calle Mayor 1, Madrid", settings_module.Settings()) is None
 
     settings_module.reset_settings()
     settings = settings_module.get_settings()
     assert settings.geocoder_url == "https://nominatim.example.invalid/search"
-    # An explicit settings argument is honoured without needing get_settings().
     off = settings_module.Settings(geocoder="", geocoder_url="")
     assert await geo.geocode_live("Calle Mayor 1, Madrid", off) is None
 
 
+async def test_locate_and_geocode_live_require_settings(clean_env) -> None:
+    """No get_settings() fallback: callers must pass the socket Settings."""
+    with pytest.raises(TypeError):
+        await geo.geocode_live("Calle Mayor 1, Madrid")  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        await geo.locate("Calle Mayor 3, Madrid")  # type: ignore[call-arg]
+
+
 async def test_locate_prefers_the_offline_gazetteer(clean_env) -> None:
     """A recognised place never needs the geocoder, on or off."""
-    point = await geo.locate("Calle Mayor 3, Madrid")
+    point = await geo.locate("Calle Mayor 3, Madrid", settings_module.Settings())
     assert point is not None
 
 
@@ -94,6 +98,22 @@ async def test_cartociudad_resolves_alcala_200_to_a_portal(
     assert calls == ["Calle Alcalá 200"]
 
 
+async def test_cartociudad_asks_the_service_for_madrid_only(
+    clean_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """limit=5 runs on the service side, so the province filter must too."""
+    seen: list[dict[str, Any]] = []
+
+    async def fake_get(url: str, *, params: dict[str, Any], headers=None):
+        seen.append(params)
+        return CARTOCIUDAD_ALCALA_PAYLOAD
+
+    monkeypatch.setattr(geo, "_http_get_json", fake_get)
+    settings = settings_module.Settings(geocoder="cartociudad", geocoder_url="")
+    assert await geo.geocode_live("Calle Alcalá 200", settings) == ALCALA_200_PORTAL
+    assert seen[0]["provincia_filter"] == geo.CARTOCIUDAD_PROVINCE
+
+
 async def test_cartociudad_tolerates_the_alcla_misspelling(
     clean_env, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -107,7 +127,7 @@ async def test_cartociudad_tolerates_the_alcla_misspelling(
     assert point == ALCALA_200_PORTAL
 
 
-async def test_geocode_results_are_cached_by_normalised_query(
+async def test_geocode_results_are_cached_by_normalised_query_within_one_call(
     clean_env, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     calls = 0
@@ -119,11 +139,37 @@ async def test_geocode_results_are_cached_by_normalised_query(
 
     monkeypatch.setattr(geo, "_http_get_json", fake_get)
     settings = settings_module.Settings(geocoder="cartociudad")
-    first = await geo.geocode_live("Calle Alcalá 200", settings)
+    one_call: geo.GeocodeCache = {}
+    first = await geo.geocode_live("Calle Alcalá 200", settings, one_call)
     # Accents and case fold away: second call must hit the cache, not the wire.
-    second = await geo.geocode_live("CALLE ALCALA 200", settings)
+    second = await geo.geocode_live("CALLE ALCALA 200", settings, one_call)
     assert first == second == ALCALA_200_PORTAL
     assert calls == 1
+
+
+async def test_geocode_keeps_nothing_between_calls(
+    clean_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A second socket asking the same address must not read the first one's hit."""
+    calls = 0
+
+    async def fake_get(url: str, *, params: dict[str, Any], headers=None):
+        nonlocal calls
+        calls += 1
+        return CARTOCIUDAD_ALCALA_PAYLOAD
+
+    monkeypatch.setattr(geo, "_http_get_json", fake_get)
+    settings = settings_module.Settings(geocoder="cartociudad")
+    first_call: geo.GeocodeCache = {}
+    second_call: geo.GeocodeCache = {}
+    assert await geo.geocode_live("Calle Alcalá 200", settings, first_call) == ALCALA_200_PORTAL
+    assert await geo.geocode_live("Calle Alcalá 200", settings, second_call) == ALCALA_200_PORTAL
+    assert calls == 2
+    assert second_call and first_call.keys() == second_call.keys()
+    # No cache at all is the same story: nothing is retained anywhere.
+    assert await geo.geocode_live("Calle Alcalá 200", settings) == ALCALA_200_PORTAL
+    assert await geo.geocode_live("Calle Alcalá 200", settings) == ALCALA_200_PORTAL
+    assert calls == 4
 
 
 async def test_nominatim_remains_available_via_geocoder_setting(
