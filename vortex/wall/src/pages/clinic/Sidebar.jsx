@@ -16,7 +16,7 @@ const ICONS = {
       <path d="M19.4 13.6a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34a1.7 1.7 0 0 0-1 1.55V19.7a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.1-1.55a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87a1.7 1.7 0 0 0-1.55-1H4.3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 6 9.4a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H10.5a1.7 1.7 0 0 0 1-1.55V3.3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06-.06a1.7 1.7 0 0 0-.34 1.87V9.4a1.7 1.7 0 0 0 1.55 1h.09a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1z" />
     </>
   ),
-  personalities: (
+  ai: (
     <>
       <circle cx="12" cy="12" r="8.2" />
       <circle cx="9.3" cy="10.3" r="0.9" fill="currentColor" stroke="none" />
@@ -37,8 +37,8 @@ const ICONS = {
 
 const CLINIC_ITEMS = [
   { to: "/clinic/home", label: "Home", icon: "home" },
-  { to: "/clinic/settings", label: "Settings", icon: "settings" },
-  { to: "/clinic/personalities", label: "Personalidades", icon: "personalities" },
+  { to: "/clinic/settings", label: "Ajustes", icon: "settings" },
+  { to: "/clinic/ai", label: "IA", icon: "ai" },
   { to: "/clinic/insights", label: "Insights", icon: "insights" },
   { to: "/clinic/live-calls", label: "Live Calls", icon: "liveCalls" },
   { to: "/clinic/doctor", label: "Horarios", icon: "doctor" },
