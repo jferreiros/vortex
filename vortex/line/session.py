@@ -28,7 +28,9 @@ from vortex.clinic.client import ClinicApi
 from vortex.contract import (
     MADRID,
     Action,
+    DeclineReason,
     EscalateAction,
+    FindPatientResult,
     NoAction,
     Rejection,
     SubmitInput,
@@ -69,6 +71,13 @@ ACCEPTED_STATUSES: tuple[str, ...] = ("accepted", "duplicate")
 VERDICT_TOOLS: frozenset[str] = frozenset({"check_eligibility", "find_slots"})
 
 
+def refusal_for(reason: DeclineReason) -> Action:
+    """The action a named reason ends on. A red flag goes to /escalate, the rest refuse."""
+    if reason == "medical_emergency":
+        return EscalateAction(reason=reason)
+    return NoAction(reason=reason)
+
+
 @dataclass
 class CallMemory:
     """What the call learned, kept for the moment the line goes dead.
@@ -95,6 +104,16 @@ class CallMemory:
     # It is the reason a refusal must carry, so ``submit_action`` forces it.
     last_verdict: Rejection | None = None
     last_verdict_tool: str = ""
+    # The same reason, kept across the action a tool later prepares around it.
+    # A plan nobody confirmed must not cost the call a named reason: replacing
+    # one with ``out_of_scope`` only ever loses the case. Free slots clear it,
+    # because by then the rule no longer stands.
+    stored_reason: Rejection | None = None
+    stored_reason_tool: str = ""
+    # A lookup ran and nobody was identified. The call ends on
+    # ``patient_not_found``, which says what happened; ``out_of_scope`` claims
+    # we could not serve the request at all, which is a different call.
+    identity_pending: bool = False
     prepared: Action | None = None
     prepared_tool: str = ""
     # Set by the conversation lane when the caller agrees to ``prepared``. It
@@ -121,6 +140,8 @@ class CallMemory:
         if tool in VERDICT_TOOLS:
             self.last_verdict = rejection
             self.last_verdict_tool = tool
+        self.stored_reason = rejection
+        self.stored_reason_tool = tool
         self.prepared = None
         self.prepared_tool = ""
         self.confirmed = False
@@ -138,14 +159,22 @@ class CallMemory:
         self.last_verdict = None
         self.last_verdict_tool = ""
 
+    def forget_stored_reason(self) -> None:
+        """Only for what proves the rule gone, never for a plan drawn up around it."""
+        self.stored_reason = None
+        self.stored_reason_tool = ""
+
     def observe(self, tool: str, result: Any) -> None:
         """Remember whatever a tool result says about where the call stands.
 
         Reads the contract's own field names, so no lane tool has to know this
         exists: ``rejection`` on every result that can refuse, ``action`` on the
         ``prepare_*`` and ``build_registration`` results, ``slots``/``blocked``
-        on availability.
+        on availability, ``status`` on the identity lookup.
         """
+        if isinstance(result, FindPatientResult):
+            self.identity_pending = result.status != "found"
+
         rejection = getattr(result, "rejection", None)
         if isinstance(rejection, Rejection):
             self.remember_rejection(tool, rejection)
@@ -162,6 +191,7 @@ class CallMemory:
         blocked = getattr(result, "blocked", None) or []
         if slots:
             self.forget_rejection()
+            self.forget_stored_reason()
         elif blocked and rejection is None:
             first = blocked[0]
             self.remember_rejection(
@@ -464,20 +494,31 @@ class CallSession:
         #     out_of_scope matches problem 14 and nothing else, while a named
         #     reason matches the refusal endings of problems 6, 7, 10 and 16.
         #     A red flag is the one ending the platform expects on /escalate.
+        #     The verb is the rejection's, the reason the rules' verdict where
+        #     the call holds one: the same swap ``submit_action`` makes, done
+        #     here so the branch we log is the action that goes out and the
+        #     re-send check in ``_send_fallback`` compares like with like.
         if memory.last_rejection is not None:
             reason = memory.last_rejection.reason
-            refusal: Action = (
-                EscalateAction(reason=reason)
-                if reason == "medical_emergency"
-                else NoAction(reason=reason)
-            )
             return (
                 "last_rejection",
-                refusal,
+                with_verdict_reason(self.ctx, refusal_for(reason)),
                 f"{memory.last_rejection_tool} refused: {reason}",
             )
 
-        # (c) Nobody said anything we could act on: a dropped or silent call.
+        # (c) A rule bit earlier and a tool then drew up a plan around it that
+        #     nobody confirmed. The rule is still the last thing we learned, so
+        #     it names the ending: a stored reason is never worth trading for
+        #     out_of_scope.
+        if memory.stored_reason is not None:
+            reason = memory.stored_reason.reason
+            return (
+                "stored_reason",
+                refusal_for(reason),
+                f"{memory.stored_reason_tool} refused: {reason}, before a plan nobody confirmed",
+            )
+
+        # (d) Nobody said anything we could act on: a dropped or silent call.
         if self.ctx.log.user_turns == 0:
             return (
                 "no_turns",
@@ -485,7 +526,18 @@ class CallSession:
                 "the caller never said anything we could act on",
             )
 
-        # (d) A real conversation that resolved nothing, and no rule to name.
+        # (e) The line died with the lookup still open: a patient was searched
+        #     for and none was identified. That is patient_not_found, and it is
+        #     the one thing out_of_scope certainly is not - the request was ours
+        #     to serve, we just never learned whose it was.
+        if memory.identity_pending:
+            return (
+                "identity_pending",
+                NoAction(reason="patient_not_found"),
+                "a lookup ran and identified nobody",
+            )
+
+        # (f) A real conversation that resolved nothing, and no rule to name.
         #     NO_ACTION, not ESCALATE. The problem set pairs ESCALATE with one
         #     ending only - a red flag, with medical_emergency - and branch (b)
         #     already covers it from triage's own rejection. An ESCALATE
