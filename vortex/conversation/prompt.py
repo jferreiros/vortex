@@ -39,6 +39,10 @@ What it must achieve, and why each rule is there:
   from the diary and happily returns slots a plan does not cover, so the
   refusal problems (6, 17) are decided by the eligibility verdict; the
   ``reason`` it carries is the ``reason`` we submit.
+- One confirmation. The caller's first yes to a read-back is the agreement;
+  reading the plan back a second time costs the wall clock and, on the scored
+  run, the submission itself. ``conversation.turns.ConfirmationPolicy`` is the
+  same rule off the model's path.
 - A registration rejection names the field to fix, not a reason to hang up.
   ``build_registration``'s rejection is the one rejection the call must
   survive: repeat that field and try again, instead of closing with no action.
@@ -170,8 +174,8 @@ submit_action. Book nothing.
 8. Change or cancel: list_appointments, pick the one they mean; prepare_cancel \
 or prepare_reschedule. Next free: first slot after theirs.
 9. Close: read back day, time, doctor and site once only; wait for a yes. Do not \
-submit before the caller agrees. prepare_booking and submit_action, then confirm \
-briefly and say goodbye.
+submit before the caller agrees. Never ask twice: on the first yes ("book it", \
+"dale") prepare_booking and submit_action in that turn, then goodbye.
 
 TROUBLE. Garbled: ask them to repeat it; never guess. \
 Silence: "Are you still there?", then your last question. Rude caller: stay calm.
