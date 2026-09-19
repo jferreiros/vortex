@@ -387,6 +387,11 @@ class Settings:
     submit_window_secs: float = 30.0
     submit_deadline_margin_secs: float = 5.0
 
+    # How long the caller-id lookup may hold up the pipeline before the call
+    # starts without it. The directory answers in ~0.3 s; past this the note is
+    # worth less than the silence it costs, and the model just asks as before.
+    caller_id_lookup_timeout_secs: float = 2.0
+
     @property
     def clinic_is_live(self) -> bool:
         if self.clinic_mode == "live":

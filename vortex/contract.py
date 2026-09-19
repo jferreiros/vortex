@@ -505,6 +505,28 @@ class FindPatientResult(BaseModel):
     ask_for: Literal["date_of_birth", "national_id", "phone", "name", ""] = ""
 
 
+class CallerLineMatch(BaseModel):
+    """Who the dialling line belongs to, resolved before the caller speaks.
+
+    The directory takes a phone on its own, so the number Twilio hands us is a
+    free exact query: one match names the line's owner, none says the line is on
+    no record. It is a *hint about the line*, never an identification of the
+    person holding it - the owner of the phone and the patient being booked for
+    are different people on a third-party call.
+
+    ``looked_up`` is False when there was no caller id, the lookup failed or it
+    did not answer in time. The prompt renders no CALLER block for those, so the
+    call behaves exactly as it did before the lookup existed.
+    """
+
+    looked_up: bool = False
+    from_number: str = ""
+    patient: PatientRecord | None = None
+    #: Several records share the line (a family). Never one identity, so the
+    #: prompt says nothing; the ordering hint still helps ``find_patient``.
+    candidates: list[PatientRecord] = Field(default_factory=list)
+
+
 class ValidateNationalIdInput(BaseModel):
     value: str = Field(description="DNI or NIE as heard, letters and digits")
 
