@@ -1,0 +1,25 @@
+:root {
+  --text: #131414;
+  --background: #fef9f1;
+  --primary: #013551;
+  --secondary: #ffffff;
+  --accent: #ff421c;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--background);
+  color: var(--text);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}

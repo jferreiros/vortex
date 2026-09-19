@@ -20,12 +20,14 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import httpx
+from fastapi.responses import HTMLResponse, JSONResponse
 from nicegui import app, ui
 
 from vortex.observability import auth, explain, insights
 from vortex.observability.calllog import read_recent
 from vortex.observability.demo import write_scripted_call
 from vortex.observability.view import CallCard, build_calls, flatten_grouped
+from vortex.observability.wall_timeline import build_timeline, call_summary, latest_intent
 from vortex.settings import REPO_ROOT, get_settings
 
 LINE_URL = os.environ.get("VORTEX_LINE_URL", "http://127.0.0.1:7860").rstrip("/")
@@ -36,6 +38,10 @@ _HERE = Path(__file__).parent
 DESIGN_CSS = (_HERE / "design.css").read_text(encoding="utf-8")
 BOARD_CSS = (_HERE / "board.css").read_text(encoding="utf-8")
 EVALS_SUMMARY = REPO_ROOT / "evals" / "results" / "summary.json"
+#: The react-spring per-call "zoom" page (vortex/observability/wall-app/),
+#: built by `npm run build`. /call/{id} above is the NiceGUI page; this is
+#: an animated alternative at /call/{id}/zoom, additive and never required.
+WALL_APP_DIST = _HERE / "wall-app" / "dist"
 
 MADRID = ZoneInfo("Europe/Madrid")
 
@@ -701,6 +707,8 @@ def wall_page() -> None:
             slot = _nav("/wall", team=False)
             with slot:
                 _line_pill(health)
+                zoom_id = featured.call_id if featured else "demo"
+                ui.link("Demo", f"/call/{zoom_id}/zoom", new_tab=True).classes("pill mute")
             with ui.element("main").classes("page"):
                 with ui.element("div").classes("page-head"):
                     with ui.element("div"):
@@ -747,6 +755,7 @@ def call_page(call_id: str) -> None:
             slot = _nav("", team=False)
             with slot:
                 _line_pill(health)
+                ui.link("Demo", f"/call/{call_id}/zoom", new_tab=True).classes("pill mute")
             with ui.element("main").classes("page"):
                 with ui.element("div").classes("page-head"):
                     with ui.element("div"):
@@ -772,6 +781,42 @@ def call_page(call_id: str) -> None:
 
     redraw()
     ui.timer(0.6, redraw)
+
+
+@app.get("/api/wall/timeline/{call_id}")
+def wall_timeline_api(call_id: str) -> JSONResponse:
+    """The chat+tool timeline the react-spring zoom page polls."""
+    events, health = _load_events()
+    items = build_timeline(events, call_id)
+    intent = latest_intent(events, call_id)
+    call = call_summary(events, call_id)
+    call["submit_window_secs"] = get_settings().submit_window_secs
+    return JSONResponse(
+        {
+            "call_id": call_id,
+            "items": items,
+            "intent": intent,
+            "call": call,
+            "line_up": health is not None,
+        }
+    )
+
+
+if WALL_APP_DIST.exists():
+    app.add_static_files("/wall-assets", str(WALL_APP_DIST))
+    _WALL_INDEX_HTML = (WALL_APP_DIST / "index.html").read_text(encoding="utf-8")
+
+    @app.get("/call/{call_id}/zoom")
+    def call_zoom_page(call_id: str) -> HTMLResponse:
+        """The react-spring zoom page: voice orb, live tool demo, extracted
+        info with the rule behind each, final action.
+
+        Built by ``npm run build`` in ``vortex/observability/wall-app/``. It
+        reads its data from ``/api/wall/timeline/{call_id}`` above, client-side.
+        Additive: ``/call/{call_id}`` (no ``/zoom``) stays the NiceGUI page.
+        """
+        del call_id  # the SPA reads the id itself from window.location
+        return HTMLResponse(_WALL_INDEX_HTML)
 
 
 # ---------------------------------------------------------------------------
