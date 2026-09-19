@@ -110,7 +110,9 @@ def _attention(cards: list[CallCard]) -> list[tuple[str, str, str, str, str]]:
 
 @ui.page("/")
 def overview_page() -> None:
-    if not _guard():
+    live._apply_chrome()
+    if not live._ops_ok():
+        ui.navigate.to("/wall")
         return
     ui.page_title("Vortex · Overview")
     cards, health = live._load_cards()
@@ -307,8 +309,7 @@ def calls_live_page() -> None:
     with console_page(
         "/calls/live",
         "Live",
-        "The call the agent is on right now, stage by stage. The wall shows the same "
-        "thing without the sidebar.",
+        explain.LIVE_SUB,
         health=health,
         clinic=live.CLINIC_NAME,
         who=_who(),
@@ -326,9 +327,8 @@ def calls_live_page() -> None:
             featured = live._feature(cards)
             stage.clear()
             with stage:
-                live._kpis(cards)
                 live._live_strip(cards, featured)
-                live._call_panel(featured, verbose=True)
+                live._workflow_panel(featured)
 
         redraw()
         ui.timer(0.6, redraw)
