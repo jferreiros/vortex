@@ -20,22 +20,19 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-import httpx
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from nicegui import app, ui
 
-from vortex.observability import auth, explain, insights, pricing
+from vortex.observability import auth, callfeed, explain, insights, pricing
 from vortex.observability.business_insights import business_insights
-from vortex.observability.calllog import read_recent
 from vortex.observability.demo import write_scripted_call
 from vortex.observability.icons import icon
-from vortex.observability.view import CallCard, build_calls, flatten_grouped
+from vortex.observability.view import CallCard, build_calls
 from vortex.observability.wall_timeline import build_timeline, call_summary, latest_intent
 from vortex.settings import REPO_ROOT, get_settings
 
 log = logging.getLogger("vortex.observability")
 
-LINE_URL = os.environ.get("VORTEX_LINE_URL", "http://127.0.0.1:7860").rstrip("/")
 BOARD_PORT = int(os.environ.get("VORTEX_BOARD_PORT", "8080"))
 CLINIC_NAME = os.environ.get("VORTEX_CLINIC_NAME", "Clínica Arenal")
 PRESENCE: dict[str, float] = {}
@@ -69,44 +66,20 @@ def _log_path() -> Path:
     return get_settings().calls_log_path
 
 
-#: Deliberately generous. The line server answers /health and /calls from a
-#: sync FastAPI route on the same event loop that streams live call audio, so
-#: under real load (a "Run All" holding ten to twenty sockets open) a fetch
-#: that used to time out at 0.35 s / 0.5 s failed constantly and silently fell
-#: back to the board's own, always-empty log — every Insights panel and the
-#: live wall itself would read as "no data" during exactly the calls that
-#: mattered, while a quiet local box with a single call never hit the timeout
-#: and looked fine. Six seconds still comfortably beats the 6 s poll interval
-#: the Insights page itself uses, so one slow fetch does not pile up on the
-#: next.
-_LINE_HEALTH_TIMEOUT_S = 3.0
-_LINE_CALLS_TIMEOUT_S = 6.0
-
-#: Last events successfully fetched from the line, kept so one slow or
-#: dropped request degrades to slightly-stale real data instead of an empty
-#: board. Cleared only by a fresh success; never written to disk.
-_last_good_events: list[dict[str, Any]] = []
-_last_good_health: dict[str, Any] | None = None
+#: Where the events a screen draws come from lives in ``callfeed`` (a leaf
+#: module, so it is importable in tests without pulling in these pages): the
+#: line's /calls first, then the last good fetch, then this process's own
+#: calls.jsonl — which in production is the line's log volume mounted into
+#: the board, not an empty private one.
 
 
-def _load_events() -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
-    global _last_good_events, _last_good_health
-    try:
-        health = httpx.get(f"{LINE_URL}/health", timeout=_LINE_HEALTH_TIMEOUT_S).json()
-        grouped = (
-            httpx.get(f"{LINE_URL}/calls", params={"limit": 800}, timeout=_LINE_CALLS_TIMEOUT_S)
-            .json()
-            .get("calls", {})
-        )
-        if isinstance(grouped, dict):
-            events = flatten_grouped(grouped)
-            _last_good_events, _last_good_health = events, health
-            return events, health
-    except Exception as exc:
-        log.warning("could not reach line at %s (%s); falling back", LINE_URL, exc)
-    if _last_good_events:
-        return _last_good_events, _last_good_health
-    return read_recent(_log_path(), limit=800), None
+def _load_events(
+    scope: str = "recent",
+    *,
+    since: datetime | None = None,
+    cache_ttl: float = 0.0,
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None, dict]:
+    return callfeed.load_events(scope, _log_path(), since=since, cache_ttl=cache_ttl)
 
 
 def _parse_ts(value: str | None) -> datetime | None:
@@ -129,7 +102,7 @@ def _is_live(card: CallCard) -> bool:
 
 
 def _build_cards() -> tuple[list[CallCard], dict[str, Any] | None]:
-    events, health = _load_events()
+    events, health, _source_info = _load_events("recent")
     cards = build_calls(events)
     for card in cards:
         if card.live and not _is_live(card):
@@ -939,7 +912,7 @@ async def call_page(call_id: str) -> None:
 @app.get("/api/wall/timeline/{call_id}")
 def wall_timeline_api(call_id: str) -> JSONResponse:
     """The chat+tool timeline the react-spring zoom page polls."""
-    events, health = _load_events()
+    events, health, _source_info = _load_events("recent")
     items = build_timeline(events, call_id)
     intent = latest_intent(events, call_id)
     call = call_summary(events, call_id)
@@ -973,12 +946,18 @@ def wall_business_insights_api(days: int = 30) -> JSONResponse:
     """
     days = min((7, 30, 90), key=lambda d: abs(d - days))
     now = datetime.now(UTC)
-    events, _health = _load_events()
-    cards = build_calls(events)
     cutoff = now - timedelta(days=days)
+    # Ask the line for every call started inside the window — a fetch bounded
+    # by date, so a busy day's worth of events can never push an in-range call
+    # out of the read the way the old 800-event tail did.
+    events, _health, source = _load_events(
+        f"insights:{days}", since=cutoff, cache_ttl=callfeed.INSIGHTS_CACHE_TTL_S
+    )
+    cards = build_calls(events)
     in_range = [c for c in cards if (started := _card_started(c)) and started >= cutoff]
     payload = business_insights(in_range, now=now)
     payload["range_days"] = days
+    payload["source"] = source
     return JSONResponse(payload)
 
 
