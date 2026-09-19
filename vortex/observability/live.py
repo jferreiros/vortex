@@ -846,6 +846,15 @@ def wall_avatar2d() -> FileResponse:
     return FileResponse(WALL_MEDIA_DIR / "avatar2d.png", media_type="image/png")
 
 
+@app.get("/wall/avatar2d-animated")
+def wall_avatar2d_animated() -> FileResponse:
+    """The animated version: a self-contained SVG (transparent background,
+    CSS keyframes baked in — float, head bob, blink, clipboard sway) used
+    as the landing page's hero avatar.
+    """
+    return FileResponse(WALL_MEDIA_DIR / "avatar2d_animated.svg", media_type="image/svg+xml")
+
+
 @app.get("/wall", response_model=None)
 def wall_entry() -> Response:
     """The public URL (see README's production table): the React app

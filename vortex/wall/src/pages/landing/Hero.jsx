@@ -1,51 +1,54 @@
 import { useHeroScroll } from "./useHeroScroll";
 import "./hero.css";
 
-// The landing page is deliberately not another light, calm app screen —
-// it's the introduction, so it gets a bolder, darker treatment that hands
-// off into the app's real palette as the user scrolls into the explainer.
+function scrollToExplainer() {
+  document.getElementById("explainer")?.scrollIntoView({ behavior: "smooth" });
+}
+
+// Two-column hero, sized to fill almost the whole viewport: Vorty and the
+// headline share one centered row (vertically centered on each other —
+// the text column has nothing else in it pulling its center off the
+// avatar's), and the CTA lives in its own footer strip pinned to the very
+// bottom of the section, independent of how tall the headline gets.
 export default function Hero() {
   const { ref, progress } = useHeroScroll();
-
-  const scale = 1 - progress * 0.55;
-  const translateY = progress * -70;
-  const copyOpacity = Math.max(0, 1 - progress * 2.4);
-  const avatarOpacity = Math.max(0.12, 1 - progress * 0.7);
+  const fade = Math.max(0, 1 - progress * 2.2);
+  const lift = progress * -50;
 
   return (
     <section className="landing-hero" ref={ref}>
-      <div className="landing-hero-inner">
-        <div
-          className="landing-hero-avatar-wrap"
-          style={{ transform: `translateY(${translateY}px) scale(${scale})`, opacity: avatarOpacity }}
-        >
-          <div className="landing-hero-avatar">
-            <span className="landing-hero-avatar-ring r1" />
-            <span className="landing-hero-avatar-ring r2" />
-            <span className="landing-hero-avatar-glow" />
-            {/* Served straight off disk by the backend — see
-                vortex/observability/live.py:wall_avatar2d — not bundled,
-                so swapping the file needs no rebuild. */}
-            <img className="landing-hero-avatar-img" src="/wall/avatar2d" alt="Vorty, el agente de voz de Vortex" />
+      <div className="landing-hero-content" style={{ opacity: fade }}>
+        <div className="landing-hero-row" style={{ transform: `translateY(${lift}px)` }}>
+          <div className="landing-hero-avatar-col">
+            <div className="landing-hero-avatar">
+              {/* Self-contained animated SVG — see
+                  vortex/observability/live.py:wall_avatar2d_animated. */}
+              <img
+                className="landing-hero-avatar-img"
+                src="/wall/avatar2d-animated"
+                alt="Vorty, el agente de voz de Vortex"
+              />
+            </div>
+          </div>
+
+          <div className="landing-hero-text-col">
+            <h1>
+              <span className="landing-hero-hi">Hi!</span> <span className="landing-hero-imvorty">I am Vorty</span>
+            </h1>
+            <p>
+              A voice AI agent that answers the inbound scheduling calls for <strong>YOUR</strong> clinic.
+            </p>
           </div>
         </div>
 
-        <div className="landing-hero-copy" style={{ opacity: copyOpacity }}>
-          <span className="landing-hero-kicker">Vortex</span>
-          <h1>
-            Contesta el teléfono
-            <br />
-            antes de que suene dos veces.
-          </h1>
-          <p>
-            Un agente de voz que identifica al paciente, consulta la agenda de la clínica
-            y decide: reservar, registrar, cambiar, cancelar o escalar.
-          </p>
-        </div>
-
-        <div className="landing-scroll-cue" style={{ opacity: copyOpacity }}>
-          <span>Desliza para descubrir cómo funciona</span>
-          <span className="landing-scroll-cue-arrow">↓</span>
+        <div className="landing-hero-cta-wrap">
+          <button type="button" className="landing-hero-cta" onClick={scrollToExplainer}>
+            <span>Get to know me</span>
+            <svg viewBox="0 0 24 16" width="24" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M2 2l10 7 10-7" />
+              <path d="M2 8l10 7 10-7" opacity="0.5" />
+            </svg>
+          </button>
         </div>
       </div>
     </section>
