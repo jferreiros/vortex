@@ -462,6 +462,25 @@ async def test_missing_from_number_skips_sms(sms_settings: Settings) -> None:
 
 
 @pytest.mark.asyncio
+async def test_sms_force_to_overrides_caller(
+    sms_settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Demo override: every confirmation goes to VORTEX_SMS_FORCE_TO."""
+    monkeypatch.setenv("VORTEX_SMS_FORCE_TO", "+34600000000")
+    reset_settings()
+    settings = get_settings()
+    session = make_session(settings, "CA-force-to", from_number="+34600999888")
+    sms = session.sms
+    assert isinstance(sms, DryRunSmsClient)
+
+    await session.submit(a_booking())
+    await session.close()
+
+    assert len(sms.sent) == 1
+    assert sms.sent[0][0] == "+34600000000"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("submitter_cls", [DryRunSubmitter, RejectingSubmitter])
 async def test_non_accepted_submit_skips_sms(
     sms_settings: Settings, submitter_cls: type[AcceptingSubmitter]
