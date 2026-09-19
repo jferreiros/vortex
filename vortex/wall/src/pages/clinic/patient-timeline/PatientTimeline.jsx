@@ -85,9 +85,9 @@ function formatDate(iso) {
 // (besides the suggestion at its end). `isEvidence` marks it as one of the
 // events the detected pattern actually matched on, drawing a highlight box
 // around it so the pattern is tied to the concrete facts that triggered it.
-function EventNode({ event, isEvidence }) {
+function EventNode({ event, isEvidence, gridColumn }) {
   return (
-    <div className={`pt-node ${isEvidence ? "pt-node-evidence" : ""}`}>
+    <div className={`pt-node ${isEvidence ? "pt-node-evidence" : ""}`} style={{ gridColumn }}>
       <span className="pt-node-caption above">{event.description}</span>
       <span className="pt-shape">
         <ShapeGlyphs family={event.shape.family} type={event.shape.type} subfamily={event.shape.subfamily} />
@@ -101,10 +101,10 @@ function EventNode({ event, isEvidence }) {
 // alone). Rejecting doesn't show a "dismissed" state here — the whole node
 // disappears immediately (see handleReject) — so the only status this ever
 // renders is "accepted".
-function SuggestionNode({ pattern, onAccept, onReject, status }) {
+function SuggestionNode({ pattern, onAccept, onReject, status, gridColumn }) {
   const { shape, description } = pattern.suggestionNode;
   return (
-    <div className={`pt-node pt-suggestion ${status ? `pt-suggestion-${status}` : ""}`}>
+    <div className={`pt-node pt-suggestion ${status ? `pt-suggestion-${status}` : ""}`} style={{ gridColumn }}>
       <span className="pt-node-caption above">{description}</span>
       <div className="pt-shape-wrap">
         <span className="pt-shape">
@@ -135,10 +135,10 @@ function SuggestionNode({ pattern, onAccept, onReject, status }) {
 // underneath, in quotes, naming the shape just drawn. No arrow here — that
 // only lives once, in the top row, pointing at the suggestion this box sits
 // under.
-function PatternDetectedBox({ pattern }) {
+function PatternDetectedBox({ pattern, gridColumn }) {
   const count = pattern.nodes.length;
   return (
-    <div className="pt-explain">
+    <div className="pt-explain" style={{ gridColumn }}>
       <span className="pt-explain-label">Pattern detected</span>
       <div className="pt-pattern-box">
         <div className="pt-pattern-abstract-row">
@@ -157,9 +157,15 @@ function PatternDetectedBox({ pattern }) {
 
 // Longer than a plain arrow glyph, and reused as the only arrow on the page —
 // the pattern box below the suggestion doesn't get its own.
-function TimelineArrow() {
+function TimelineArrow({ gridColumn }) {
   return (
-    <svg className="pt-timeline-arrow" viewBox="0 0 100 10" preserveAspectRatio="none" aria-hidden="true">
+    <svg
+      className="pt-timeline-arrow"
+      viewBox="0 0 100 10"
+      preserveAspectRatio="none"
+      aria-hidden="true"
+      style={{ gridColumn }}
+    >
       <line x1="0" y1="5" x2="90" y2="5" />
       <path d="M84 1 L94 5 L84 9" fill="none" />
     </svg>
@@ -182,6 +188,14 @@ export default function PatientTimeline() {
   const [rejectedMap, setRejectedMap] = useState(loadRejectedMap);
 
   useEffect(() => {
+    const nextFallback = patientTimelines.patients.find((p) => p.patientId === patientId) || {
+      patientId,
+      name: patientId,
+      events: [],
+      referrals: [],
+    };
+    setPatient(nextFallback);
+    setSuggestionStatus(null);
     let cancelled = false;
     fetch(`/api/wall/patient-timeline/${encodeURIComponent(patientId)}`)
       .then((r) => (r.ok ? r.json() : Promise.reject()))
@@ -189,7 +203,7 @@ export default function PatientTimeline() {
         if (cancelled || !json) return;
         setPatient({
           patientId: json.patientId || patientId,
-          name: json.name || fallback.name,
+          name: json.name || nextFallback.name,
           events: Array.isArray(json.events) ? json.events : [],
           referrals: [],
         });
@@ -198,7 +212,7 @@ export default function PatientTimeline() {
         }
       })
       .catch(() => {
-        if (!cancelled) setPatient(fallback);
+        if (!cancelled) setPatient(nextFallback);
       });
     fetch("/api/wall/patterns")
       .then((r) => (r.ok ? r.json() : Promise.reject()))
@@ -246,7 +260,7 @@ export default function PatientTimeline() {
   const match = rawMatch && rejectedIds.includes(rawMatch.pattern.id) ? null : rawMatch;
 
   const handleReject = () => {
-    if (!match) return;
+    if (!match || patient.patientId !== patientId) return;
     const patternId = match.pattern.id;
     setRejectedMap((prev) => {
       const next = { ...prev, [patient.patientId]: [...(prev[patient.patientId] || []), patternId] };
@@ -275,6 +289,20 @@ export default function PatientTimeline() {
 
   const evidenceIds = new Set(match ? match.evidenceEventIds : []);
 
+  // The "why" box sits centered under the evidence event(s) it explains —
+  // spanning from the first to the last evidence column when a pattern
+  // touched more than one real event — never under the suggestion. A
+  // pattern with no real-event evidence (condition-only rules, e.g. an
+  // unfulfilled referral) has nothing to point at, so it falls back to the
+  // suggestion's own column.
+  const evidenceColumns = events.reduce((acc, event, i) => {
+    if (evidenceIds.has(event.id)) acc.push(i + 1);
+    return acc;
+  }, []);
+  const explainGridColumn = evidenceColumns.length
+    ? `${evidenceColumns[0]} / ${evidenceColumns[evidenceColumns.length - 1] + 1}`
+    : `${events.length + 2}`;
+
   return (
     <div className="pt-page">
       <SectionHeader
@@ -298,26 +326,30 @@ export default function PatientTimeline() {
 
         {/* The whole main pane is one white card, its content centered
             vertically as a block. The top row itself is centered as a
-            whole; when a pattern matched, the "why" box sits in the same
-            column as the suggestion node, right below it, so it reads as
-            centered under that dashed shape rather than under the row. */}
+            whole; a CSS grid (not flex) so the "why" box below can be
+            placed by column index, centered under the evidence node(s) it
+            explains instead of under the suggestion. */}
         <Card padding="lg" className="pt-main-card">
           <div className="pt-timeline-track">
-            {events.map((event) => (
-              <EventNode key={event.id} event={event} isEvidence={evidenceIds.has(event.id)} />
+            {events.map((event, i) => (
+              <EventNode
+                key={event.id}
+                event={event}
+                isEvidence={evidenceIds.has(event.id)}
+                gridColumn={i + 1}
+              />
             ))}
             {matchedPattern && (
               <Fragment>
-                <TimelineArrow />
-                <div className="pt-suggestion-column">
-                  <SuggestionNode
-                    pattern={matchedPattern}
-                    status={suggestionStatus}
-                    onAccept={() => setSuggestionStatus("accepted")}
-                    onReject={handleReject}
-                  />
-                  <PatternDetectedBox pattern={matchedPattern} />
-                </div>
+                <TimelineArrow gridColumn={events.length + 1} />
+                <SuggestionNode
+                  pattern={matchedPattern}
+                  status={suggestionStatus}
+                  onAccept={() => setSuggestionStatus("accepted")}
+                  onReject={handleReject}
+                  gridColumn={events.length + 2}
+                />
+                <PatternDetectedBox pattern={matchedPattern} gridColumn={explainGridColumn} />
               </Fragment>
             )}
           </div>

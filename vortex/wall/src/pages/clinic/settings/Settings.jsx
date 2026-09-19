@@ -87,13 +87,14 @@ export default function Settings() {
   };
 
   const handleSave = async () => {
+    const submitted = settings;
     try {
-      const saved = await persist(settings);
-      setSettings(saved);
+      const saved = await persist(submitted);
+      setSettings((current) => (deepEqual(current, submitted) ? saved : current));
       setSavedSettings(saved);
       setSaveStatus("saved");
     } catch {
-      setSaveStatus(null);
+      setSaveStatus("error");
     }
     setTimeout(() => setSaveStatus(null), 3000);
   };
@@ -105,8 +106,7 @@ export default function Settings() {
       setSavedSettings(saved);
       setSaveStatus("defaulted");
     } catch {
-      setSettings(DEFAULTS);
-      setSaveStatus("defaulted");
+      setSaveStatus("error");
     }
     setTimeout(() => setSaveStatus(null), 3000);
   };
@@ -145,6 +145,7 @@ export default function Settings() {
 
       {saveStatus === "saved" && <div className="settings-toast saved">Guardado</div>}
       {saveStatus === "defaulted" && <div className="settings-toast defaulted">Valores por defecto restaurados</div>}
+      {saveStatus === "error" && <div className="settings-toast error">No se pudo guardar</div>}
 
       <div className="settings-groups">
         <div className="settings-pair">

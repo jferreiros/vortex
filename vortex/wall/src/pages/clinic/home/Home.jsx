@@ -5,21 +5,13 @@ import { MOCK_OVERVIEW, useHomeOverview } from "./useHomeOverview";
 import { useOccupancy, withDate } from "./useHomeData";
 import useLiveCalls from "../live-calls/useLiveCalls";
 import { PHASE_LABEL, REASON_LABEL } from "../../../lib/labels";
-import patientTimelines from "../../../data/patientTimelines.json";
 import "../live-calls/live-calls.css";
 import "./home.css";
 
 const MANAGER_NAME = "Ricardo";
 
-// Placeholder name→id lookup until calls carry a real patient_id — falls
-// back to the first mock timeline for anyone not in it.
-const PATIENT_ID_BY_NAME = Object.fromEntries(
-  patientTimelines.patients.map((p) => [p.name, p.patientId])
-);
 function patientIdFor(call) {
-  if (typeof call === "object" && call?.patient_id) return call.patient_id;
-  const name = typeof call === "string" ? call : call?.patient;
-  return PATIENT_ID_BY_NAME[name] || patientTimelines.patients[0].patientId;
+  return typeof call === "object" && call?.patient_id ? call.patient_id : "";
 }
 
 function HistoryIcon() {
@@ -60,6 +52,7 @@ function EscalateIcon() {
 }
 
 function RejectedRow({ call, onOpenHistory }) {
+  const canOpenHistory = Boolean(call.patient_id);
   return (
     <li className="feed-row">
       <span className="feed-row-dot urgent" />
@@ -72,8 +65,9 @@ function RejectedRow({ call, onOpenHistory }) {
             type="button"
             className="feed-row-history"
             onClick={onOpenHistory}
-            title="Ver historial del paciente"
-            aria-label="Ver historial del paciente"
+            disabled={!canOpenHistory}
+            title={canOpenHistory ? "Ver historial del paciente" : "Paciente sin identificar"}
+            aria-label={canOpenHistory ? "Ver historial del paciente" : "Paciente sin identificar"}
           >
             <HistoryIcon />
           </button>
@@ -92,6 +86,7 @@ function RejectedRow({ call, onOpenHistory }) {
 }
 
 function EscalatedRow({ call, onOpenHistory }) {
+  const canOpenHistory = Boolean(call.patient_id);
   return (
     <li className="feed-row">
       <span className="feed-row-dot muted" />
@@ -103,8 +98,9 @@ function EscalatedRow({ call, onOpenHistory }) {
           type="button"
           className="feed-row-history"
           onClick={onOpenHistory}
-          title="Ver historial del paciente"
-          aria-label="Ver historial del paciente"
+          disabled={!canOpenHistory}
+          title={canOpenHistory ? "Ver historial del paciente" : "Paciente sin identificar"}
+          aria-label={canOpenHistory ? "Ver historial del paciente" : "Paciente sin identificar"}
         >
           <HistoryIcon />
         </button>
@@ -246,7 +242,10 @@ export default function Home() {
   const liveCalls =
     liveFilter === "all" ? liveFeed : liveFeed.filter((c) => c.direction === liveFilter);
   const occupancyWeek = withDate(occupancy?.week);
-  const openHistory = (call) => navigate(`/clinic/patient-timeline/${patientIdFor(call)}`);
+  const openHistory = (call) => {
+    const id = patientIdFor(call);
+    if (id) navigate(`/clinic/patient-timeline/${id}`);
+  };
 
   const kpis = [
     {
@@ -346,12 +345,13 @@ export default function Home() {
                   <button
                     type="button"
                     className="home-call-history-btn"
+                    disabled={!call.patient_id}
                     onClick={(e) => {
                       e.stopPropagation();
                       openHistory(call);
                     }}
-                    title="Ver historial del paciente"
-                    aria-label="Ver historial del paciente"
+                    title={call.patient_id ? "Ver historial del paciente" : "Paciente sin identificar"}
+                    aria-label={call.patient_id ? "Ver historial del paciente" : "Paciente sin identificar"}
                   >
                     <HistoryIcon />
                   </button>

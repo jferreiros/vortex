@@ -144,8 +144,9 @@ function loadStoredState() {
 
 function applyPathwaysDoc(json, setPathways, setSelectedId) {
   if (!Array.isArray(json?.pathways) || json.pathways.length === 0) return;
-  setPathways(migratePathways(json.pathways));
-  if (json.selectedId) setSelectedId(json.selectedId);
+  const next = migratePathways(json.pathways);
+  setPathways(next);
+  setSelectedId(next.some((pathway) => pathway.id === json.selectedId) ? json.selectedId : next[0].id);
 }
 
 function SaveIcon() {

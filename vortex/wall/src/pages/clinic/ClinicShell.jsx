@@ -1,5 +1,6 @@
 import { Outlet } from "react-router-dom";
 import Sidebar from "./Sidebar";
+import VortyDock from "./VortyDock";
 import "./clinic-shell.css";
 
 // Persistent app chrome for every Clinic View page (Home, Settings,
@@ -11,6 +12,7 @@ export default function ClinicShell() {
       <main className="clinic-shell-content">
         <Outlet />
       </main>
+      <VortyDock />
     </div>
   );
 }
