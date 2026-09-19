@@ -18,7 +18,15 @@ from typing import Any
 
 import pytest
 
-from vortex.contract import MADRID, Action, NoAction, SubmitResult, action_route
+from vortex.contract import (
+    MADRID,
+    Action,
+    EligibilityVerdict,
+    NoAction,
+    Rejection,
+    SubmitResult,
+    action_route,
+)
 from vortex.line.session import CallSession
 from vortex.line.twilio import StartPayload
 
@@ -70,6 +78,14 @@ def a_no_action() -> dict[str, Any]:
     return {"action": NoAction(reason="out_of_scope").model_dump(mode="json")}
 
 
+def a_rule_that_bit(session: CallSession) -> None:
+    """A refusal in the call's memory, as ``check_eligibility`` leaves one."""
+    session.memory.observe(
+        "check_eligibility",
+        EligibilityVerdict(allowed=False, rejection=Rejection(reason="specialty_not_covered")),
+    )
+
+
 def events(settings: Any, call_id: str, kind: str) -> list[dict[str, Any]]:
     path = Path(settings.calls_log_path)
     lines = [json.loads(line) for line in path.read_text().splitlines()]
@@ -110,6 +126,30 @@ async def test_a_submission_the_platform_did_not_take_arms_nothing(
 
     assert session.hangup_armed is False
     assert session.hangup_reason == ""
+
+
+async def test_an_accepted_refusal_arms_the_hangup(offline_settings) -> None:
+    """The refusal the caller accepted is the ending: there is nothing left to do."""
+    session = make_session(offline_settings, "CA-refusal", ScriptedSubmitter("accepted"))
+    a_rule_that_bit(session)
+
+    result = await session.submit_accepted_refusal()
+
+    assert result is not None
+    assert session.hangup_armed is True
+    assert session.hangup_reason == "submit_accepted"
+
+
+async def test_a_refusal_the_platform_did_not_take_arms_nothing(offline_settings) -> None:
+    """Nothing is on record, so the fallback inside the window is still the last word."""
+    session = make_session(
+        offline_settings, "CA-refusal-rejected", ScriptedSubmitter("rejected", 422)
+    )
+    a_rule_that_bit(session)
+
+    await session.submit_accepted_refusal()
+
+    assert session.hangup_armed is False
 
 
 async def test_an_ordinary_tool_call_arms_nothing(offline_settings) -> None:
