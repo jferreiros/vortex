@@ -545,7 +545,9 @@ def storage_bakeoff(full_pull_slots: list[dict], runs: int) -> dict:
             "load_s": round(json_load, 4),
             "size_mb": round(json_path.stat().st_size / 1e6, 3),
             "patient_by_phone_scan_ms": round(json_scan, 3),
-            "note": "a query is a full scan unless the whole file is re-indexed in memory after load",
+            "note": (
+                "a query is a full scan unless the whole file is re-indexed in memory after load"
+            ),
         }
 
         # --- SQLite ---------------------------------------------------------
@@ -555,7 +557,8 @@ def storage_bakeoff(full_pull_slots: list[dict], runs: int) -> dict:
         db.execute("CREATE TABLE patients (patient_id TEXT PRIMARY KEY, phone TEXT, payload TEXT)")
         db.execute("CREATE INDEX idx_patients_phone ON patients(phone)")
         db.execute(
-            "CREATE TABLE appointments (appointment_id TEXT PRIMARY KEY, patient_id TEXT, payload TEXT)"
+            "CREATE TABLE appointments ("
+            "appointment_id TEXT PRIMARY KEY, patient_id TEXT, payload TEXT)"
         )
         db.execute("CREATE INDEX idx_appt_patient ON appointments(patient_id)")
         db.execute("CREATE TABLE slots (provider_id TEXT, day TEXT, payload TEXT)")
@@ -616,7 +619,9 @@ def storage_bakeoff(full_pull_slots: list[dict], runs: int) -> dict:
             "build_s": round(mem_build, 4),
             "payload_mb_serialized": round(payload_bytes / 1e6, 3),
             "patient_by_phone_us": round(mem_query, 2),
-            "note": "payload_mb_serialized is the JSON floor; live Python objects sit ~2-4x above it",
+            "note": (
+                "payload_mb_serialized is the JSON floor; live Python objects sit ~2-4x above it"
+            ),
         }
     return report
 
@@ -771,9 +776,8 @@ async def amain() -> None:
             if "error" in row:
                 print(f"| {name} | ERROR {row['error'][:60]} | | |")
             else:
-                print(
-                    f"| {name} | {row['p50_ms']} | {row['p95_ms']} | {row.get('api_requests_per_call')} |"
-                )
+                reqs = row.get("api_requests_per_call")
+                print(f"| {name} | {row['p50_ms']} | {row['p95_ms']} | {reqs} |")
     print("\ncache_build_local:", json.dumps(out["cache_build_local"]))
     print("storage:", json.dumps(out["storage"], indent=2)[:1500])
     if "network_floor" in out:
