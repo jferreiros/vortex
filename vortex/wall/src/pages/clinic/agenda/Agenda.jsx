@@ -17,7 +17,7 @@ function addDays(iso, days) {
 
 function visitKey(visit) {
   if (!visit) return "";
-  return `${visit.date || ""}-${visit.time}-${visit.full_name}`;
+  return `${visit.date || ""}-${visit.time}-${visit.provider_id || ""}-${visit.full_name}`;
 }
 
 function loadName() {
@@ -52,7 +52,7 @@ export default function Agenda() {
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState(null);
   const [focusDay, setFocusDay] = useState("");
-  const [calView, setCalView] = useState("week");
+  const [calView, setCalView] = useState("month");
   const [site, setSite] = useState("");
   const [specialty, setSpecialty] = useState("");
   const [typeId, setTypeId] = useState("");
@@ -79,13 +79,11 @@ export default function Agenda() {
       .catch(() => {});
   }, []);
 
-  const load = useCallback(async (who, monthStart) => {
-    if (!who.trim()) {
-      setData(null);
-      return;
-    }
+  const load = useCallback(async (who, monthStart, spec) => {
     setLoading(true);
-    const params = new URLSearchParams({ name: who.trim() });
+    const params = new URLSearchParams();
+    if (who.trim()) params.set("name", who.trim());
+    if (spec) params.set("specialty", spec);
     if (monthStart) params.set("month", monthStart.slice(0, 7));
     const res = await fetch(`/api/wall/doctor-agenda?${params}`);
     const payload = await res.json();
@@ -103,8 +101,8 @@ export default function Agenda() {
   }, []);
 
   useEffect(() => {
-    if (name) load(name, month);
-  }, [name, month, load]);
+    load(name, month, specialty);
+  }, [name, month, specialty, load]);
 
   function pickDoctor(who) {
     const next = who.trim();
@@ -112,13 +110,13 @@ export default function Agenda() {
     setMonth("");
     setSelected(null);
     setFocusDay("");
-    setCalView("week");
+    setCalView("month");
     setName(next);
   }
 
   function backToWeek() {
     setSelected(null);
-    setCalView("week");
+    setCalView("month");
   }
 
   function openDay(day) {
@@ -167,7 +165,7 @@ export default function Agenda() {
         title={data?.doctor?.name || "Horarios"}
         subtitle={
           data?.doctor?.specialty
-            || "Elige especialidad, sede o tipo de cita. El calendario cambia con eso."
+            || "Elige especialidad o doctor. El calendario enseña las citas del pack."
         }
       />
       <div className="agenda-toolbar">
@@ -178,7 +176,7 @@ export default function Agenda() {
           value={name}
           onChange={(event) => pickDoctor(event.target.value)}
         >
-          <option value="">Elige doctor</option>
+          <option value="">Cualquiera</option>
           {doctors.map((row) => (
             <option key={row.name} value={row.name}>{row.name}</option>
           ))}
@@ -238,16 +236,22 @@ export default function Agenda() {
         {error && <p className="agenda-error">{error}</p>}
       </div>
 
-      {!name || !data ? (
+      {loading && !data ? (
         <Card padding="lg">
           <div className="agenda-empty">
-            <p>{loading ? "Cargando agenda…" : "Elige un horario arriba para ver la semana."}</p>
+            <p>Cargando agenda…</p>
+          </div>
+        </Card>
+      ) : !data ? (
+        <Card padding="lg">
+          <div className="agenda-empty">
+            <p>No hay horarios para esos filtros.</p>
           </div>
         </Card>
       ) : selected ? (
         <div className="agenda-day-stack">
           <Button variant="secondary" type="button" className="agenda-back" onClick={backToWeek}>
-            ‹ Volver a la semana
+            ‹ Volver al calendario
           </Button>
           <div className="agenda-consult">
           <Card padding="lg" className="agenda-day-pane">
@@ -268,7 +272,7 @@ export default function Agenda() {
       ) : calView === "day" ? (
         <div className="agenda-day-stack">
           <Button variant="secondary" type="button" className="agenda-back" onClick={backToWeek}>
-            ‹ Volver a la semana
+            ‹ Volver al calendario
           </Button>
         <Card padding="lg" className="agenda-day-pane">
           <SectionHeader
@@ -439,6 +443,7 @@ function DayCell({ day, lookingAt, selectedKey, onDay, onVisit, tall }) {
             }}
           >
             {visit.time} {visit.full_name}
+            {visit.provider_name ? ` · ${visit.provider_name}` : ""}
           </button>
         ))}
       </span>
@@ -464,7 +469,7 @@ function DayList({ visits, selectedKey, onPick }) {
           onClick={() => onPick(visit)}
         >
           <strong>{visit.time}</strong>
-          <span>{visit.full_name}</span>
+          <span>{visit.full_name}{visit.provider_name ? ` · ${visit.provider_name}` : ""}</span>
           <em>{visit.duration_minutes || 15} min</em>
         </button>
       ))}
@@ -494,6 +499,7 @@ function VisitDetail({ visit }) {
       </div>
       <dl className="agenda-kv">
         <div><dt>Paciente</dt><dd>{visit.full_name}</dd></div>
+        {visit.provider_name ? <div><dt>Doctor</dt><dd>{visit.provider_name}</dd></div> : null}
         <div><dt>Cuándo</dt><dd>{visit.when}</dd></div>
         <div><dt>Duración</dt><dd>{visit.duration_minutes || 15} min</dd></div>
         <div><dt>Centro</dt><dd>{visit.location_name || "—"}</dd></div>
