@@ -1,4 +1,4 @@
-.PHONY: install run smoke test call replay try-api tunnel tail lint fmt board design-sync rehearse evals evals-logic evals-conversation evals-voice evals-replay evals-report evals-accept evals-selftest evals-discord logs-discord langfuse-check
+.PHONY: install run smoke test call replay try-api tunnel tail lint fmt board design-sync didactica rehearse evals evals-logic evals-conversation evals-voice evals-replay evals-report evals-accept evals-selftest evals-discord logs-discord langfuse-check
 
 PORT ?= 7860
 BOARD_PORT ?= 8080
@@ -46,6 +46,10 @@ lint:
 
 design-sync:      ## copy the design tokens to docs/ (GitHub Pages serves only docs/); see DESIGN.md
 	cp vortex/observability/design.css docs/design.css
+	$(MAKE) didactica
+
+didactica:        ## inline the design tokens into docs/didactica.html, the standalone explainer
+	uv run python scripts/build_didactica.py
 
 fmt:
 	uv run ruff format . && uv run ruff check --fix .

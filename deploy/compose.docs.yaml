@@ -1,0 +1,76 @@
+# Vortex — the didactic explainer, published as a static page.
+#
+#     docker compose -f deploy/compose.docs.yaml up -d --build
+#
+# One nginx with one file in it. It shares nothing with the line or the board:
+# its own project name, its own router names, its own host. Restarting it can
+# never touch the socket the organisers dial.
+#
+# The page is self-contained (`make didactica` inlines the design tokens), so
+# the image carries no stylesheet, no font file and no image. Rebuild after the
+# page changes; there is nothing else to deploy.
+
+name: vortex-docs
+
+networks:
+  coolify:
+    external: true
+
+services:
+  docs:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.docs
+    image: vortex-docs:local
+    container_name: vortex-docs
+
+    restart: unless-stopped
+
+    networks:
+      - coolify
+
+    # Visible to Traefik on the shared network, never to the internet directly.
+    expose:
+      - "80"
+
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+
+    # A courteous neighbour on a shared box: bounded memory, bounded logs.
+    mem_limit: 128m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=coolify
+
+      - traefik.http.middlewares.vortexdocs-gzip.compress=true
+      - traefik.http.middlewares.vortexdocs-https.redirectscheme.scheme=https
+      - traefik.http.middlewares.vortexdocs-https.redirectscheme.permanent=true
+      - traefik.http.middlewares.vortexdocs-headers.headers.stsSeconds=31536000
+      - traefik.http.middlewares.vortexdocs-headers.headers.framedeny=true
+      - traefik.http.middlewares.vortexdocs-headers.headers.browserxssfilter=true
+      - traefik.http.middlewares.vortexdocs-headers.headers.contenttypenosniff=true
+      - traefik.http.middlewares.vortexdocs-headers.headers.referrerpolicy=no-referrer
+
+      # sslip.io resolves <anything>.167.233.80.47.sslip.io to this host, so the
+      # name works the moment the container starts. No DNS record to wait for.
+      - traefik.http.routers.vortexdocs-sslip-http.rule=Host(`docs.167.233.80.47.sslip.io`)
+      - traefik.http.routers.vortexdocs-sslip-http.entrypoints=http
+      - traefik.http.routers.vortexdocs-sslip-http.middlewares=vortexdocs-https
+      - traefik.http.routers.vortexdocs-sslip-http.service=vortex-docs
+
+      - traefik.http.routers.vortexdocs-sslip-https.rule=Host(`docs.167.233.80.47.sslip.io`)
+      - traefik.http.routers.vortexdocs-sslip-https.entrypoints=https
+      - traefik.http.routers.vortexdocs-sslip-https.tls=true
+      - traefik.http.routers.vortexdocs-sslip-https.tls.certresolver=letsencrypt
+      - traefik.http.routers.vortexdocs-sslip-https.middlewares=vortexdocs-gzip,vortexdocs-headers
+      - traefik.http.routers.vortexdocs-sslip-https.service=vortex-docs
+
+      - traefik.http.services.vortex-docs.loadbalancer.server.port=80
