@@ -505,7 +505,11 @@ The console (`live.py`) is built from these. Reuse them before you draw a new on
 - `.live-badge`: "N on the line", dark, pulsing.
 - `.icon`: 16px stroke, `currentColor`, no hue. Sidebar, workflow cards, mark.
 - `.app` is one scroll: sidebar pinned, `.content` scrolls. Under 850px both
-  release and the page scrolls as a document.
+  release and the page scrolls as a document. Public pages (`/wall`, `/call`,
+  sign-in) scroll as a document; Quasar's layout must not clip them.
+- Unsigned `/` is team sign-in, never a bounce back to `/wall`.
+- `.transcript`: the chat column scrolls inside itself (64dvh) so Live and
+  `/wall` stay on one screen.
 - `.workflow` with `.wf-card` / `.patient` / `.agent` / `.tool` / `.speaking`:
   the live call as cards in the order the line wrote them. The speaking card
   pulses with `transform` only. The outcome card is still the page's one
