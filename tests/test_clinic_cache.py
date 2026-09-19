@@ -51,6 +51,38 @@ class CountingLiveClinic(ClinicClient):
         return await FakeClinicClient().availability(**kwargs)
 
 
+class BlockingLiveClinic(ClinicClient):
+    """A live client whose fetch parks until the test releases it."""
+
+    def __init__(self) -> None:
+        super().__init__("http://unused", "test-key")
+        self.availability_fetches = 0
+        self.fetch_started = asyncio.Event()
+        self.fetch_released = asyncio.Event()
+
+    async def _fetch_availability(self, *args, **kwargs):
+        self.availability_fetches += 1
+        self.fetch_started.set()
+        await self.fetch_released.wait()
+        return AvailabilityResponse()
+
+
+class BlockingFakeClinic(FakeClinicClient):
+    """An offline client whose fetch parks until the test releases it."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.availability_fetches = 0
+        self.fetch_started = asyncio.Event()
+        self.fetch_released = asyncio.Event()
+
+    async def _fetch_availability(self, **kwargs):
+        self.availability_fetches += 1
+        self.fetch_started.set()
+        await self.fetch_released.wait()
+        return await super()._fetch_availability(**kwargs)
+
+
 class AcceptedSubmitter:
     async def submit(self, call_id, action):
         return SubmitResult(status="accepted")
@@ -117,6 +149,65 @@ async def test_live_availability_misses_are_deduplicated() -> None:
     await clinic.aclose()
 
 
+async def test_invalidation_during_a_live_miss_drops_the_stale_response() -> None:
+    clinic = BlockingLiveClinic()
+    query = {
+        "date_from": date(2026, 9, 19),
+        "date_to": date(2026, 9, 19),
+        "specialty_id": "general_practice",
+        "patient_id": "P00042",
+    }
+
+    pending = asyncio.create_task(clinic.availability(**query))
+    await clinic.fetch_started.wait()
+    clinic.invalidate_availability()
+    clinic.fetch_released.set()
+    await pending
+    await clinic.availability(**query)
+
+    assert clinic.availability_fetches == 2
+    await clinic.aclose()
+
+
+async def test_invalidation_during_a_fresh_fetch_drops_the_stale_response() -> None:
+    clinic = BlockingLiveClinic()
+    query = {
+        "date_from": date(2026, 9, 19),
+        "date_to": date(2026, 9, 19),
+        "specialty_id": "general_practice",
+        "patient_id": "P00042",
+    }
+
+    pending = asyncio.create_task(clinic.fresh_availability(**query))
+    await clinic.fetch_started.wait()
+    clinic.invalidate_availability()
+    clinic.fetch_released.set()
+    await pending
+    await clinic.availability(**query)
+
+    assert clinic.availability_fetches == 2
+    await clinic.aclose()
+
+
+async def test_invalidation_during_an_offline_miss_drops_the_stale_response() -> None:
+    clinic = BlockingFakeClinic()
+    query = {
+        "date_from": date(2026, 9, 19),
+        "date_to": date(2026, 9, 19),
+        "specialty_id": "general_practice",
+        "patient_id": "P00042",
+    }
+
+    pending = asyncio.create_task(clinic.availability(**query))
+    await clinic.fetch_started.wait()
+    clinic.invalidate_availability()
+    clinic.fetch_released.set()
+    await pending
+    await clinic.availability(**query)
+
+    assert clinic.availability_fetches == 2
+
+
 @pytest.mark.parametrize(
     "action",
     [
@@ -138,9 +229,7 @@ async def test_live_availability_misses_are_deduplicated() -> None:
         ),
     ],
 )
-async def test_accepted_diary_writes_invalidate_availability(
-    tmp_path: Path, action
-) -> None:
+async def test_accepted_diary_writes_invalidate_availability(tmp_path: Path, action) -> None:
     clinic = CountingFakeClinic()
     query = {
         "date_from": date(2026, 9, 19),
@@ -165,9 +254,7 @@ async def test_prepare_booking_rechecks_outside_the_snapshot(tmp_path: Path) -> 
     )
     result = await prepare_booking(
         _context(tmp_path, clinic),
-        PrepareBookingInput(
-            patient_id="P00042", slot=offered.slots[0], policy_id="sanitas"
-        ),
+        PrepareBookingInput(patient_id="P00042", slot=offered.slots[0], policy_id="sanitas"),
     )
 
     assert result.action is None
