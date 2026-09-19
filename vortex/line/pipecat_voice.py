@@ -43,13 +43,19 @@ from fastapi import WebSocket
 
 from vortex import tools as registry
 from vortex.conversation.language import DEFAULT_LANGUAGE, detect_language, tts_voice_for
-from vortex.conversation.prompt import GREETING, idle_prompt_for, initial_messages
+from vortex.conversation.prompt import (
+    GREETING,
+    idle_prompt_for,
+    initial_messages,
+    wait_prompt_for,
+)
 from vortex.conversation.stt_context import stt_context_text, stt_terms
 from vortex.conversation.turns import (
     TurnSettings,
     default_turn_settings,
     user_turn_strategies,
 )
+from vortex.line.llm_timeout import first_token_guard
 from vortex.line.session import CallSession
 from vortex.observability.tracing import traced_openai_llm_service
 
@@ -131,6 +137,10 @@ async def run_pipecat_call(
         should_interrupt=turns.enable_interruptions,
     )
 
+    # The language this call is in, shared by the watcher that updates it and
+    # the router that reads it. Per call: a closure, never a module global.
+    language_state = _LanguageState()
+
     # ---- LLM: any OpenAI-compatible endpoint, as long as it is in the EU. ----
     llm_settings = OpenAILLMService.Settings(
         model=settings.llm_model,
@@ -139,15 +149,22 @@ async def run_pipecat_call(
         extra=_llm_extra_body(settings),
     )
     llm = traced_openai_llm_service(
-        OpenAILLMService,
+        # The guard goes underneath the tracing subclass, which only overrides
+        # ``create_client``: a request that never streams a first token is
+        # abandoned, re-issued, and in the worst case answered with a short
+        # spoken line. See vortex/line/llm_timeout.py for the post-mortem.
+        first_token_guard(OpenAILLMService),
         api_key=settings.llm_api_key,
         base_url=settings.llm_base_url or None,
         settings=llm_settings,
+        first_token_timeout_secs=settings.llm_first_token_timeout_secs,
+        llm_retries=settings.llm_retries,
+        # Read at fire time, so a mid-call language switch moves the line and
+        # the TTS router sends it down the branch that can say it.
+        timeout_fallback_text=lambda: wait_prompt_for(language_state.language),
+        timeout_log_event=ctx.log.event,
     )
 
-    # The language this call is in, shared by the watcher that updates it and
-    # the router that reads it. Per call: a closure, never a module global.
-    language_state = _LanguageState()
     tts = _make_tts_stage(settings, language_state)
 
     # ---- tools: every registry entry becomes a function the model can call ----
