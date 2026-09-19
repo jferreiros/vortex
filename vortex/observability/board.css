@@ -366,57 +366,6 @@ body:has(.app) .nicegui-content {
 /* Doctor calendar (/calendar)                                         */
 /* ------------------------------------------------------------------ */
 
-.cal-rail {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: var(--space-md);
-}
-
-.cal-doc {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-xs);
-  text-align: left;
-  border: 1px solid var(--hairline);
-  border-radius: var(--rounded-lg);
-  background: var(--canvas);
-  padding: var(--space-md) var(--space-lg);
-  cursor: pointer;
-  min-width: 0;
-}
-
-.cal-doc.on {
-  border-color: var(--ink);
-}
-
-.cal-doc .row {
-  gap: var(--space-sm);
-}
-
-.cal-doc-name {
-  font: var(--text-body-sm-strong);
-  color: var(--ink);
-}
-
-.cal-doc-spec,
-.cal-doc-count {
-  font: var(--text-caption-sm);
-  color: var(--body);
-}
-
-.cal-bar {
-  height: 6px;
-  border-radius: var(--rounded-full);
-  background: var(--surface-soft);
-  border: 1px solid var(--hairline);
-  overflow: hidden;
-}
-
-.cal-bar-fill {
-  height: 100%;
-  background: var(--ink);
-}
-
 .cal-grid-wrap {
   overflow-x: auto;
   padding-bottom: var(--space-sm);
@@ -479,6 +428,23 @@ body:has(.app) .nicegui-content {
   border-radius: var(--rounded-sm);
 }
 
+button.cal-cell,
+.cal-cell.q-btn {
+  height: 18px !important;
+  min-height: 18px !important;
+  min-width: 0 !important;
+  padding: 0 !important;
+  border-radius: var(--rounded-sm) !important;
+  font-size: 0 !important;
+  color: transparent !important;
+}
+
+button.cal-cell .q-btn__content,
+.cal-cell.q-btn .q-btn__content {
+  width: 100%;
+  height: 100%;
+}
+
 .cal-cell.free {
   background: var(--surface-soft);
   border: 1px solid var(--hairline);
@@ -486,8 +452,76 @@ body:has(.app) .nicegui-content {
 
 .cal-cell.booked {
   background: var(--ink);
+  cursor: pointer;
+}
+
+.cal-cell.booked.on {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
 }
 
 .cal-cell.off {
   background: transparent;
+}
+
+.page-head .button-quiet {
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.cal-grid-week {
+  min-width: 0;
+  width: 100%;
+}
+
+.cal-grid-week .cal-cell,
+.cal-grid-week button.cal-cell,
+.cal-grid-week .cal-cell.q-btn {
+  height: 28px;
+  min-height: 28px !important;
+}
+
+.cal-week {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-md);
+}
+
+.cal-week-label {
+  font: var(--text-body-sm-strong);
+  color: var(--ink);
+  text-align: center;
+  flex: 1 1 auto;
+}
+
+.cal-today-list {
+  display: grid;
+  gap: var(--space-lg);
+}
+
+.cal-brief {
+  margin: 0;
+  max-width: 40rem;
+}
+
+.cal-brief .section-title {
+  margin-bottom: var(--space-md);
+}
+
+.cal-brief-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-md);
+}
+
+.cal-note {
+  max-width: 56ch;
+  margin-top: var(--space-xs);
+}
+
+.cal-brief .kicker {
+  margin-top: var(--space-md);
 }

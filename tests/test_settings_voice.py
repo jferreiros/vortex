@@ -418,6 +418,7 @@ def test_describe_never_leaks_a_key(clean_env) -> None:
         "LANGFUSE_PUBLIC_KEY": "pk-lf-secret",
         "LANGFUSE_SECRET_KEY": "sk-lf-secret",
         "GOOGLE_API_KEY": "google-api-secret",
+        "HF_TOKEN": "hf-secret",
     }
     s = _settings(clean_env, VORTEX_TTS_PROVIDER="elevenlabs", **secrets)
     described = s.describe()
@@ -429,6 +430,7 @@ def test_describe_never_leaks_a_key(clean_env) -> None:
     assert described["has_elevenlabs_key"] is True
     assert described["has_arbiter_key"] is True
     assert described["has_langfuse_keys"] is True
+    assert described["has_hf_token"] is True
     assert described["has_google_api_key"] is True
     assert described["llm_provider"] == "helmcode"
     assert described["tts_provider"] == "elevenlabs"

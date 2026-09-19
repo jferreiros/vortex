@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { useMemo, useState } from "react";
 import SectionHeader from "../../../components/ui/SectionHeader";
 import Card from "../../../components/ui/Card";
@@ -64,6 +65,9 @@ function OccupancyCard() {
             <span className="occupancy-headline-value">{occ.weekAvgPct}%</span>
             <span className="occupancy-headline-label">de ocupación media esta semana</span>
           </div>
+          <Link to="/clinic/doctor" className="occupancy-diary-link">
+            Horarios
+          </Link>
         </div>
 
         <div className="occupancy-divider" />

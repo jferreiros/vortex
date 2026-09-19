@@ -128,19 +128,24 @@ async def test_console_routes_render(seeded: Path, user: User) -> None:
 async def test_calendar_page_renders_doctor_grids(seeded: Path, user: User) -> None:
     await user.open("/calendar")
     await user.should_see("Calendar")
-    await user.should_see("Doctors")
-    # Doctor names come from the catalogue, so the rail renders with or without
-    # the synthetic-data pack present.
-    await user.should_see("Dra. Ortiz")
+    await user.should_see("Type your name to open it.")
+    await user.should_not_see("Dra. Ortiz")
 
 
-async def test_calendar_page_renders_doctor_grids(seeded: Path, user: User) -> None:
+async def test_calendar_login_opens_one_diary_and_a_visit(
+    seeded: Path, user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("VORTEX_CALENDAR_TODAY", "2026-09-19")
     await user.open("/calendar")
-    await user.should_see("Calendar")
-    await user.should_see("Doctors")
-    # Doctor names come from the catalogue, so the rail renders with or without
-    # the synthetic-data pack present.
+    user.find(ui.input).type("Dra. Ortiz")
+    user.find("Open").click()
     await user.should_see("Dra. Ortiz")
+    await user.should_see("Next")
+    await user.should_see("Today")
+    await user.should_not_see("Dr. Sáez")
+    await user.should_see("Ignacio Vázquez Moreno")
+    await user.should_not_see("Roster record")
+    await user.should_not_see("Fake record")
 
 
 async def test_public_pages_mask_the_phone(seeded: Path, user: User) -> None:
