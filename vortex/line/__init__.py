@@ -11,6 +11,7 @@ Modules:
 - ``submit.py``        POST /api/v1/submit/<action> with the 30 s window rules.
 - ``stub_voice.py``    beeps-only pipeline for offline runs and tests.
 - ``pipecat_voice.py`` the real STT -> LLM -> TTS pipeline.
+- ``aic_filter.py``    optional ai-coustics Quail input filter (default off).
 - ``privacy.py``       outgoing TTS guard: block session national_id/phone.
 - ``ulaw.py``          G.711 helpers for tones and silence.
 """

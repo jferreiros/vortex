@@ -50,6 +50,7 @@ from vortex.conversation.turns import (
     default_turn_settings,
     user_turn_strategies,
 )
+from vortex.line.aic_filter import build_audio_in_filter
 from vortex.line.session import CallSession
 from vortex.observability.tracing import traced_openai_llm_service
 
@@ -103,6 +104,15 @@ async def run_pipecat_call(
         call_sid=session.call_id,
         params=TwilioFrameSerializer.InputParams(auto_hang_up=False),
     )
+    # Optional AICFilter (Quail 8 kHz) before Silero/Soniox. Default off —
+    # only enable after entity CER drops on the T54 5 dB bench.
+    audio_in_filter = build_audio_in_filter(settings)
+    if audio_in_filter is not None:
+        ctx.log.event(
+            "voice.aic_filter",
+            model=settings.aic_model_id,
+            enabled=True,
+        )
     transport = FastAPIWebsocketTransport(
         websocket=ws,
         params=FastAPIWebsocketParams(
@@ -110,6 +120,7 @@ async def run_pipecat_call(
             audio_out_enabled=True,
             add_wav_header=False,
             serializer=serializer,
+            audio_in_filter=audio_in_filter,
         ),
     )
 
@@ -233,6 +244,7 @@ def _providers(settings: Any) -> dict[str, object]:
         "llm": settings.llm_model,
         "tts": settings.tts_provider,
         "tts_alt": settings.tts_provider_alt,
+        "aic_filter": "on" if settings.aic_filter_enabled and settings.aic_sdk_license else "off",
     }
 
 
