@@ -1,0 +1,4 @@
+# BuildKit reads this file because it sits next to deploy/Dockerfile.docs.
+# The image needs one file; everything else is context we do not ship.
+*
+!docs/didactica.html
