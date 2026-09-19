@@ -24,7 +24,8 @@ from vortex.contract import (
     Slot,
     ToolContext,
 )
-from vortex.identity.tools import check_national_id, find_patient
+from vortex.identity.dictation import check_email, check_phone
+from vortex.identity.tools import check_national_id, find_patient, normalize_email, normalize_phone
 from vortex.line.submit import DryRunSubmitClient
 from vortex.observability.calllog import CallLog
 from vortex.tools import call_tool
@@ -50,6 +51,56 @@ def logged(ctx: ToolContext) -> list[dict]:
     if not ctx.log.path.exists():
         return []
     return [json.loads(line) for line in ctx.log.path.read_text().splitlines() if line.strip()]
+
+
+# ---- dictated email / phone (problem 4; docs/research/05 §3) ---------------
+
+
+@pytest.mark.parametrize(
+    ("spoken", "address"),
+    [
+        ("ana punto garcia arroba gmail punto com", "ana.garcia@gmail.com"),  # es
+        ("ana punt garcia arrova gmail punt com", "ana.garcia@gmail.com"),  # ca
+        ("ana dot garcia at gmail dot com", "ana.garcia@gmail.com"),  # en
+        ("sergio guion bajo martinez arroba outlook punto es", "sergio_martinez@outlook.es"),
+        ("natalia dot munoz 86 at hotmail dot com", "natalia.munoz86@hotmail.com"),
+        ("juan arroba yimeil punto com", "juan@gmail.com"),  # STT domain alias
+        ("Ana.Garcia@Gmail.com", "ana.garcia@gmail.com"),  # already an address
+    ],
+)
+def test_spoken_email_maps_and_validates_without_dns(spoken: str, address: str) -> None:
+    result = check_email(spoken)
+    assert result.normalized == address
+    assert result.valid is True
+    assert normalize_email(spoken) == address
+
+
+@pytest.mark.parametrize(
+    ("spoken", "e164"),
+    [
+        ("seis uno dos tres cuatro cinco seis siete ocho", "+34612345678"),  # es digits
+        ("sis un dos tres quatre cinc sis set vuit", "+34612345678"),  # ca digits
+        ("612 34 56 78", "+34612345678"),  # grouped digits
+    ],
+)
+def test_spoken_phone_maps_through_phonenumbers_es(spoken: str, e164: str) -> None:
+    result = check_phone(spoken)
+    assert result.normalized == e164
+    assert result.possible is True
+    assert normalize_phone(spoken) == e164
+
+
+def test_check_email_rejects_garbage_without_dns() -> None:
+    result = check_email("esto no es un correo")
+    assert result.valid is False
+    assert "@" not in result.normalized
+
+
+def test_organiser_7xx_mobile_is_possible_even_if_unallocated() -> None:
+    """Platform fixtures use 7xx mobiles; is_valid_number would refuse them."""
+    result = check_phone("792919982")
+    assert result.normalized == "+34792919982"
+    assert result.possible is True
 
 
 # ---- check_national_id: DNI/NIE, mod-23 -----------------------------------
