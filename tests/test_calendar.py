@@ -12,8 +12,10 @@ from datetime import date, datetime, time
 from vortex.clinic.client import FakeClinicClient
 from vortex.contract import (
     MADRID,
+    Appointment,
     Catalogue,
     OpeningHours,
+    PatientRecord,
     ProviderRecord,
     ProviderSchedule,
 )
@@ -53,7 +55,12 @@ def _slot(hour: int, minute: int) -> str:
 
 
 def _book_event(
-    hour: int, minute: int, *, patient: str = "P00001", appointment_id: str = ""
+    hour: int,
+    minute: int,
+    *,
+    patient: str = "P00001",
+    appt_type: str = "review",
+    appointment_id: str = "",
 ) -> dict:
     return {
         "kind": "submit.result",
@@ -63,7 +70,7 @@ def _book_event(
             "patient_id": patient,
             "provider_id": "PR01",
             "location_id": "centro",
-            "appointment_type_id": "review",
+            "appointment_type_id": appt_type,
             "appointment_id": appointment_id,
             "slot": _slot(hour, minute),
         },
@@ -250,3 +257,324 @@ async def test_real_catalogue_fills_from_the_synthetic_pack() -> None:
     # No booked cell exceeds its doctor's capacity accounting.
     for c in calendars:
         assert c.booked <= c.capacity
+
+
+# ---- visit briefing -------------------------------------------------------
+
+
+def test_patient_index_joins_given_name_and_surnames() -> None:
+    index = cal.patient_index(
+        [
+            {
+                "patient_id": "P00007",
+                "given_name": "Marta",
+                "first_surname": "Ruiz",
+                "second_surname": "López",
+                "phone": "612345678",
+                "insurer": "sanitas",
+                "note": "Hard of hearing — speak slowly.",
+                "has_visited_before": True,
+            }
+        ]
+    )
+    person = index["P00007"]
+    assert person.full_name == "Marta Ruiz López"
+    assert person.phone == "612345678"
+    assert person.insurer == "sanitas"
+    assert person.has_visited_before is True
+
+
+def test_briefing_for_joins_the_roster_and_keeps_unknown_ids() -> None:
+    patients = cal.patient_index(
+        [
+            {
+                "patient_id": "P00007",
+                "given_name": "Marta",
+                "first_surname": "Ruiz",
+                "second_surname": "López",
+                "insurer": "sanitas",
+                "note": "Hard of hearing — speak slowly.",
+                "has_visited_before": True,
+                "phone": "612345678",
+            }
+        ]
+    )
+    cell = cal.CalendarCell(
+        start=datetime(2026, 10, 5, 9, 15, tzinfo=MADRID),
+        status="booked",
+        patient_id="P00007",
+        appointment_type_id="review",
+        location_id="centro",
+    )
+    brief = cal.briefing_for(
+        cell,
+        patients,
+        location_names={"centro": "Arenal Centro"},
+        type_names={"review": "Review"},
+        plan_names={"sanitas": "Sanitas"},
+    )
+    assert brief.full_name == "Marta Ruiz López"
+    assert brief.location_name == "Arenal Centro"
+    assert brief.appointment_type == "Review"
+    assert brief.insurer == "Sanitas"
+    assert brief.note == "Hipoacusia: habla despacio."
+    assert brief.has_visited_before is True
+
+    unknown = cal.CalendarCell(
+        start=datetime(2026, 10, 5, 9, 30, tzinfo=MADRID),
+        status="booked",
+        patient_id="P99999",
+        appointment_type_id="first_visit",
+        location_id="norte",
+    )
+    missing = cal.briefing_for(unknown, patients)
+    assert missing.full_name == ""
+    assert missing.location_name == "norte"
+    assert missing.appointment_type == "first visit"
+    assert missing.note == ""
+
+
+def test_summarize_note_skips_short_text_and_missing_token() -> None:
+    cal.clear_summary_cache()
+    long_note = " ".join(["word"] * 50)
+    assert cal.summarize_note("Hard of hearing — speak slowly.", token="hf_x") == ""
+    assert cal.summarize_note(long_note, token="") == ""
+
+
+def test_summarize_note_caches_huggingface_payload() -> None:
+    cal.clear_summary_cache()
+    long_note = " ".join(["word"] * 50)
+    calls = {"n": 0}
+
+    def post(url, *, headers, json, timeout):
+        del url, headers, timeout
+        assert json["inputs"] == long_note
+        calls["n"] += 1
+        return {"summary_text": "Speak slowly. Hard of hearing."}
+
+    first = cal.summarize_note(long_note, token="hf_x", post=post)
+    second = cal.summarize_note(long_note, token="hf_x", post=post)
+    assert first == "Speak slowly. Hard of hearing."
+    assert second == first
+    assert calls["n"] == 1
+
+
+def test_clinical_note_strips_pack_metadata() -> None:
+    assert cal.clinical_note("Hard of hearing — speak slowly.") == "Hard of hearing — speak slowly."
+    assert (
+        cal.clinical_note(
+            "Fake record. Hard of hearing; speak slowly. Holds a dermatology referral."
+        )
+        == "Hard of hearing; speak slowly. Holds a dermatology referral."
+    )
+    assert (
+        cal.clinical_note("Fake record. Published case: first thing Monday the twelfth of October.")
+        == "first thing Monday the twelfth of October."
+    )
+    assert (
+        cal.clinical_note(
+            "Roster record. Cases: simple_booking-12dc84a98cb2, triage-b2163776cec8."
+        )
+        == ""
+    )
+    assert cal.clinical_note(
+        "Roster record. Cases: simple_booking-12dc84a98cb2, noise-04791d2a653e."
+    ) == ""
+    assert (
+        cal.clinical_note(
+            "Roster record. Cases: the_questions-1eaff9b8dea3, when_exactly-72cdb35b9682."
+        )
+        == ""
+    )
+    assert cal.clinical_note("") == ""
+
+
+def test_readable_note_is_a_plain_sentence() -> None:
+    assert cal.readable_note("Hard of hearing — speak slowly.") == "Hipoacusia: habla despacio."
+    assert (
+        cal.readable_note(
+            "Fake record. Published cases: orthopaedics Thursday, general practice Saturday."
+        )
+        == ""
+    )
+    assert (
+        cal.readable_note("Fake record. Published case: first thing Monday the twelfth of October.")
+        == ""
+    )
+    assert (
+        cal.readable_note(
+            "Roster record. Cases: simple_booking-12dc84a98cb2, triage-b2163776cec8."
+        )
+        == ""
+    )
+    assert (
+        cal.readable_note(
+            "Roster record. Cases: the_questions-1eaff9b8dea3, when_exactly-72cdb35b9682."
+        )
+        == ""
+    )
+    assert cal.readable_note("Roster record. Cases: difficult_caller-8e5f87c31fd2.") == ""
+    assert (
+        cal.readable_note(
+            "Fake record. Hard of hearing; speak slowly. Holds a dermatology referral."
+        )
+        == "Hipoacusia: habla despacio. Trae derivación a dermatología."
+    )
+
+
+def test_clinic_api_records_fill_the_diary() -> None:
+    record = PatientRecord(
+        patient_id="P00007",
+        given_name="Marta",
+        first_surname="Ruiz",
+        phone="612345678",
+        insurer="sanitas",
+        note="Hard of hearing — speak slowly.",
+        has_visited_before=True,
+        sex="F",
+        date_of_birth=date(1984, 3, 1),
+    )
+    patients = cal.patient_index_from_records([record])
+    assert patients["P00007"].full_name == "Marta Ruiz"
+    assert patients["P00007"].phone == "612345678"
+    visit = Appointment(
+        appointment_id="A1",
+        patient_id="P00007",
+        provider_id="PR01",
+        location_id="centro",
+        appointment_type_id="review",
+        start=datetime(2026, 10, 5, 9, 0, tzinfo=MADRID),
+        duration_minutes=15,
+    )
+    bookings = cal.bookings_from_appointments([visit])
+    calendars = cal.build_calendars(_catalogue(), bookings, start_from=_START, days_window=8)
+    payload = cal.doctor_agenda(calendars, patients, name="Dra. Uno", today=_START, week=_START)
+    assert payload["visits"][0]["full_name"] == "Marta Ruiz"
+    assert payload["visits"][0]["phone"] == "612345678"
+    assert payload["visits"][0]["note"] == "Hipoacusia: habla despacio."
+    assert payload["visits"][0]["location_id"] == "centro"
+    assert payload["visits"][0]["appointment_type_id"] == "review"
+    assert payload["sites"][0]["id"] == "centro"
+
+
+def test_agenda_options_lists_catalogue_dropdowns() -> None:
+    opts = cal.agenda_options(_catalogue())
+    assert opts["ok"] is True
+    assert opts["doctors"][0]["name"] == "Dra. Uno"
+
+
+def test_suggest_doctors_stays_empty_until_you_type() -> None:
+    calendars = [_only_calendar([])]
+    assert cal.suggest_doctors(calendars, "") == {"ok": True, "doctors": []}
+    hits = cal.suggest_doctors(calendars, "uno")["doctors"]
+    assert hits[0]["name"] == "Dra. Uno"
+
+
+def test_doctor_agenda_never_lists_the_roster() -> None:
+    events = [_book_event(9, 0, patient="P00007")]
+    calendars = [_only_calendar(events)]
+    patients = cal.patient_index(
+        [
+            {
+                "patient_id": "P00007",
+                "given_name": "Marta",
+                "first_surname": "Ruiz",
+                "note": (
+                    "Fake record. Published cases: orthopaedics Thursday, "
+                    "general practice Saturday."
+                ),
+            }
+        ]
+    )
+    miss = cal.doctor_agenda(calendars, patients, name="", today=_START)
+    assert miss == {"ok": False, "error": "no_match"}
+    payload = cal.doctor_agenda(
+        calendars,
+        patients,
+        name="Dra. Uno",
+        today=_START,
+        week=_START,
+    )
+    assert payload["ok"] is True
+    assert payload["doctor"]["name"] == "Dra. Uno"
+    assert len(payload["days"]) == 7
+    assert payload["month"] == "2026-10-01"
+    assert payload["month_label"] == "Octubre 2026"
+    assert len(payload["weeks"]) >= 4
+    fifth = next(
+        cell
+        for week in payload["weeks"]
+        for cell in week
+        if cell["date"] == "2026-10-05"
+    )
+    assert fifth["visits"][0]["full_name"] == "Marta Ruiz"
+    assert payload["visits"][0]["full_name"] == "Marta Ruiz"
+    assert payload["visits"][0]["note"] == ""
+    booked = next(cell for cell in payload["days"][0]["cells"] if cell["status"] == "booked")
+    assert booked["visit"]["full_name"] == "Marta Ruiz"
+    assert booked["visit"]["duration_minutes"] == 15
+    assert booked["part"] == "start"
+    later = cal.doctor_agenda(
+        calendars,
+        patients,
+        name="Dra. Uno",
+        today=_START,
+        week=_FIESTA,
+    )
+    assert later["visits"][0]["full_name"] == "Marta Ruiz"
+
+
+def test_doctor_agenda_hides_unnamed_patients() -> None:
+    events = [_book_event(9, 0, patient="P00007"), _book_event(9, 15, patient="")]
+    calendars = [_only_calendar(events)]
+    patients = cal.patient_index(
+        [{"patient_id": "P00007", "given_name": "Marta", "first_surname": "Ruiz"}]
+    )
+    payload = cal.doctor_agenda(
+        calendars, patients, name="Dra. Uno", today=_START, week=_START
+    )
+    names = [row["full_name"] for row in payload["visits"]]
+    assert names == ["Marta Ruiz"]
+    chips = [
+        row["full_name"]
+        for week in payload["weeks"]
+        for day in week
+        for row in day["visits"]
+    ]
+    assert "Unknown patient" not in chips
+    assert "" not in chips
+
+
+def test_doctor_agenda_spans_appointment_type_duration() -> None:
+    events = [_book_event(9, 0, patient="P00007", appt_type="first_visit")]
+    calendars = [_only_calendar(events)]
+    patients = cal.patient_index(
+        [{"patient_id": "P00007", "given_name": "Marta", "first_surname": "Ruiz"}]
+    )
+    payload = cal.doctor_agenda(
+        calendars,
+        patients,
+        name="Dra. Uno",
+        today=_START,
+        week=_START,
+        type_durations={"first_visit": 30, "review": 15},
+    )
+    by_time = {cell["time"]: cell for cell in payload["days"][0]["cells"]}
+    assert by_time["09:00"]["part"] == "start"
+    assert by_time["09:00"]["visit"]["duration_minutes"] == 30
+    assert by_time["09:15"]["status"] == "booked"
+    assert by_time["09:15"]["part"] == "cont"
+    assert by_time["09:15"]["visit"]["full_name"] == "Marta Ruiz"
+    assert by_time["09:30"]["status"] == "free"
+    assert payload["visits"][0]["duration_minutes"] == 30
+
+
+def test_summarize_note_returns_empty_when_the_api_fails() -> None:
+    cal.clear_summary_cache()
+    long_note = " ".join(["word"] * 50)
+
+    def post(url, *, headers, json, timeout):
+        del url, headers, json, timeout
+        raise RuntimeError("429")
+
+    assert cal.summarize_note(long_note, token="hf_x", post=post) == ""
