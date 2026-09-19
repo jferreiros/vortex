@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from pydantic import BaseModel, ValidationError
@@ -34,6 +34,7 @@ from vortex.contract import (
     DeclineReason,
     EscalateAction,
     FindPatientResult,
+    FindSlotsInput,
     NoAction,
     PatientRecord,
     Rejection,
@@ -43,7 +44,8 @@ from vortex.contract import (
     ToolContext,
     action_route,
 )
-from vortex.identity.tools import resolve_caller_line
+from vortex.diary.tools import find_slots
+from vortex.identity.tools import PATIENT_PREFERENCES_KEY, resolve_caller_line
 from vortex.line.submit import (
     DryRunSubmitClient,
     SubmitApi,
@@ -54,6 +56,7 @@ from vortex.line.submit import (
 from vortex.line.twilio import StartPayload
 from vortex.observability.calllog import CallLog
 from vortex.observability.tracing import observe_span
+from vortex.rules.triage import DEFAULT_SPECIALTY
 from vortex.settings import Settings, get_settings
 
 # The tool the model calls to send an action itself. It goes through
@@ -82,6 +85,18 @@ VERDICT_TOOLS: frozenset[str] = frozenset({"check_eligibility", "find_slots"})
 # no cover we have not seen.
 SELF_PAY_POLICY = "privado"
 
+# The refusal that wins nothing. ``out_of_scope`` claims the clinic line does not
+# handle the request at all, and of the published cases not one is accepted on
+# it: every ending is BOOK, REGISTER, or a refusal that names its rule. Where the
+# fallback lands here it has named nothing, so the last-resort booking gets its
+# try before this goes out. See ``CallSession.cold_booking``.
+UNSCORED_REFUSAL = NoAction(reason="out_of_scope")
+
+# How far ahead the last-resort booking looks for the first free slot. Two weeks
+# is the longest span ``/availability`` answers in one request, and a slot past
+# it is not what a caller who asked for nothing in particular wanted anyway.
+COLD_BOOKING_HORIZON_DAYS = 14
+
 
 def refusal_for(reason: DeclineReason) -> Action:
     """The action a named reason ends on. A red flag goes to /escalate, the rest refuse."""
@@ -96,6 +111,24 @@ def policy_for(patient: PatientRecord, slot: Slot) -> str:
     policy = next(candidate for candidate in candidates if candidate in INSURERS)
     assert policy in INSURERS
     return policy
+
+
+def booking_for(patient: PatientRecord, slot: Slot) -> BookAction:
+    """One patient and one slot, as the action the platform scores.
+
+    Every id but the plan comes straight off the slot the platform offered, the
+    ``appointment_type_id`` included: the submitted type must be the slot's own,
+    never one we decided.
+    """
+    assert patient.patient_id, "the directory never returns a match without an id"
+    return BookAction(
+        patient_id=patient.patient_id,
+        provider_id=slot.provider_id,
+        location_id=slot.location_id,
+        appointment_type_id=slot.appointment_type_id,
+        slot=slot.start,
+        policy_id=policy_for(patient, slot),
+    )
 
 
 @dataclass
@@ -199,6 +232,17 @@ class CallMemory:
         """The one patient the dialling line resolved to, if it resolved to one."""
         return self.caller_line.patient if self.caller_line is not None else None
 
+    @property
+    def patient_on_record(self) -> PatientRecord | None:
+        """Who this call is for, on the best claim it has.
+
+        Whoever the conversation identified, and failing that the owner of the
+        dialling line. The line is the weaker claim - a third-party call books
+        someone else - but it is the only one a call that never got a word in
+        has, and every field on it came from ``/directory``.
+        """
+        return self.identified_patient or self.line_owner
+
     def draft_booking(self) -> BookAction | None:
         """The booking the call had every part of and nobody drew up.
 
@@ -213,18 +257,10 @@ class CallMemory:
         a third-party call books someone else - but a slot was found for this
         call, so the alternative here is a refusal that scores nothing.
         """
-        patient, slot = self.identified_patient or self.line_owner, self.free_slot
+        patient, slot = self.patient_on_record, self.free_slot
         if patient is None or slot is None or self.identity_pending:
             return None
-        assert patient.patient_id, "the directory never returns a match without an id"
-        return BookAction(
-            patient_id=patient.patient_id,
-            provider_id=slot.provider_id,
-            location_id=slot.location_id,
-            appointment_type_id=slot.appointment_type_id,
-            slot=slot.start,
-            policy_id=policy_for(patient, slot),
-        )
+        return booking_for(patient, slot)
 
     def observe(self, tool: str, result: Any) -> None:
         """Remember whatever a tool result says about where the call stands.
@@ -536,6 +572,12 @@ class CallSession:
         if self.has_accepted_submission:
             return
         branch, action, why = self.fallback_action()
+        if action == UNSCORED_REFUSAL:
+            booking = await self.cold_booking()
+            if booking is not None:
+                branch = "cold_booking"
+                why = f"{why}, and out_of_scope wins no case: booked what the line points at"
+                action = booking
         with observe_span(
             "submit-fallback",
             input={"branch": branch, "why": why, "route": action_route(action)},
@@ -559,6 +601,95 @@ class CallSession:
         if span is not None:
             span.update(output={"skipped": False, "retrying": retrying, "branch": branch})
         await self.submit(action)
+
+    async def cold_booking(self) -> BookAction | None:
+        """The booking the dialling line implies, for a call that resolved nothing.
+
+        Reached only where the fallback has named nothing and would send
+        ``out_of_scope``, which no published case accepts and which is therefore
+        a certain zero. The call still knows who dialled: the caller-id lookup
+        runs before the greeting, so a call the agent never got a word into ends
+        holding a ``patient_id`` from ``/directory`` and the habits mined off
+        that patient's visit history. This asks the platform for the slot those
+        habits point at and books it.
+
+        ``None`` whenever the guess would not be ours to make: nobody on the
+        line, no slot free, or the platform did not answer in time. Every one of
+        those leaves the refusal the fallback already chose in place - a booking
+        nobody sends is worth less than a refusal that goes out inside the
+        window.
+        """
+        patient = self.memory.patient_on_record
+        if patient is None:
+            return None
+        try:
+            slot = await asyncio.wait_for(
+                self._first_slot_for(patient),
+                timeout=self.settings.cold_booking_timeout_secs,
+            )
+        except TimeoutError:
+            self.ctx.log.event("submit.cold_booking_timed_out", patient_id=patient.patient_id)
+            return None
+        except Exception as exc:
+            self.ctx.log.event("submit.cold_booking_failed", detail=f"{type(exc).__name__}: {exc}")
+            return None
+        if slot is None:
+            return None
+        booking = booking_for(patient, slot)
+        self.ctx.log.event(
+            "submit.cold_booking",
+            patient_id=booking.patient_id,
+            provider_id=booking.provider_id,
+            location_id=booking.location_id,
+            appointment_type_id=booking.appointment_type_id,
+            slot=booking.slot,
+            from_line=self.memory.identified_patient is None,
+        )
+        return booking
+
+    async def _first_slot_for(self, patient: PatientRecord) -> Slot | None:
+        """The first slot the platform offers this patient, their habits first.
+
+        Two searches at most: the doctor and site every past visit of theirs
+        used, then general practice anywhere. ``/availability`` answers no query
+        that names neither a provider nor a specialty, so the open search still
+        has to name one, and general practice is what a scheduling line is asked
+        for when it was not asked for anything.
+
+        Both go through the diary lane's ``find_slots``, so the same-day rule,
+        the site calendar and the span the platform accepts stay in one place,
+        and the slots come back priced against this patient's own plan.
+        """
+        today = self.ctx.now.astimezone(MADRID).date()
+        window = {
+            "patient_id": patient.patient_id,
+            "date_from": today,
+            "date_to": today + timedelta(days=COLD_BOOKING_HORIZON_DAYS),
+        }
+        queries = []
+        provider, location = self._habits_of(patient)
+        if provider:
+            queries.append(FindSlotsInput(provider_id=provider, location_id=location, **window))
+        queries.append(FindSlotsInput(specialty_id=DEFAULT_SPECIALTY, **window))
+        for query in queries:
+            result = await find_slots(self.ctx, query)
+            if result.slots:
+                return result.slots[0]
+        return None
+
+    def _habits_of(self, patient: PatientRecord) -> tuple[str | None, str | None]:
+        """The doctor and site this patient has always used, or ``(None, None)``.
+
+        Read from what the identity lane mined in the background when the caller
+        id resolved, and only when it mined it for this patient: a call that
+        identified somebody else later must not book against the line owner's
+        habits. Unanimous or nothing - a patient who has seen two doctors has no
+        habit worth guessing from.
+        """
+        habits = self.ctx.state.get(PATIENT_PREFERENCES_KEY) or {}
+        if habits.get("patient_id") != patient.patient_id:
+            return None, None
+        return habits.get("provider_preference") or None, habits.get("location_preference") or None
 
     def fallback_action(self) -> tuple[str, Action, str]:
         """The action a silent call ends on: (branch, action, why)."""
