@@ -140,6 +140,13 @@ def sms_events(settings: Settings, call_id: str) -> list[dict[str, Any]]:
     return [x for x in lines if x["call_id"] == call_id and x["kind"].startswith("sms.")]
 
 
+def one_sms_event(settings: Settings, call_id: str, kind: str) -> dict[str, Any]:
+    """The single ``sms.*`` event of that kind, with its typed payload fields."""
+    matching = [event for event in sms_events(settings, call_id) if event["kind"] == kind]
+    assert len(matching) == 1
+    return matching[0]
+
+
 def remember_appointment(session: CallSession) -> None:
     appointment = Appointment(
         appointment_id="A0001",
@@ -269,6 +276,10 @@ async def test_accepted_booking_sends_sms(sms_settings: Settings) -> None:
     assert len(sms.results) == 1
     assert sms.results[0].status == "dry_run"
     assert sms.results[0].to == CALLER
+    event = one_sms_event(offline_settings, "CA-book-sms", "sms.dry_run")
+    assert event["action_kind"] == "book"
+    assert event["when"] == SLOT.isoformat()
+    assert event["missing"] == []
 
 
 @pytest.mark.asyncio
@@ -284,6 +295,10 @@ async def test_accepted_cancel_sends_sms(sms_settings: Settings) -> None:
     assert len(sms.results) == 1
     assert sms.results[0].status == "dry_run"
     assert sms.results[0].to == CALLER
+    event = one_sms_event(offline_settings, "CA-cancel-sms", "sms.dry_run")
+    assert event["action_kind"] == "cancel"
+    assert event["when"] == REMEMBERED_START.isoformat()
+    assert event["appointment_id"] == "A0001"
 
 
 @pytest.mark.asyncio
@@ -300,6 +315,10 @@ async def test_cancel_without_remembered_appointment_still_texts(
     assert len(sms.results) == 1
     assert sms.results[0].status == "dry_run"
     assert sms.results[0].to == CALLER
+    event = one_sms_event(offline_settings, "CA-cancel-bare", "sms.dry_run")
+    assert event["action_kind"] == "cancel"
+    assert event["when"] == ""
+    assert event["missing"] == ["appointment_details"]
 
 
 @pytest.mark.asyncio
