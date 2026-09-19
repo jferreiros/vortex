@@ -20,6 +20,8 @@ make call N=10              # ... with 10 concurrent fake calls
 make tunnel                 # ngrok http 7860 -> wss://<host>/ws for the dashboard
 make test                   # the whole test suite
 make tail                   # follow logs/calls.jsonl
+make logs-discord           # redacted digest of the call log to Discord
+make langfuse-check         # project URL + whether the live line has keys
 ```
 
 `make smoke` and `make test` need no key and no network.

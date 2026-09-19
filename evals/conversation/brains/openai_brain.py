@@ -110,6 +110,9 @@ class ModelBrain:
         self._client: Any = None
         self._messages: list[dict[str, Any]] = []
         self._tools: list[dict[str, Any]] = []
+        # A cassette is loaded only when answers would be recorded or read
+        # back. Anything else (a bench run, a replay of the official cases)
+        # must always reach the model, never a stale recording.
         self._cassette: Cassette | None = None
         if not replay_only:
             if not spec.available:
@@ -119,7 +122,7 @@ class ModelBrain:
                 )
             self._client = spec.client()
 
-    async def start(self, scenario: Scenario, trace: Trace) -> None:
+    async def start(self, scenario: Scenario | None, trace: Trace) -> None:
         trace.model = self.spec.id
         self._messages = list(initial_messages(trace.ctx.now))
         self._messages.append({"role": "assistant", "content": GREETING})
@@ -128,13 +131,14 @@ class ModelBrain:
         self._tools = [
             {"type": "function", "function": fn} for fn in registry.function_schemas(exposed)
         ]
-        self._cassette = Cassette(CASSETTES_DIR / self.spec.slug / f"{scenario.id}.json")
-        if self.replay_only and not self._cassette.entries:
-            raise CassetteMiss(
-                f"no cassette for {scenario.id} and {self.spec.id}: "
-                f"run with --brain model --model {self.spec.id} --record"
-            )
-        self._cassette.model = self.spec.id
+        if scenario is not None and (self.replay_only or self.record):
+            self._cassette = Cassette(CASSETTES_DIR / self.spec.slug / f"{scenario.id}.json")
+            if self.replay_only and not self._cassette.entries:
+                raise CassetteMiss(
+                    f"no cassette for {scenario.id} and {self.spec.id}: "
+                    f"run with --brain model --model {self.spec.id} --record"
+                )
+            self._cassette.model = self.spec.id
 
     async def hear(self, turn: CallerTurn, trace: Trace) -> str:
         if (
@@ -199,21 +203,21 @@ class ModelBrain:
             self._cassette.save()
 
     async def _complete(self, trace: Trace) -> dict[str, Any]:
-        assert self._cassette is not None
-        key = Cassette.key(self.spec.id, self._messages, self._tools)
-        hit = self._cassette.entries.get(key)
-        if hit is not None:
-            usage = hit.get("usage", {})
-            trace.tokens_in += usage.get("prompt_tokens", 0)
-            trace.tokens_out += usage.get("completion_tokens", 0)
-            if "ms" in hit:
-                trace.llm_ms.append(int(hit["ms"]))
-            return hit["message"]
-        if self.replay_only:
-            raise CassetteMiss(
-                "no recorded model answer for this prompt: the system prompt, the tools or "
-                "the script changed since the cassette was recorded"
-            )
+        if self._cassette is not None:
+            key = Cassette.key(self.spec.id, self._messages, self._tools)
+            hit = self._cassette.entries.get(key)
+            if hit is not None:
+                usage = hit.get("usage", {})
+                trace.tokens_in += usage.get("prompt_tokens", 0)
+                trace.tokens_out += usage.get("completion_tokens", 0)
+                if "ms" in hit:
+                    trace.llm_ms.append(int(hit["ms"]))
+                return hit["message"]
+            if self.replay_only:
+                raise CassetteMiss(
+                    "no recorded model answer for this prompt: the system prompt, the tools or "
+                    "the script changed since the cassette was recorded"
+                )
         started = time.monotonic()
         response = await self._client.chat.completions.create(
             messages=self._messages,

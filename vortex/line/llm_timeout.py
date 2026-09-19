@@ -156,6 +156,9 @@ def first_token_guard(service_cls: type) -> type:
     - ``first_token_timeout_secs``: seconds an attempt may go without its first
       chunk. ``0`` disables the guard and restores pipecat's own behaviour.
     - ``llm_retries``: how many times a timed-out request is re-issued.
+    - ``retry_model``: model id to switch to on a re-issue. Same host, same
+      key. Empty keeps the hung model. Used so a stall on deepseek-v4-flash
+      does not spend the retry on the same slot.
     - ``timeout_fallback_text``: the line to speak when every attempt failed.
       A callable is read at fire time, so a mid-call language switch moves it.
     - ``timeout_log_event``: ``ctx.log.event``-shaped sink, ``(kind, **data)``.
@@ -167,6 +170,7 @@ def first_token_guard(service_cls: type) -> type:
                 kwargs.pop("first_token_timeout_secs", DEFAULT_FIRST_TOKEN_TIMEOUT_SECS)
             )
             retries = int(kwargs.pop("llm_retries", DEFAULT_RETRIES))
+            retry_model = kwargs.pop("retry_model", None)
             fallback = kwargs.pop("timeout_fallback_text", None)
             log_event = kwargs.pop("timeout_log_event", None)
             # After super(): the base constructor builds the client and the
@@ -174,6 +178,7 @@ def first_token_guard(service_cls: type) -> type:
             super().__init__(**kwargs)
             self._first_token_timeout_secs = max(0.0, timeout)
             self._first_token_retries = max(0, retries)
+            self._retry_model = str(retry_model).strip() if retry_model else ""
             self._timeout_fallback_text: Callable[[], str] | str | None = fallback
             self._timeout_log_event: Callable[..., None] | None = log_event
 
@@ -200,16 +205,41 @@ def first_token_guard(service_cls: type) -> type:
                         attempts=attempts,
                         elapsed_secs=elapsed,
                         timeout_secs=self._first_token_timeout_secs,
+                        model=self._current_model(),
                         **detail,
                     )
                     if attempt < attempts:
+                        switched = self._switch_to_retry_model()
                         self._log_llm_event(
                             RETRY_EVENT,
                             attempt=attempt + 1,
                             attempts=attempts,
                             after_secs=elapsed,
+                            **({"model": switched} if switched else {}),
                         )
             return await self._speak_and_give_up()
+
+        def _current_model(self) -> str:
+            settings = getattr(self, "_settings", None)
+            return str(getattr(settings, "model", "") or "")
+
+        def _switch_to_retry_model(self) -> str:
+            """Point the next attempt at ``retry_model`` when it is a real other model.
+
+            Same OpenAI-compatible client: Helmcode qwen3.6 rides the same
+            base URL and key as deepseek-v4-flash. A hang that is the model's
+            slot, not the host, then has somewhere else to go. No-op when the
+            alt is empty or already the current model.
+            """
+            alt = self._retry_model
+            current = self._current_model()
+            if not alt or alt == current:
+                return ""
+            settings = getattr(self, "_settings", None)
+            if settings is None:
+                return ""
+            settings.model = alt
+            return alt
 
         async def _stream_with_first_token(self, context: Any) -> Any:
             """One attempt: open the stream and hold its first chunk, under one deadline.

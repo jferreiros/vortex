@@ -14,16 +14,19 @@ Owner: the line lane.
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, PlainTextResponse
 
 from vortex.line import twilio
 from vortex.line.session import CallSession
-from vortex.observability.calllog import group_by_call, read_recent
+from vortex.observability.calllog import group_by_call, read_calls, read_recent
+from vortex.observability.discord_calls import enabled as discord_calls_on
+from vortex.observability.discord_calls import notify_session
 from vortex.observability.tracing import trace_call
 from vortex.settings import Settings, get_settings
 
@@ -50,6 +53,11 @@ async def read_handshake(ws: WebSocket, *, max_messages: int = 5) -> twilio.Star
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
+    log.info(
+        "langfuse %s · discord calls %s",
+        "on" if settings.langfuse_public_key and settings.langfuse_secret_key else "off",
+        "on" if discord_calls_on() else "off",
+    )
     app = FastAPI(title="Vortex", version="0.1.0")
 
     @app.get("/health")
@@ -57,8 +65,36 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"status": "ok", **settings.describe()}
 
     @app.get("/calls")
-    async def calls(limit: int = 500) -> dict[str, object]:
-        events = read_recent(settings.calls_log_path, limit=limit)
+    async def calls(limit: int = 500, calls: int = 0, since: str = "") -> dict[str, object]:
+        """Recent call events grouped by ``call_id`` — what the board reads.
+
+        ``limit`` alone keeps the legacy behaviour: the last N *events*.
+
+        ``calls`` and ``since`` bound by calls instead of events, which is the
+        difference that matters: every group returned carries its
+        ``call.started``, so a date-filtered reader never silently drops the
+        call that straddled the tail. ``calls=60`` returns the newest sixty
+        complete calls; ``since=<ISO-8601>`` returns every call started at or
+        after the timestamp. Both run in a worker thread — parsing the log
+        must not stall the loop that streams live call audio.
+        """
+        if calls or since:
+            stamp = None
+            if since:
+                try:
+                    stamp = datetime.fromisoformat(since)
+                except ValueError:
+                    raise HTTPException(400, f"invalid since: {since!r}") from None
+                if stamp.tzinfo is None:
+                    stamp = stamp.replace(tzinfo=UTC)
+            grouped, meta = await asyncio.to_thread(
+                read_calls,
+                settings.calls_log_path,
+                max_calls=calls or None,
+                since=stamp,
+            )
+            return {"calls": grouped, "meta": meta}
+        events = await asyncio.to_thread(read_recent, settings.calls_log_path, limit)
         return {"calls": group_by_call(events)}
 
     @app.get("/mic", response_class=HTMLResponse)
@@ -109,6 +145,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 # closes. close() submits the fallback if nothing went out.
                 await session.close(reason=reason)
                 log.info("call %s ended (%s)", session.call_id, reason)
+                notify_session(session)
 
     return app
 

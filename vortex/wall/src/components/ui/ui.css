@@ -289,6 +289,92 @@
   border-color: var(--color-primary);
 }
 
+/* Knob (circular slider) ------------------------------------------------------*/
+
+.ui-knob {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 140px;
+}
+
+.ui-knob.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ui-knob-track {
+  width: 128px;
+  height: 128px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  border-radius: 50%;
+  touch-action: none;
+}
+
+.ui-knob-track:active {
+  cursor: grabbing;
+}
+
+.ui-knob-svg {
+  width: 128px;
+  height: 128px;
+  transform: rotate(-90deg);
+}
+
+.ui-knob-bg {
+  stroke: var(--color-border-strong);
+}
+
+.ui-knob-progress {
+  stroke: var(--color-primary);
+  stroke-linecap: round;
+  transition: stroke-dashoffset var(--duration-fast) var(--ease-standard);
+}
+
+.ui-knob-value {
+  position: absolute;
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  font-weight: var(--weight-bold);
+  color: var(--color-ink);
+  pointer-events: none;
+}
+
+.ui-knob-labels {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  font-size: var(--text-xs);
+  color: var(--color-mute);
+}
+
+.ui-knob-label {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-ink);
+  text-align: center;
+}
+
+.ui-knob-preview {
+  font-size: var(--text-xs);
+  color: var(--color-faint);
+  font-style: italic;
+  text-align: center;
+  max-width: 160px;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+}
+
+.ui-knob.dragging .ui-knob-track {
+  cursor: grabbing;
+}
+
 /* Section header -------------------------------------------------------------*/
 
 .ui-section-header {

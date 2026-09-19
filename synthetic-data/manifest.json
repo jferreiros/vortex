@@ -547,5 +547,37 @@
       ],
       "probe_calls": 1
     }
+  },
+  "clinic_day": {
+    "day": "2026-09-19",
+    "calls": 60,
+    "verbs": {
+      "REGISTER": 3,
+      "ESCALATE": 1,
+      "NO_ACTION": 10,
+      "CANCEL": 4,
+      "RESCHEDULE": 4,
+      "BOOK": 38
+    },
+    "reasons": {
+      "medical_emergency": 1,
+      "no_availability": 2,
+      "referral_required": 1,
+      "specialty_not_covered": 1,
+      "provider_not_found": 1,
+      "clinic_closed": 1,
+      "not_eligible_age": 1,
+      "location_hours": 1,
+      "out_of_scope": 1,
+      "provider_on_leave": 1
+    },
+    "resolved": 49,
+    "rejected": 10,
+    "escalated": 1,
+    "unresolved": 11,
+    "unresolved_pct": 18.3,
+    "resolved_pct": 81.7,
+    "escalated_share_of_unresolved_pct": 9.1,
+    "new_patients": 3
   }
 }

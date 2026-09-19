@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from vortex.observability import insights
+from datetime import date
+
+import pytest
+
+from vortex.observability import insights, pricing
 from vortex.observability.agents import AGENTS, get_agent, preview_agents, real_agents
 from vortex.observability.view import CallCard, ToolStep
 from vortex.tools import TOOLS
@@ -73,6 +77,83 @@ def test_calls_by_hour_skips_naive_timestamps() -> None:
     hours = insights.calls_by_hour(cards)
     assert hours[10].value == 1
     assert sum(h.value for h in hours) == 1
+
+
+def test_percentiles_pick_a_real_call_never_an_average_of_two() -> None:
+    values = [10.0, 20.0, 30.0, 40.0, 100.0]
+    assert insights.percentiles(values, 0.5, 0.95) == [30.0, 100.0]
+    assert insights.percentiles(values, 0.0) == [10.0]
+    assert insights.percentiles([], 0.5, 0.95) == [None, None]
+    assert insights.percentiles([7.0], 0.5, 0.95) == [7.0, 7.0]
+
+
+def test_handle_seconds_skips_live_calls_and_calls_with_no_duration() -> None:
+    cards = [
+        _card("a", "book", duration_ms=30000),
+        _card("b", "book", duration_ms=None),
+        CallCard(call_id="live", ended=False, duration_ms=99000),
+    ]
+    assert insights.handle_seconds(cards) == [30.0]
+
+
+def test_on_day_keeps_the_calls_that_started_that_day_in_madrid() -> None:
+    cards = [
+        # 23:30 UTC is 01:30 the next day in Madrid: it belongs to the 20th.
+        _card("late", "book", started_at="2026-09-19T23:30:00+00:00"),
+        _card("same", "book", started_at="2026-09-19T08:00:00+00:00"),
+        _card("naive", "book", started_at="2026-09-19T08:00:00"),
+        _card("none", "book"),
+    ]
+    assert [c.call_id for c in insights.on_day(cards, date(2026, 9, 19))] == ["same"]
+    assert [c.call_id for c in insights.on_day(cards, date(2026, 9, 20))] == ["late"]
+
+
+def _metered(call_id: str, *, chars: int = 1_000_000, tts_model: str = "es-ES-Chirp3-HD-A"):
+    card = _card(call_id, "book", duration_ms=30000)
+    card.usage = {
+        "metered": True,
+        "stt": {"provider": "soniox", "model": "stt-rt-v5", "audio_seconds": 60.0},
+        "llm": {
+            "provider": "helmcode",
+            "model": "deepseek-v4-flash",
+            "prompt_tokens": 1_000_000,
+            "completion_tokens": 1_000_000,
+        },
+        "tts": [{"provider": "google", "model": tts_model, "characters": chars}],
+    }
+    return card
+
+
+def test_cost_per_call_averages_the_calls_it_could_price_in_full() -> None:
+    priced_one = _metered("a")
+    priced_two = _metered("b", chars=0)
+    partial = _metered("c", tts_model="gemini-2.5-flash-tts")
+    unmetered = _card("old", "book", duration_ms=30000)  # logged before metering
+    stub = _card("stub", "book", duration_ms=30000)
+    stub.usage = {"metered": False, "stt": {}, "llm": {}, "tts": []}
+
+    summary = insights.cost_per_call([priced_one, priced_two, partial, unmetered, stub])
+    assert summary.metered == 3
+    assert summary.priced == 2
+    assert summary.unpriced == ["TTS gemini-2.5-flash-tts"]
+    assert summary.perk is True
+    # The TTS leg is €27.60 on one call and €0 on the other, so the average is
+    # half of it plus the STT both of them paid. The LLM leg is a perk.
+    rate = pricing.eur_per_usd()
+    stt = 0.002 * rate
+    tts = 30.0 * rate
+    llm = (0.14 + 0.28) * rate
+    assert summary.avg_paid_eur == pytest.approx(stt + tts / 2)
+    assert summary.avg_list_eur == pytest.approx(stt + llm + tts / 2)
+    assert summary.total_list_eur == pytest.approx(2 * (stt + llm) + tts)
+
+
+def test_cost_per_call_has_no_average_when_nothing_could_be_priced() -> None:
+    summary = insights.cost_per_call([_card("old", "book", duration_ms=30000)])
+    assert summary.metered == 0
+    assert summary.priced == 0
+    assert summary.avg_list_eur is None
+    assert summary.avg_paid_eur is None
 
 
 def test_patients_merge_by_patient_id_and_mask_phone() -> None:

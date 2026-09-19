@@ -55,6 +55,7 @@ from vortex.line.submit import (
     with_verdict_reason,
 )
 from vortex.line.twilio import StartPayload
+from vortex.line.usage import UsageTotals
 from vortex.observability.calllog import CallLog
 from vortex.observability.tracing import observe_span
 from vortex.rules.triage import DEFAULT_SPECIALTY
@@ -342,6 +343,10 @@ class CallSession:
     submitter: SubmitApi
     media_frames_in: int = 0
     media_frames_out: int = 0
+    # What this call spent at Soniox, the LLM host and Google TTS. Filled by
+    # the pipecat observer from pipecat's own usage metrics; left at zero with
+    # ``metered`` False by the lanes that do not measure. One per socket.
+    usage: UsageTotals = field(default_factory=UsageTotals)
     submitted: list[SubmitResult] = field(default_factory=list)
     # Every action this call sent, in order, whatever the platform answered.
     # The fallback reads it to log whether a silent-call retry is a re-send.
@@ -356,6 +361,12 @@ class CallSession:
     # one mid-flight, and so ``close`` waits for them before deciding a call
     # submitted nothing.
     _pending: set[asyncio.Task[Any]] = field(default_factory=set)
+    # A refusal submission ``accept_refusal`` has already spawned. Nothing in
+    # ``submit_accepted_refusal`` is true until its POST comes back, so two
+    # acceptance frames in a row both pass its guards and both send the same
+    # refusal. Reserved before the task starts, and never given back: a send
+    # the platform did not take is the end-of-call fallback's to retry.
+    _refusal_spawned: bool = False
 
     @property
     def call_id(self) -> str:
@@ -494,6 +505,54 @@ class CallSession:
         if memory.prepared is not None:
             self._spawn(self.submit_confirmed_prepared("affirmation"))
 
+    def accept_refusal(self, why: str) -> None:
+        """The caller accepted a rule that already bit. Do not ask again.
+
+        Call ``6d537b3a``: eligibility refused, they said "Ah, I see", and the
+        model asked about another policy until they hung up. The refusal was
+        already the ending. A booking still on the table is not this path.
+        """
+        memory = self.memory
+        if self.has_accepted_submission or self._refusal_spawned:
+            return
+        if memory.prepared is not None or memory.last_rejection is None:
+            return
+        self.ctx.log.event(
+            "refusal.accepted",
+            why=why,
+            reason=memory.last_rejection.reason,
+            tool=memory.last_rejection_tool,
+        )
+        self._refusal_spawned = True
+        self._spawn(self.submit_accepted_refusal())
+
+    async def submit_accepted_refusal(self) -> SubmitResult | None:
+        """Send the stored refusal once, the moment the caller accepted it.
+
+        A refusal the caller has accepted is the whole ending of the call: there
+        is no second action to draw up and no question left to ask. So unlike
+        ``submit_confirmed_prepared`` this arms the hangup as soon as the
+        platform holds it, and the pipeline ends after the goodbye instead of
+        running to the three-minute cap.
+        """
+        memory = self.memory
+        if self.has_accepted_submission or memory.last_rejection is None:
+            return None
+        if memory.prepared is not None:
+            return None
+        action = with_verdict_reason(self.ctx, refusal_for(memory.last_rejection.reason))
+        if action in self.sent_actions:
+            return None
+        self.ctx.log.event(
+            "submit.on_refusal_accepted",
+            reason=memory.last_rejection.reason,
+            route=action_route(action),
+        )
+        result = await self.submit(action)
+        if result.status in ACCEPTED_STATUSES:
+            self.arm_hangup("submit_accepted")
+        return result
+
     async def submit_confirmed_prepared(self, trigger: str) -> SubmitResult | None:
         """Send the prepared action the caller has agreed to, once.
 
@@ -580,6 +639,11 @@ class CallSession:
             return
         self._closed = True
         self.end_reason = reason
+        # Before ``call.ended``, and on every close reason including a crash:
+        # the dashboard prices a call in euros and an unpriced call is a hole
+        # in the total. A lane that does not measure still writes the line,
+        # with ``metered`` false, so "no cost" never reads as "no data".
+        self.ctx.log.event("call.usage", **self.usage.payload(self.settings))
         self.ctx.log.event(
             "call.ended",
             reason=reason,
@@ -596,7 +660,7 @@ class CallSession:
         except TimeoutError:
             self.ctx.log.event("submit.fallback_timed_out")
         finally:
-            self.ctx.log.summary(reason=reason)
+            self.ctx.log.summary(reason=reason, usage=self.usage.summary_extras())
             await self.submitter.aclose()
 
     async def _fallback_if_silent(self) -> None:

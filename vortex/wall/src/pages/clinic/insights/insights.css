@@ -48,6 +48,18 @@
   }
 }
 
+/* Data-source notice: the endpoint could not serve fresh live events -------*/
+
+.insights-notice {
+  margin-bottom: var(--space-5);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-warn-soft);
+  color: var(--color-ink);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+
 /* Suggested action ---------------------------------------------------------*/
 
 .insights-suggestion {
