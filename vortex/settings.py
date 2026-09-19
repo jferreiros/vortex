@@ -236,6 +236,18 @@ class Settings:
     # VORTEX_CLINIC_MODE: auto | fake | live
     clinic_mode: str = field(default_factory=lambda: _env("VORTEX_CLINIC_MODE", "auto"))
 
+    # Optional ai-coustics AICFilter on the Twilio input (8 kHz Quail).
+    # Default off: only flip on after the T54 entity-CER bench shows a drop
+    # with the filter. License from developers.ai-coustics.com.
+    # VORTEX_AIC_FILTER: off | on   (unknown / empty -> off)
+    aic_filter_enabled: bool = field(
+        default_factory=lambda: (
+            _env("VORTEX_AIC_FILTER", "off").lower() in ("1", "true", "yes", "on")
+        )
+    )
+    aic_sdk_license: str = field(default_factory=lambda: _env("AIC_SDK_LICENSE"))
+    aic_model_id: str = field(default_factory=lambda: _env("VORTEX_AIC_MODEL", "quail-ms-l-8khz"))
+
     # Observability
     calls_log_path: Path = field(
         default_factory=lambda: Path(_env("VORTEX_CALLS_LOG", str(REPO_ROOT / "logs/calls.jsonl")))
@@ -423,6 +435,9 @@ class Settings:
             # A provider with a key but no voice id builds and then fails on
             # every utterance, so say so before the first call.
             "tts_voices_missing": self.tts_voices_missing,
+            "aic_filter": "on" if self.aic_filter_enabled and self.aic_sdk_license else "off",
+            "aic_model": self.aic_model_id,
+            "has_aic_license": bool(self.aic_sdk_license),
             "ws_path": self.ws_path,
             "calls_log_path": str(self.calls_log_path),
             "has_langfuse_keys": bool(self.langfuse_public_key and self.langfuse_secret_key),
