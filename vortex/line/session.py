@@ -55,6 +55,7 @@ from vortex.line.submit import (
     with_verdict_reason,
 )
 from vortex.line.twilio import StartPayload
+from vortex.line.usage import UsageTotals
 from vortex.observability.calllog import CallLog
 from vortex.observability.tracing import observe_span
 from vortex.rules.triage import DEFAULT_SPECIALTY
@@ -342,6 +343,10 @@ class CallSession:
     submitter: SubmitApi
     media_frames_in: int = 0
     media_frames_out: int = 0
+    # What this call spent at Soniox, the LLM host and Google TTS. Filled by
+    # the pipecat observer from pipecat's own usage metrics; left at zero with
+    # ``metered`` False by the lanes that do not measure. One per socket.
+    usage: UsageTotals = field(default_factory=UsageTotals)
     submitted: list[SubmitResult] = field(default_factory=list)
     # Every action this call sent, in order, whatever the platform answered.
     # The fallback reads it to log whether a silent-call retry is a re-send.
@@ -580,6 +585,11 @@ class CallSession:
             return
         self._closed = True
         self.end_reason = reason
+        # Before ``call.ended``, and on every close reason including a crash:
+        # the dashboard prices a call in euros and an unpriced call is a hole
+        # in the total. A lane that does not measure still writes the line,
+        # with ``metered`` false, so "no cost" never reads as "no data".
+        self.ctx.log.event("call.usage", **self.usage.payload(self.settings))
         self.ctx.log.event(
             "call.ended",
             reason=reason,
@@ -596,7 +606,7 @@ class CallSession:
         except TimeoutError:
             self.ctx.log.event("submit.fallback_timed_out")
         finally:
-            self.ctx.log.summary(reason=reason)
+            self.ctx.log.summary(reason=reason, usage=self.usage.summary_extras())
             await self.submitter.aclose()
 
     async def _fallback_if_silent(self) -> None:
