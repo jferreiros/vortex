@@ -10,6 +10,7 @@ Event kinds written by the base:
 - ``call.started``     stream_sid, from_number, voice mode, clinic mode
 - ``turn.user``        text
 - ``turn.assistant``   text
+- ``turn.metrics``     speaker, started_ts, ended_ts, words, ttfb_ms (agent only)
 - ``tool.called``      tool, args
 - ``tool.returned``    tool, result, ms
 - ``tool.failed``      tool, error
@@ -69,11 +70,19 @@ class CallLog:
         self.said: deque[str] = deque(maxlen=CALLER_WORDS_KEPT)
         self.tool_calls = 0
         self.actions: list[dict[str, Any]] = []
+        # Turn-metric state: the ts of the last caller turn, and whether the
+        # next agent turn is its reply. ``turn.metrics`` reads both so the
+        # first answer after a caller turn carries a TTFB even when the
+        # pipeline passes no timing of its own.
+        self._last_user_ts: str | None = None
+        self._awaiting_reply = False
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
-    def event(self, kind: str, **data: Any) -> None:
+    def event(self, kind: str, **data: Any) -> str:
+        """Append one line. Returns the ``ts`` it was written with."""
+        ts = datetime.now(UTC).isoformat(timespec="milliseconds")
         line = {
-            "ts": datetime.now(UTC).isoformat(timespec="milliseconds"),
+            "ts": ts,
             "call_id": self.call_id,
             "kind": kind,
             **data,
@@ -81,22 +90,77 @@ class CallLog:
         text = json.dumps(line, default=_json_default, ensure_ascii=False)
         with _WRITE_LOCK, self.path.open("a", encoding="utf-8") as fh:
             fh.write(text + "\n")
+        return ts
 
     # Convenience wrappers so lanes log the same shape.
 
-    def user_turn(self, text: str) -> None:
+    def user_turn(
+        self, text: str, *, started_ts: str | None = None, ended_ts: str | None = None
+    ) -> None:
         self.turns += 1
         self.user_turns += 1
         self.said.append(text)
-        self.event("turn.user", text=text)
+        ts = self.event("turn.user", text=text)
+        self._last_user_ts = ts
+        self._awaiting_reply = True
+        self._turn_metrics("user", text, ts, started_ts=started_ts, ended_ts=ended_ts)
 
     def caller_words(self) -> str:
         """The caller's own recent turns, oldest first, as one string to match on."""
         return " ".join(self.said)
 
-    def assistant_turn(self, text: str) -> None:
+    def assistant_turn(
+        self,
+        text: str,
+        *,
+        started_ts: str | None = None,
+        ended_ts: str | None = None,
+        ttfb_ms: float | None = None,
+    ) -> None:
         self.turns += 1
-        self.event("turn.assistant", text=text)
+        ts = self.event("turn.assistant", text=text)
+        if ttfb_ms is None and self._awaiting_reply and self._last_user_ts is not None:
+            # First agent turn after a caller turn: the gap between the
+            # transcript landing and the first spoken line is the best TTFB a
+            # pipeline with no frame timing can report.
+            ttfb_ms = round(
+                (
+                    datetime.fromisoformat(ts) - datetime.fromisoformat(self._last_user_ts)
+                ).total_seconds()
+                * 1000,
+                1,
+            )
+        self._awaiting_reply = False
+        self._turn_metrics(
+            "assistant", text, ts, started_ts=started_ts, ended_ts=ended_ts, ttfb_ms=ttfb_ms
+        )
+
+    def _turn_metrics(
+        self,
+        speaker: str,
+        text: str,
+        ts: str,
+        *,
+        started_ts: str | None,
+        ended_ts: str | None,
+        ttfb_ms: float | None = None,
+    ) -> None:
+        """The per-turn analytics row, written right after its ``turn.*`` line.
+
+        ``started_ts``/``ended_ts`` bound the turn in wall clock when the
+        pipeline knows it (pipecat reads them off the frame stream); a lane
+        that cannot time a turn leaves both at the turn's own ts. ``ttfb_ms``
+        exists on agent turns only - it is None where no latency was seen.
+        """
+        payload: dict[str, Any] = {
+            "speaker": speaker,
+            "started_ts": started_ts or ts,
+            "ended_ts": ended_ts or ts,
+            "words": len(text.split()),
+        }
+        if speaker == "assistant":
+            payload["ttfb_ms"] = ttfb_ms
+        self.event("turn.metrics", **payload)
 
     def tool_called(self, tool: str, args: Any) -> None:
         self.tool_calls += 1

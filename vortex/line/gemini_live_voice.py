@@ -227,22 +227,46 @@ async def run_gemini_live_call(
 
 
 def _CallLogObserver(session: CallSession):  # noqa: N802 - factory that returns an observer
-    """Log user/assistant text and count media frames from the frame stream."""
+    """Log user/assistant text, bound each turn for ``turn.metrics``, and
+    count media frames from the frame stream."""
     from pipecat.frames.frames import (
         InputAudioRawFrame,
+        InterruptionFrame,
+        LLMFullResponseEndFrame,
+        LLMFullResponseStartFrame,
         OutputAudioRawFrame,
         TranscriptionFrame,
         TTSTextFrame,
+        UserStartedSpeakingFrame,
+        UserStoppedSpeakingFrame,
+        VADUserStartedSpeakingFrame,
+        VADUserStoppedSpeakingFrame,
     )
     from pipecat.observers.base_observer import BaseObserver, FramePushed
+
+    from vortex.line.turnclock import TurnClock
+
+    clock = TurnClock()
 
     class Observer(BaseObserver):
         async def on_push_frame(self, data: FramePushed) -> None:
             frame = data.frame
             if isinstance(frame, TranscriptionFrame):
-                session.ctx.log.user_turn(frame.text)
+                started_ts, ended_ts = clock.user_bounds()
+                session.ctx.log.user_turn(frame.text, started_ts=started_ts, ended_ts=ended_ts)
             elif isinstance(frame, TTSTextFrame):
-                session.ctx.log.assistant_turn(frame.text)
+                started_ts, ended_ts, ttfb_ms = clock.assistant_bounds()
+                session.ctx.log.assistant_turn(
+                    frame.text, started_ts=started_ts, ended_ts=ended_ts, ttfb_ms=ttfb_ms
+                )
+            elif isinstance(frame, (VADUserStartedSpeakingFrame, UserStartedSpeakingFrame)):
+                clock.on_user_speech_start()
+            elif isinstance(frame, (UserStoppedSpeakingFrame, VADUserStoppedSpeakingFrame)):
+                clock.on_user_turn_end()
+            elif isinstance(frame, LLMFullResponseStartFrame):
+                clock.on_agent_response_start()
+            elif isinstance(frame, (LLMFullResponseEndFrame, InterruptionFrame)):
+                clock.on_agent_response_end()
             elif isinstance(frame, InputAudioRawFrame):
                 session.media_frames_in += 1
             elif isinstance(frame, OutputAudioRawFrame):
