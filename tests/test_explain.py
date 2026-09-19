@@ -4,6 +4,7 @@ from vortex.contract import ALL_REASONS
 from vortex.observability.explain import (
     ACTION_LABEL,
     EVENT_TEXT,
+    KPI_LABEL,
     LIVE_SUB,
     REASON_TEXT,
     STAGES,
@@ -148,6 +149,7 @@ def test_screen_words_say_patient_never_caller() -> None:
             *EVENT_TEXT.values(),
             *ACTION_LABEL.values(),
             LIVE_SUB,
+            *KPI_LABEL.values(),
             wall_sub("Clínica Arenal"),
         ]
     )
