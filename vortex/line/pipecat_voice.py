@@ -46,23 +46,18 @@ from typing import Any
 from fastapi import WebSocket
 
 from vortex import tools as registry
-<<<<<<< HEAD
 from vortex.conversation.language import (
     DEFAULT_LANGUAGE,
     detect_language,
     normalise_language,
     tts_voice_for,
 )
-from vortex.conversation.prompt import GREETING, idle_prompt_for, initial_messages
-=======
-from vortex.conversation.language import DEFAULT_LANGUAGE, detect_language, tts_voice_for
 from vortex.conversation.prompt import (
     GREETING,
     idle_prompt_for,
     initial_messages,
     wait_prompt_for,
 )
->>>>>>> origin/main
 from vortex.conversation.stt_context import stt_context_text, stt_terms
 from vortex.conversation.turns import (
     TurnSettings,
