@@ -14,7 +14,6 @@ second time.
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import subprocess
 import sys
@@ -35,6 +34,7 @@ LOC_ARROW = re.compile(r"^\s*\u2192\s*(\S+?):(\d+(?:-\d+)?)\s*$")
 SKIP_PREFIXES = ("docs/",)
 LABEL = "coderabbit"
 WANTED = ("major", "critical")
+PAGE_SIZE = 100
 
 
 def parse(text: str) -> list[dict[str, str]]:
@@ -86,31 +86,28 @@ def dedupe(findings: list[dict[str, str]]) -> list[dict[str, str]]:
     return out
 
 
+class LookupFailed(RuntimeError):
+    """The list of filed issues could not be read, so none of it can be trusted."""
+
+
 def existing_titles(repo: str) -> set[str]:
-    raw = (
-        subprocess.run(
-            [
-                "gh",
-                "issue",
-                "list",
-                "--repo",
-                repo,
-                "--label",
-                LABEL,
-                "--state",
-                "all",
-                "--limit",
-                "200",
-                "--json",
-                "title",
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-        ).stdout
-        or "[]"
+    """Every labelled title, all pages. A partial answer would file a duplicate."""
+    done = subprocess.run(
+        [
+            "gh",
+            "api",
+            "--paginate",
+            f"repos/{repo}/issues?labels={LABEL}&state=all&per_page={PAGE_SIZE}",
+            "--jq",
+            '.[] | select(has("pull_request") | not) | .title',
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
     )
-    return {i["title"] for i in json.loads(raw)}
+    if done.returncode:
+        raise LookupFailed(done.stderr.strip() or f"gh api exited {done.returncode}")
+    return {line for line in done.stdout.splitlines() if line.strip()}
 
 
 def issue_title(f: dict[str, str]) -> str:
@@ -141,7 +138,14 @@ def main() -> None:
         print("No major findings. Nothing to file.")
         return
 
-    already = set() if args.dry_run else existing_titles(args.repo)
+    if args.dry_run:
+        already: set[str] = set()
+    else:
+        try:
+            already = existing_titles(args.repo)
+        except LookupFailed as failure:
+            print(f"could not list the issues already filed: {failure}", file=sys.stderr)
+            raise SystemExit(1) from failure
     made = 0
     for f in findings:
         title = issue_title(f)
