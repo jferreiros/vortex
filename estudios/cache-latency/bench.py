@@ -59,7 +59,7 @@ from vortex.clinic.client import (  # noqa: E402
     FakeClinicClient,
     _adapt_catalogue,
 )
-from vortex.contract import MADRID, Catalogue  # noqa: E402
+from vortex.contract import MADRID, Catalogue, PatientRecord  # noqa: E402
 from vortex.tools import TOOLS  # noqa: E402
 
 PROD_BASE_URL = "https://hackspain.getprosperapp.com"
@@ -239,14 +239,37 @@ def pct(samples: list[float]) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def provider_name() -> str:
-    raw = fixtures.CLINIC["providers"][0]
-    return raw.get("name", "Dr. Martin")
+#: A five-day window inside the event calendar, shared by the ``find_slots``
+#: recipe and the warmup that feeds the booking ones.
+FIND_SLOTS_WINDOW: dict[str, str] = {"date_from": "2026-09-21", "date_to": "2026-09-25"}
+
+#: recipe -> {tool argument: key in ``resolve_inputs``}. Every clinic-side
+#: identifier a recipe needs is listed here and nowhere else, so a scenario
+#: only ever times ids its own client answered for.
+RESOLVED_INPUTS: dict[str, dict[str, str]] = {
+    "find_patient": {"phone": "phone"},
+    "find_slots": {"specialty_id": "specialty_id"},
+    "list_appointments": {"patient_id": "appointment_patient_id"},
+    "prepare_booking": {"patient_id": "patient_id", "policy_id": "policy_id", "slot": "slot"},
+    "prepare_reschedule": {
+        "appointment_id": "appointment_id",
+        "policy_id": "appointment_policy_id",
+        "slot": "slot",
+    },
+    "prepare_cancel": {"appointment_id": "appointment_id", "patient_id": "appointment_patient_id"},
+    "check_eligibility": {"patient_id": "patient_id", "specialty_id": "specialty_id"},
+    "nearest_location": {"specialty_id": "specialty_id"},
+    "find_provider": {"spoken_name": "provider_name"},
+    "clinic_facts": {"location_id": "location_id"},
+}
 
 
 def tool_recipes() -> dict[str, dict]:
+    """Realistic arguments per tool, with every clinic-side identifier left out:
+    ``apply_resolved_inputs`` fills those from the client the scenario runs
+    against, so a fixture id never reaches the production API."""
     return {
-        "find_patient": {"phone": fixtures.PATIENTS[0]["phone"]},
+        "find_patient": {},
         "validate_national_id": {"value": fixtures.PATIENTS[0]["national_id"]},
         "build_registration": {
             "given_name": "Lucia",
@@ -259,48 +282,28 @@ def tool_recipes() -> dict[str, dict]:
             "insurer": "mapfre",
         },
         "resolve_date": {"phrase": "next Tuesday"},
-        "find_slots": {
-            "specialty_id": "general_practice",
-            "date_from": "2026-09-21",
-            "date_to": "2026-09-25",
-        },
-        "list_appointments": {"patient_id": fixtures.APPOINTMENTS[0]["patient_id"], "when": "all"},
-        # prepare_booking / prepare_reschedule get their slot injected by the warmup.
-        "prepare_booking": {
-            "patient_id": fixtures.PATIENTS[0]["patient_id"],
-            "policy_id": "mapfre",
-        },
-        "prepare_reschedule": {
-            "appointment_id": fixtures.APPOINTMENTS[0]["appointment_id"],
-            "policy_id": "mapfre",
-        },
-        "prepare_cancel": {
-            "appointment_id": fixtures.APPOINTMENTS[0]["appointment_id"],
-            "patient_id": fixtures.APPOINTMENTS[0]["patient_id"],
-        },
-        "check_eligibility": {
-            "patient_id": fixtures.PATIENTS[0]["patient_id"],
-            "specialty_id": "general_practice",
-        },
+        "find_slots": dict(FIND_SLOTS_WINDOW),
+        "list_appointments": {"when": "all"},
+        "prepare_booking": {},
+        "prepare_reschedule": {},
+        "prepare_cancel": {},
+        "check_eligibility": {},
         "triage": {"complaint": "knee pain since yesterday"},
-        "nearest_location": {
-            "address": "Calle de Alcala 1, Madrid",
-            "specialty_id": "general_practice",
-        },
-        "find_provider": {"spoken_name": provider_name()},
-        "clinic_facts": {"location_id": "centro"},
+        "nearest_location": {"address": "Calle de Alcala 1, Madrid"},
+        "find_provider": {},
+        "clinic_facts": {},
     }
 
 
-async def warmup_slot(client) -> dict:
-    """One real slot from the data, for the booking/reschedule recipes."""
+async def warmup_slot(client, args: dict) -> dict:
+    """One slot ``client`` is really offering, for the booking/reschedule recipes."""
     spec = TOOLS["find_slots"]
     with tempfile.TemporaryDirectory() as tmp:
         ctx = make_context(call_id="bench-warmup", log_dir=Path(tmp), clinic=client)
-        result = await spec.fn(ctx, spec.input_model.model_validate(tool_recipes()["find_slots"]))
+        result = await spec.fn(ctx, spec.input_model.model_validate(args))
     slots = getattr(result, "slots", None) or getattr(result, "results", None) or []
     if not slots:
-        raise RuntimeError("warmup find_slots returned no slots; fixtures changed?")
+        raise RuntimeError(f"warmup find_slots returned no slots for {args}")
     slot = slots[0]
     return {
         "start": slot.start.isoformat(),
@@ -312,6 +315,86 @@ async def warmup_slot(client) -> dict:
         "duration_minutes": slot.duration_minutes,
         "payable_with": slot.payable_with,
     }
+
+
+async def known_patient(client, raw: dict) -> PatientRecord | None:
+    """The fixture patient ``raw`` as ``client``'s own directory returns it."""
+    for field in ("phone", "national_id"):
+        value = raw.get(field)
+        if not value:
+            continue
+        try:
+            matches = await client.directory(**{field: value})
+        except Exception:
+            continue  # this client does not answer that field
+        if matches:
+            return matches[0]
+    return None
+
+
+async def resolve_inputs(client) -> dict:
+    """Every clinic-side recipe value, taken from ``client`` itself.
+
+    Catalogue ids and the warmup slot come straight off the client. A patient
+    cannot be invented - ``/directory`` only answers an exact field - so each
+    fixture patient is offered to the client and the first one it recognises is
+    used, plus the first upcoming appointment of the first recognised patient
+    that has one. What stays unresolved excludes its recipes instead of timing
+    an identifier this API would reject.
+    """
+    resolved: dict = {}
+    catalogue = await client.catalogue()
+    if catalogue.specialties:
+        resolved["specialty_id"] = catalogue.specialties[0].specialty_id
+    if catalogue.locations:
+        resolved["location_id"] = catalogue.locations[0].location_id
+    if catalogue.providers:
+        resolved["provider_name"] = catalogue.providers[0].name
+
+    slot_args = dict(FIND_SLOTS_WINDOW)
+    if "specialty_id" in resolved:
+        slot_args["specialty_id"] = resolved["specialty_id"]
+    try:
+        resolved["slot"] = await warmup_slot(client, slot_args)
+    except Exception as exc:
+        print(f"!! no warmup slot: {type(exc).__name__}: {exc}", file=sys.stderr)
+
+    for raw in fixtures.PATIENTS:
+        if "patient_id" in resolved and "appointment_id" in resolved:
+            break
+        record = await known_patient(client, raw)
+        if record is None:
+            continue
+        if "patient_id" not in resolved:
+            resolved["patient_id"] = record.patient_id
+            resolved["phone"] = record.phone or raw.get("phone", "")
+            if record.insurer:
+                resolved["policy_id"] = record.insurer
+        if "appointment_id" in resolved:
+            continue
+        try:
+            appointments = await client.appointments(record.patient_id, when="upcoming")
+        except Exception:
+            continue
+        if appointments:
+            resolved["appointment_id"] = appointments[0].appointment_id
+            resolved["appointment_patient_id"] = record.patient_id
+            if record.insurer:
+                resolved["appointment_policy_id"] = record.insurer
+    return resolved
+
+
+def apply_resolved_inputs(recipes: dict[str, dict], resolved: dict) -> dict[str, str]:
+    """Fill every recipe from ``resolved``; name the ones that stay unfillable."""
+    skipped: dict[str, str] = {}
+    for name, arguments in RESOLVED_INPUTS.items():
+        missing = sorted({key for key in arguments.values() if resolved.get(key) is None})
+        if missing:
+            skipped[name] = f"no live-compatible {', '.join(missing)}"
+            continue
+        for argument, key in arguments.items():
+            recipes[name][argument] = resolved[key]
+    return skipped
 
 
 async def run_scenario(
@@ -334,18 +417,20 @@ async def run_scenario(
 
     warm_client = shared if shared is not None else ClinicClient(base_url, api_key)
     try:
-        slot = await warmup_slot(warm_client)
+        resolved = await resolve_inputs(warm_client)
     finally:
         if warm_client is not shared:
             await warm_client.aclose()
     recipes = tool_recipes()
-    recipes["prepare_booking"]["slot"] = slot
-    recipes["prepare_reschedule"]["slot"] = slot
+    skipped = apply_resolved_inputs(recipes, resolved)
 
-    from_number = fixtures.PATIENTS[0]["phone"]
+    from_number = resolved.get("phone", "")
     with tempfile.TemporaryDirectory() as tmp:
         log_dir = Path(tmp)
         for name, args in recipes.items():
+            if name in skipped:
+                out["scenarios"][label]["tools"][name] = {"skipped": skipped[name]}
+                continue
             spec = TOOLS[name]
             samples: list[float] = []
             reqs_before = sum(state.requests.values()) if state else 0
@@ -780,6 +865,8 @@ async def amain() -> None:
         for name, row in scenario["tools"].items():
             if "error" in row:
                 print(f"| {name} | ERROR {row['error'][:60]} | | |")
+            elif "skipped" in row:
+                print(f"| {name} | SKIPPED {row['skipped']} | | |")
             else:
                 reqs = row.get("api_requests_per_call")
                 print(f"| {name} | {row['p50_ms']} | {row['p95_ms']} | {reqs} |")
