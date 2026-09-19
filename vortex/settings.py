@@ -240,6 +240,14 @@ class Settings:
     calls_log_path: Path = field(
         default_factory=lambda: Path(_env("VORTEX_CALLS_LOG", str(REPO_ROOT / "logs/calls.jsonl")))
     )
+    langfuse_public_key: str = field(default_factory=lambda: _env("LANGFUSE_PUBLIC_KEY"))
+    langfuse_secret_key: str = field(default_factory=lambda: _env("LANGFUSE_SECRET_KEY"))
+    langfuse_base_url: str = field(
+        default_factory=lambda: _env("LANGFUSE_BASE_URL", "https://cloud.langfuse.com")
+    )
+    langfuse_environment: str = field(
+        default_factory=lambda: _env("LANGFUSE_TRACING_ENVIRONMENT") or _env("VORTEX_ENV")
+    )
 
     # Optional Nominatim-compatible endpoint for problem 15's address lookup
     # (vortex/rules/geo.py). Empty means the offline Madrid gazetteer only, so
@@ -417,6 +425,9 @@ class Settings:
             "tts_voices_missing": self.tts_voices_missing,
             "ws_path": self.ws_path,
             "calls_log_path": str(self.calls_log_path),
+            "has_langfuse_keys": bool(self.langfuse_public_key and self.langfuse_secret_key),
+            "langfuse_base_url": self.langfuse_base_url,
+            "langfuse_environment": self.langfuse_environment,
         }
 
 
