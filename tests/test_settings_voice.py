@@ -23,6 +23,8 @@ VOICE_KEYS = (
     "CLOUDFLARE_ACCOUNT_ID",
     "CLOUDFLARE_API_TOKEN",
     "VERCEL_AI_GATEWAY_KEY",
+    "VERTEX_LOCATION",
+    "VERTEX_PROJECT_ID",
     "ARBITER_PROVIDER",
     "ARBITER_BASE_URL",
     "ARBITER_API_KEY",
@@ -140,6 +142,69 @@ def test_the_overrides_always_win(clean_env) -> None:
     assert s.llm_base_url == "https://mine.example.invalid/v1"
     assert s.llm_api_key == "mine-x"
     assert s.llm_model == "mine/model-1"
+
+
+def test_vertex_is_a_preset_with_a_region_and_no_key(clean_env, tmp_path) -> None:
+    """LLM_PROVIDER=vertex and the TTS credential are the whole configuration."""
+    credentials = tmp_path / "google-tts.json"
+    credentials.write_text('{"type": "service_account", "project_id": "vortex-1"}')
+
+    s = _settings(
+        clean_env,
+        LLM_PROVIDER="vertex",
+        GOOGLE_APPLICATION_CREDENTIALS=str(credentials),
+    )
+    assert s.llm_is_vertex is True
+    assert s.llm_model == "gemini-2.5-flash"  # Flash, never Flash-Lite
+    assert s.vertex_location == "europe-west1"  # the point of the preset
+    assert s.vertex_project_id == "vortex-1"  # read out of the credential
+    # The preset's "key" is the credential, so the generic gates still work.
+    assert s.llm_api_key == str(credentials)
+    assert s.llm_base_url == "https://europe-west1-aiplatform.googleapis.com"
+
+
+def test_vertex_takes_the_region_the_model_and_the_project_from_the_env(clean_env) -> None:
+    s = _settings(
+        clean_env,
+        LLM_PROVIDER="vertex",
+        VERTEX_LOCATION="europe-west4",
+        VERTEX_PROJECT_ID="billing-project",
+        LLM_MODEL="gemini-2.5-pro",
+        GOOGLE_TTS_CREDENTIALS_JSON='{"type": "service_account", "project_id": "ignored"}',
+    )
+    assert s.vertex_location == "europe-west4"
+    assert s.llm_base_url == "https://europe-west4-aiplatform.googleapis.com"
+    assert s.llm_model == "gemini-2.5-pro"
+    # VERTEX_PROJECT_ID wins over the project inside the credential.
+    assert s.vertex_project_id == "billing-project"
+    # Inline JSON is a credential too, exactly as it is for the TTS.
+    assert s.vertex_credentials.startswith("{")
+
+
+def test_vertex_survives_a_credential_it_cannot_read(clean_env, tmp_path) -> None:
+    """A bad path is a missing project, not a crash at import time."""
+    s = _settings(
+        clean_env,
+        LLM_PROVIDER="vertex",
+        GOOGLE_APPLICATION_CREDENTIALS=str(tmp_path / "nope.json"),
+    )
+    assert s.vertex_project_id == ""
+
+    s = _settings(clean_env, LLM_PROVIDER="vertex", GOOGLE_TTS_CREDENTIALS_JSON="{not json")
+    assert s.vertex_project_id == ""
+
+
+def test_vertex_turns_the_real_pipeline_on_with_soniox_and_a_voice(clean_env, tmp_path) -> None:
+    """No LLM_API_KEY anywhere, and the pipeline still leaves stub mode."""
+    credentials = tmp_path / "google-tts.json"
+    credentials.write_text('{"type": "service_account", "project_id": "vortex-1"}')
+    s = _settings(
+        clean_env,
+        LLM_PROVIDER="vertex",
+        SONIOX_API_KEY="sx-x",
+        GOOGLE_APPLICATION_CREDENTIALS=str(credentials),
+    )
+    assert s.voice_is_pipecat is True
 
 
 def test_an_unknown_preset_falls_back_to_the_default(clean_env) -> None:
@@ -434,6 +499,29 @@ def test_describe_never_leaks_a_key(clean_env) -> None:
     assert described["tts_provider"] == "elevenlabs"
     assert described["tts_provider_alt"] == "google"
     assert described["tts_routed"] is True
+    # Not on Vertex: no region, no project, and the guard is installed.
+    assert described["vertex_location"] == ""
+    assert described["vertex_project_id"] == ""
+    assert described["llm_first_token_guard"] is True
+
+
+def test_describe_shows_the_vertex_provider_model_and_region(clean_env, tmp_path) -> None:
+    """/health has to answer "which model, from where" in one look."""
+    credentials = tmp_path / "google-tts.json"
+    credentials.write_text('{"type": "service_account", "project_id": "vortex-1"}')
+    described = _settings(
+        clean_env,
+        LLM_PROVIDER="vertex",
+        GOOGLE_APPLICATION_CREDENTIALS=str(credentials),
+    ).describe()
+
+    assert described["llm_provider"] == "vertex"
+    assert described["llm_model"] == "gemini-2.5-flash"
+    assert described["vertex_location"] == "europe-west1"
+    assert described["vertex_project_id"] == "vortex-1"
+    assert described["llm_base_url"] == "https://europe-west1-aiplatform.googleapis.com"
+    # The one thing that is worse on this preset, said out loud.
+    assert described["llm_first_token_guard"] is False
 
 
 def test_describe_reports_google_without_the_credentials(clean_env) -> None:

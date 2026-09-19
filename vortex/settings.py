@@ -16,6 +16,9 @@ Two ideas make every provider swappable from ``.env`` alone:
   the key variable and the model id. ``LLM_BASE_URL`` / ``LLM_API_KEY`` /
   ``LLM_MODEL`` always win when set, so a preset is a shortcut, never a cage.
   Each preset reads its *own* key variable, so several can sit in one ``.env``.
+  ``vertex`` is the one preset that is not an OpenAI endpoint: it is Gemini on
+  Google Cloud, in the region ``VERTEX_LOCATION`` names, authenticated with the
+  service account the TTS already uses.
 - **A primary and an alternate TTS.** ``VORTEX_TTS_PROVIDER`` speaks Spanish;
   ``VORTEX_TTS_PROVIDER_ALT`` speaks whatever the primary cannot. With both on
   ``google`` (the default) English/Spanish ride Chirp 3 HD and ca/gl/eu ride
@@ -26,6 +29,7 @@ UNVERIFIED markers below flag base URLs and model ids nobody has called yet.
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -64,6 +68,26 @@ CLOUDFLARE_LLM_BASE_URL = "https://api.cloudflare.com/client/v4/accounts/{accoun
 # Confirmed from https://helmcode.com/docs/integrations (18 Sep 2026).
 HELMCODE_BASE_URL = "https://api.helmcode.com/v1"
 
+# Vertex AI is the odd preset: not an OpenAI-compatible /v1, no API key. It
+# authenticates with the team's Google service account — the same JSON the TTS
+# already reads from GOOGLE_APPLICATION_CREDENTIALS — and speaks Google's own
+# protocol. The preset still fills the three slots so nothing downstream needs a
+# special case: the "base URL" is the regional endpoint the requests go to and
+# the "key" is the credential. Only the *voice* pipeline knows how to build it
+# (vortex/line/pipecat_voice.py); the OpenAI-shaped benches in vortex/models.py
+# and scripts/rehearse_text.py cannot call it.
+VERTEX_BASE_URL = "https://{location}-aiplatform.googleapis.com"
+# EU data residency: Gemini served from Belgium, not from a global endpoint.
+DEFAULT_VERTEX_LOCATION = "europe-west1"
+# Listed by the API in europe-west1 on 19 Sep 2026 (project vortex-509020):
+# gemini-2.5-pro, gemini-2.5-flash, gemini-2.5-flash-lite, plus the TTS and
+# live variants. No 3.x model is served from a European region yet — those are
+# on the ``global`` endpoint, which is exactly what we are avoiding. So: the
+# cheapest Flash that is not Flash-Lite. $0.30 per million input tokens and
+# $2.50 per million output (Vertex list price, 19 Sep 2026). Set LLM_MODEL to
+# bump it the day a cheaper or newer Flash lands in the region.
+DEFAULT_VERTEX_MODEL = "gemini-2.5-flash"
+
 LLM_PRESETS: dict[str, LlmPreset] = {
     # Bring your own endpoint: the three LLM_* variables and nothing else.
     "custom": LlmPreset("", "llm_api_key_env", "Qwen/Qwen3-30B-A3B-Instruct-2507"),
@@ -81,6 +105,10 @@ LLM_PRESETS: dict[str, LlmPreset] = {
     "vercel": LlmPreset(
         "https://ai-gateway.vercel.sh/v1", "vercel_ai_gateway_key", "anthropic/claude-haiku-4.5"
     ),
+    # Gemini on Google Cloud, in an EU region. The key field is a credential
+    # path or the JSON itself, not a token; the base URL is assembled from
+    # VERTEX_LOCATION in _preset_base_url.
+    "vertex": LlmPreset(VERTEX_BASE_URL, "vertex_credentials", DEFAULT_VERTEX_MODEL),
 }
 
 DEFAULT_LLM_PROVIDER = "helmcode"
@@ -152,7 +180,8 @@ class Settings:
     soniox_stt_model: str = field(default_factory=lambda: _env("SONIOX_STT_MODEL", "stt-rt-v5"))
 
     # --- LLM: a preset, or the raw LLM_* variables ----------------------------
-    # LLM_PROVIDER: custom | helmcode | cloudflare | vercel (unknown -> helmcode)
+    # LLM_PROVIDER: custom | helmcode | cloudflare | vercel | vertex
+    #               (unknown -> helmcode)
     llm_provider: str = field(
         default_factory=lambda: _llm_provider("LLM_PROVIDER", DEFAULT_LLM_PROVIDER)
     )
@@ -169,6 +198,16 @@ class Settings:
     cloudflare_account_id: str = field(default_factory=lambda: _env("CLOUDFLARE_ACCOUNT_ID"))
     cloudflare_api_token: str = field(default_factory=lambda: _env("CLOUDFLARE_API_TOKEN"))
     vercel_ai_gateway_key: str = field(default_factory=lambda: _env("VERCEL_AI_GATEWAY_KEY"))
+    # Vertex AI. The credential is GOOGLE_APPLICATION_CREDENTIALS, shared with
+    # the TTS, so switching the LLM to Vertex costs no new secret. The region
+    # is the whole point of the preset: Gemini answering from inside the EU.
+    vertex_location: str = field(
+        default_factory=lambda: _env("VERTEX_LOCATION", DEFAULT_VERTEX_LOCATION)
+    )
+    # Empty means "the project_id inside the credentials JSON", which is the
+    # project that owns the service account and, nine times out of ten, the one
+    # billing Vertex too.
+    vertex_project_id_env: str = field(default_factory=lambda: _env("VERTEX_PROJECT_ID"))
 
     llm_temperature: float = field(default_factory=lambda: float(_env("LLM_TEMPERATURE", "0.2")))
     # 120 was chosen for the spoken turn (one or two sentences) and silently
@@ -373,6 +412,8 @@ class Settings:
             if not self.cloudflare_account_id:
                 return ""
             return CLOUDFLARE_LLM_BASE_URL.format(account_id=self.cloudflare_account_id)
+        if provider == "vertex":
+            return VERTEX_BASE_URL.format(location=self.vertex_location)
         return LLM_PRESETS[provider].base_url
 
     def _preset_api_key(self, provider: str) -> str:
@@ -389,6 +430,51 @@ class Settings:
     @property
     def llm_model(self) -> str:
         return self.llm_model_env or LLM_PRESETS[self.llm_provider].model
+
+    # --- Vertex AI resolution -------------------------------------------------
+
+    @property
+    def llm_is_vertex(self) -> bool:
+        """True when the turn model is Gemini on Vertex, not an OpenAI endpoint.
+
+        The voice pipeline branches on this: Vertex takes a different client, a
+        different settings object, and none of the OpenAI-only request fields.
+        """
+        return self.llm_provider == "vertex"
+
+    @property
+    def vertex_credentials(self) -> str:
+        """The service-account credential: a path to the JSON, or the JSON itself.
+
+        The same one the Google TTS uses. This is the preset's ``key_field``, so
+        ``llm_api_key`` answers with it and ``has_llm_key`` /
+        ``voice_is_pipecat`` keep working without knowing what Vertex is.
+        """
+        return self.google_application_credentials or self.google_tts_credentials_json
+
+    @property
+    def vertex_project_id(self) -> str:
+        """``VERTEX_PROJECT_ID``, or the ``project_id`` inside the credentials.
+
+        Reading it from the credential keeps the common case to one variable
+        (``LLM_PROVIDER=vertex``) and makes the wrong-project failure — a 403
+        naming a project nobody configured — impossible by default. An
+        unreadable or non-JSON credential answers empty rather than raising:
+        the pipeline reports the missing project, it does not crash the server.
+        """
+        if self.vertex_project_id_env:
+            return self.vertex_project_id_env
+        raw = self.vertex_credentials
+        if not raw:
+            return ""
+        try:
+            if raw.lstrip().startswith("{"):
+                payload = json.loads(raw)
+            else:
+                payload = json.loads(Path(raw).read_text(encoding="utf-8"))
+            return str(payload.get("project_id", ""))
+        except (OSError, ValueError):
+            return ""
 
     @property
     def arbiter_base_url(self) -> str:
@@ -527,6 +613,12 @@ class Settings:
             "llm_provider": self.llm_provider,
             "llm_model": self.llm_model,
             "llm_base_url": self.llm_base_url,
+            # Only Vertex has a region and a project, and only Vertex loses the
+            # first-token guard (it wraps the OpenAI entry point). Empty on
+            # every other preset, so /health does not grow noise.
+            "vertex_location": self.vertex_location if self.llm_is_vertex else "",
+            "vertex_project_id": self.vertex_project_id if self.llm_is_vertex else "",
+            "llm_first_token_guard": not self.llm_is_vertex,
             "gemini_live_model": self.gemini_live_model,
             "gemini_live_voice": self.gemini_live_voice,
             "llm_first_token_timeout_secs": self.llm_first_token_timeout_secs,
