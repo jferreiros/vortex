@@ -1,6 +1,6 @@
 """Business-facing insights for the Clinic View's Insights page.
 
-Four questions a clinic manager actually asks, all answered from
+Five questions a clinic manager actually asks, all answered from
 ``calls.jsonl`` through ``view.build_calls`` — no synthetic numbers, same
 rule as ``insights.py`` next to this file (read that one first; ``Bar`` and
 ``mask_phone`` live there and this module follows the same shape):
@@ -8,15 +8,20 @@ rule as ``insights.py`` next to this file (read that one first; ``Bar`` and
 1. ``unavailability_reasons`` — of the calls that tried to schedule and did
    not end up booked, why not: no slot in the window asked, a specific
    doctor unavailable, a specialty with no agenda here, an insurance/referral
-   rule, outside opening hours, or something else.
+   rule, or outside opening hours. Calls that fit none of those (``other``)
+   name no rule to act on, so they are dropped from what the page shows and
+   the remaining buckets renormalise to 100%.
 2. ``provider_ranking`` — which doctors get asked for by name, how often
    that turns into a kept appointment, the median wait to their next slot
-   when it does, and per doctor why the requests that failed did fail, so
-   the page can expand a row into that breakdown.
-3. ``demand_supply_heatmap`` — weekday x time-band grid of appointments
+   when it does, and per doctor why the requests that failed did fail.
+3. ``service_occupancy`` — per specialty, appointment requests against slots
+   actually offered, whole-clinic or one site at a time. Over 100% means
+   real callers were told there was nothing, and ``extra_providers_needed``
+   turns that gap into a hiring number.
+4. ``demand_supply_heatmap`` — weekday x time-band grid of appointments
    *requested* against slots *actually offered*, to spot where demand has
    nowhere to land.
-4. ``cancellation_slots`` — every slot a cancellation freed this period:
+5. ``cancellation_slots`` — every slot a cancellation freed this period:
    picked up by another caller before the day arrived, or left empty. The
    platform only ever books for the day after the call, so a freed slot has
    one short window to be reused, never more.
@@ -35,6 +40,7 @@ capturing so this stops being a heuristic.
 
 from __future__ import annotations
 
+import math
 import unicodedata
 from collections import Counter, defaultdict
 from datetime import UTC, datetime
@@ -432,7 +438,9 @@ def _unavailability_suggestion(
         return None
     top = ranked[0]
     subset = [c for c in unmet if classify_unmet(c) == top["key"]]
-    total = len(unmet)
+    # Matches the denominator ``pct`` was computed against: the shown
+    # buckets, not every unmet call — "other" is excluded from both.
+    total = sum(r["count"] for r in ranked)
     pct = top["pct"]
     count = top["count"]
     base = f"El {pct:.0f}% de la demanda no cubierta ({count} de {total} llamadas)"
@@ -476,22 +484,33 @@ def _unavailability_suggestion(
 def unavailability_reasons(
     cards: list[CallCard], *, catalogue: Catalogue | None = None
 ) -> dict[str, Any]:
-    """Ranking with count and % of unmet demand, most frequent first."""
+    """Ranking with count and % of unmet demand, most frequent first.
+
+    "Otro" never appears: it names no clinic rule to act on, and because
+    every decline that fits none of the other five buckets lands there, it
+    would otherwise dominate the ranking with a bar that means nothing
+    actionable. It is dropped from what is shown and the remaining buckets'
+    percentages are renormalised over themselves, so they still sum to 100%.
+    ``unmet_total`` keeps counting every unmet call, "otro" included — it
+    answers "how many calls failed", not "how many the chart explains".
+    """
     catalogue = catalogue or site_catalogue()
     unmet = [c for c in cards if is_unmet_demand(c)]
     counter: Counter[str] = Counter(classify_unmet(c) for c in unmet)
     total = sum(counter.values())
+    shown = {key: count for key, count in counter.items() if key != "other"}
+    shown_total = sum(shown.values())
     ranked: list[dict[str, Any]] = []
-    if total:
-        top_count = counter.most_common(1)[0][1]
-        for key, count in sorted(counter.items(), key=lambda kv: -kv[1]):
+    if shown_total:
+        top_count = max(shown.values())
+        for key, count in sorted(shown.items(), key=lambda kv: -kv[1]):
             ranked.append(
                 {
                     "key": key,
                     "label": BUCKET_LABELS[key],
                     "count": count,
                     "share": round(count / top_count, 3),
-                    "pct": round(100 * count / total, 1),
+                    "pct": round(100 * count / shown_total, 1),
                 }
             )
     return {
@@ -620,7 +639,162 @@ def provider_ranking(
 
 
 # ---------------------------------------------------------------------------
-# 3. Demand vs. supply heatmap
+# 3. Service occupancy: demand vs. capacity by specialty, and the providers
+#    it would take to close the gap
+# ---------------------------------------------------------------------------
+
+#: Spanish display names for the specialty ids, mirroring
+#: ``home_overview.SPECIALTY_ES``: the catalogue itself is in English (it
+#: mirrors the platform's own field values).
+SERVICE_LABEL_ES: dict[str, str] = {
+    "general_practice": "Medicina general",
+    "paediatrics": "Pediatría",
+    "dermatology": "Dermatología",
+    "orthopaedics": "Traumatología",
+    "gynaecology": "Ginecología",
+    "physiotherapy": "Fisioterapia",
+}
+
+
+def _request_specialty_id(catalogue: Catalogue, args: dict[str, Any]) -> str | None:
+    """The specialty one ``find_slots`` request is actually about: the
+    specialty asked for directly, or the one the named doctor practises. A
+    request naming neither says nothing about which service was under
+    pressure, so it counts toward no service's occupancy — the same rule
+    the heatmap's ``all_day_demand`` bucket applies to an hour-less request."""
+    if sid := args.get("specialty_id"):
+        return str(sid)
+    if pid := args.get("provider_id"):
+        rec = next((p for p in catalogue.providers if p.provider_id == str(pid)), None)
+        if rec:
+            return rec.specialty_id
+    return None
+
+
+def _slot_specialty_id(catalogue: Catalogue, slot: dict[str, Any]) -> str | None:
+    """The specialty an offered slot belongs to, resolved through the slot's
+    own provider first — more reliable than trusting ``slot.specialty_id``
+    made it through every layer of a real payload."""
+    pid = slot.get("provider_id")
+    rec = next((p for p in catalogue.providers if p.provider_id == str(pid)), None) if pid else None
+    if rec:
+        return rec.specialty_id
+    sid = slot.get("specialty_id")
+    return str(sid) if sid else None
+
+
+def _extra_providers_needed(n_providers: int, occupancy_pct: float | None) -> int:
+    """How many more providers of this specialty, at today's slots-per-doctor
+    rate, would bring occupancy back to 100% — a straight-line estimate
+    (capacity scales with headcount), not a schedule, but enough to turn a
+    percentage into a hiring number."""
+    if occupancy_pct is None or n_providers <= 0 or occupancy_pct <= 100:
+        return 0
+    needed = math.ceil(n_providers * occupancy_pct / 100)
+    return needed - n_providers
+
+
+def _service_occupancy_rows(
+    cards: list[CallCard], catalogue: Catalogue, *, site_id: str | None = None
+) -> list[dict[str, Any]]:
+    """One row per specialty in the catalogue, scoped to one site when
+    ``site_id`` is given. A request without a named site counts against
+    every site it could have landed in (``_request_scope``), same as the
+    heatmap; a slot only counts against the site it was actually offered at.
+    """
+    requested: Counter[str] = Counter()
+    offered: Counter[str] = Counter()
+    declined_full: Counter[str] = Counter()
+    booked: Counter[str] = Counter()
+
+    for card in cards:
+        declined = is_unmet_demand(card) and classify_unmet(card) == "no_slot_in_window"
+        for step in card.tools:
+            if step.name != "find_slots":
+                continue
+            args = _as_dict(step.args)
+            scope = _request_scope(catalogue, args)
+            if site_id is not None and site_id not in scope:
+                continue
+            specialty_id = _request_specialty_id(catalogue, args)
+            if not specialty_id:
+                continue
+            requested[specialty_id] += 1
+            if declined:
+                declined_full[specialty_id] += 1
+            result = _as_dict(step.result)
+            for slot in result.get("slots") or []:
+                slot_d = slot if isinstance(slot, dict) else _as_dict(slot)
+                if site_id is not None and str(slot_d.get("location_id")) != site_id:
+                    continue
+                slot_specialty = _slot_specialty_id(catalogue, slot_d) or specialty_id
+                offered[slot_specialty] += 1
+        pid = _booked_provider_id(card)
+        info = PROVIDER_BY_ID.get(pid) if pid else None
+        if info:
+            loc_id = (card.action_payload or {}).get("location_id")
+            if site_id is None or str(loc_id) == site_id:
+                booked[info.specialty_id] += 1
+
+    rows: list[dict[str, Any]] = []
+    for specialty_id, specialty_name in SPECIALTY_NAME_BY_ID.items():
+        n_providers = len(
+            [
+                p
+                for p in catalogue.providers
+                if p.specialty_id == specialty_id
+                and (site_id is None or site_id in p.location_ids)
+            ]
+        )
+        req, off = requested.get(specialty_id, 0), offered.get(specialty_id, 0)
+        if off > 0:
+            occupancy_pct: float | None = round(100 * req / off, 1)
+        elif req > 0:
+            occupancy_pct = None  # asked for, nothing was ever on offer to divide by
+        else:
+            occupancy_pct = 0.0
+        rows.append(
+            {
+                "id": specialty_id,
+                "name": SERVICE_LABEL_ES.get(specialty_id, specialty_name),
+                "requested": req,
+                "offered": off,
+                "booked": booked.get(specialty_id, 0),
+                "declined_full": declined_full.get(specialty_id, 0),
+                "providers": n_providers,
+                "occupancy_pct": occupancy_pct,
+                "extra_providers_needed": _extra_providers_needed(n_providers, occupancy_pct),
+            }
+        )
+    rows.sort(key=lambda r: (-(r["occupancy_pct"] or -1), r["name"]))
+    return rows
+
+
+def service_occupancy(
+    cards: list[CallCard], *, catalogue: Catalogue | None = None
+) -> dict[str, Any]:
+    """Occupancy per specialty, network-wide and per site: how many
+    appointment requests landed against how many slots were actually
+    offered. The platform only ever offers a slot that exists, so a request
+    with nothing to match is exactly a rejection for being full — over 100%
+    reads as "we turned real callers away here", not a rounding artefact.
+    """
+    catalogue = catalogue or site_catalogue()
+    return {
+        "all": _service_occupancy_rows(cards, catalogue),
+        "sites": [
+            {
+                "id": loc.location_id,
+                "name": loc.name,
+                "services": _service_occupancy_rows(cards, catalogue, site_id=loc.location_id),
+            }
+            for loc in catalogue.locations
+        ],
+    }
+
+
+# ---------------------------------------------------------------------------
+# 4. Demand vs. supply heatmap
 # ---------------------------------------------------------------------------
 
 
@@ -807,7 +981,7 @@ def demand_supply_heatmap(
 
 
 # ---------------------------------------------------------------------------
-# 4. Cancellations: slots reused vs. slots lost
+# 5. Cancellations: slots reused vs. slots lost
 # ---------------------------------------------------------------------------
 
 
@@ -1316,6 +1490,7 @@ def business_insights(cards: list[CallCard], *, now: datetime | None = None) -> 
         "calls_considered": len(cards),
         "unavailability": unavailability_reasons(cards, catalogue=catalogue),
         "providers": provider_ranking(cards),
+        "occupancy": service_occupancy(cards, catalogue=catalogue),
         "heatmap": demand_supply_heatmap(cards, catalogue=catalogue),
         "cancellations": cancellation_slots(cards, now=now, catalogue=catalogue),
         "data_gaps": DATA_GAPS,
