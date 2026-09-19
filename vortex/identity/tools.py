@@ -287,6 +287,15 @@ async def build_registration(ctx: ToolContext, args: BuildRegistrationInput) -> 
     at submit time and a mismatch is a 422: better to ask the caller to repeat
     the id than to post a record that cannot be accepted. The insurer is folded
     to the plan id the register route's enum accepts.
+
+    An empty ``phone`` means the line they are calling from, which Twilio hands
+    us before the greeting. A new patient registers themselves, so the number
+    they would dictate is the number they dialled from - it was identical on
+    every registration the platform has accepted from us - and a registration
+    has eight fields to collect inside a three-minute call. Asking for the one
+    field we already hold is a round trip that costs the whole case. With no
+    caller id there is nothing to fall back on and the refusal below still names
+    ``phone`` for the caller to dictate.
     """
 
     def ask_again(field_name: str, why: str) -> RegistrationResult:
@@ -355,7 +364,7 @@ async def build_registration(ctx: ToolContext, args: BuildRegistrationInput) -> 
             )
         )
 
-    phone_check = check_phone(args.phone)
+    phone_check = check_phone(args.phone or ctx.from_number)
     if not phone_check.possible:
         return RegistrationResult(
             rejection=ask_again(

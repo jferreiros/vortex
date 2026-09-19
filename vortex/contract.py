@@ -549,7 +549,11 @@ class BuildRegistrationInput(BaseModel):
     second_surname: str
     national_id: str
     date_of_birth: date
-    phone: str
+    #: Empty or absent means the line they are calling from. A new patient
+    #: registers themselves, so the number they would dictate is the number
+    #: Twilio already handed us, and a registration has eight fields to collect
+    #: inside three minutes. ``build_registration`` fills it.
+    phone: str = ""
     email: str
     insurer: str
 
