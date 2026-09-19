@@ -279,13 +279,23 @@ class Settings:
     # ElevenLabs. Empty means the service's own default.
     elevenlabs_base_url: str = field(default_factory=lambda: _env("ELEVENLABS_BASE_URL"))
 
+    # Gemini Live (speech-to-speech demo). Opt-in only via VORTEX_VOICE_MODE=
+    # gemini-live — never selected by auto. Jury showpiece; the cascade still
+    # scores. GOOGLE_API_KEY is the Gemini API key (AI Studio), not the TTS
+    # service-account JSON.
+    google_api_key: str = field(default_factory=lambda: _env("GOOGLE_API_KEY"))
+    gemini_live_model: str = field(
+        default_factory=lambda: _env("GEMINI_LIVE_MODEL", "models/gemini-3.8-live")
+    )
+    gemini_live_voice: str = field(default_factory=lambda: _env("GEMINI_LIVE_VOICE", "Aoede"))
+
     # Server
     host: str = field(default_factory=lambda: _env("VORTEX_HOST", "0.0.0.0"))
     port: int = field(default_factory=lambda: int(_env("VORTEX_PORT", "7860")))
     ws_path: str = field(default_factory=lambda: _env("VORTEX_WS_PATH", "/ws"))
 
     # Forced modes. "auto" derives the mode from the keys above.
-    # VORTEX_VOICE_MODE: auto | stub | pipecat
+    # VORTEX_VOICE_MODE: auto | stub | pipecat | gemini-live
     voice_mode: str = field(default_factory=lambda: _env("VORTEX_VOICE_MODE", "auto"))
     # VORTEX_CLINIC_MODE: auto | fake | live
     clinic_mode: str = field(default_factory=lambda: _env("VORTEX_CLINIC_MODE", "auto"))
@@ -460,30 +470,50 @@ class Settings:
         return [name for name in self.tts_providers_in_use if not self.tts_voice_es(name)]
 
     @property
+    def voice_is_gemini_live(self) -> bool:
+        """Jury demo path: speech-to-speech via GeminiLiveLLMService.
+
+        Opt-in only. ``auto`` never picks it — S2S stays off the scoring line.
+        """
+        return self.voice_mode == "gemini-live"
+
+    @property
     def voice_is_pipecat(self) -> bool:
         if self.voice_mode == "pipecat":
             return True
-        if self.voice_mode == "stub":
+        if self.voice_mode in ("stub", "gemini-live"):
             return False
         return bool(
             self.soniox_api_key and self.llm_api_key and self.llm_base_url and self.has_tts_key
         )
 
+    @property
+    def voice_label(self) -> str:
+        """What ``/health`` reports under ``voice``."""
+        if self.voice_is_gemini_live:
+            return "gemini-live"
+        if self.voice_is_pipecat:
+            return "pipecat"
+        return "stub"
+
     def describe(self) -> dict[str, object]:
         """A safe summary for logs and /health. Never includes key values."""
         return {
             "clinic": "live" if self.clinic_is_live else "fake",
-            "voice": "pipecat" if self.voice_is_pipecat else "stub",
+            "voice": self.voice_label,
             "platform_api_base_url": self.platform_api_base_url,
             "has_platform_key": bool(self.platform_api_key),
             "has_soniox_key": bool(self.soniox_api_key),
             "has_llm_key": bool(self.llm_api_key),
+            "has_google_api_key": bool(self.google_api_key),
             "has_google_tts_credentials": self.has_google_tts_credentials,
             "has_elevenlabs_key": bool(self.elevenlabs_api_key),
             "stt_model": self.soniox_stt_model,
             "llm_provider": self.llm_provider,
             "llm_model": self.llm_model,
             "llm_base_url": self.llm_base_url,
+            "gemini_live_model": self.gemini_live_model,
+            "gemini_live_voice": self.gemini_live_voice,
             "llm_first_token_timeout_secs": self.llm_first_token_timeout_secs,
             "llm_retries": self.llm_retries,
             "arbiter_provider": self.arbiter_provider,
