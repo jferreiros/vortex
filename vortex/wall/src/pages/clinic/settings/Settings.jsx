@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import SectionHeader from "../../../components/ui/SectionHeader";
 import Card from "../../../components/ui/Card";
 import Switch from "../../../components/ui/Switch";
@@ -68,6 +68,9 @@ export default function Settings() {
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState(null);
   const [showDefaultConfirm, setShowDefaultConfirm] = useState(false);
+  const [isTrying, setIsTrying] = useState(false);
+  const [tryError, setTryError] = useState(false);
+  const audioRef = useRef(null);
 
   const hasChanges = !deepEqual(settings, savedSettings);
 
@@ -105,11 +108,45 @@ export default function Settings() {
   const handleSave = async () => {
     setIsSaving(true);
     setSaveStatus("saving");
-    await new Promise((r) => setTimeout(r, 600));
-    setSavedSettings(JSON.parse(JSON.stringify(settings)));
-    setSaveStatus("saved");
+    try {
+      const r = await fetch("/api/wall/voice-config", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(settings.personalization),
+      });
+      if (!r.ok) throw new Error(`save failed: ${r.status}`);
+      const cfg = await r.json();
+      const next = { ...settings, personalization: { ...settings.personalization, ...cfg } };
+      setSettings(next);
+      setSavedSettings(JSON.parse(JSON.stringify(next)));
+      setSaveStatus("saved");
+    } catch {
+      setSaveStatus("error");
+    }
     setIsSaving(false);
     setTimeout(() => setSaveStatus(null), 3000);
+  };
+
+  const handleTry = async () => {
+    if (isTrying) return;
+    setIsTrying(true);
+    setTryError(false);
+    try {
+      const r = await fetch("/api/wall/voice-preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(settings.personalization),
+      });
+      if (!r.ok) throw new Error(`preview failed: ${r.status}`);
+      const url = URL.createObjectURL(await r.blob());
+      audioRef.current?.pause();
+      audioRef.current = new Audio(url);
+      await audioRef.current.play();
+    } catch {
+      setTryError(true);
+      setTimeout(() => setTryError(false), 3000);
+    }
+    setIsTrying(false);
   };
 
   const handleSetDefault = () => {
@@ -130,11 +167,22 @@ export default function Settings() {
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [hasChanges]);
 
-  // TODO: wire to GET /api/wall/settings/agent-rules
-  // useEffect(() => { fetch(...).then(setSettings).then(setSavedSettings); }, []);
-
-  // TODO: wire to PUT /api/wall/settings/agent-rules
-  // const handleSave = async () => { await fetch(..., { method: 'PUT', body: JSON.stringify(settings) }); ... };
+  // The voice card's store lives on the line (voiceconfig.db); the board
+  // proxies it. On failure the page keeps its defaults — controls still render.
+  useEffect(() => {
+    fetch("/api/wall/voice-config")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((cfg) => {
+        if (!cfg) return;
+        const merge = (prev) => ({
+          ...prev,
+          personalization: { ...prev.personalization, ...cfg },
+        });
+        setSettings(merge);
+        setSavedSettings(merge);
+      })
+      .catch(() => {});
+  }, []);
 
   // TODO: wire to POST /api/wall/settings/agent-rules/defaults
   // const handleSetDefault = async () => { await fetch(..., { method: 'POST' }); setSettings(DEFAULTS); setSavedSettings(DEFAULTS); };
@@ -159,6 +207,8 @@ export default function Settings() {
 
       {saveStatus === "saved" && <div className="settings-toast saved">Guardado — aplica a llamadas nuevas</div>}
       {saveStatus === "defaulted" && <div className="settings-toast defaulted">Valores por defecto restaurados</div>}
+      {saveStatus === "error" && <div className="settings-toast error">No se pudo guardar</div>}
+      {tryError && <div className="settings-toast error">Vista previa no disponible</div>}
 
       <div className="settings-groups">
         {/* 1. Voz del agente */}
@@ -168,9 +218,8 @@ export default function Settings() {
               <h3>Voz del agente</h3>
               <p>Cómo suena el agente.</p>
             </div>
-            {/* TODO: wire to a short TTS sample with the current slider values */}
-            <Button variant="secondary" onClick={() => {}}>
-              ▶ Try
+            <Button variant="secondary" onClick={handleTry} disabled={isTrying}>
+              {isTrying ? "…" : "▶ Try"}
             </Button>
           </div>
           <div className="settings-rows">
