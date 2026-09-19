@@ -833,6 +833,14 @@ table.ds td.num {
   border: 1px solid var(--hairline);
 }
 
+.transcript {
+  max-height: 64dvh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
+  padding-right: var(--space-sm);
+}
+
 /* ------------------------------------------------------------------ */
 /* Console components (wall, ops, call detail)                         */
 /* ------------------------------------------------------------------ */
@@ -1636,6 +1644,8 @@ table.ds td.num {
   display: flex;
   flex-direction: column;
   gap: var(--space-md);
+  min-height: 0;
+  padding-bottom: var(--space-xl);
 }
 
 .wf-card {
