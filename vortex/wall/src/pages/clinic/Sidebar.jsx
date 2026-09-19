@@ -55,7 +55,6 @@ const CLINIC_ITEMS = [
   { to: "/clinic/ai", label: "IA", icon: "ai" },
   { to: "/clinic/insights", label: "Statistics", icon: "insights" },
   { to: "/clinic/analytics", label: "Analytics", icon: "analytics" },
-  { to: "/clinic/live-calls", label: "Live Calls", icon: "liveCalls" },
   { to: "/clinic/doctor", label: "Horarios", icon: "doctor" },
   { to: "/clinic/patterns-pathways", label: "Pathways & Patterns", icon: "patternsPathways" },
 ];
