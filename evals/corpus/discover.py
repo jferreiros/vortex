@@ -132,15 +132,25 @@ def _seed_names() -> list[str]:
     return sorted(names)
 
 
-async def _harvest_patients(client: ClinicClient, sem: asyncio.Semaphore) -> list[PatientRecord]:
-    """Every patient the seed names surface, deduplicated by id."""
+async def _harvest_patients(
+    client: ClinicClient, sem: asyncio.Semaphore
+) -> tuple[list[PatientRecord], dict[str, int]]:
+    """Every patient the seed names surface, deduplicated by id.
+
+    Also returns how many name queries ran and how many got no answer: a lost
+    directory query is a pool missing the patients it would have named, and a
+    sweep over a partial pool cannot call a reason absent from the clinic.
+    """
     pool: dict[str, PatientRecord] = {}
+    failed = 0
 
     async def one(name: str) -> None:
+        nonlocal failed
         async with sem:
             try:
                 found = await client.directory(name=name)
             except (ClinicApiError, httpx.HTTPError):
+                failed += 1
                 return
             for patient in found:
                 pool.setdefault(patient.patient_id, patient)
@@ -148,7 +158,10 @@ async def _harvest_patients(client: ClinicClient, sem: asyncio.Semaphore) -> lis
     seeds = _seed_names()
     await asyncio.gather(*(one(name) for name in seeds))
     print(f"  {len(pool)} patients from {len(seeds)} name queries")
-    return sorted(pool.values(), key=lambda p: p.patient_id)
+    return sorted(pool.values(), key=lambda p: p.patient_id), {
+        "queries": len(seeds),
+        "failed": failed,
+    }
 
 
 def _last_weekday(anchor: date, weekday: int) -> date:
@@ -470,11 +483,15 @@ def _unverified_notes(
     """
     notes: dict[str, str] = {}
     allowance = stats.get("allowance_exhausted", {})
-    if "allowance_exhausted" not in found and allowance.get("failed"):
+    if "allowance_exhausted" not in found and (
+        allowance.get("failed") or allowance.get("directory_failed") or not allowance.get("queries")
+    ):
         notes["allowance_exhausted"] = (
-            f"{allowance['failed']} of {allowance.get('queries', 0)} patient x specialty "
-            "queries got no answer from the API — the plans behind them were never read; "
-            "re-run before calling the reason unreachable"
+            f"{allowance.get('failed', 0)} of {allowance.get('queries', 0)} patient x specialty "
+            f"queries got no answer from the API and {allowance.get('directory_failed', 0)} of "
+            f"{allowance.get('directory_queries', 0)} name queries lost the patients they would "
+            "have harvested — the plans behind them were never read; re-run before calling the "
+            "reason unreachable"
         )
     location = stats.get("location_hours", {})
     if "location_hours" not in found and (
@@ -631,15 +648,17 @@ async def sweep(
 
         print("by directory-harvested patient and specialty")
         live = await client.catalogue()
-        pool = await _harvest_patients(client, sem)
+        pool, directory = await _harvest_patients(client, sem)
         roster_ids = set(patients)
         fresh = [p for p in pool if p.patient_id not in roster_ids][:max_patients]
         harvested = len(fresh)
         print(f"  {harvested} patients outside the roster's own {len(roster_ids)}")
         if len(found.get("allowance_exhausted", [])) < MAX_SAMPLES:
-            stats["allowance_exhausted"] = await sweep_harvested_patients(
-                client, sem, fresh, specialties, found, record
-            )
+            stats["allowance_exhausted"] = {
+                **await sweep_harvested_patients(client, sem, fresh, specialties, found, record),
+                "directory_queries": directory["queries"],
+                "directory_failed": directory["failed"],
+            }
 
         print("the shapes that should name the last three rules")
         stats.update(await probe_unreportable(client, sem, live, pool, record))

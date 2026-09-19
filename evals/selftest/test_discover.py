@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 
 from evals.corpus.discover import (
+    _harvest_patients,
     _impossible_notes,
     _seed_names,
     _specialty_type,
@@ -37,6 +38,13 @@ class _DeadClinic(FakeClinicClient):
         raise ClinicApiError(503, "unavailable")
 
 
+class _DeadDirectory(FakeClinicClient):
+    """A clinic that answers no name query, the way a timeout does."""
+
+    async def directory(self, **params):
+        raise ClinicApiError(503, "unavailable")
+
+
 class _RecordingClinic(FakeClinicClient):
     """The fake clinic, keeping every availability query it was asked."""
 
@@ -51,6 +59,21 @@ class _RecordingClinic(FakeClinicClient):
 
 def _discard(reason: str, **sample) -> None:
     return None
+
+
+def _probe_stats(*, queries: int, failed: int, directory_queries: int, directory_failed: int):
+    """The stats a sweep returns, with only the allowance_exhausted half varied."""
+    return {
+        "allowance_exhausted": {
+            "queries": queries,
+            "failed": failed,
+            "directory_queries": directory_queries,
+            "directory_failed": directory_failed,
+        },
+        "location_hours": {"windows": 0, "blocked": 0, "failed": 0, "unprobed": 0},
+        "type_not_offered": {"gaps": 0, "probed": 0, "failed": 0, "unprobed": 0},
+        "patient_history": {"queries": 0, "failed": 0},
+    }
 
 
 def _catalogue_with_a_type_gap():
@@ -226,6 +249,36 @@ def test_a_shape_whose_probes_all_failed_is_unverified_not_impossible() -> None:
     unverified = _unverified_notes({}, stats)
     assert "location_hours" in unverified
     assert "location_hours" not in _impossible_notes({}, stats, 0, 5, unverified)
+
+
+def test_a_lost_name_query_is_counted_by_the_harvest() -> None:
+    """The pool the sweep walks is missing whoever the failed query named."""
+    pool, directory = asyncio.run(_harvest_patients(_DeadDirectory(), asyncio.Semaphore(4)))
+    assert pool == []
+    assert directory["failed"] == directory["queries"] == len(_seed_names())
+
+
+def test_a_lost_name_query_holds_allowance_exhausted_unverified() -> None:
+    """A clean patient x specialty sweep over a partial pool says nothing
+    about the patients the directory never handed over."""
+    stats = _probe_stats(queries=48, failed=0, directory_queries=70, directory_failed=3)
+    unverified = _unverified_notes({}, stats)
+    assert "allowance_exhausted" in unverified
+    assert "allowance_exhausted" not in _impossible_notes({}, stats, 0, 5, unverified)
+
+
+def test_a_sweep_that_asked_no_patient_is_unverified_not_impossible() -> None:
+    stats = _probe_stats(queries=0, failed=0, directory_queries=70, directory_failed=0)
+    unverified = _unverified_notes({}, stats)
+    assert "allowance_exhausted" in unverified
+    assert "allowance_exhausted" not in _impossible_notes({}, stats, 0, 5, unverified)
+
+
+def test_a_whole_sweep_that_answered_earns_the_impossible_verdict() -> None:
+    stats = _probe_stats(queries=48, failed=0, directory_queries=70, directory_failed=0)
+    unverified = _unverified_notes({}, stats)
+    assert "allowance_exhausted" not in unverified
+    assert "allowance_exhausted" in _impossible_notes({}, stats, 0, 5, unverified)
 
 
 def test_an_unverified_reason_is_reported_as_unverified(capsys) -> None:
