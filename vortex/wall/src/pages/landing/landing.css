@@ -3,12 +3,15 @@
 }
 
 /* Crossfade veil for the hero → explainer scroll transition, see
-   useCrossfadeScroll.js. Sits above both sections while it fades in/out. */
+   useCrossfadeScroll.js. Sits above both sections while it fades in/out.
+   The gradient runs white → grey in COLOUR, never in alpha — every stop
+   stays fully opaque so the veil actually hides the scroll jump underneath
+   at full opacity, instead of leaving a see-through band. */
 .landing-scroll-veil {
   position: fixed;
   inset: 0;
   z-index: 40;
-  background: var(--color-bg);
+  background: linear-gradient(to bottom, var(--color-bg-raised), var(--color-bg-empty) 85%);
   opacity: 0;
   pointer-events: none;
   transition: opacity 420ms ease;

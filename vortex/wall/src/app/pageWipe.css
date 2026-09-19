@@ -1,0 +1,38 @@
+/* A grey panel with a lighter leading sheen — the gradient is in COLOUR,
+   never in alpha, so the panel is fully opaque edge to edge and actually
+   covers the screen while it holds, instead of leaving the leading band
+   see-through. */
+.page-wipe {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  width: 100vw;
+  pointer-events: none;
+  background: linear-gradient(100deg, var(--color-bg-raised), var(--color-bg-empty) 30%, var(--color-bg-empty) 100%);
+}
+
+.page-wipe-cover {
+  animation: page-wipe-cover-in 480ms cubic-bezier(0.65, 0, 0.35, 1) forwards;
+}
+
+.page-wipe-reveal {
+  animation: page-wipe-reveal-out 480ms cubic-bezier(0.65, 0, 0.35, 1) forwards;
+}
+
+@keyframes page-wipe-cover-in {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0%);
+  }
+}
+
+@keyframes page-wipe-reveal-out {
+  from {
+    transform: translateX(0%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
