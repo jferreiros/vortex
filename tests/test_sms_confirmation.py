@@ -6,7 +6,9 @@ an accepted book/cancel texts the calling number; everything else stays quiet.
 
 from __future__ import annotations
 
+import json
 from datetime import date, datetime
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -38,6 +40,7 @@ from vortex.line.sms import (
     twilio_is_configured,
 )
 from vortex.line.twilio import StartPayload
+from vortex.observability.tracing import mask_phone
 from vortex.settings import Settings, get_settings, reset_settings
 
 NOW = datetime(2026, 9, 18, 10, 0, tzinfo=MADRID)
@@ -111,6 +114,12 @@ def make_session(
     return session
 
 
+def sms_events(settings: Settings, call_id: str) -> list[dict[str, Any]]:
+    path = Path(settings.calls_log_path)
+    lines = [json.loads(line) for line in path.read_text().splitlines()]
+    return [x for x in lines if x["call_id"] == call_id and x["kind"].startswith("sms.")]
+
+
 def remember_appointment(session: CallSession) -> None:
     appointment = Appointment(
         appointment_id="A0001",
@@ -120,9 +129,9 @@ def remember_appointment(session: CallSession) -> None:
         appointment_type_id="review",
         start=datetime(2026, 9, 30, 10, 0, tzinfo=MADRID),
     )
-    session.ctx.state.setdefault("diary_appointments", {})[
-        appointment.appointment_id
-    ] = appointment.model_dump(mode="json")
+    session.ctx.state.setdefault("diary_appointments", {})[appointment.appointment_id] = (
+        appointment.model_dump(mode="json")
+    )
 
 
 # ---- render helpers ---------------------------------------------------------
@@ -321,9 +330,7 @@ async def test_missing_from_number_skips_sms(offline_settings: Settings) -> None
 async def test_non_accepted_submit_skips_sms(
     offline_settings: Settings, submitter_cls: type[AcceptingSubmitter]
 ) -> None:
-    session = make_session(
-        offline_settings, "CA-not-accepted", submitter=submitter_cls()
-    )
+    session = make_session(offline_settings, "CA-not-accepted", submitter=submitter_cls())
     sms = session.sms
     assert isinstance(sms, DryRunSmsClient)
 
@@ -365,6 +372,23 @@ async def test_submit_action_tool_path_also_sends_sms(offline_settings: Settings
 
     assert len(sms.sent) == 1
     assert sms.sent[0][0] == CALLER
+
+
+@pytest.mark.asyncio
+async def test_sms_events_never_persist_the_number_or_the_body(
+    offline_settings: Settings,
+) -> None:
+    session = make_session(offline_settings, "CA-sms-privacy")
+
+    await session.submit(a_booking())
+    await session.close()
+
+    logged = sms_events(offline_settings, "CA-sms-privacy")
+    assert [event["kind"] for event in logged] == ["sms.sending", "sms.dry_run"]
+    for event in logged:
+        assert event["to"] == mask_phone(CALLER)
+        assert "body" not in event
+        assert CALLER not in json.dumps(event, ensure_ascii=False)
 
 
 @pytest.mark.asyncio
