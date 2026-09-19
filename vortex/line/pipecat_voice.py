@@ -46,7 +46,12 @@ from typing import Any
 from fastapi import WebSocket
 
 from vortex import tools as registry
-from vortex.conversation.language import DEFAULT_LANGUAGE, detect_language, tts_voice_for
+from vortex.conversation.language import (
+    DEFAULT_LANGUAGE,
+    detect_language,
+    normalise_language,
+    tts_voice_for,
+)
 from vortex.conversation.prompt import (
     GREETING,
     idle_prompt_for,
@@ -71,6 +76,24 @@ log = logging.getLogger(__name__)
 # Both the line in and the voice out are 8 kHz: the platform speaks µ-law at
 # 8 kHz and the serializer does the companding.
 LINE_SAMPLE_RATE = 8000
+
+# Spoken the instant a tool call starts, so the caller hears something while
+# the LLM waits on the clinic API (~1.3 s p50). Keep each line under ~1 s of
+# audio. Pipecat treats TTSSpeakFrame as bot speech, so the word gate and the
+# idle timer stay quiet for the duration. See docs/research/03-turn-detection.md.
+TOOL_FILLERS: dict[str, str] = {
+    "en": "One moment.",
+    "es": "Un momento.",
+    "ca": "Un moment.",
+    "gl": "Un momento.",
+    "eu": "Momentu bat.",
+}
+
+
+def tool_filler_for(language: str | None = None) -> str:
+    """Short filler for the call's current language. Falls back to English."""
+    code = normalise_language(language) or DEFAULT_LANGUAGE
+    return TOOL_FILLERS.get(code, TOOL_FILLERS[DEFAULT_LANGUAGE])
 
 
 def _language_hints(codes: tuple[str, ...]) -> list[Any]:
@@ -254,6 +277,10 @@ async def run_pipecat_call(
 
     aggregators.user().add_event_handler(
         "on_user_turn_idle", _make_idle_speaker(session, language_state, task)
+    )
+    llm.add_event_handler(
+        "on_function_calls_started",
+        _make_tool_filler_speaker(session, language_state, task),
     )
 
     runner = PipelineRunner(handle_sigint=False)
@@ -609,6 +636,29 @@ def _make_idle_speaker(session: CallSession, state: _LanguageState, task: Any) -
         await task.queue_frames([TTSSpeakFrame(idle_prompt_for(state.language))])
 
     return _on_user_idle
+
+
+def _make_tool_filler_speaker(session: CallSession, state: _LanguageState, task: Any) -> Any:
+    """Speak one short filler when the LLM starts executing tool calls.
+
+    Wired to ``LLMService.on_function_calls_started``. One phrase per batch,
+    read at fire time so a mid-call language switch moves it. ``TTSSpeakFrame``
+    is bot speech: ``MinWordsUserTurnStartStrategy`` guards it and the idle
+    timer does not run during it.
+    """
+    from pipecat.frames.frames import TTSSpeakFrame
+
+    async def _on_function_calls_started(service: Any, function_calls: Any = None) -> None:
+        phrase = tool_filler_for(state.language)
+        session.ctx.log.event(
+            "voice.tool_filler",
+            language=state.language,
+            tools=len(function_calls or ()),
+            text=phrase,
+        )
+        await task.queue_frames([TTSSpeakFrame(phrase)])
+
+    return _on_function_calls_started
 
 
 def _CallLogObserver(session: CallSession):  # noqa: N802 - factory that returns an observer
