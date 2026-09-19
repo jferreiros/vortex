@@ -61,6 +61,14 @@
       "deadline": "Domingo 06:00 muro · 11:00 jurado",
       "goal": "Medir en bucle, congelar, y enseñarlo.",
       "why": "El ranking guarda el mejor Run All, no el último. Y la mitad de la nota del jurado es lo que podemos enseñar."
+    },
+    {
+      "id": "w6",
+      "label": "Bloque 6",
+      "title": "La voz · lo que dice la investigación",
+      "deadline": "Sábado, en paralelo a los retos",
+      "goal": "Meter en el código lo que la investigación de voz priorizó por puntos por hora.",
+      "why": "Ocho segundos de silencio y una barrera de barge-in muerta cuestan el reto 13 entero. Se hace en paralelo, no en vez de los retos."
     }
   ],
   "tasks": [
@@ -484,6 +492,14 @@
       "files": [],
       "done": "Quien conduce enseña, sin buscar nada: la llamada entrando, las tools disparando, el registro enviado y el tablero de evals. Ensayado dos veces.",
       "why": "El jurado nos llama en directo el domingo a las 11:00. Buscar una pestaña delante de ellos gasta la mitad del tiempo que tenemos."
+    },
+    {
+      "id": "T59", "wave": "w6", "lane": "conv", "kind": "reto",
+      "title": "Voz · Silencio: repreguntar a los 5 s y enviar en el segundo silencio",
+      "problems": [13], "weight": 4, "size": "30 min", "blocked_by": [],
+      "files": ["vortex/conversation/turns.py", "vortex/line/pipecat_voice.py"],
+      "done": "user_idle_timeout=5.0; primer idle → repregunta; segundo idle → resumen y submit de lo que haya. user_turn_stop_timeout=6.0 como red.",
+      "why": "El caller difícil calla ocho segundos. Hoy hay un aviso a los 6 s y nada después, y la llamada tiene tres minutos."
     }
   ]
 }

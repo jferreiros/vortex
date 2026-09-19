@@ -42,12 +42,19 @@ from typing import Any
 from fastapi import WebSocket
 
 from vortex import tools as registry
+from vortex.contract import action_route
 from vortex.conversation.language import DEFAULT_LANGUAGE, detect_language, tts_voice_for
-from vortex.conversation.prompt import GREETING, idle_prompt_for, initial_messages
+from vortex.conversation.prompt import (
+    GREETING,
+    idle_prompt_for,
+    idle_submit_line_for,
+    initial_messages,
+)
 from vortex.conversation.stt_context import stt_context_text, stt_terms
 from vortex.conversation.turns import (
     TurnSettings,
     default_turn_settings,
+    idle_phase,
     user_turn_strategies,
 )
 from vortex.line.session import CallSession
@@ -260,6 +267,7 @@ def _user_aggregator_params(turns: TurnSettings) -> Any:
             )
         ),
         user_idle_timeout=turns.user_idle_secs,
+        user_turn_stop_timeout=turns.user_turn_stop_secs,
         user_turn_strategies=user_turn_strategies(turns),
     )
 
@@ -477,21 +485,58 @@ def _LanguageWatcher(  # noqa: N802 - factory that returns a processor
 
 
 def _make_idle_speaker(session: CallSession, state: _LanguageState, task: Any) -> Any:
-    """The handler the user aggregator fires when the caller goes quiet.
+    """Handle ``on_user_turn_idle``: one re-prompt, then summarise and submit.
 
-    Speaks ``prompt.idle_prompt_for`` in the language the call is in now — the
-    platform cuts a call that goes quiet, so silence has to answer — and keeps
-    the ``voice.user_idle`` event on the call log. The prompt is read at fire
-    time, so a mid-call language switch moves it, and the TTS router reads the
-    same state, so it comes out on the right voice.
+    First idle speaks ``prompt.idle_prompt_for`` in the call's language. Second
+    idle speaks ``prompt.idle_submit_line_for`` and submits the best known
+    action (a prepared booking counts as confirmed by the second silence; else
+    the same refusal ``close()`` would send). Further idles are silent.
     """
     from pipecat.frames.frames import TTSSpeakFrame
 
+    idle_count = 0
+
     async def _on_user_idle(aggregator: Any, *args: Any) -> None:
-        session.ctx.log.event("voice.user_idle")
-        await task.queue_frames([TTSSpeakFrame(idle_prompt_for(state.language))])
+        nonlocal idle_count
+        idle_count += 1
+        phase = idle_phase(idle_count)
+        session.ctx.log.event("voice.user_idle", count=idle_count, phase=phase)
+        if phase == "reprompt":
+            await task.queue_frames([TTSSpeakFrame(idle_prompt_for(state.language))])
+            return
+        if phase == "submit":
+            await task.queue_frames([TTSSpeakFrame(idle_submit_line_for(state.language))])
+            await _submit_best_known_on_idle(session)
+            return
 
     return _on_user_idle
+
+
+async def _submit_best_known_on_idle(session: CallSession) -> None:
+    """Second idle: send prepared work, or the fallback refusal, once."""
+    if session.has_accepted_submission:
+        return
+    memory = session.memory
+    if memory.prepared is not None:
+        memory.mark_confirmed()
+        branch, action, why = (
+            "prepared_on_idle",
+            memory.prepared,
+            f"{memory.prepared_tool} prepared; second idle confirms",
+        )
+    else:
+        branch, action, why = session.fallback_action()
+    repeat = action in session.sent_actions
+    session.ctx.log.event(
+        "submit.idle",
+        branch=branch,
+        why=why,
+        route=action_route(action),
+        skipped=repeat,
+    )
+    if repeat:
+        return
+    await session.submit(action)
 
 
 def _CallLogObserver(session: CallSession):  # noqa: N802 - factory that returns an observer

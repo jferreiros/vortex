@@ -24,15 +24,34 @@ flag. ``LLMUserAggregatorParams(user_turn_strategies=...)`` is the argument.
 
 Noise (problem 12) and the eight-second silence (problem 13) both live here:
 the VAD thresholds keep a passing bus from becoming a barge-in, and
-``user_idle_secs`` is when the aggregator fires ``on_user_turn_idle`` so the
-agent can ask "are you still there?" (``prompt.idle_prompt_for``) instead of
-letting the platform cut a quiet call.
+``user_idle_secs`` is when the aggregator fires ``on_user_turn_idle``. The
+first idle re-prompts (``prompt.idle_prompt_for``); the second summarises and
+submits what the call already knows, so eight seconds of quiet does not burn
+the three-minute cap with nothing sent.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
+
+# First ``on_user_turn_idle`` re-prompts; the next one submits. Further idles
+# are no-ops (the call already sent what it had).
+MAX_IDLE_REPROMPTS = 1
+
+IdlePhase = Literal["reprompt", "submit", "done"]
+
+
+def idle_phase(count: int, *, max_reprompts: int = MAX_IDLE_REPROMPTS) -> IdlePhase:
+    """What to do on the Nth ``on_user_turn_idle`` (1-based) for this call."""
+    if count < 1:
+        raise ValueError(f"idle count must be >= 1, got {count}")
+    if count <= max_reprompts:
+        return "reprompt"
+    if count == max_reprompts + 1:
+        return "submit"
+    return "done"
+
 
 # Every tool in vortex/tools.py plus submit_action. The model sees all of
 # them at once: the flow is short and staging would cost a round trip per
@@ -74,10 +93,12 @@ class TurnSettings:
     # In VAD mode, seconds of silence after speech before the turn is over.
     # Longer than the mid-id pause ("one two, three four ... five six").
     user_speech_timeout_secs: float = 1.2
-    # Seconds of caller silence before the agent prompts again. 0 disables.
-    # The difficult caller goes quiet for about eight seconds; the platform's
-    # own cut-off for a quiet line is unpublished, so nudge before it could.
-    user_idle_secs: float = 6.0
+    # Seconds of caller silence before the first re-prompt. 0 disables.
+    # The difficult caller goes quiet for about eight seconds; nudge at 5 s so
+    # one re-prompt still fits before the platform could cut the line.
+    user_idle_secs: float = 5.0
+    # Safety net: if no stop strategy ends the user turn, force it after this.
+    user_turn_stop_secs: float = 6.0
     exposed_tools: list[str] = field(default_factory=lambda: list(DEFAULT_EXPOSED_TOOLS))
 
     # --- Soniox STT ---------------------------------------------------------
