@@ -111,3 +111,15 @@ async def test_console_routes_render(seeded: Path, user: User) -> None:
 async def test_public_pages_mask_the_phone(seeded: Path, user: User) -> None:
     await user.open("/wall")
     await user.should_not_see("+34612345678")
+
+
+async def test_unsigned_root_is_sign_in_not_the_wall(
+    seeded: Path, monkeypatch: pytest.MonkeyPatch, user: User
+) -> None:
+    monkeypatch.setenv("VORTEX_OPS_PASSWORD", "secret")
+    monkeypatch.setenv("VORTEX_ENV", "production")
+    monkeypatch.setenv("VORTEX_STORAGE_SECRET", "test-secret")
+    await user.open("/")
+    await user.should_see("Team sign-in")
+    await user.should_not_see("Recent calls")
+    await user.should_not_see("Overview")
