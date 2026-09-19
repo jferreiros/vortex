@@ -4,14 +4,20 @@ Builds, for each provider, a day x time grid from the clinic catalogue
 (opening hours, closure days, the bookable window) and fills the slots the call
 log says were booked, moved or cancelled.
 
-The log source is the synthetic-data pack by default
-(``synthetic-data/logs/*.jsonl``). Set ``VORTEX_CALENDAR_LOG`` to point it at a
-single live call log (``logs/calls.jsonl``) later - the grid fills from
-whichever file it reads as more actions land.
+The Clinic View's filled slots come from the product database
+(``logs/vortex_product.db``), which ``database/scripts/backfill_from_logs.py``
+builds out of the call log: real visits, on the real providers and sites. A
+database with no appointments falls back to the synthetic-data pack, so a
+fresh clone still draws a populated diary.
 
-The builders (``bookings_from_events``, ``build_calendars``, ``clinic_agenda``)
-are pure: they take data and return data, so the view and the tests share one
-code path. The IO helpers (``appointment_index``, ``load_source_events``,
+The standalone ``/calendar`` page reads the pack's own logs
+(``synthetic-data/logs/*.jsonl``); set ``VORTEX_CALENDAR_LOG`` to a single live
+call log to fill that grid from real calls as they land instead.
+
+The builders (``bookings_from_events``, ``bookings_from_rows``,
+``build_calendars``, ``clinic_agenda``) are pure: they take data and return
+data, so the view and the tests share one code path. The IO helpers
+(``appointment_index``, ``load_source_events``, ``load_database_agenda``,
 ``load_agenda_bookings``) sit at the bottom.
 """
 
@@ -25,7 +31,16 @@ from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any, Literal
 
-from vortex.contract import MADRID, Appointment, Catalogue, PatientRecord
+from pydantic import ValidationError
+
+from vortex.contract import (
+    MADRID,
+    Appointment,
+    AppointmentTypeRecord,
+    Catalogue,
+    PatientRecord,
+    ProviderRecord,
+)
 from vortex.observability.calllog import read_recent
 from vortex.settings import REPO_ROOT
 
@@ -257,8 +272,216 @@ def _provider_for_slot(catalogue: Catalogue, location_id: str, appointment_type_
     return ranked[0].provider_id if ranked else ""
 
 
+def bookings_from_rows(
+    rows: list[Any],
+    call_ids: dict[str, str] | None = None,
+    *,
+    catalogue: Catalogue | None = None,
+) -> dict[BookingKey, Booking]:
+    """Taken slots from ``database/`` appointment rows, keyed like the log.
+
+    Pure: ``rows`` are ``database.models.AppointmentRecord``-shaped and the
+    caller does the reading. No event replay is needed — the database is the
+    diary already materialised, so a cancelled appointment is simply absent
+    from an open-status read and a rescheduled one already names its new slot.
+    """
+    call_ids = call_ids or {}
+    bookings: dict[BookingKey, Booking] = {}
+    for row in rows:
+        start = _parse_dt(row.slot_start)
+        if start is None:
+            continue
+        start = start.astimezone(MADRID).replace(second=0, microsecond=0)
+        booking = Booking(
+            provider_id=str(row.provider_id or ""),
+            location_id=str(row.site_id or ""),
+            start=start,
+            patient_id=str(row.patient_id or ""),
+            appointment_type_id=str(row.appointment_type_id or ""),
+            appointment_id=str(row.id or ""),
+            call_id=call_ids.get(str(row.id or ""), ""),
+        )
+        if catalogue is not None:
+            booking = assign_provider(catalogue, booking)
+        if not booking.provider_id:
+            continue
+        bookings[_key(booking.provider_id, booking.location_id, booking.start)] = booking
+    return bookings
+
+
+def patient_index_from_rows(rows: list[Any]) -> dict[str, PatientBrief]:
+    """``patient_id`` -> the roster fields the appointment rows carry.
+
+    The database knows a patient only through the calls that booked them, so a
+    row whose call never ran ``find_patient`` has an id and no name. Those are
+    skipped rather than shown as a blank card: the directory is a better source
+    for anyone it does know, and this index only fills the gaps it can.
+    """
+    index: dict[str, PatientBrief] = {}
+    for row in rows:
+        patient_id = str(row.patient_id or "")
+        if not patient_id or not row.patient_name:
+            continue
+        index.setdefault(
+            patient_id,
+            PatientBrief(
+                patient_id=patient_id,
+                full_name=str(row.patient_name),
+                phone=str(row.patient_phone or ""),
+                insurer=str(row.insurer or ""),
+            ),
+        )
+    return index
+
+
+def providers_from_events(events: list[dict[str, Any]]) -> list[ProviderRecord]:
+    """The platform's own provider records, recovered from the call log.
+
+    ``find_provider`` logs the whole record the clinic returned — name,
+    specialty, per-site schedules, insurers, leave — so this is a real roster
+    rather than an approximation of one.
+
+    It matters because the offline fallback is not real: ``vortex/clinic/
+    fixtures.py`` carries seven providers to the platform's twelve, and gives
+    PR03 a different name and specialty. A visit booked with a doctor the
+    catalogue has never heard of has no grid to hang on, so it vanishes from
+    the Agenda — which is most of the real bookings, not a few of them.
+    """
+    out: dict[str, ProviderRecord] = {}
+    for event in events:
+        if event.get("kind") != "tool.returned" or event.get("tool") != "find_provider":
+            continue
+        row = (event.get("result") or {}).get("provider")
+        if not isinstance(row, dict) or not row.get("provider_id"):
+            continue
+        provider_id = str(row["provider_id"])
+        if provider_id in out:
+            continue
+        try:
+            out[provider_id] = ProviderRecord.model_validate(row)
+        except ValidationError:
+            continue
+    return list(out.values())
+
+
+def provider_names_from_events(events: list[dict[str, Any]]) -> dict[str, tuple[str, str]]:
+    """``provider_id`` -> (name, specialty_id) as ``find_slots`` reported it.
+
+    A thinner source than ``providers_from_events`` — a slot names its doctor
+    but not their schedules, so this cannot put a missing doctor on the board.
+    It can correct one already there: the fixtures call PR01 "Dra. Ortiz"
+    where the clinic calls her "Dra. Carmen Ortiz Vidal", and the name is what
+    the screen shows and what a receptionist would say out loud.
+    """
+    out: dict[str, tuple[str, str]] = {}
+    for event in events:
+        if event.get("kind") != "tool.returned" or event.get("tool") != "find_slots":
+            continue
+        for slot in (event.get("result") or {}).get("slots") or []:
+            if not isinstance(slot, dict):
+                continue
+            provider_id = str(slot.get("provider_id") or "")
+            name = str(slot.get("provider_name") or "")
+            if provider_id and name and provider_id not in out:
+                out[provider_id] = (name, str(slot.get("specialty_id") or ""))
+    return out
+
+
+def appointment_types_from_events(events: list[dict[str, Any]]) -> list[AppointmentTypeRecord]:
+    """Appointment types the log has seen offered, with their real durations.
+
+    ``find_slots`` names a slot's type and how long it runs but never the
+    type's label, so ``name`` is left empty and the grid falls back to
+    ``_pretty_id``. The duration is the point: without it an orthopaedic first
+    visit draws as one 15-minute step instead of the three it occupies.
+    """
+    seen: dict[str, AppointmentTypeRecord] = {}
+    for event in events:
+        if event.get("kind") != "tool.returned" or event.get("tool") != "find_slots":
+            continue
+        for slot in (event.get("result") or {}).get("slots") or []:
+            if not isinstance(slot, dict):
+                continue
+            type_id = str(slot.get("appointment_type_id") or "")
+            if not type_id or type_id in seen:
+                continue
+            seen[type_id] = AppointmentTypeRecord(
+                appointment_type_id=type_id,
+                name="",
+                specialty_id=slot.get("specialty_id") or None,
+                duration_minutes=int(slot.get("duration_minutes") or 15),
+            )
+    return list(seen.values())
+
+
+def catalogue_with_log_roster(catalogue: Catalogue, events: list[dict[str, Any]]) -> Catalogue:
+    """``catalogue`` with every provider and type the log knows folded in.
+
+    The log wins on collision: a record straight from ``GET /clinic`` via
+    ``find_provider`` is the platform's answer, where the same id in the
+    fixtures is a stand-in written before the real roster was known. A
+    catalogue that is already live simply gets nothing it does not have.
+    """
+    providers = {row.provider_id: row for row in catalogue.providers}
+    full = providers_from_events(events)
+    for row in full:
+        providers[row.provider_id] = row
+    # Names for the doctors the log never looked up in full but did offer a
+    # slot with. Only the fields a slot actually carries are touched, so a
+    # stand-in keeps its schedules and becomes reachable under its real name.
+    recovered = {row.provider_id for row in full}
+    for provider_id, (name, specialty_id) in provider_names_from_events(events).items():
+        row = providers.get(provider_id)
+        if row is None or provider_id in recovered:
+            continue
+        providers[provider_id] = row.model_copy(
+            update={"name": name, "specialty_id": specialty_id or row.specialty_id}
+        )
+    types = {row.appointment_type_id: row for row in catalogue.appointment_types}
+    for row in appointment_types_from_events(events):
+        types.setdefault(row.appointment_type_id, row)
+    return catalogue.model_copy(
+        update={"providers": list(providers.values()), "appointment_types": list(types.values())}
+    )
+
+
+def load_database_agenda() -> tuple[list[Any], dict[str, str]]:
+    """Open appointments and their call ids, or ``([], {})`` if unavailable.
+
+    Late import and broad catch for the same reason ``live.py`` reads
+    ``wall_cancellations`` that way: a missing or unwritable store must never
+    blank the diary.
+    """
+    try:
+        from database import db
+        from vortex.settings import get_settings
+
+        with db.connection(get_settings().product_db_path) as conn:
+            return db.list_appointments(conn), db.call_id_by_appointment(conn)
+    except Exception:
+        return [], {}
+
+
 def load_agenda_bookings(catalogue: Catalogue) -> dict[BookingKey, Booking]:
-    """Taken slots for the Clinic View: fixtures, the synthetic pack, then the log.
+    """Taken slots for the Clinic View.
+
+    The product database first: ``database/scripts/backfill_from_logs.py`` has
+    already turned every landed BOOK/CANCEL/RESCHEDULE in the call log into
+    rows there, so it holds the real clinic's own visits with the real
+    providers and sites on them.
+
+    A database with no appointments — a fresh clone that has never run the
+    backfill — falls back to the synthetic pack below, so the board shows a
+    populated diary either way rather than an empty grid.
+    """
+    rows, call_ids = load_database_agenda()
+    if rows:
+        return bookings_from_rows(rows, call_ids, catalogue=catalogue)
+    return load_pack_bookings(catalogue)
+
+
+def load_pack_bookings(catalogue: Catalogue) -> dict[BookingKey, Booking]:
+    """Taken slots from fixtures, the synthetic pack, then the pack's logs.
 
     Per-patient clinic lookups miss pack rows with an empty ``patient_id``.
     Reading ``appointments.json`` whole (and filling a missing doctor from the
@@ -972,8 +1195,15 @@ def agenda_options(catalogue: Catalogue) -> dict[str, Any]:
             if provider.specialty_id and provider.specialty_id not in seen:
                 seen[provider.specialty_id] = provider.specialty_name or provider.specialty_id
         specialties = [{"id": key, "name": label} for key, label in seen.items()]
+    # A type recovered from the log has its real duration but no label — the
+    # platform sends one only in the catalogue. Same ``_pretty_id`` fallback a
+    # booked cell already uses, so the dropdown never carries a blank option.
     types = [
-        {"id": row.appointment_type_id, "name": row.name} for row in catalogue.appointment_types
+        {
+            "id": row.appointment_type_id,
+            "name": row.name or _pretty_id(row.appointment_type_id),
+        }
+        for row in catalogue.appointment_types
     ]
     return {
         "ok": True,

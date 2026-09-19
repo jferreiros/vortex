@@ -69,6 +69,9 @@ class CallLog:
         self.said: deque[str] = deque(maxlen=CALLER_WORDS_KEPT)
         self.tool_calls = 0
         self.actions: list[dict[str, Any]] = []
+        #: This call's own events, in write order — so the product-database
+        #: hook at hangup can persist the row without re-reading the whole log.
+        self.events: list[dict[str, Any]] = []
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
     def event(self, kind: str, **data: Any) -> None:
@@ -78,9 +81,16 @@ class CallLog:
             "kind": kind,
             **data,
         }
+        self.events.append(line)
         text = json.dumps(line, default=_json_default, ensure_ascii=False)
         with _WRITE_LOCK, self.path.open("a", encoding="utf-8") as fh:
             fh.write(text + "\n")
+        try:
+            from vortex.observability.supabase_log import enqueue
+
+            enqueue(json.loads(text))
+        except Exception:
+            pass
 
     # Convenience wrappers so lanes log the same shape.
 
@@ -149,6 +159,15 @@ def _iter_lines_backwards(path: Path, chunk_size: int = 1 << 19) -> Iterator[str
 
 def read_recent(path: Path, limit: int = 200) -> list[dict[str, Any]]:
     """The last ``limit`` events, oldest first. For /calls and the live view."""
+    try:
+        from vortex.observability import supabase_log
+
+        if supabase_log.uses_this_log(path):
+            remote = supabase_log.fetch_recent(limit)
+            if remote:
+                return remote
+    except Exception:
+        pass
     if not path.exists():
         return []
     out: list[dict[str, Any]] = []
@@ -202,6 +221,15 @@ def read_calls(
     Returns ``(grouped, meta)`` where each group is chronological and meta
     carries event/call counts and the truncation flag.
     """
+    try:
+        from vortex.observability import supabase_log
+
+        if supabase_log.uses_this_log(path):
+            remote = supabase_log.fetch_window(max_calls=max_calls, since=since)
+            if remote is not None:
+                return remote
+    except Exception:
+        pass
     grouped: dict[str, list[dict[str, Any]]] = {}
     meta: dict[str, Any] = {"calls": 0, "events": 0, "truncated": False}
     if not path.exists():

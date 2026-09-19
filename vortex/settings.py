@@ -362,6 +362,12 @@ class Settings:
             _env("VORTEX_PRODUCT_DB", str(REPO_ROOT / "logs" / "vortex_product.db"))
         )
     )
+    # Hosted call log (vortex/observability/supabase_log.py). Empty = JSONL
+    # only. The service-role key is server-side; never ship it to the browser.
+    supabase_url: str = field(default_factory=lambda: _env("SUPABASE_URL"))
+    supabase_service_role_key: str = field(
+        default_factory=lambda: _env("SUPABASE_SERVICE_ROLE_KEY") or _env("SUPABASE_SECRET_KEY")
+    )
     langfuse_public_key: str = field(default_factory=lambda: _env("LANGFUSE_PUBLIC_KEY"))
     langfuse_secret_key: str = field(default_factory=lambda: _env("LANGFUSE_SECRET_KEY"))
     langfuse_base_url: str = field(
@@ -661,6 +667,7 @@ class Settings:
             "ws_path": self.ws_path,
             "calls_log_path": str(self.calls_log_path),
             "product_db_path": str(self.product_db_path),
+            "has_supabase": bool(self.supabase_url and self.supabase_service_role_key),
             "has_langfuse_keys": bool(self.langfuse_public_key and self.langfuse_secret_key),
             "has_hf_token": bool(self.hf_token),
             "langfuse_base_url": self.langfuse_base_url,
