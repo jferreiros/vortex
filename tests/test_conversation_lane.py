@@ -141,7 +141,7 @@ def test_prompt_names_every_rule_the_score_depends_on() -> None:
         "patient_id from find_patient",
         "list_appointments",
         "last stated request",
-        "One field per turn",
+        "One question per turn",
         "groups of three",
         "read back once",
         "Last value wins",
