@@ -32,6 +32,7 @@ from vortex.contract import (
     BookAction,
     CallerLineMatch,
     DeclineReason,
+    EligibilityVerdict,
     EscalateAction,
     FindPatientResult,
     FindSlotsInput,
@@ -291,12 +292,20 @@ class CallMemory:
         Reads the contract's own field names, so no lane tool has to know this
         exists: ``rejection`` on every result that can refuse, ``action`` on the
         ``prepare_*`` and ``build_registration`` results, ``slots``/``blocked``
-        on availability, ``status`` on the identity lookup.
+        on availability, ``status`` on the identity lookup, ``allowed`` on the
+        eligibility verdict.
         """
         if isinstance(result, FindPatientResult):
             self.identity_pending = result.status != "found"
             if result.patient is not None and result.status == "found":
                 self.identified_patient = result.patient
+
+        # A recheck the rules allow proves the earlier refusal gone, exactly as
+        # free slots do. Left standing, its verdict would rewrite the reason of
+        # every later refusal with a rule that no longer bites.
+        if isinstance(result, EligibilityVerdict) and result.allowed:
+            self.forget_rejection()
+            self.forget_stored_reason()
 
         rejection = getattr(result, "rejection", None)
         if isinstance(rejection, Rejection):
