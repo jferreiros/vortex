@@ -1,0 +1,146 @@
+/* RecordingCell — the Calls table's recording column. Tokens only;
+   see src/theme/tokens.css. */
+
+/* Simulated live wave -------------------------------------------------------
+   Bars breathe on scaleY so the strip reads as "audio" without any real
+   audio leaving the server mid-call. Phase only changes the tempo and
+   amplitude, never the colour. */
+
+.rec-wave {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 26px;
+}
+
+.rec-wave i {
+  display: block;
+  width: 3px;
+  height: 100%;
+  border-radius: var(--radius-full);
+  background: var(--color-faint);
+  transform-origin: center;
+  animation: rec-wave-bar 1.6s var(--ease-standard) infinite;
+}
+
+.rec-wave i:nth-child(1) { animation-delay: 0ms; }
+.rec-wave i:nth-child(2) { animation-delay: 180ms; }
+.rec-wave i:nth-child(3) { animation-delay: 360ms; }
+.rec-wave i:nth-child(4) { animation-delay: 540ms; }
+.rec-wave i:nth-child(5) { animation-delay: 720ms; }
+
+@keyframes rec-wave-bar {
+  0%, 100% { transform: scaleY(0.25); }
+  50% { transform: scaleY(0.55); }
+}
+
+.rec-wave-speaking i,
+.rec-wave-working i {
+  background: var(--color-primary);
+  animation-duration: 0.9s;
+}
+
+.rec-wave-speaking i { animation-name: rec-wave-bar-loud; }
+.rec-wave-working i { animation-name: rec-wave-bar-mid; animation-duration: 1.1s; }
+.rec-wave-thinking i { animation-duration: 2.2s; }
+
+@keyframes rec-wave-bar-loud {
+  0%, 100% { transform: scaleY(0.2); }
+  50% { transform: scaleY(0.95); }
+}
+
+@keyframes rec-wave-bar-mid {
+  0%, 100% { transform: scaleY(0.25); }
+  50% { transform: scaleY(0.7); }
+}
+
+/* Compact player --------------------------------------------------------------
+   Native <audio> underneath; the visible control is a round play button,
+   a hairline track and the time — same grammar as the stat-tile buttons. */
+
+.rec-player {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.rec-play {
+  appearance: none;
+  border: none;
+  cursor: pointer;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--color-primary-soft);
+  color: var(--color-primary-deep);
+  transition: background-color var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
+}
+
+.rec-play:hover:not(:disabled) {
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+.rec-play:disabled {
+  cursor: default;
+  color: var(--color-faint);
+}
+
+.rec-track {
+  flex: 0 1 auto;
+  width: 88px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--color-border);
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.rec-track.pending {
+  cursor: default;
+}
+
+.rec-track-fill {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-full);
+  background: var(--color-primary);
+  transition: width 150ms linear;
+}
+
+.rec-time {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--color-mute);
+  white-space: nowrap;
+}
+
+.rec-download {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  color: var(--color-mute);
+  transition: background-color var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
+}
+
+.rec-download:hover {
+  background: var(--color-primary-soft);
+  color: var(--color-primary-deep);
+}
+
+/* Muted fallback ---------------------------------------------------------------*/
+
+.rec-none {
+  font-size: var(--text-xs);
+  color: var(--color-faint);
+  white-space: nowrap;
+}
