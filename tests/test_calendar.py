@@ -372,14 +372,13 @@ def test_clinical_note_strips_pack_metadata() -> None:
         == "first thing Monday the twelfth of October."
     )
     assert (
-        cal.clinical_note(
-            "Roster record. Cases: simple_booking-12dc84a98cb2, triage-b2163776cec8."
-        )
+        cal.clinical_note("Roster record. Cases: simple_booking-12dc84a98cb2, triage-b2163776cec8.")
         == ""
     )
-    assert cal.clinical_note(
-        "Roster record. Cases: simple_booking-12dc84a98cb2, noise-04791d2a653e."
-    ) == ""
+    assert (
+        cal.clinical_note("Roster record. Cases: simple_booking-12dc84a98cb2, noise-04791d2a653e.")
+        == ""
+    )
     assert (
         cal.clinical_note(
             "Roster record. Cases: the_questions-1eaff9b8dea3, when_exactly-72cdb35b9682."
@@ -402,9 +401,7 @@ def test_readable_note_is_a_plain_sentence() -> None:
         == ""
     )
     assert (
-        cal.readable_note(
-            "Roster record. Cases: simple_booking-12dc84a98cb2, triage-b2163776cec8."
-        )
+        cal.readable_note("Roster record. Cases: simple_booking-12dc84a98cb2, triage-b2163776cec8.")
         == ""
     )
     assert (
@@ -501,12 +498,7 @@ def test_doctor_agenda_never_lists_the_roster() -> None:
     assert payload["month"] == "2026-10-01"
     assert payload["month_label"] == "Octubre 2026"
     assert len(payload["weeks"]) >= 4
-    fifth = next(
-        cell
-        for week in payload["weeks"]
-        for cell in week
-        if cell["date"] == "2026-10-05"
-    )
+    fifth = next(cell for week in payload["weeks"] for cell in week if cell["date"] == "2026-10-05")
     assert fifth["visits"][0]["full_name"] == "Marta Ruiz"
     assert payload["visits"][0]["full_name"] == "Marta Ruiz"
     assert payload["visits"][0]["note"] == ""
@@ -530,17 +522,10 @@ def test_doctor_agenda_hides_unnamed_patients() -> None:
     patients = cal.patient_index(
         [{"patient_id": "P00007", "given_name": "Marta", "first_surname": "Ruiz"}]
     )
-    payload = cal.doctor_agenda(
-        calendars, patients, name="Dra. Uno", today=_START, week=_START
-    )
+    payload = cal.doctor_agenda(calendars, patients, name="Dra. Uno", today=_START, week=_START)
     names = [row["full_name"] for row in payload["visits"]]
     assert names == ["Marta Ruiz"]
-    chips = [
-        row["full_name"]
-        for week in payload["weeks"]
-        for day in week
-        for row in day["visits"]
-    ]
+    chips = [row["full_name"] for week in payload["weeks"] for day in week for row in day["visits"]]
     assert "Unknown patient" not in chips
     assert "" not in chips
 
