@@ -163,6 +163,8 @@ class CallMemory:
     # because by then the rule no longer stands.
     stored_reason: Rejection | None = None
     stored_reason_tool: str = ""
+    # The slot of the plan the last search superseded, for the log line only.
+    superseded_slot: str = ""
     # A lookup ran and nobody was identified. The call ends on
     # ``patient_not_found``, which says what happened; ``out_of_scope`` claims
     # we could not serve the request at all, which is a different call.
@@ -227,6 +229,27 @@ class CallMemory:
         self.stored_reason = None
         self.stored_reason_tool = ""
 
+    def forget_superseded_plan(self, slots: list[Slot]) -> str:
+        """Drop a plan the caller has moved off. Returns its slot, or "".
+
+        A fresh search whose slots do not hold the prepared one is the caller
+        being offered something else: they asked for another site, another day,
+        another doctor. The next "yes" belongs to that new offer, and spending it
+        on the old plan books the slot they just turned down — and books it *as
+        well as* the right one, because the model then draws the new plan up
+        properly and sends that too. Two bookings is a mismatched record.
+
+        ``confirmed`` is deliberately left alone. A caller who has already
+        agreed to the new offer should not be asked twice: with nothing prepared,
+        the next ``prepare_booking`` submits, which is what that flag is for.
+        """
+        slot = getattr(self.prepared, "slot", None)
+        if not slot or any(free.start == slot for free in slots):
+            return ""
+        self.prepared = None
+        self.prepared_tool = ""
+        return slot
+
     @property
     def line_owner(self) -> PatientRecord | None:
         """The one patient the dialling line resolved to, if it resolved to one."""
@@ -290,6 +313,7 @@ class CallMemory:
         # At the end of a dead call it is the only reason we have.
         blocked = getattr(result, "blocked", None) or []
         if slots:
+            self.superseded_slot = self.forget_superseded_plan(slots)
             self.free_slot = slots[0]
             self.forget_rejection()
             self.forget_stored_reason()
@@ -422,6 +446,14 @@ class CallSession:
                 self.arm_hangup("submit_accepted")
         else:
             self.memory.observe(name, result)
+            if self.memory.superseded_slot:
+                self.ctx.log.event(
+                    "plan.superseded",
+                    tool=name,
+                    slot=self.memory.superseded_slot,
+                    confirmed=self.memory.confirmed,
+                )
+                self.memory.superseded_slot = ""
             await self._submit_after_prepare(name)
         return result
 

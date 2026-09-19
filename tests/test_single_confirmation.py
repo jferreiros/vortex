@@ -26,6 +26,7 @@ import pytest
 from vortex.contract import (
     MADRID,
     Action,
+    AvailabilityResult,
     BookAction,
     BookingResult,
     Rejection,
@@ -274,3 +275,107 @@ def test_the_prompt_tells_the_model_not_to_ask_twice() -> None:
     text = build_system_prompt(NOW)
     assert "Never ask twice" in text
     assert "Do not submit before the caller agrees" in text
+
+
+# ---- the yes belongs to the offer on the table ------------------------------
+#
+# Run 540d5092, call 8c8a7c54, 0 of 2 points. The agent offered Centro on the
+# 21st and drew it up. The caller then said "I need it at Arenal Norte, please,
+# not Centro"; the agent searched Norte, offered the 22nd, and asked. On "Sure"
+# the first yes spent itself on the Centro plan still sitting in memory, so the
+# call submitted Centro *and*, once the model drew Norte up properly, Norte too.
+# Two bookings is a mismatched record.
+
+
+def another_slot(start: datetime) -> Slot:
+    return Slot(
+        start=start,
+        provider_id="PR07",
+        location_id="norte",
+        appointment_type_id="review",
+    )
+
+
+def a_search(*starts: datetime) -> AvailabilityResult:
+    return AvailabilityResult(slots=[another_slot(start) for start in starts])
+
+
+ELSEWHERE = datetime(2026, 9, 25, 9, 0, tzinfo=MADRID)
+
+
+async def test_a_search_past_the_prepared_slot_drops_the_plan(offline_settings) -> None:
+    """The caller moved off it, so no yes can send it."""
+    session = make_session(offline_settings, "CA-superseded")
+    session.memory.observe("prepare_booking", BookingResult(action=a_booking()))
+
+    session.memory.observe("find_slots", a_search(ELSEWHERE))
+
+    assert session.memory.prepared is None
+
+
+async def test_the_yes_after_that_search_submits_nothing(offline_settings) -> None:
+    """The failure itself: one yes, and it must not book what was turned down."""
+    session = make_session(offline_settings, "CA-superseded-yes")
+    session.memory.observe("prepare_booking", BookingResult(action=a_booking()))
+    session.memory.observe("find_slots", a_search(ELSEWHERE))
+
+    session.confirm_prepared("caller affirmed: Sure.")
+    await session.close()
+
+    booked = [payload.get("slot", "") for _, payload in sent(session)]
+    assert not any(slot.startswith("2026-09-24T16:30") for slot in booked), (
+        f"booked the slot the caller turned down: {booked}"
+    )
+
+
+async def test_that_yes_still_counts_for_the_offer_it_was_given_to(offline_settings) -> None:
+    """Dropping the plan must not cost the caller a second question: the next
+    booking the model draws up goes out on the yes they already gave."""
+    session = make_session(offline_settings, "CA-superseded-then-prepared")
+    session.memory.observe("prepare_booking", BookingResult(action=a_booking()))
+    session.memory.observe("find_slots", a_search(ELSEWHERE))
+    session.confirm_prepared("caller affirmed: Sure.")
+
+    slot = await an_offered_slot(session)
+    result = await session.call_tool(
+        "prepare_booking",
+        {"patient_id": PATIENT, "slot": slot.model_dump(mode="json"), "policy_id": "sanitas"},
+    )
+
+    assert result.rejection is None
+    routes = [route for route, _ in sent(session)]
+    assert routes == ["/api/v1/submit/book"], "exactly one booking, and it is the new one"
+    assert sent(session)[0][1]["slot"].startswith(slot.start.isoformat()[:16])
+
+
+async def test_a_search_that_still_offers_the_slot_keeps_the_plan(offline_settings) -> None:
+    """The regression guard. Re-reading the same availability is not a change of
+    mind, and every ordinary booking call searches before it prepares."""
+    session = make_session(offline_settings, "CA-same-slot")
+    session.memory.observe("prepare_booking", BookingResult(action=a_booking()))
+
+    session.memory.observe("find_slots", a_search(ELSEWHERE, SLOT))
+
+    assert session.memory.prepared is not None
+    session.confirm_prepared("caller affirmed: yes")
+    await session.close()
+    assert [payload["slot"] for _, payload in sent(session)][0].startswith("2026-09-24T16:30")
+
+
+async def test_an_empty_search_leaves_the_plan_alone(offline_settings) -> None:
+    """No availability is not another offer. It must not silently drop a booking."""
+    session = make_session(offline_settings, "CA-no-slots")
+    session.memory.observe("prepare_booking", BookingResult(action=a_booking()))
+
+    session.memory.observe("find_slots", AvailabilityResult(slots=[]))
+
+    assert session.memory.prepared is not None
+
+
+async def test_a_search_before_anything_is_prepared_is_harmless(offline_settings) -> None:
+    session = make_session(offline_settings, "CA-search-first")
+
+    session.memory.observe("find_slots", a_search(ELSEWHERE))
+
+    assert session.memory.prepared is None
+    assert session.memory.free_slot is not None
