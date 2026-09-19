@@ -22,7 +22,8 @@ Two layers, in order:
    never depend on a network call, and so nothing leaks a caller's address to a
    third party unless the team turned it on deliberately.
 
-Live results are cached by ``(backend, fold(query))`` for the process lifetime.
+Live results are cached inside the call that asked for them — in the socket's
+``ToolContext.state`` — so no caller's address outlives their call.
 
 If neither places the address, the site whose own published address shares the
 most words with it answers. A caller who gives an address we cannot place is
@@ -47,8 +48,12 @@ CARTOCIUDAD_CANDIDATES_URL = "https://www.cartociudad.es/geocoder/api/geocoder/c
 CARTOCIUDAD_HIT_TYPES = frozenset({"portal", "callejero"})
 CARTOCIUDAD_PROVINCE = "Madrid"
 
-#: Process-wide cache: (backend, folded query) -> coordinates or a miss.
-_geocode_cache: dict[tuple[str, str], tuple[float, float] | None] = {}
+#: Key under which a call keeps its own live geocode hits in ``ToolContext.state``:
+#: ``"<backend>|<folded query>"`` -> ``[lat, lon]``, or ``None`` for a known miss.
+GEOCODE_CACHE_KEY = "geo_live_by_query"
+
+#: One call's live geocode hits. JSON-safe, per socket, never shared.
+GeocodeCache = dict[str, list[float] | None]
 
 
 def fold(text: str) -> str:
@@ -212,11 +217,6 @@ def gazetteer_lookup(address: str) -> tuple[float, float] | None:
     return best[1] if best else None
 
 
-def clear_geocode_cache() -> None:
-    """Drop every cached live geocode hit. Tests call this between cases."""
-    _geocode_cache.clear()
-
-
 def resolve_geocoder_backend(settings: Settings) -> str:
     """``cartociudad``, ``nominatim``, or empty when live geocoding is off."""
     backend = (settings.geocoder or "").strip().lower()
@@ -289,19 +289,27 @@ async def _geocode_nominatim(address: str, url: str) -> tuple[float, float] | No
         return None
 
 
-async def geocode_live(address: str, settings: Settings) -> tuple[float, float] | None:
-    """Ask the configured live geocoder. ``None`` when none is configured."""
+async def geocode_live(
+    address: str, settings: Settings, cache: GeocodeCache | None = None
+) -> tuple[float, float] | None:
+    """Ask the configured live geocoder. ``None`` when none is configured.
+
+    ``cache`` is this call's own store, from ``ToolContext.state``. Without one
+    every lookup goes to the wire: nothing is kept between sockets.
+    """
     backend = resolve_geocoder_backend(settings)
     if not backend:
         return None
-    cache_key = (backend, fold(address))
-    if cache_key in _geocode_cache:
-        return _geocode_cache[cache_key]
+    cache_key = f"{backend}|{fold(address)}"
+    if cache is not None and cache_key in cache:
+        hit = cache[cache_key]
+        return (hit[0], hit[1]) if hit else None
     if backend == "cartociudad":
         point = await _geocode_cartociudad(address)
     else:
         point = await _geocode_nominatim(address, settings.geocoder_url)
-    _geocode_cache[cache_key] = point
+    if cache is not None:
+        cache[cache_key] = list(point) if point is not None else None
     return point
 
 
@@ -315,9 +323,11 @@ def address_overlap(caller: str, site_address: str) -> int:
     return len(_address_words(caller) & _address_words(site_address))
 
 
-async def locate(address: str, settings: Settings) -> tuple[float, float] | None:
+async def locate(
+    address: str, settings: Settings, cache: GeocodeCache | None = None
+) -> tuple[float, float] | None:
     """Coordinates for a spoken address: gazetteer first, then a live geocoder."""
-    return gazetteer_lookup(address) or await geocode_live(address, settings)
+    return gazetteer_lookup(address) or await geocode_live(address, settings, cache)
 
 
 def nearest(point: tuple[float, float], sites: list[Any]) -> tuple[Any, float] | None:
