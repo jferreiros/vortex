@@ -166,6 +166,10 @@ class CallSession:
     # The fallback reads it so it never repeats an action already on its way.
     sent_actions: list[Action] = field(default_factory=list)
     end_reason: str = ""
+    # Set the moment the platform accepts an action the model itself sent.
+    # The pipeline reads it to hang up after the farewell instead of letting
+    # the harness cut the call at three minutes. See ``arm_hangup``.
+    hangup_reason: str = ""
     _closed: bool = False
 
     @property
@@ -228,6 +232,9 @@ class CallSession:
           through ``ctx.submitter`` without passing ``CallSession.submit``, so
           without this the session would end a booked call believing it had
           submitted nothing and send a refusal on top of the booking.
+
+        An accepted submission also arms the hangup: the call has nothing left
+        to do, so the pipeline ends it after the farewell.
         """
         result = await registry.call_tool(name, self.ctx, raw_args)
         if name == SUBMIT_TOOL and isinstance(result, SubmitResult):
@@ -236,9 +243,27 @@ class CallSession:
                 self.sent_actions.append(SubmitInput.model_validate(raw_args).action)
             except ValidationError:  # pragma: no cover - the registry validated it already
                 pass
+            if result.status in ACCEPTED_STATUSES:
+                self.arm_hangup("submit_accepted")
         else:
             self.memory.observe(name, result)
         return result
+
+    def arm_hangup(self, reason: str) -> None:
+        """The call is done: let the pipeline end it once the agent stops talking.
+
+        Only an action the platform *holds* arms this. A rejection, a late
+        submission or a dry run leaves the call running, because the model may
+        still fix what it sent and the end-of-call fallback is still the last
+        word. Armed once, it stays armed: the first reason is the true one.
+        """
+        if not self.hangup_reason:
+            self.hangup_reason = reason
+
+    @property
+    def hangup_armed(self) -> bool:
+        """Has the call earned the right to hang up from our side?"""
+        return bool(self.hangup_reason)
 
     async def submit(self, action: Action) -> SubmitResult:
         result = await submit_action(self.ctx, SubmitInput(action=action))

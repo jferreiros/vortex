@@ -28,14 +28,18 @@ settings, STT vocabulary and language (it edits ``vortex/conversation/*``).
 Imports of pipecat live inside the function so the server starts, and the
 smoke test runs, with the stub pipeline when the keys are missing.
 
+We hang up from our side. Once the platform has accepted an action the model
+sent, the session is armed; ``_make_hangup_watcher`` then ends the pipeline
+with an ``EndFrame`` as soon as the agent has finished speaking its farewell,
+and the socket closes. ``auto_hang_up`` stays False: that flag is the
+serializer's own Twilio REST call, and we have no Twilio account.
+
 TODO(line):
 - Run one real call end to end once the four keys exist.
 - Confirm the 8 kHz µ-law path: serializer ``twilio_sample_rate=8000`` in, and
   the TTS asked for 8 kHz PCM out (Google LINEAR16 @ 8000, ElevenLabs
   ``pcm_8000``; Gemini-TTS stays at 24 kHz and the transport resamples).
   Check for choppy audio.
-- Hang up from our side when the agent says goodbye (send EndFrame, let the
-  platform close the socket). auto_hang_up stays False: no Twilio account.
 """
 
 from __future__ import annotations
@@ -218,6 +222,16 @@ async def run_pipecat_call(
     context = LLMContext(initial_messages(ctx.now), tools=ToolsSchema(standard_tools=schemas))
     aggregators = LLMContextAggregatorPair(context, user_params=_user_aggregator_params(turns))
 
+    # Ends the call from our side once the platform holds an action and the
+    # agent has said its goodbye. It is both an observer of the frame stream
+    # (for the farewell) and a handler on the user aggregator (for a caller who
+    # goes quiet after the submission), so it is built before either exists and
+    # handed the task below. A second handler is not a change to the first: the
+    # aggregator appends them, so the idle nudge still fires on every call that
+    # is not armed.
+    hangup = _make_hangup_watcher(session)
+    aggregators.user().add_event_handler("on_user_turn_idle", hangup.on_user_idle)
+
     stages: list[Any] = [transport.input(), stt]
     if settings.tts_supports_language_switch:
         # Only worth a processor when the pair can say more than one language.
@@ -239,8 +253,9 @@ async def run_pipecat_call(
             audio_out_sample_rate=LINE_SAMPLE_RATE,
             enable_metrics=True,
         ),
-        observers=[_CallLogObserver(session)],
+        observers=[_CallLogObserver(session), hangup],
     )
+    hangup.bind(task)
 
     @transport.event_handler("on_client_connected")
     async def _on_connected(transport: Any, client: Any) -> None:
@@ -634,3 +649,70 @@ def _CallLogObserver(session: CallSession):  # noqa: N802 - factory that returns
                 session.media_frames_out += 1
 
     return Observer()
+
+
+def _make_hangup_watcher(session: CallSession) -> Any:
+    """End the call from our side once the platform holds an action.
+
+    Every call used to run until the harness cut it at three minutes, booked
+    calls included: the socket stayed open with nothing left to do on it. So
+    the session arms this the moment ``submit_action`` comes back accepted (or
+    duplicate, which means the platform already holds that action), and the
+    watcher picks one of two moments to end the pipeline:
+
+    - **the farewell is out**. The output transport pushes
+      ``BotStoppedSpeakingFrame`` when the last audio of an utterance has gone
+      down the wire, so ending there never cuts the agent off mid-word. We wait
+      for an utterance that *started* after the submission was accepted: the
+      sentence the model spoke before its tool call can still be playing when
+      the platform answers, and that one is not the goodbye.
+    - **the caller went quiet**, one idle period after the submission. A model
+      that submits and then says nothing would otherwise hold the line open to
+      the cap.
+
+    The end is a graceful one: ``stop_when_done`` queues an ``EndFrame``, which
+    travels the pipeline behind everything already in flight and drains it.
+    ``cancel`` would cut the audio still on its way out, which is the goodbye.
+
+    A rejected submission, a late one and a dry run arm nothing - see
+    ``CallSession.arm_hangup``. Neither does the end-of-call fallback, which
+    only runs once the socket is already gone.
+    """
+    from pipecat.frames.frames import BotStartedSpeakingFrame, BotStoppedSpeakingFrame
+    from pipecat.observers.base_observer import BaseObserver, FramePushed
+
+    class HangupWatcher(BaseObserver):
+        def __init__(self) -> None:
+            super().__init__()
+            self._task: Any = None
+            self._spoke_since_armed = False
+            self._requested = False
+
+        def bind(self, task: Any) -> None:
+            """Hand over the task. It does not exist yet when this is built."""
+            self._task = task
+
+        async def on_push_frame(self, data: FramePushed) -> None:
+            if self._requested or not session.hangup_armed:
+                return
+            # The transport pushes each of these twice, up and down. Both are
+            # the same moment, and ``_requested`` keeps the second one quiet.
+            if isinstance(data.frame, BotStartedSpeakingFrame):
+                self._spoke_since_armed = True
+            elif isinstance(data.frame, BotStoppedSpeakingFrame) and self._spoke_since_armed:
+                await self._end("farewell_spoken")
+
+        async def on_user_idle(self, aggregator: Any, *args: Any) -> None:
+            if session.hangup_armed:
+                await self._end("idle_after_submit")
+
+        async def _end(self, reason: str) -> None:
+            if self._requested or self._task is None:
+                return
+            self._requested = True
+            session.ctx.log.event(
+                "call.hangup_requested", reason=reason, armed_by=session.hangup_reason
+            )
+            await self._task.stop_when_done()
+
+    return HangupWatcher()
