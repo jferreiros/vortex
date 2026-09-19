@@ -40,9 +40,7 @@ def clean_env(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv("VORTEX_GEOCODER", raising=False)
     monkeypatch.delenv("VORTEX_GEOCODER_URL", raising=False)
     settings_module.reset_settings()
-    geo.clear_geocode_cache()
     yield monkeypatch
-    geo.clear_geocode_cache()
     settings_module.reset_settings()
 
 
@@ -129,7 +127,7 @@ async def test_cartociudad_tolerates_the_alcla_misspelling(
     assert point == ALCALA_200_PORTAL
 
 
-async def test_geocode_results_are_cached_by_normalised_query(
+async def test_geocode_results_are_cached_by_normalised_query_within_one_call(
     clean_env, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     calls = 0
@@ -141,11 +139,37 @@ async def test_geocode_results_are_cached_by_normalised_query(
 
     monkeypatch.setattr(geo, "_http_get_json", fake_get)
     settings = settings_module.Settings(geocoder="cartociudad")
-    first = await geo.geocode_live("Calle Alcalá 200", settings)
+    one_call: geo.GeocodeCache = {}
+    first = await geo.geocode_live("Calle Alcalá 200", settings, one_call)
     # Accents and case fold away: second call must hit the cache, not the wire.
-    second = await geo.geocode_live("CALLE ALCALA 200", settings)
+    second = await geo.geocode_live("CALLE ALCALA 200", settings, one_call)
     assert first == second == ALCALA_200_PORTAL
     assert calls == 1
+
+
+async def test_geocode_keeps_nothing_between_calls(
+    clean_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A second socket asking the same address must not read the first one's hit."""
+    calls = 0
+
+    async def fake_get(url: str, *, params: dict[str, Any], headers=None):
+        nonlocal calls
+        calls += 1
+        return CARTOCIUDAD_ALCALA_PAYLOAD
+
+    monkeypatch.setattr(geo, "_http_get_json", fake_get)
+    settings = settings_module.Settings(geocoder="cartociudad")
+    first_call: geo.GeocodeCache = {}
+    second_call: geo.GeocodeCache = {}
+    assert await geo.geocode_live("Calle Alcalá 200", settings, first_call) == ALCALA_200_PORTAL
+    assert await geo.geocode_live("Calle Alcalá 200", settings, second_call) == ALCALA_200_PORTAL
+    assert calls == 2
+    assert second_call and first_call.keys() == second_call.keys()
+    # No cache at all is the same story: nothing is retained anywhere.
+    assert await geo.geocode_live("Calle Alcalá 200", settings) == ALCALA_200_PORTAL
+    assert await geo.geocode_live("Calle Alcalá 200", settings) == ALCALA_200_PORTAL
+    assert calls == 4
 
 
 async def test_nominatim_remains_available_via_geocoder_setting(
