@@ -6,5 +6,5 @@ Wants=docker.service
 [Service]
 Type=oneshot
 WorkingDirectory=/home/factory/personal/vortex
-ExecStart=/home/factory/personal/vortex/deploy/deploy-both.sh
+ExecStart=/home/factory/personal/vortex-deploy-run.sh
 Nice=10
