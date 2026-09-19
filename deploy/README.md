@@ -116,6 +116,15 @@ voice pipeline. `GET /health` says which mode is live:
 curl -s https://line.203.0.113.20.sslip.io/health
 ```
 
+`has_langfuse_keys` must be true for inbound calls to show up in Langfuse
+Cloud. The keys live only in `deploy/.env` (same file as the platform key).
+The project is already created; `make langfuse-check` prints its URL and
+whether the live line has the keys. A missing pair is a silent no-op: the
+call still completes.
+
+Each finished call also posts a redacted card to Discord when
+`DISCORD_WEBHOOK_URL` is set. `make logs-discord` dumps the whole log.
+
 ---
 
 ## Logs

@@ -31,11 +31,17 @@ Local Discord RPC on `127.0.0.1:6463` is Rich Presence, not server admin.
 ```bash
 scripts/notify-discord.sh '**eval** 12/17 pass · https://vortex.203.0.113.20.sslip.io/wall'
 scripts/notify-discord.sh --evals     # embed from evals/results/summary.json
+scripts/notify-discord.sh --calls     # digest of the live call log
+make logs-discord LOG=logs/calls-runall-2026-09-18-2332.jsonl
 ```
 
-Keep dumps short: score, case id, wall/evals link. Do not paste ops passwords
-or `PLATFORM_API_KEY`. GitHub Actions cannot post here (Discord 403s runner
-IPs); run `--evals` on a laptop or the VPS after `make evals`.
+Each inbound call also posts one short card when the socket closes, from
+`vortex-line`, if `DISCORD_WEBHOOK_URL` is in `deploy/.env`.
+
+Keep dumps short: score, case id, wall/evals/langfuse link. Never names,
+national ids, phones or transcript text. Do not paste ops passwords or
+`PLATFORM_API_KEY`. GitHub Actions cannot post here (Discord 403s runner
+IPs); run `--evals` / `--calls` on a laptop or the VPS.
 
 ## Confirm GitHub → Discord
 
