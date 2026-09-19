@@ -435,13 +435,20 @@ class Settings:
         default_factory=lambda: float(_env("VORTEX_SMS_REMINDER_POLL_SECS", "30") or "30")
     )
 
-    # --- Day-before confirmation calls (Twilio Voice) -------------------------
-    # The day before an accepted booking we call the patient, say the
-    # appointment in their language and ask whether they will come; the answer
-    # is stored per appointment (logs/confirmation_calls.json). Opt-in like
-    # SMS, dry-run without Twilio keys or a public URL. The TwiML comes from
-    # this server's /confirmation/* routes, so Twilio needs to reach them:
-    # public_base_url is the https tunnel base (e.g. the `make tunnel` host).
+    # --- Outbound scheduled calls (Twilio Voice) -------------------------------
+    # One flag for the whole outbound-calling subsystem in
+    # vortex/line/confirmation_calls.py, not just its first job: with this
+    # off, server.py never starts ConfirmationWorker (which otherwise runs
+    # for the process's whole lifetime, independent of any inbound call) and
+    # session.py never queues a row, whatever the row's `motivo` would have
+    # been (confirmacion / recordatorio / reprogramacion / seguimiento /
+    # call_now — see KNOWN_MOTIVOS). The day before an accepted booking we
+    # call the patient, say the appointment in their language and ask
+    # whether they will come; the answer is stored per appointment
+    # (logs/confirmation_calls.json). Dry-run without Twilio keys or a
+    # public URL. The TwiML comes from this server's /confirmation/*
+    # routes, so Twilio needs to reach them: public_base_url is the https
+    # tunnel base (e.g. the `make tunnel` host).
     confirmation_calls: bool = field(default_factory=lambda: _env_flag("VORTEX_CONFIRMATION_CALLS"))
     public_base_url: str = field(default_factory=lambda: _env("VORTEX_PUBLIC_BASE_URL"))
     # How far ahead of the slot the call fires. 24 = one day before.

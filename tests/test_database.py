@@ -67,6 +67,36 @@ def test_migrate_is_idempotent(db_path: Path) -> None:
     assert version == len(schema.MIGRATIONS)
 
 
+def test_calls_motivo_column_round_trips(db_path: Path) -> None:
+    """Migration 3: an outbound call's motivo (confirmacion / recordatorio /
+    reprogramacion / seguimiento / call_now, or any other string — the
+    column has no CHECK, unlike purpose/outcome) persists and reads back."""
+    with db.connection(db_path) as conn:
+        call = db.insert_call(
+            conn,
+            call_id="OUT-1",
+            direction="outbound",
+            purpose="confirmation",
+            started_at="2026-09-19T18:00:00+00:00",
+            motivo="recordatorio",
+        )
+        assert call.motivo == "recordatorio"
+        reread = db.get_call_by_call_id(conn, "OUT-1")
+        assert reread.motivo == "recordatorio"
+
+
+def test_calls_motivo_defaults_to_null_for_inbound(db_path: Path) -> None:
+    with db.connection(db_path) as conn:
+        call = db.insert_call(
+            conn,
+            call_id="IN-1",
+            direction="inbound",
+            purpose="booking",
+            started_at="2026-09-19T18:00:00+00:00",
+        )
+        assert call.motivo is None
+
+
 # ---------------------------------------------------------------------------
 # booking
 # ---------------------------------------------------------------------------
@@ -394,6 +424,9 @@ async def test_confirmation_call_confirms_appointment(tmp_path: Path, db_path: P
         assert confirmation_call.direction == "outbound"
         assert confirmation_call.purpose == "confirmation"
         assert confirmation_call.outcome == "confirmed"
+        # Mirrors vortex.line.confirmation_calls.KNOWN_MOTIVOS: this job only
+        # ever places the day-before "will you come" call.
+        assert confirmation_call.motivo == "confirmacion"
 
 
 @pytest.mark.asyncio

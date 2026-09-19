@@ -14,7 +14,21 @@ the queue, worker, routes and outcome bookkeeping come with the system.
 The first job is ``appointment_confirmation``: the day before an accepted
 booking we call the patient, say the appointment in their language and ask
 whether they will come; the answer (yes / no / wants to reschedule) is stored
-per appointment.
+per appointment. ``motivo`` (``KNOWN_MOTIVOS``) rides the same job and the
+same yes/no flow but opens with a different clause — confirmación, a plain
+recordatorio, a reprogramación the clinic initiates, a seguimiento, or
+``call_now`` to jump the queue (see ``build_confirmation_call``).
+
+``VORTEX_CONFIRMATION_CALLS`` gates this entire module, not just the
+appointment-confirmation job: with it off, ``server.py`` never starts
+``ConfirmationWorker`` and ``session.py`` never queues a row, whatever the
+row's ``job`` or ``motivo`` would have been. One flag, one subsystem.
+
+The worker itself does not care whether a socket is open: ``server.py``
+starts it once in the FastAPI app's own lifespan (``_app_lifespan``), the
+same place the SMS ``ReminderWorker`` starts, so it polls and dials on its
+own schedule for as long as the process is up — an inbound call queues a
+row, it never has to be the thing that drives the worker's next tick.
 
 --- the original confirmation-call notes ---
 
@@ -78,6 +92,30 @@ CALL_BUDGET_SECS = 8.0
 #: it, there is nothing to remind. Hard-coded, not the lead: the lead is a demo
 #: knob, this rule is not.
 MIN_BOOKING_GAP = timedelta(hours=24)
+
+#: Why this particular outbound call is happening — a lighter, business-
+#: facing label than ``job`` (which selects the TwiML/classification code
+#: path; today only ``appointment_confirmation`` exists). Every motivo below
+#: rides the *same* job and the *same* yes/no flow: only the opening clause
+#: (``_MOTIVO_OPENING``) changes, e.g. "para confirmar su cita" vs. "para
+#: recordarle su cita". A motivo that genuinely needs a different question or
+#: a different answer classification is not a new motivo, it is a new
+#: ``CallJob`` (see ``register_job``) — this list only changes what the call
+#: opens by saying, never what it asks or how it reads the reply.
+#:
+#: Deliberately not a closed set: ``motivo`` is a plain ``str`` on
+#: ``ConfirmationCall`` and nothing validates membership, so a caller can use
+#: a value not listed here (it opens with the ``"confirmacion"`` clause as a
+#: safe default — see ``ask_text``). ``KNOWN_MOTIVOS`` documents the ones the
+#: product actually asked for; add to it, do not gate on it.
+KNOWN_MOTIVOS: tuple[str, ...] = (
+    "confirmacion",  # day-before "will you come" — the original, still the default
+    "recordatorio",  # a plain reminder, no explicit yes/no framing
+    "reprogramacion",  # the clinic needs to move this appointment
+    "seguimiento",  # a follow-up call about a past or upcoming visit
+    "call_now",  # place it on the very next worker tick — see build_confirmation_call
+)
+DEFAULT_MOTIVO = "confirmacion"
 
 ConfirmationStatus = Literal[
     "pending",  # queued, call_at in the future
@@ -223,31 +261,74 @@ def _named(provider_name: str, location_name: str) -> tuple[str, str]:
     return provider_name.strip(), location_name.strip()
 
 
+#: The opening clause naming *why* we are calling, per language and motivo —
+#: the only piece of ``_ASK`` that varies with ``motivo``. An unknown motivo
+#: (or ``call_now``, which is about *when* to dial, not what to say) falls
+#: back to the ``"confirmacion"`` clause: see ``ask_text``.
+_MOTIVO_OPENING: dict[str, dict[str, str]] = {
+    "es": {
+        "confirmacion": "para confirmar su cita",
+        "recordatorio": "para recordarle su cita",
+        "reprogramacion": "porque necesitamos reprogramar su cita",
+        "seguimiento": "para hacer un seguimiento de su cita",
+    },
+    "ca": {
+        "confirmacion": "per confirmar la seva cita",
+        "recordatorio": "per recordar-li la seva cita",
+        "reprogramacion": "perquè necessitem reprogramar la seva cita",
+        "seguimiento": "per fer un seguiment de la seva cita",
+    },
+    "gl": {
+        "confirmacion": "para confirmar a súa cita",
+        "recordatorio": "para lembrarlle a súa cita",
+        "reprogramacion": "porque necesitamos reprogramar a súa cita",
+        "seguimiento": "para facer un seguimento da súa cita",
+    },
+    "eu": {
+        "confirmacion": "hitzordua berresteko",
+        "recordatorio": "hitzordua gogorarazteko",
+        "reprogramacion": "hitzordua berrantolatu behar dugulako",
+        "seguimiento": "hitzorduaren jarraipena egiteko",
+    },
+    "en": {
+        "confirmacion": "to confirm your appointment",
+        "recordatorio": "to remind you of your appointment",
+        "reprogramacion": "because we need to reschedule your appointment",
+        "seguimiento": "to follow up on your appointment",
+    },
+}
+
+
+def _motivo_clause(lang: str, motivo: str) -> str:
+    by_motivo = _MOTIVO_OPENING[lang]
+    return by_motivo.get(motivo, by_motivo[DEFAULT_MOTIVO])
+
+
 _ASK = {
     "es": (
-        "Hola, le llamamos de {clinic} para confirmar su cita. "
+        "Hola, le llamamos de {clinic} {motivo_clause}. "
         "Mañana tiene cita{with_whom}: {stamp}. "
         "¿Va a venir? Diga sí para confirmar. Si prefiere cambiarla, dígamelo y la movemos "
         "ahora mismo. Si no puede venir, diga no."
     ),
     "ca": (
-        "Hola, li truquem de {clinic} per confirmar la seva cita de demà{with_whom}: {stamp}. "
+        "Hola, li truquem de {clinic} {motivo_clause}, demà{with_whom}: {stamp}. "
         "Hi vindrà? Digui sí per confirmar. Si prefereix canviar-la, m'ho diu i la movem ara "
         "mateix. Si no hi pot venir, digui no."
     ),
     "gl": (
-        "Hola, chamámoslle de {clinic} para confirmar a súa cita de mañá{with_whom}: {stamp}. "
+        "Hola, chamámoslle de {clinic} {motivo_clause}, mañá{with_whom}: {stamp}. "
         "Vai vir? Diga si para confirmar. Se prefire cambiala, dígamo e movémola agora mesmo. "
         "Se non pode vir, diga non."
     ),
     "eu": (
-        "Kaixo, {clinic} koak gara, biharko hitzordua{with_whom} "
-        "berresteko deitzen dizugu: {stamp}. "
+        "Kaixo, {clinic} koak gara, {motivo_clause} deitzen dizugu, "
+        "bihar duzun hitzordua{with_whom}: {stamp}. "
         "Etorriko al zara? Esan bai berresteko. Aldatzea nahiago baduzu, esadazu eta oraintxe "
         "bertan mugituko dugu. Ezin bazara etorri, esan ez."
     ),
     "en": (
-        "Hello, this is {clinic} calling to confirm your appointment tomorrow{with_whom}: {stamp}. "
+        "Hello, this is {clinic} calling {motivo_clause} tomorrow{with_whom}: {stamp}. "
         "Will you come? Say yes to confirm. If you'd rather move it, tell me and we'll change "
         "it right now. If you can't make it, say no."
     ),
@@ -334,6 +415,7 @@ def ask_text(
     provider_name: str = "",
     location_name: str = "",
     clinic_name: str = CLINIC_NAME,
+    motivo: str = DEFAULT_MOTIVO,
 ) -> str:
     lang = call_language(language)
     provider, location = _named(provider_name, location_name)
@@ -342,7 +424,12 @@ def ask_text(
         with_whom = _WITH_WHOM[lang].format(provider=provider, location=location)
     elif provider and lang in ("es", "gl", "en"):
         with_whom = {"es": " con {p}", "gl": " con {p}", "en": " with {p}"}[lang].format(p=provider)
-    return _ASK[lang].format(clinic=clinic_name, with_whom=with_whom, stamp=_stamp_for(lang, when))
+    return _ASK[lang].format(
+        clinic=clinic_name,
+        with_whom=with_whom,
+        stamp=_stamp_for(lang, when),
+        motivo_clause=_motivo_clause(lang, motivo),
+    )
 
 
 def ack_text(outcome: CallOutcome, language: str) -> str:
@@ -529,6 +616,7 @@ def ask_speech(call: ConfirmationCall, *, reprompt: bool = False) -> str:
         when=call.appointment_dt,
         provider_name=call.provider_name,
         location_name=call.location_name,
+        motivo=call.motivo,
     )
 
 
@@ -654,6 +742,9 @@ class ConfirmationCall:
     location_id: str = ""
     appointment_id: str = ""
     job: str = "appointment_confirmation"
+    #: Why this call is happening — see ``KNOWN_MOTIVOS``. Every row queued
+    #: from an accepted ``BookAction`` keeps the default, ``"confirmacion"``.
+    motivo: str = DEFAULT_MOTIVO
     status: ConfirmationStatus = "pending"
     detail: str = ""
     twilio_call_sid: str = ""
@@ -740,6 +831,11 @@ class ConfirmationStore:
     async def add(self, call: ConfirmationCall) -> ConfirmationCall:
         async with self._lock:
             rows = self._read()
+            # Dedup keys on motivo too: a pending "confirmacion" and a
+            # pending "recordatorio" for the same phone+slot are two
+            # different calls the patient should get, neither replaces the
+            # other. Two calls of the *same* motivo for the same phone+slot
+            # are the same call queued twice — the newer one wins.
             rows = [
                 row
                 for row in rows
@@ -747,6 +843,7 @@ class ConfirmationStore:
                     row.status == "pending"
                     and row.to == call.to
                     and row.appointment_at == call.appointment_at
+                    and row.motivo == call.motivo
                 )
             ]
             rows.append(call)
@@ -937,20 +1034,32 @@ def build_confirmation_call(
     appointment_id: str = "",
     now: datetime,
     lead: timedelta | None = None,
+    motivo: str = DEFAULT_MOTIVO,
 ) -> ConfirmationCall | None:
-    """Return a pending call for ``when - lead``, or ``None`` when that is past."""
+    """Return a pending call for ``when - lead``, or ``None`` when that is past.
+
+    ``motivo="call_now"`` is the one exception to both guards below: it skips
+    the 24h booking-gap rule and the lead-based schedule entirely and sets
+    ``call_at`` to ``now``, so ``ConfirmationWorker.tick`` claims and dials it
+    on its very next poll — see ``KNOWN_MOTIVOS`` and the module README for
+    how to enqueue one by hand.
+    """
     if when.tzinfo is None:
         raise ValueError(f"appointment datetime must carry an offset: {when.isoformat()}")
     clock = now if now.tzinfo is not None else now.replace(tzinfo=MADRID)
-    if when - clock < MIN_BOOKING_GAP:
-        return None
-    gap = lead if lead is not None else timedelta(days=1)
-    call_at = job_for(job).call_at(when=when, lead=gap)
-    if call_at <= clock:
-        return None
+    if motivo == "call_now":
+        call_at = clock
+    else:
+        if when - clock < MIN_BOOKING_GAP:
+            return None
+        gap = lead if lead is not None else timedelta(days=1)
+        call_at = job_for(job).call_at(when=when, lead=gap)
+        if call_at <= clock:
+            return None
     return ConfirmationCall(
         confirmation_id=uuid.uuid4().hex,
         job=job,
+        motivo=motivo,
         to=to,
         appointment_at=when.isoformat(),
         call_at=call_at.isoformat(),
@@ -980,6 +1089,7 @@ async def schedule_confirmation_call(
     appointment_id: str = "",
     now: datetime,
     lead: timedelta | None = None,
+    motivo: str = DEFAULT_MOTIVO,
 ) -> ConfirmationCall | None:
     call = build_confirmation_call(
         to=to,
@@ -994,6 +1104,7 @@ async def schedule_confirmation_call(
         appointment_id=appointment_id,
         now=now,
         lead=lead,
+        motivo=motivo,
     )
     if call is None:
         return None

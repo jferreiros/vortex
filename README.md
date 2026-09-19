@@ -30,12 +30,19 @@ make langfuse-check         # project URL + whether the live line has keys
 
 With `VORTEX_CONFIRMATION_CALLS=true` plus the Twilio keys and
 `VORTEX_PUBLIC_BASE_URL` (the tunnel host), an accepted booking also queues a
-voice call for the day before the slot. The worker dials the patient, this
-server's `/confirmation/*` routes serve the TwiML, and `Gather input="speech"`
-captures the answer: confirmed / not_coming / reschedule_requested. The question
-itself offers the move out loud ("Si prefiere cambiarla, dígamelo y la movemos
-ahora mismo"), so the caller learns the option exists without guessing (es, ca, gl,
-eu and en scripts; the call inherits the language the caller used, Spanish by
+voice call for the day before the slot. `VORTEX_CONFIRMATION_CALLS` gates the
+*whole* outbound-calling subsystem in `vortex/line/confirmation_calls.py`,
+not just this one job: with it off, nothing is ever queued and the worker
+never starts. The worker itself runs for the whole life of the server
+process (`server.py`'s `_app_lifespan`, same place the day-before SMS
+`ReminderWorker` starts) — it is not tied to any inbound `/ws` call, so a
+scheduled row fires on its own poll even on a day the line takes no calls at
+all. The worker dials the patient, this server's `/confirmation/*` routes
+serve the TwiML, and `Gather input="speech"` captures the answer: confirmed /
+not_coming / reschedule_requested. The question itself offers the move out
+loud ("Si prefiere cambiarla, dígamelo y la movemos ahora mismo"), so the
+caller learns the option exists without guessing (es, ca, gl, eu and en
+scripts; the call inherits the language the caller used, Spanish by
 default). No answer lands as `no_answer` or `unclear`. A reschedule answer does
 not end the call: when the live voice pipeline runs behind the same server the
 call hands the line to its colleague - "le paso con mi compañero, que es quien
@@ -54,6 +61,69 @@ keeps Twilio's standard `<Say>` voice for that line. Every row lives in
 `logs/confirmation_calls.json` — the hooks a waitlist filler or a retry/SMS
 fallback would subscribe to. Try it: `uv run python scripts/try_confirmation_call.py`
 (`--live --to <E.164> --base-url <tunnel>` to dial for real).
+
+### `motivo`: why the call is happening
+
+Every row also carries a `motivo` — a lighter, business-facing label than
+`job` (which selects the TwiML/classification code; today only
+`appointment_confirmation` exists). All five known values ride the *same*
+job and the *same* yes/no flow; only the opening clause changes ("para
+confirmar su cita" vs. "para recordarle su cita", ...). See
+`vortex/line/confirmation_calls.py`'s `KNOWN_MOTIVOS` — it is a plain string,
+not a closed enum, so a new value needs no code change to be accepted, only
+an entry in `_MOTIVO_OPENING` to get its own opening line (it otherwise
+opens with the `confirmacion` clause).
+
+| `motivo` | When |
+| --- | --- |
+| `confirmacion` (default) | the day-before "will you come" call every accepted `BookAction` queues |
+| `recordatorio` | a plain reminder, no explicit yes/no framing |
+| `reprogramacion` | the clinic needs to move the appointment |
+| `seguimiento` | a follow-up call about a past or upcoming visit |
+| `call_now` | place it on the worker's very next poll — see below |
+
+`uv run python scripts/try_confirmation_call.py --motivo recordatorio` prints
+the reminder's opening line without dialling anything.
+
+### Queuing a call by hand (for testing)
+
+`logs/confirmation_calls.json` is a plain JSON list; the server rereads it on
+every poll, so appending a row to it while the server is running is enough
+to have the worker pick it up — no restart needed. A `call_now` row jumps
+the 24h booking-gap rule and the lead-time schedule entirely: any row whose
+`call_at` is already due (in the past, or `motivo: "call_now"` built through
+`build_confirmation_call`, which forces `call_at` to "now") is claimed and
+dialled on the worker's very next tick (`VORTEX_CONFIRMATION_POLL_SECS`,
+30s by default).
+
+```json
+{
+  "confirmation_id": "manual-test-0001",
+  "to": "+34600000000",
+  "appointment_at": "2026-09-25T10:00:00+02:00",
+  "call_at": "2020-01-01T00:00:00+02:00",
+  "language": "es",
+  "provider_name": "Dra. Ortiz",
+  "location_name": "Arenal Centro",
+  "patient_id": "P00042",
+  "job": "appointment_confirmation",
+  "motivo": "call_now",
+  "status": "pending",
+  "detail": "",
+  "twilio_call_sid": "",
+  "transcript": "",
+  "attempts": 0
+}
+```
+
+Set `call_at` to a timestamp already in the past (or now) so `claim_due`
+picks it up immediately regardless of `motivo`; `motivo: "call_now"` is what
+makes the *intent* ("dial this immediately") legible in the row itself and
+in the `calls` table once the outbound worker is wired to the database (see
+`database/README.md`). Every unrecognised key in the JSON is ignored on
+read, and any dataclass field left out — including `motivo` on a row
+written before this feature — defaults to `"confirmacion"`, so older rows
+keep working unmodified.
 
 ## Modes
 

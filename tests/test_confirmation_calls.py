@@ -10,6 +10,8 @@ from starlette.testclient import TestClient
 
 from vortex.contract import MADRID
 from vortex.line.confirmation_calls import (
+    DEFAULT_MOTIVO,
+    KNOWN_MOTIVOS,
     ConfirmationCall,
     ConfirmationStore,
     ConfirmationWorker,
@@ -84,6 +86,69 @@ def test_ask_text_other_languages_ask_the_same_question() -> None:
         assert marker in text
         assert offer in text  # the in-call reschedule offer, in her language
         assert "24/09" in text  # digit stamp any voice can read
+
+
+# ---- motivo: the opening clause, not the flow -----------------------------
+
+
+def test_default_motivo_is_confirmacion() -> None:
+    assert DEFAULT_MOTIVO == "confirmacion"
+    assert _pending().motivo == "confirmacion"
+
+
+def test_ask_text_motivo_changes_only_the_opening_clause() -> None:
+    confirmacion = ask_text(language="es", when=WHEN, motivo="confirmacion")
+    recordatorio = ask_text(language="es", when=WHEN, motivo="recordatorio")
+    assert "para confirmar su cita" in confirmacion
+    assert "para recordarle su cita" in recordatorio
+    # Same question, same reschedule offer, regardless of motivo.
+    for text in (confirmacion, recordatorio):
+        assert "¿Va a venir?" in text
+        assert "la movemos ahora mismo" in text
+
+
+@pytest.mark.parametrize("motivo", KNOWN_MOTIVOS)
+def test_every_known_motivo_produces_a_non_empty_ask(motivo: str) -> None:
+    # call_now has no opening-clause entry of its own (it is about *when*,
+    # not *what* to say) and falls back to the confirmacion clause — this
+    # just asserts every motivo the product asked for renders without KeyError.
+    text = ask_text(language="es", when=WHEN, motivo=motivo)
+    assert text.strip()
+
+
+def test_unknown_motivo_falls_back_to_confirmacion_clause() -> None:
+    text = ask_text(language="es", when=WHEN, motivo="something_nobody_registered")
+    assert "para confirmar su cita" in text
+
+
+def test_build_confirmation_call_tags_default_motivo() -> None:
+    call = _pending()
+    assert call.motivo == "confirmacion"
+
+
+def test_call_now_bypasses_the_24h_gap_and_the_lead() -> None:
+    # Booked one minute before the slot: the 24h rule alone would refuse this.
+    just_booked = WHEN - timedelta(minutes=1)
+    call = build_confirmation_call(
+        to="+34600000000",
+        when=WHEN,
+        now=just_booked,
+        lead=timedelta(hours=24),
+        motivo="call_now",
+    )
+    assert call is not None
+    assert call.motivo == "call_now"
+    assert call.call_dt == just_booked
+
+
+def test_call_now_does_not_relax_the_gap_for_other_motivos() -> None:
+    just_booked = WHEN - timedelta(minutes=1)
+    assert (
+        build_confirmation_call(
+            to="+34600000000", when=WHEN, now=just_booked, lead=timedelta(hours=24)
+        )
+        is None
+    )
 
 
 def test_twiml_escapes_and_routes() -> None:
@@ -201,6 +266,25 @@ async def test_store_add_dedupes_pending(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_store_dedup_keys_on_motivo_too(tmp_path: Path) -> None:
+    """A pending 'confirmacion' and a pending 'recordatorio' for the exact
+    same phone+slot are two different calls the patient should get — neither
+    replaces the other. Two rows of the *same* motivo still dedupe."""
+    store = ConfirmationStore(tmp_path / "calls.json")
+    kwargs = {"to": "+34600000000", "when": WHEN, "now": NOW, "lead": timedelta(hours=24)}
+    await schedule_confirmation_call(store, motivo="confirmacion", **kwargs)
+    await schedule_confirmation_call(store, motivo="recordatorio", **kwargs)
+    rows = store._read()
+    assert {row.motivo for row in rows} == {"confirmacion", "recordatorio"}
+    assert len(rows) == 2
+
+    replaced = await schedule_confirmation_call(store, motivo="confirmacion", **kwargs)
+    rows = store._read()
+    assert len(rows) == 2  # still one confirmacion + one recordatorio
+    assert any(r.confirmation_id == replaced.confirmation_id for r in rows)
+
+
+@pytest.mark.asyncio
 async def test_store_cancel_matching(tmp_path: Path) -> None:
     store = ConfirmationStore(tmp_path / "calls.json")
     await schedule_confirmation_call(
@@ -267,6 +351,27 @@ class _QueuedClient:
 
     async def aclose(self) -> None:
         return None
+
+
+@pytest.mark.asyncio
+async def test_worker_dials_a_call_now_row_on_the_very_next_tick(
+    tmp_path: Path, offline_settings
+) -> None:
+    """A call_now row queued this instant, with the appointment itself still
+    days away, is claimed and dialled on the worker's next poll — it never
+    waits for the 24h gap or the confirmation lead."""
+    store = ConfirmationStore(tmp_path / "calls.json")
+    call = build_confirmation_call(to="+34600000000", when=WHEN, now=NOW, motivo="call_now")
+    assert call is not None
+    await store.add(call)
+    client = _QueuedClient()
+    worker = ConfirmationWorker(offline_settings, store=store, calls=client, poll_secs=999)
+    # Any tick at or after NOW claims it — no 23-hour wait like the other tests.
+    count = await worker.tick(NOW)
+    assert count == 1
+    row = store._read()[0]
+    assert row.status == "calling"
+    assert row.motivo == "call_now"
 
 
 @pytest.mark.asyncio

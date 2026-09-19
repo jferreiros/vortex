@@ -160,6 +160,10 @@ async def run_confirmations(
             duration_ms=result.duration_ms,
             outcome=result.outcome,
             appointment_id=appt.id,
+            # This job only ever places the day-before "will you come" call;
+            # see vortex.line.confirmation_calls.KNOWN_MOTIVOS for the wider
+            # set a real outbound worker also places.
+            motivo="confirmacion",
         )
         db.set_confirmation_call(conn, appt.id, outbound_call.id)
         if result.outcome == "confirmed":

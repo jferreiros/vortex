@@ -38,6 +38,11 @@ class CallRecord:
     duration_ms: int | None
     outcome: CallOutcome | None
     appointment_id: str | None
+    #: Why an *outbound* call was placed — confirmacion / recordatorio /
+    #: reprogramacion / seguimiento / call_now, mirroring
+    #: vortex.line.confirmation_calls.KNOWN_MOTIVOS. NULL for an inbound
+    #: call and for any outbound row written before migration 3.
+    motivo: str | None = None
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> CallRecord:
@@ -52,6 +57,7 @@ class CallRecord:
             duration_ms=row["duration_ms"],
             outcome=row["outcome"],
             appointment_id=row["appointment_id"],
+            motivo=row["motivo"],
         )
 
 
