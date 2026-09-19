@@ -133,7 +133,7 @@ jobs:
           fi
 
       - name: File every major finding as an issue
-        if: steps.key.outputs.present == 'true'
+        if: steps.key.outputs.present == 'true' && steps.review.outputs.status == '0'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
