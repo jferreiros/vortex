@@ -5,6 +5,9 @@ the call log. The source is the synthetic-data pack by default; point
 ``VORTEX_CALENDAR_LOG`` at ``logs/calls.jsonl`` and the same grid fills live as
 calls book, move and cancel.
 
+The page needs no sign-in, so a taken slot renders a generic booked state: the
+cell carries no ``patient_id`` and no ``appointment_type_id``.
+
 This module reuses the chrome from ``live.py`` (nav, footer, dots, pills) the
 same way ``console.py`` does, and follows DESIGN.md: layout only lives in
 ``board.css``, colour comes from the tokens.
@@ -114,9 +117,7 @@ def _grid(calendar: cal.DoctorCalendar | None) -> None:
                         ui.element("div").classes("cal-cell off")
                     elif cell.status == "booked":
                         with ui.element("div").classes("cal-cell booked"):
-                            who = cell.patient_id or "Booked"
-                            kind = cell.appointment_type_id or "appointment"
-                            ui.tooltip(f"{who} · {kind}")
+                            ui.tooltip("Booked")
                     else:
                         ui.element("div").classes("cal-cell free")
 
