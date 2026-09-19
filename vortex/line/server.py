@@ -21,10 +21,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import Body, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import Body, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, PlainTextResponse, Response
 
+from vortex.line import confirmation_calls as confirmations
 from vortex.line import twilio, voice_config
+from vortex.line.confirmation_calls import ConfirmationWorker, confirmation_worker_status
 from vortex.line.session import CallSession
 from vortex.line.sms_reminders import ReminderWorker, reminder_worker_status
 from vortex.observability.calllog import group_by_call, read_calls, read_recent
@@ -63,11 +65,18 @@ async def _app_lifespan(app: FastAPI):
         worker = ReminderWorker(cfg)
         worker.start()
     app.state.sms_reminder_worker = worker
+    call_worker: ConfirmationWorker | None = None
+    if cfg.confirmation_calls:
+        call_worker = ConfirmationWorker(cfg)
+        call_worker.start()
+    app.state.confirmation_call_worker = call_worker
     try:
         yield
     finally:
         if worker is not None:
             await worker.stop()
+        if call_worker is not None:
+            await call_worker.stop()
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -83,10 +92,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/health")
     async def health() -> dict[str, object]:
         worker = getattr(app.state, "sms_reminder_worker", None)
+        call_worker = getattr(app.state, "confirmation_call_worker", None)
         return {
             "status": "ok",
             **settings.describe(),
             **reminder_worker_status(worker),
+            **confirmation_worker_status(call_worker),
         }
 
     @app.get("/calls")
@@ -158,6 +169,120 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except Exception as exc:
             raise HTTPException(503, f"voice preview unavailable: {exc}") from exc
         return Response(content=audio, media_type="audio/mpeg")
+
+    # ---- outbound confirmation calls (Twilio fetches these) -----------------
+    # Twilio posts application/x-www-form-urlencoded; parsed by hand so the app
+    # keeps its no-python-multipart dependency footprint.
+
+    async def _form(request: Request) -> dict[str, str]:
+        from urllib.parse import parse_qsl
+
+        body = (await request.body()).decode("utf-8", errors="replace")
+        return dict(parse_qsl(body))
+
+    def _call_store() -> confirmations.ConfirmationStore:
+        return confirmations.confirmation_store_from_settings(settings)
+
+    @app.api_route("/confirmation/twiml", methods=["GET", "POST"])
+    async def confirmation_twiml(cid: str = "") -> Response:
+        """The TwiML for one queued confirmation call: the question + Gather."""
+        call = await _call_store().get(cid) if cid else None
+        if call is None:
+            return Response(status_code=404)
+        base = settings.public_base_url.rstrip("/")
+        return Response(content=confirmations.twiml_ask(call, base), media_type="application/xml")
+
+    @app.post("/confirmation/result")
+    async def confirmation_result(request: Request, cid: str = "", attempt: int = 1) -> Response:
+        """Gather's action: classify the spoken answer and store the outcome."""
+        store = _call_store()
+        call = await store.get(cid) if cid else None
+        if call is None:
+            return Response(status_code=404)
+        form = await _form(request)
+        transcript = (form.get("SpeechResult") or "").strip()
+        outcome = confirmations.classify_reply(transcript, call.language)
+        if outcome == "unknown" and attempt < 2:
+            base = settings.public_base_url.rstrip("/")
+            xml = confirmations.twiml_ask(call, base, attempt=attempt + 1, reprompt=True)
+            return Response(content=xml, media_type="application/xml")
+        status: confirmations.ConfirmationStatus = outcome if outcome != "unknown" else "unclear"
+        detail = "answered" if outcome != "unknown" else "unclear_response"
+        await store.update(
+            call.confirmation_id,
+            status=status,
+            detail=detail,
+            transcript=transcript,
+            attempts=attempt,
+        )
+        log.info("confirmation %s -> %s (%r)", call.confirmation_id, status, transcript[:80])
+        text = (
+            confirmations.ack_text(outcome, call.language)
+            if outcome != "unknown"
+            else confirmations.final_unclear_text(call.language)
+        )
+        return Response(
+            content=confirmations.twiml_say(text, call.language),
+            media_type="application/xml",
+        )
+
+    @app.post("/confirmation/noresult")
+    async def confirmation_noresult(cid: str = "") -> Response:
+        """The Gather timed out with no speech: the call connected, nobody spoke."""
+        store = _call_store()
+        call = await store.get(cid) if cid else None
+        if call is None:
+            return Response(status_code=404)
+        await store.update(
+            call.confirmation_id,
+            status="unclear",
+            detail="no_speech",
+        )
+        return Response(
+            content=confirmations.twiml_say(
+                confirmations.no_speech_text(call.language), call.language
+            ),
+            media_type="application/xml",
+        )
+
+    @app.post("/confirmation/status")
+    async def confirmation_status(request: Request, cid: str = "") -> Response:
+        """Twilio's terminal call statuses: catch the calls that never answered.
+
+        The result webhook owns the answered outcomes; this only fills the rows
+        still ``calling`` when the call ends, so a hangup mid-question and a
+        phone that never picked up both land somewhere countable.
+        """
+        store = _call_store()
+        call = await store.get(cid) if cid else None
+        if call is None:
+            return Response(status_code=404)
+        form = await _form(request)
+        call_status = (form.get("CallStatus") or "").strip()
+        call_sid = (form.get("CallSid") or "").strip()
+        if call.status == "calling":
+            if call_status in ("no-answer", "busy"):
+                await store.update(
+                    call.confirmation_id,
+                    status="no_answer",
+                    detail=call_status,
+                    twilio_call_sid=call_sid or call.twilio_call_sid,
+                )
+            elif call_status in ("failed", "canceled"):
+                await store.update(
+                    call.confirmation_id,
+                    status="failed",
+                    detail=call_status,
+                    twilio_call_sid=call_sid or call.twilio_call_sid,
+                )
+            elif call_status == "completed":
+                await store.update(
+                    call.confirmation_id,
+                    status="unclear",
+                    detail="hangup_before_answer",
+                    twilio_call_sid=call_sid or call.twilio_call_sid,
+                )
+        return Response(status_code=204)
 
     @app.websocket(settings.ws_path)
     async def call_socket(ws: WebSocket) -> None:

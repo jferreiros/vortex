@@ -26,6 +26,11 @@ from vortex.settings import Settings
 
 log = logging.getLogger("vortex.line.sms_reminders")
 
+#: Product rule (Cristina, 2026-09-19): an appointment booked less than 24 h
+#: before its slot gets no reminder SMS - the patient just booked it.
+#: Hard-coded, not the lead: the lead is a demo knob, this rule is not.
+MIN_BOOKING_GAP = timedelta(hours=24)
+
 ReminderStatus = Literal["pending", "sent", "cancelled", "skipped"]
 
 
@@ -208,6 +213,8 @@ def build_book_reminder(
     clock = now or datetime.now(tz=MADRID)
     if clock.tzinfo is None:
         clock = clock.replace(tzinfo=MADRID)
+    if when - clock < MIN_BOOKING_GAP:
+        return None
     gap = lead if lead is not None else timedelta(days=1)
     send_at = when - gap
     if send_at <= clock:
