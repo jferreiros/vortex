@@ -1,4 +1,3 @@
-import { useState } from "react";
 import "./charts.css";
 
 // Sequential blue ramp (magnitude encoding), light -> dark = low -> high
@@ -11,10 +10,9 @@ function stepFor(pct) {
   return RAMP[idx];
 }
 
+// No hover tooltip: every cell already shows its own day, date and % —
+// hovering wouldn't reveal anything the cell doesn't already say.
 export default function OccupancyCalendar({ week }) {
-  const [hoverIndex, setHoverIndex] = useState(null);
-  const hovered = hoverIndex != null ? week[hoverIndex] : null;
-
   return (
     <div className="chart-root occupancy-calendar">
       <div className="occupancy-grid">
@@ -23,8 +21,6 @@ export default function OccupancyCalendar({ week }) {
             key={i}
             className="occupancy-cell"
             style={{ background: stepFor(day.pct), color: day.pct > 55 ? "#fff" : "var(--color-ink)" }}
-            onMouseEnter={() => setHoverIndex(i)}
-            onMouseLeave={() => setHoverIndex(null)}
           >
             <span className="occupancy-cell-day">{day.label}</span>
             <span className="occupancy-cell-date">{day.date.getDate()}</span>
@@ -32,11 +28,6 @@ export default function OccupancyCalendar({ week }) {
           </div>
         ))}
       </div>
-      {hovered && (
-        <div className="occupancy-tooltip">
-          {hovered.label} {hovered.date.getDate()}: {hovered.pct}% ocupado
-        </div>
-      )}
     </div>
   );
 }

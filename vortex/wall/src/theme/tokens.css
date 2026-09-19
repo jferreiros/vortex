@@ -32,6 +32,9 @@
   --color-info: #3a6ea5;
   --color-info-soft: #e6eef6;
 
+  --color-urgent: #8a2620;
+  --color-urgent-soft: #f5e0de;
+
   --color-overlay: rgba(17, 26, 22, 0.5);
 
   /* Typography ----------------------------------------------------------- */

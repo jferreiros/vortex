@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import subprocess
 import sys
 import time
 from datetime import UTC, datetime, timedelta
@@ -27,6 +28,7 @@ from vortex.observability import auth, explain, insights
 from vortex.observability.business_insights import business_insights
 from vortex.observability.calllog import read_recent
 from vortex.observability.demo import write_scripted_call
+from vortex.observability.home_overview import home_overview, load_synthetic_cards, occupancy
 from vortex.observability.icons import icon
 from vortex.observability.view import CallCard, build_calls, flatten_grouped
 from vortex.observability.wall_timeline import build_timeline, call_summary, latest_intent
@@ -911,6 +913,33 @@ def wall_business_insights_api(days: int = 30) -> JSONResponse:
     return JSONResponse(payload)
 
 
+#: The Home page's own numbers never come from the live line: the pack is a
+#: fixed corpus of eval calls, cached for the life of the process the same
+#: way the React app's build is.
+_HOME_CARDS_CACHE: list[CallCard] | None = None
+
+
+def _home_cards() -> list[CallCard]:
+    global _HOME_CARDS_CACHE
+    if _HOME_CARDS_CACHE is None:
+        _HOME_CARDS_CACHE = load_synthetic_cards()
+    return _HOME_CARDS_CACHE
+
+
+@app.get("/api/wall/home-overview")
+def wall_home_overview_api() -> JSONResponse:
+    """Stats, hourly and daily volume for the Home page — read straight off
+    ``synthetic-data/`` (see ``home_overview.py``), never a per-render mock."""
+    return JSONResponse(home_overview(_home_cards()))
+
+
+@app.get("/api/wall/occupancy")
+def wall_occupancy_api(site: str = "", specialty: str = "") -> JSONResponse:
+    """Occupancy calendar for the Home page's site/specialty filters — read
+    straight off ``wall-cache/occupancy.json``, precomputed at start-up."""
+    return JSONResponse(occupancy(site=site, specialty=specialty))
+
+
 @app.get("/wall/avatar2d")
 def wall_avatar2d() -> FileResponse:
     """The 2D avatar art, served as a plain image — not wrapped in a page —
@@ -926,6 +955,14 @@ def wall_avatar2d_animated() -> FileResponse:
     as the landing page's hero avatar.
     """
     return FileResponse(WALL_MEDIA_DIR / "avatar2d_animated.svg", media_type="image/svg+xml")
+
+
+@app.get("/wall/vorty-face")
+def wall_vorty_face() -> FileResponse:
+    """A static, cropped-to-the-head SVG (no animation) used as Vorty's
+    chat avatar — e.g. the Live Call transcript.
+    """
+    return FileResponse(WALL_MEDIA_DIR / "vorty-face.svg", media_type="image/svg+xml")
 
 
 @app.get("/wall", response_model=None)
@@ -1247,9 +1284,28 @@ def bench_page() -> None:
     )
 
 
+def _precompute_wall_cache() -> None:
+    """Refresh ``wall-cache/occupancy.json`` off the clinic API's own GETs
+    before serving the first request — see ``scripts/precompute_wall_cache.py``.
+    Run as a subprocess, the same way ``_play_line`` shells out to
+    ``scripts/fake_caller.py``: it's a standalone script, not a package
+    import, and a slow or failing fetch should delay start-up, never crash
+    the board — the Home page just shows an empty occupancy card until the
+    next successful run."""
+    script = REPO_ROOT / "scripts" / "precompute_wall_cache.py"
+    result = subprocess.run(
+        [sys.executable, str(script)], cwd=str(REPO_ROOT), capture_output=True, text=True
+    )
+    if result.returncode == 0:
+        print(result.stdout.strip())
+    else:
+        print(f"wall-cache precompute failed, keeping any existing file: {result.stderr.strip()}")
+
+
 def main() -> None:
     if auth.is_production() and not auth.ops_password():
         raise SystemExit("VORTEX_OPS_PASSWORD is required in production")
+    _precompute_wall_cache()
     ui.run(
         host="0.0.0.0",
         port=BOARD_PORT,
