@@ -361,6 +361,12 @@ class CallSession:
     # one mid-flight, and so ``close`` waits for them before deciding a call
     # submitted nothing.
     _pending: set[asyncio.Task[Any]] = field(default_factory=set)
+    # A refusal submission ``accept_refusal`` has already spawned. Nothing in
+    # ``submit_accepted_refusal`` is true until its POST comes back, so two
+    # acceptance frames in a row both pass its guards and both send the same
+    # refusal. Reserved before the task starts, and never given back: a send
+    # the platform did not take is the end-of-call fallback's to retry.
+    _refusal_spawned: bool = False
 
     @property
     def call_id(self) -> str:
@@ -507,7 +513,7 @@ class CallSession:
         already the ending. A booking still on the table is not this path.
         """
         memory = self.memory
-        if self.has_accepted_submission:
+        if self.has_accepted_submission or self._refusal_spawned:
             return
         if memory.prepared is not None or memory.last_rejection is None:
             return
@@ -517,6 +523,7 @@ class CallSession:
             reason=memory.last_rejection.reason,
             tool=memory.last_rejection_tool,
         )
+        self._refusal_spawned = True
         self._spawn(self.submit_accepted_refusal())
 
     async def submit_accepted_refusal(self) -> SubmitResult | None:
