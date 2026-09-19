@@ -21,6 +21,8 @@ from vortex.contract import (
     FAKE_PATIENT,
     MADRID,
     Action,
+    Appointment,
+    AppointmentList,
     AvailabilityResult,
     BlockedProvider,
     BookAction,
@@ -32,6 +34,7 @@ from vortex.contract import (
     RegisterAction,
     RegistrationResult,
     Rejection,
+    ResolvedWindow,
     Slot,
     SubmitResult,
     TriageResult,
@@ -39,7 +42,7 @@ from vortex.contract import (
     action_route,
 )
 from vortex.identity.tools import PATIENT_PREFERENCES_KEY
-from vortex.line.session import CallMemory, CallSession
+from vortex.line.session import CallMemory, CallSession, _last_intent
 from vortex.line.twilio import StartPayload
 
 NOW = datetime(2026, 9, 18, 10, 0, tzinfo=MADRID)
@@ -708,6 +711,137 @@ async def test_the_cold_booking_gives_up_inside_the_submit_window(offline_settin
     assert time.monotonic() - started < settings.submit_window_secs
     assert sent(session)[0][1]["reason"] == "out_of_scope"
     assert events(settings, "CA-cold-slow", "submit.cold_booking_timed_out")
+
+
+# --- the caller's own ask: change and cancel ----------------------------------
+
+
+def the_appointment() -> Appointment:
+    """The caller's one live visit, as ``list_appointments`` would have returned it."""
+    return Appointment(
+        appointment_id="A0001",
+        patient_id=FAKE_PATIENT.patient_id,
+        provider_id="PR01",
+        location_id="centro",
+        appointment_type_id="review",
+        start=datetime(2026, 9, 30, 10, 0, tzinfo=MADRID),
+    )
+
+
+def test_the_last_asked_thing_wins() -> None:
+    """ "move it - actually, cancel it" ends on cancel; a negated ask is no ask."""
+    assert _last_intent("quiero cancelar mi cita") == "cancel"
+    assert _last_intent("can you move it to next week") == "move"
+    assert _last_intent("quisiera cambiar la cita del viernes") == "move"
+    assert _last_intent("move it - actually, cancel it") == "cancel"
+    assert _last_intent("no, no quiero cancelarla") is None
+    assert _last_intent("hola, llamaba por una cita") is None
+
+
+async def test_a_scored_zero_refusal_yields_to_the_caller_intent(offline_settings) -> None:
+    """Call 096af75d, the failed change_and_cancel case: the caller asked to
+    move her visit, ``resolve_date`` refused "later than my appointment" with
+    out_of_scope, and the line died. The fallback sent a cold booking nobody
+    asked for. Her words and the visit on record win instead."""
+    session = make_session(offline_settings, "CA-intent-move")
+    line_owner(session)
+    session.ctx.log.user_turn("puedo mover mi cita con la doctora a mas tarde")
+    session.memory.observe("list_appointments", AppointmentList(appointments=[the_appointment()]))
+    session.memory.observe(
+        "resolve_date",
+        ResolvedWindow(
+            date_from=date(2026, 9, 19),
+            date_to=date(2026, 9, 19),
+            rejection=Rejection(reason="out_of_scope"),
+        ),
+    )
+
+    await session.close()
+
+    route, payload = sent(session)[0]
+    assert route == "/api/v1/submit/reschedule"
+    assert payload["appointment_id"] == "A0001"
+    # Same doctor and site, first slot after hers: the move the case asks for.
+    assert payload["provider_id"] == "PR01"
+    assert payload["location_id"] == "centro"
+    assert datetime.fromisoformat(payload["slot"]) > the_appointment().start
+    event = events(offline_settings, "CA-intent-move", "submit.fallback")[0]
+    assert event["branch"] == "caller_intent"
+
+
+async def test_a_caller_who_asked_to_cancel_gets_the_cancellation(offline_settings) -> None:
+    session = make_session(offline_settings, "CA-intent-cancel")
+    line_owner(session)
+    session.ctx.log.user_turn("quiero cancelar mi cita del dia 30")
+    session.memory.observe("list_appointments", AppointmentList(appointments=[the_appointment()]))
+
+    await session.close()
+
+    route, payload = sent(session)[0]
+    assert route == "/api/v1/submit/cancel"
+    assert payload["appointment_id"] == "A0001"
+
+
+async def test_two_live_visits_are_never_guessed_between(offline_settings) -> None:
+    """Which of two visits to act on is the caller's to say, not ours to guess."""
+    session = make_session(offline_settings, "CA-intent-two")
+    line_owner(session)
+    session.ctx.log.user_turn("quiero cancelar mi cita")
+    second = the_appointment().model_copy(
+        update={"appointment_id": "A0002", "start": datetime(2026, 10, 2, 17, 15, tzinfo=MADRID)}
+    )
+    session.memory.observe(
+        "list_appointments",
+        AppointmentList(appointments=[the_appointment(), second]),
+    )
+
+    await session.close()
+
+    route, _ = sent(session)[0]
+    assert route not in {"/api/v1/submit/cancel", "/api/v1/submit/reschedule"}
+    event = events(offline_settings, "CA-intent-two", "submit.fallback")[0]
+    assert event["branch"] != "caller_intent"
+
+
+async def test_a_visit_that_is_not_the_callers_is_never_acted_on(offline_settings) -> None:
+    """The diary on record is somebody else's: cancelling it is not ours to do."""
+    session = make_session(offline_settings, "CA-intent-other")
+    line_owner(session)
+    session.ctx.log.user_turn("quiero cancelar la cita")
+    not_hers = the_appointment().model_copy(update={"patient_id": "P00107"})
+    session.memory.observe("list_appointments", AppointmentList(appointments=[not_hers]))
+
+    await session.close()
+
+    assert sent(session)[0][0] != "/api/v1/submit/cancel"
+
+
+async def test_a_named_rule_outranks_the_caller_intent(offline_settings) -> None:
+    """A real rule still names the ending; the intent only fills a certain zero."""
+    session = make_session(offline_settings, "CA-intent-vs-rule")
+    line_owner(session)
+    session.ctx.log.user_turn("quiero cancelar mi cita")
+    session.memory.observe("list_appointments", AppointmentList(appointments=[the_appointment()]))
+    session.memory.observe(
+        "check_eligibility",
+        EligibilityVerdict(allowed=False, rejection=Rejection(reason="allowance_exhausted")),
+    )
+
+    await session.close()
+
+    assert sent(session)[0][1]["reason"] == "allowance_exhausted"
+
+
+async def test_a_negated_ask_is_not_an_intent(offline_settings) -> None:
+    """ "I don't want to cancel it" must not cancel it."""
+    session = make_session(offline_settings, "CA-intent-negated")
+    line_owner(session)
+    session.ctx.log.user_turn("no, no quiero cancelarla")
+    session.memory.observe("list_appointments", AppointmentList(appointments=[the_appointment()]))
+
+    await session.close()
+
+    assert sent(session)[0][0] != "/api/v1/submit/cancel"
 
 
 # --- what stops the fallback --------------------------------------------------

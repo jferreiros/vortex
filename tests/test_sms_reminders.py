@@ -17,7 +17,7 @@ from vortex.line.sms_reminders import (
     reminder_text,
     schedule_book_reminder,
 )
-from vortex.settings import Settings, get_settings, reset_settings
+from vortex.settings import get_settings, reset_settings
 
 WHEN = datetime(2026, 9, 24, 16, 30, tzinfo=MADRID)
 NOW = datetime(2026, 9, 20, 10, 0, tzinfo=MADRID)

@@ -640,9 +640,7 @@ def test_cancellations_by_provider_rank_freed_and_lost() -> None:
 
 def test_classify_cancel_reason_buckets() -> None:
     assert (
-        bi.classify_cancel_reason(
-            _say(_card("a"), "me equivoqué de día, la tenía mal apuntada")
-        )
+        bi.classify_cancel_reason(_say(_card("a"), "me equivoqué de día, la tenía mal apuntada"))
         == "mistake"
     )
     assert (
@@ -650,19 +648,14 @@ def test_classify_cancel_reason_buckets() -> None:
         == "health"
     )
     assert (
-        bi.classify_cancel_reason(
-            _say(_card("c"), "me ha surgido una reunión en el trabajo")
-        )
+        bi.classify_cancel_reason(_say(_card("c"), "me ha surgido una reunión en el trabajo"))
         == "scheduling"
     )
     assert (
         bi.classify_cancel_reason(_say(_card("d"), "porque al final no me hace falta"))
         == "no_longer_needed"
     )
-    assert (
-        bi.classify_cancel_reason(_say(_card("e"), "sí, cancélemela por favor"))
-        == "unknown"
-    )
+    assert bi.classify_cancel_reason(_say(_card("e"), "sí, cancélemela por favor")) == "unknown"
     assert bi.classify_cancel_reason(_card("f")) == "unknown"
     assert bi.classify_cancel_reason(_say(_card("g"), "es que tengo un compromiso")) == "other"
 

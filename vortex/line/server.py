@@ -15,8 +15,8 @@ Owner: the line lane.
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
 import logging
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
@@ -52,7 +52,6 @@ async def read_handshake(ws: WebSocket, *, max_messages: int = 5) -> twilio.Star
         if isinstance(msg, twilio.StopMessage):
             raise HandshakeError("stop before start")
     raise HandshakeError("no start message in the first frames")
-
 
 
 @asynccontextmanager
