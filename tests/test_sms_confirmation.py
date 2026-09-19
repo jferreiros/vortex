@@ -1,0 +1,385 @@
+"""SMS confirmations after an accepted book or cancel.
+
+Covers the render helpers, the Twilio/dry-run clients, and the session hook:
+an accepted book/cancel texts the calling number; everything else stays quiet.
+"""
+
+from __future__ import annotations
+
+from datetime import date, datetime
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock
+
+import httpx
+import pytest
+
+from vortex.contract import (
+    MADRID,
+    Action,
+    Appointment,
+    BookAction,
+    CancelAction,
+    NoAction,
+    RegisterAction,
+    RescheduleAction,
+    SubmitResult,
+    action_payload,
+    action_route,
+)
+from vortex.line.session import CallSession
+from vortex.line.sms import (
+    DryRunSmsClient,
+    TwilioSmsClient,
+    action_fingerprint,
+    booking_confirmation_text,
+    cancellation_confirmation_text,
+    format_slot_es,
+    make_sms_client,
+    twilio_is_configured,
+)
+from vortex.line.twilio import StartPayload
+from vortex.settings import Settings, get_settings, reset_settings
+
+NOW = datetime(2026, 9, 18, 10, 0, tzinfo=MADRID)
+SLOT = datetime(2026, 9, 24, 16, 30, tzinfo=MADRID)
+CALLER = "+34600111222"
+PATIENT = "P00042"
+
+
+class AcceptingSubmitter:
+    def __init__(self) -> None:
+        self.sent: list[tuple[str, dict[str, Any]]] = []
+
+    async def submit(self, call_id: str, action: Action) -> SubmitResult:
+        self.sent.append((action_route(action), action_payload(action, call_id)))
+        return SubmitResult(status="accepted", http_status=200)
+
+    async def aclose(self) -> None:
+        return None
+
+
+class DuplicateSubmitter(AcceptingSubmitter):
+    async def submit(self, call_id: str, action: Action) -> SubmitResult:
+        self.sent.append((action_route(action), action_payload(action, call_id)))
+        return SubmitResult(status="duplicate", http_status=409)
+
+
+class DryRunSubmitter(AcceptingSubmitter):
+    async def submit(self, call_id: str, action: Action) -> SubmitResult:
+        self.sent.append((action_route(action), action_payload(action, call_id)))
+        return SubmitResult(status="dry_run", detail="not sent")
+
+
+class RejectingSubmitter(AcceptingSubmitter):
+    async def submit(self, call_id: str, action: Action) -> SubmitResult:
+        return SubmitResult(status="rejected", http_status=422, detail="nope")
+
+
+def a_booking() -> BookAction:
+    return BookAction(
+        patient_id=PATIENT,
+        provider_id="PR05",
+        location_id="sur",
+        appointment_type_id="review",
+        slot=SLOT,
+        policy_id="sanitas",
+    )
+
+
+def a_cancel() -> CancelAction:
+    return CancelAction(appointment_id="A0001")
+
+
+def make_session(
+    settings: Settings,
+    call_id: str,
+    *,
+    from_number: str | None = CALLER,
+    submitter: AcceptingSubmitter | None = None,
+) -> CallSession:
+    params = {"from_number": from_number} if from_number else {}
+    start = StartPayload(
+        streamSid=f"MZ-{call_id}",
+        callSid=call_id,
+        customParameters=params,
+    )
+    session = CallSession.open(start, settings=settings, now=NOW)
+    submitter = submitter or AcceptingSubmitter()
+    session.submitter = submitter
+    session.ctx.submitter = submitter
+    session.sms = DryRunSmsClient()
+    return session
+
+
+def remember_appointment(session: CallSession) -> None:
+    appointment = Appointment(
+        appointment_id="A0001",
+        patient_id=PATIENT,
+        provider_id="PR01",
+        location_id="centro",
+        appointment_type_id="review",
+        start=datetime(2026, 9, 30, 10, 0, tzinfo=MADRID),
+    )
+    session.ctx.state.setdefault("diary_appointments", {})[
+        appointment.appointment_id
+    ] = appointment.model_dump(mode="json")
+
+
+# ---- render helpers ---------------------------------------------------------
+
+
+def test_format_slot_es_uses_madrid_wall_clock() -> None:
+    text = format_slot_es(SLOT)
+    assert "jueves" in text
+    assert "24" in text
+    assert "septiembre" in text
+    assert "16:30" in text
+
+
+def test_booking_text_includes_doctor_and_site_when_known() -> None:
+    text = booking_confirmation_text(
+        when=SLOT, provider_name="Dr. Iglesia", location_name="Arenal Sur"
+    )
+    assert "Dr. Iglesia" in text
+    assert "Arenal Sur" in text
+    assert "16:30" in text
+    assert "clínica" in text
+
+
+def test_cancellation_text_falls_back_without_details() -> None:
+    text = cancellation_confirmation_text()
+    assert "Cita cancelada" in text
+    assert "reservar" in text
+
+
+# ---- clients ----------------------------------------------------------------
+
+
+def test_make_sms_client_is_dry_run_without_twilio(offline_settings: Settings) -> None:
+    assert not twilio_is_configured(offline_settings)
+    client = make_sms_client(offline_settings)
+    assert isinstance(client, DryRunSmsClient)
+
+
+def test_twilio_is_configured_needs_from_or_messaging_service(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TWILIO_ACCOUNT_SID", "ACxxx")
+    monkeypatch.setenv("TWILIO_AUTH_TOKEN", "secret")
+    monkeypatch.delenv("TWILIO_FROM_NUMBER", raising=False)
+    monkeypatch.delenv("TWILIO_MESSAGING_SERVICE_SID", raising=False)
+    reset_settings()
+    assert not twilio_is_configured(get_settings())
+    monkeypatch.setenv("TWILIO_FROM_NUMBER", "+34600999888")
+    reset_settings()
+    assert twilio_is_configured(get_settings())
+    reset_settings()
+
+
+@pytest.mark.asyncio
+async def test_twilio_client_posts_form_body() -> None:
+    client = TwilioSmsClient(
+        "ACxxx",
+        "token",
+        from_number="+34600999888",
+    )
+    response = MagicMock()
+    response.status_code = 201
+    response.json.return_value = {"sid": "SMxxx"}
+    response.text = "ok"
+    client._http.post = AsyncMock(return_value=response)
+
+    result = await client.send(to=CALLER, body="hola")
+
+    assert result.status == "sent"
+    assert result.sid == "SMxxx"
+    kwargs = client._http.post.await_args.kwargs
+    assert kwargs["data"]["To"] == CALLER
+    assert kwargs["data"]["From"] == "+34600999888"
+    assert kwargs["data"]["Body"] == "hola"
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_twilio_client_reports_http_errors() -> None:
+    client = TwilioSmsClient(
+        "ACxxx",
+        "token",
+        messaging_service_sid="MGxxx",
+    )
+    client._http.post = AsyncMock(side_effect=httpx.ConnectError("down"))
+
+    result = await client.send(to=CALLER, body="hola")
+
+    assert result.status == "failed"
+    assert "ConnectError" in result.detail
+    await client.aclose()
+
+
+# ---- session hook -----------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_accepted_booking_sends_sms(offline_settings: Settings) -> None:
+    session = make_session(offline_settings, "CA-book-sms")
+    sms = session.sms
+    assert isinstance(sms, DryRunSmsClient)
+
+    await session.submit(a_booking())
+    await session.close()
+
+    assert len(sms.sent) == 1
+    to, body = sms.sent[0]
+    assert to == CALLER
+    assert "Cita confirmada" in body
+    assert "16:30" in body
+
+
+@pytest.mark.asyncio
+async def test_accepted_cancel_sends_sms(offline_settings: Settings) -> None:
+    session = make_session(offline_settings, "CA-cancel-sms")
+    remember_appointment(session)
+    sms = session.sms
+    assert isinstance(sms, DryRunSmsClient)
+
+    await session.submit(a_cancel())
+    await session.close()
+
+    assert len(sms.sent) == 1
+    to, body = sms.sent[0]
+    assert to == CALLER
+    assert "Cita cancelada" in body
+    assert "10:00" in body
+
+
+@pytest.mark.asyncio
+async def test_cancel_without_remembered_appointment_still_texts(
+    offline_settings: Settings,
+) -> None:
+    session = make_session(offline_settings, "CA-cancel-bare")
+    sms = session.sms
+    assert isinstance(sms, DryRunSmsClient)
+
+    await session.submit(a_cancel())
+    await session.close()
+
+    assert len(sms.sent) == 1
+    assert "Cita cancelada" in sms.sent[0][1]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "action",
+    [
+        NoAction(reason="out_of_scope"),
+        RegisterAction(
+            given_name="Ana",
+            first_surname="García",
+            second_surname="López",
+            national_id="12345678Z",
+            date_of_birth=date(1990, 1, 1),
+            phone=CALLER,
+            email="ana@example.com",
+            insurer="sanitas",
+        ),
+        RescheduleAction(
+            appointment_id="A0001",
+            provider_id="PR05",
+            location_id="sur",
+            slot=SLOT,
+            policy_id="sanitas",
+        ),
+    ],
+)
+async def test_non_book_cancel_actions_do_not_sms(
+    offline_settings: Settings, action: Action
+) -> None:
+    session = make_session(offline_settings, "CA-no-sms")
+    sms = session.sms
+    assert isinstance(sms, DryRunSmsClient)
+
+    await session.submit(action)
+    await session.close()
+
+    assert sms.sent == []
+
+
+@pytest.mark.asyncio
+async def test_missing_from_number_skips_sms(offline_settings: Settings) -> None:
+    session = make_session(offline_settings, "CA-no-from", from_number=None)
+    sms = session.sms
+    assert isinstance(sms, DryRunSmsClient)
+
+    await session.submit(a_booking())
+    await session.close()
+
+    assert sms.sent == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("submitter_cls", [DryRunSubmitter, RejectingSubmitter])
+async def test_non_accepted_submit_skips_sms(
+    offline_settings: Settings, submitter_cls: type[AcceptingSubmitter]
+) -> None:
+    session = make_session(
+        offline_settings, "CA-not-accepted", submitter=submitter_cls()
+    )
+    sms = session.sms
+    assert isinstance(sms, DryRunSmsClient)
+
+    await session.submit(a_booking())
+    await session.close()
+
+    assert sms.sent == []
+
+
+@pytest.mark.asyncio
+async def test_duplicate_status_does_not_double_text(offline_settings: Settings) -> None:
+    session = make_session(offline_settings, "CA-dup", submitter=AcceptingSubmitter())
+    sms = session.sms
+    assert isinstance(sms, DryRunSmsClient)
+    booking = a_booking()
+
+    await session.submit(booking)
+    session.submitter = DuplicateSubmitter()
+    session.ctx.submitter = session.submitter
+    await session.submit(booking)
+    await session.close()
+
+    assert len(sms.sent) == 1
+    assert action_fingerprint(booking) in session._sms_notified
+
+
+@pytest.mark.asyncio
+async def test_submit_action_tool_path_also_sends_sms(offline_settings: Settings) -> None:
+    session = make_session(offline_settings, "CA-tool-sms")
+    sms = session.sms
+    assert isinstance(sms, DryRunSmsClient)
+    booking = a_booking()
+
+    await session.call_tool(
+        "submit_action",
+        {"action": {"kind": "book", **booking.model_dump(mode="json")}},
+    )
+    await session.close()
+
+    assert len(sms.sent) == 1
+    assert sms.sent[0][0] == CALLER
+
+
+@pytest.mark.asyncio
+async def test_sms_disabled_flag_skips(
+    offline_settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("VORTEX_SMS_CONFIRMATIONS", "false")
+    reset_settings()
+    settings = get_settings()
+    session = make_session(settings, "CA-disabled")
+    sms = session.sms
+    assert isinstance(sms, DryRunSmsClient)
+
+    await session.submit(a_booking())
+    await session.close()
+
+    assert sms.sent == []
+    reset_settings()
