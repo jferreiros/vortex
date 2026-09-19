@@ -157,6 +157,47 @@ def test_reschedule_moves_from_the_old_slot_to_the_new_one() -> None:
     assert calendar.booked == 1
 
 
+# ---- the grid signature the view redraws on -------------------------------
+
+
+def test_grid_signature_notices_a_moved_booking() -> None:
+    """The view redraws only on a new signature, so a move must change it.
+
+    Totals stay put when a booking moves inside the same doctor's window: same
+    booked count, same capacity, same open days. Only the cells differ.
+    """
+    before = [_only_calendar([_book_event(9, 0)])]
+    moved = [
+        _only_calendar(
+            [
+                _book_event(9, 0),
+                {
+                    "kind": "submit.result",
+                    "call_id": "roster:x",
+                    "payload": {
+                        "action": "RESCHEDULE",
+                        "appointment_id": "A2",
+                        "provider_id": "PR01",
+                        "location_id": "centro",
+                        "slot": _slot(9, 45),
+                    },
+                },
+            ],
+            {"A2": _appt("A2", 9, 0)},
+        )
+    ]
+    assert before[0].booked == moved[0].booked
+    assert before[0].capacity == moved[0].capacity
+    assert len(before[0].days) == len(moved[0].days)
+    assert cal.grid_signature(before) != cal.grid_signature(moved)
+
+
+def test_grid_signature_is_stable_for_an_unchanged_grid() -> None:
+    same = _only_calendar([_book_event(9, 30)])
+    again = _only_calendar([_book_event(9, 30)])
+    assert cal.grid_signature([same]) == cal.grid_signature([again])
+
+
 # ---- non-diary verbs ------------------------------------------------------
 
 

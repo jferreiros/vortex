@@ -139,10 +139,7 @@ def calendar_page() -> None:
         bookings = cal.bookings_from_events(events, cal.appointment_index())
         calendars = cal.build_calendars(_CATALOGUE, bookings, days_window=DAYS_WINDOW)
         total_booked = sum(c.booked for c in calendars)
-        sig = (
-            tuple((c.provider_id, c.booked, c.capacity, len(c.days)) for c in calendars),
-            state["provider"],
-        )
+        sig = (cal.grid_signature(calendars), state["provider"])
         if sig == rendered["sig"]:
             return
         rendered["sig"] = sig
