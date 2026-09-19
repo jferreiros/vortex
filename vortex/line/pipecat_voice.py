@@ -45,6 +45,7 @@ TODO(line):
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from typing import Any
 
 from fastapi import WebSocket
@@ -113,10 +114,56 @@ def _language_hints(codes: tuple[str, ...]) -> list[Any]:
     return hints
 
 
+def register_call_tools(
+    llm: Any, exposed_tools: list[str], make_handler: Callable[[str], Any]
+) -> list[Any]:
+    """Advertise every exposed registry tool on ``llm`` and bind its handler.
+
+    Returns the ``FunctionSchema`` list the LLM context is built with.
+
+    Every tool is registered with ``cancel_on_interruption=False``. Pipecat's
+    default is ``True``: an in-flight tool call is cancelled the moment an
+    ``InterruptionFrame`` reaches the LLM service, which on a phone line is any
+    caller who keeps talking. Our tools are short read-only clinic lookups plus
+    ``submit_action``, and none of them is worth abandoning half-way.
+
+    With the flag off the call is asynchronous in pipecat's sense: the handler
+    runs to completion and its result still reaches the model. When nothing
+    moved on in the meantime the result settles in place, exactly like a
+    synchronous call; when the caller did speak, it arrives as a developer
+    message and the model answers the new turn with the result in scope.
+    """
+    from pipecat.adapters.schemas.function_schema import FunctionSchema
+
+    schemas: list[Any] = []
+    for fn in registry.function_schemas(exposed_tools):
+        params_schema = fn["parameters"]
+        properties = dict(params_schema["properties"])
+        if params_schema.get("$defs"):
+            # Nested models (Slot, Action ...) need their definitions inline.
+            properties["$defs"] = params_schema["$defs"]
+        schemas.append(
+            FunctionSchema(
+                name=fn["name"],
+                description=fn["description"],
+                properties=properties,
+                required=params_schema["required"],
+            )
+        )
+        llm.register_function(
+            fn["name"],
+            make_handler(fn["name"]),
+            # Barge-in must never kill a tool: a cancelled find_patient makes the
+            # model deny a patient who exists, a cancelled submit_action loses
+            # the case with nothing posted.
+            cancel_on_interruption=False,
+        )
+    return schemas
+
+
 async def run_pipecat_call(
     ws: WebSocket, session: CallSession, turn_settings: TurnSettings | None = None
 ) -> str:
-    from pipecat.adapters.schemas.function_schema import FunctionSchema
     from pipecat.adapters.schemas.tools_schema import ToolsSchema
     from pipecat.frames.frames import TTSSpeakFrame
     from pipecat.pipeline.pipeline import Pipeline
@@ -225,22 +272,7 @@ async def run_pipecat_call(
 
         return handler
 
-    schemas: list[Any] = []
-    for fn in registry.function_schemas(turns.exposed_tools):
-        params_schema = fn["parameters"]
-        properties = dict(params_schema["properties"])
-        if params_schema.get("$defs"):
-            # Nested models (Slot, Action ...) need their definitions inline.
-            properties["$defs"] = params_schema["$defs"]
-        schemas.append(
-            FunctionSchema(
-                name=fn["name"],
-                description=fn["description"],
-                properties=properties,
-                required=params_schema["required"],
-            )
-        )
-        llm.register_function(fn["name"], make_handler(fn["name"]))
+    schemas = register_call_tools(llm, turns.exposed_tools, make_handler)
 
     context = LLMContext(initial_messages(ctx.now), tools=ToolsSchema(standard_tools=schemas))
     aggregators = LLMContextAggregatorPair(context, user_params=_user_aggregator_params(turns))
