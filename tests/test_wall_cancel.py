@@ -61,12 +61,13 @@ async def test_range_preview_counts_then_confirm_cancels(user: User, offline_set
 
     confirm = await user.http_client.post("/api/wall/agenda/cancel", json=body)
     assert confirm.status_code == 200
-    assert confirm.json() == {
-        "ok": True,
-        "doctor": doctor["name"],
-        "cancelled": count,
-        "appointments_updated": 0,
-    }
+    result = confirm.json()
+    assert result["ok"] is True
+    assert result["doctor"] == doctor["name"]
+    assert result["cancelled"] == count
+    assert result["appointments_updated"] == 0
+    # Every cancelled visit with a patient on it is queued for the callback.
+    assert result["rebookings_queued"] > 0
 
     # The wall_cancellations rows landed in the test's product DB.
     conn = db.connect(Path(offline_settings.product_db_path))
@@ -75,6 +76,21 @@ async def test_range_preview_counts_then_confirm_cancels(user: User, offline_set
     finally:
         conn.close()
     assert len(rows) == count
+
+    # And the reschedule-callback queue (rebooking.sqlite3 next to the
+    # product DB) holds one pending reschedule per queued visit.
+    from vortex.diary.rebooking import RebookingStore
+
+    store = RebookingStore(Path(offline_settings.product_db_path).with_name("rebooking.sqlite3"))
+    pending = store.pending()
+    assert len(pending) == result["rebookings_queued"]
+    assert all(
+        request.intent == "reschedule"
+        and request.status == "pending"
+        and request.source_reason == "wall_cancel"
+        and request.call_id.startswith("WALLC-")
+        for request in pending
+    )
 
     # A second preview sees the slots already gone — nothing left to cancel.
     again = await user.http_client.post("/api/wall/agenda/cancel-preview", json=body)
@@ -95,6 +111,7 @@ async def test_single_cancel_frees_the_slot_and_refuses_a_repeat(
     resp = await user.http_client.post("/api/wall/appointments/cancel", json=body)
     assert resp.status_code == 200
     assert resp.json()["ok"] is True
+    assert resp.json()["rebookings_queued"] == 1
 
     # The slot reads free on the very next agenda read — no reload needed.
     agenda = (

@@ -1105,8 +1105,12 @@ def wall_doctor_agenda_api(
 # appointment exists there — the same ``cancelled`` a phone cancellation
 # writes through ``database/hooks.py``. Reads then drop those slots via
 # ``cal.drop_cancelled``, so a cancelled visit simply shows as a free slot,
-# the same thing a CANCEL replayed from the call log does. Nothing is
-# submitted anywhere: the clinic's own diary is the system of record here.
+# the same thing a CANCEL replayed from the call log does. Every cancelled
+# visit with a patient on it also lands in the rebooking queue
+# (``rebooking.sqlite3`` next to the product DB) as a pending ``reschedule``
+# — the outbound dialer calls the patient back for a new slot once the line
+# can dial out. Nothing is submitted anywhere: the clinic's own diary is the
+# system of record here.
 
 
 def _wall_db_path() -> Path:
@@ -1139,6 +1143,47 @@ def _agenda_bookings_live() -> dict[cal.BookingKey, cal.Booking]:
     """The loaded bookings minus the slots the wall already cancelled."""
     _ensure_agenda()
     return cal.drop_cancelled(_AGENDA_BOOKINGS or {}, _wall_cancelled_keys())
+
+
+def _rebooking_store_path() -> Path:
+    """The reschedule-callback queue file: ``rebooking.sqlite3`` next to the
+    product DB (``logs/`` locally, the board's writable volume in deploy —
+    same place a real outbound dialer would read it from)."""
+    return _wall_db_path().with_name("rebooking.sqlite3")
+
+
+def _enqueue_rebookings(bookings: list[cal.Booking]) -> int:
+    """One pending ``rebooking_requests`` row per cancelled visit — the queue
+    ``vortex/diary/rebooking.py``'s watcher re-checks and the line's outbound
+    dialer will drain once it can place calls. A failed queue must not roll
+    back a cancel that already committed, so this logs and degrades to 0
+    instead of propagating."""
+    from vortex.diary import rebooking  # late import, same as database/ below
+
+    today = datetime.now(MADRID).date()
+    try:
+        store = rebooking.RebookingStore(_rebooking_store_path())
+    except Exception:
+        log.exception("rebooking queue unavailable; cancelled slots stay cancelled")
+        return 0
+    queued = 0
+    for booking in bookings:
+        request = rebooking.wall_cancel_request(
+            provider_id=booking.provider_id,
+            location_id=booking.location_id,
+            slot_start=booking.start,
+            patient_id=booking.patient_id,
+            appointment_id=booking.appointment_id or None,
+            today=today,
+        )
+        if request is None:
+            continue  # no patient on the visit — nobody to call back
+        try:
+            store.add(request)
+            queued += 1
+        except Exception:
+            log.exception("rebooking enqueue failed for slot %s", booking.start.isoformat())
+    return queued
 
 
 def _parse_day(raw: Any) -> date | None:
@@ -1251,12 +1296,14 @@ async def wall_cancel_range_api(request: Request) -> JSONResponse:
         touched = db.cancel_appointment_rows(
             conn, provider_id=provider_id, day_from=day_from, day_to=day_to
         )
+    queued = _enqueue_rebookings(hits)
     return JSONResponse(
         {
             "ok": True,
             "doctor": doctor,
             "cancelled": len(hits),
             "appointments_updated": len(touched),
+            "rebookings_queued": queued,
         }
     )
 
@@ -1300,7 +1347,10 @@ async def wall_cancel_visit_api(request: Request) -> JSONResponse:
             provider_id=provider_id,
             slot_start=booking.start.astimezone(MADRID).isoformat(),
         )
-    return JSONResponse({"ok": True, "appointment_updated": touched})
+    queued = _enqueue_rebookings([booking])
+    return JSONResponse(
+        {"ok": True, "appointment_updated": touched, "rebookings_queued": queued}
+    )
 
 
 #: The Home page's own numbers never come from the live line: the pack is a
