@@ -361,6 +361,8 @@ class Settings:
     langfuse_environment: str = field(
         default_factory=lambda: _env("LANGFUSE_TRACING_ENVIRONMENT") or _env("VORTEX_ENV")
     )
+    # Optional Hugging Face token for calendar note summaries. Empty = show the note as-is.
+    hf_token: str = field(default_factory=lambda: _env("HF_TOKEN"))
 
     # Live geocoder for problem 15 (vortex/rules/geo.py). Empty = gazetteer only.
     # VORTEX_GEOCODER: cartociudad | nominatim | "" (off).
@@ -605,6 +607,7 @@ class Settings:
             "ws_path": self.ws_path,
             "calls_log_path": str(self.calls_log_path),
             "has_langfuse_keys": bool(self.langfuse_public_key and self.langfuse_secret_key),
+            "has_hf_token": bool(self.hf_token),
             "langfuse_base_url": self.langfuse_base_url,
             "langfuse_environment": self.langfuse_environment,
             "geocoder": self.geocoder or ("nominatim" if self.geocoder_url else ""),

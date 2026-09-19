@@ -841,8 +841,7 @@ def suggest_doctors(
     return {
         "ok": True,
         "doctors": [
-            {"name": calendar.name, "specialty": calendar.specialty}
-            for calendar in found[:limit]
+            {"name": calendar.name, "specialty": calendar.specialty} for calendar in found[:limit]
         ],
     }
 
@@ -858,9 +857,7 @@ def agenda_options(catalogue: Catalogue) -> dict[str, Any]:
         for provider in sorted(catalogue.providers, key=lambda row: row.name.casefold())
     ]
     sites = [{"id": loc.location_id, "name": loc.name} for loc in catalogue.locations]
-    specialties = [
-        {"id": row.specialty_id, "name": row.name} for row in catalogue.specialties
-    ]
+    specialties = [{"id": row.specialty_id, "name": row.name} for row in catalogue.specialties]
     if not specialties:
         seen: dict[str, str] = {}
         for provider in catalogue.providers:
@@ -868,8 +865,7 @@ def agenda_options(catalogue: Catalogue) -> dict[str, Any]:
                 seen[provider.specialty_id] = provider.specialty_name or provider.specialty_id
         specialties = [{"id": key, "name": label} for key, label in seen.items()]
     types = [
-        {"id": row.appointment_type_id, "name": row.name}
-        for row in catalogue.appointment_types
+        {"id": row.appointment_type_id, "name": row.name} for row in catalogue.appointment_types
     ]
     return {
         "ok": True,
