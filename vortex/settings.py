@@ -397,6 +397,9 @@ class Settings:
     # number. Hackathon/demo only (a Twilio trial can only call verified
     # numbers anyway). Falls back to sms_force_to, the demo's one demo number.
     confirmation_force_to: str = field(default_factory=lambda: _env("VORTEX_CONFIRMATION_FORCE_TO"))
+    cancel_call_fallback_to: str = field(
+        default_factory=lambda: _env("VORTEX_CANCEL_CALL_FALLBACK_TO")
+    )
 
     @property
     def clinic_is_live(self) -> bool:
