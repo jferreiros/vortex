@@ -108,7 +108,7 @@ def test_on_day_keeps_the_calls_that_started_that_day_in_madrid() -> None:
     assert [c.call_id for c in insights.on_day(cards, date(2026, 9, 20))] == ["late"]
 
 
-def _metered(call_id: str, *, chars: int = 1_000_000, tts_model: str = "es-ES-Chirp3-HD-A"):
+def _metered(call_id: str, *, chars: int = 1_000_000, tts_model: str = "eleven_flash_v2_5"):
     card = _card(call_id, "book", duration_ms=30000)
     card.usage = {
         "metered": True,
@@ -119,15 +119,17 @@ def _metered(call_id: str, *, chars: int = 1_000_000, tts_model: str = "es-ES-Ch
             "prompt_tokens": 1_000_000,
             "completion_tokens": 1_000_000,
         },
-        "tts": [{"provider": "google", "model": tts_model, "characters": chars}],
+        "tts": [{"provider": "elevenlabs", "model": tts_model, "characters": chars}],
     }
     return card
 
 
 def test_cost_per_call_averages_the_calls_it_could_price_in_full() -> None:
-    priced_one = _metered("a")
+    # A call that never reached TTS is fully priced; one that did is partial,
+    # because ElevenLabs publishes no per-character list price we have verified.
+    priced_one = _metered("a", chars=0)
     priced_two = _metered("b", chars=0)
-    partial = _metered("c", tts_model="gemini-2.5-flash-tts")
+    partial = _metered("c")
     unmetered = _card("old", "book", duration_ms=30000)  # logged before metering
     stub = _card("stub", "book", duration_ms=30000)
     stub.usage = {"metered": False, "stt": {}, "llm": {}, "tts": []}
@@ -135,17 +137,16 @@ def test_cost_per_call_averages_the_calls_it_could_price_in_full() -> None:
     summary = insights.cost_per_call([priced_one, priced_two, partial, unmetered, stub])
     assert summary.metered == 3
     assert summary.priced == 2
-    assert summary.unpriced == ["TTS gemini-2.5-flash-tts"]
+    assert summary.unpriced == ["TTS eleven_flash_v2_5"]
     assert summary.perk is True
-    # The TTS leg is €27.60 on one call and €0 on the other, so the average is
-    # half of it plus the STT both of them paid. The LLM leg is a perk.
+    # Only STT is paid at the margin: the LLM leg is a perk and the TTS leg is
+    # not on the priced calls at all.
     rate = pricing.eur_per_usd()
     stt = 0.002 * rate
-    tts = 30.0 * rate
     llm = (0.14 + 0.28) * rate
-    assert summary.avg_paid_eur == pytest.approx(stt + tts / 2)
-    assert summary.avg_list_eur == pytest.approx(stt + llm + tts / 2)
-    assert summary.total_list_eur == pytest.approx(2 * (stt + llm) + tts)
+    assert summary.avg_paid_eur == pytest.approx(stt)
+    assert summary.avg_list_eur == pytest.approx(stt + llm)
+    assert summary.total_list_eur == pytest.approx(2 * (stt + llm))
 
 
 def test_cost_per_call_has_no_average_when_nothing_could_be_priced() -> None:

@@ -44,11 +44,12 @@ LANGUAGES: tuple[str, ...] = ("en", "es", "ca", "gl", "eu")
 #: turn, so a persona's tone has to stay a fragment, not a second prompt.
 TONE_MAX_CHARS = 400
 
-#: Same ids ``Settings.google_tts_voice_es`` / ``_en`` default to today, so
-#: that once a later change reads a persona on the line nothing about the
-#: sound moves unless somebody changed it here on purpose.
-VOICE_ES = "es-ES-Chirp3-HD-Aoede"
-VOICE_EN = "en-GB-Chirp3-HD-Aoede"
+#: A persona carries no voice id of its own: the line speaks with whatever
+#: ``Settings.elevenlabs_voice_for`` resolves, so that once a later change
+#: reads a persona on the call nothing about the sound moves unless somebody
+#: changed the ELEVENLABS_VOICE_ID_* variables on purpose.
+VOICE_ES = ""
+VOICE_EN = ""
 
 #: Vorty heads from ``vortex/wall/media``: the bare face plus one accessory
 #: overlay. ``none`` is the face without a hat. The picker stores the stem

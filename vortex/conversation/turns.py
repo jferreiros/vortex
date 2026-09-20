@@ -140,7 +140,7 @@ class TurnSettings:
     interrupt_min_words: int = 2
     # Noisy-caller settings (problem 12): a higher bar before Silero calls it
     # speech, so a bus going past does not become a barge-in. No denoiser in
-    # front of STT: Deepgram/AssemblyAI both document worse WER after
+    # front of STT: several ASR vendors document worse WER after
     # suppression, and Soniox v5 is trained for telephony noise.
     vad_confidence: float = 0.85
     vad_start_secs: float = 0.3
@@ -174,8 +174,10 @@ class TurnSettings:
     # --- Soniox STT ---------------------------------------------------------
     # Hints, not a lock: stt-rt-v5 still transcribes anything it hears, and with
     # language identification on it tags every token with the language it heard.
-    # English first: it is the clinic's default and 69 of 73 public cases.
-    stt_language_hints: tuple[str, ...] = ("en", "es", "ca")
+    # English first: it is the clinic's default and 69 of 73 public cases. All
+    # five are hinted because all five are detected and spoken: hinting only
+    # three left Galician and Basque to be recognised by luck.
+    stt_language_hints: tuple[str, ...] = ("en", "es", "ca", "gl", "eu")
     # True  -> Soniox's own endpoint detection ends the turn (vad_force_turn_endpoint=False)
     # False -> pipecat's VAD ends the turn and finalises Soniox
     soniox_turn_detection: bool = True
