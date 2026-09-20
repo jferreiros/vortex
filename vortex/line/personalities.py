@@ -31,6 +31,8 @@ from __future__ import annotations
 import json
 import logging
 import re
+import threading
+import time
 import unicodedata
 from datetime import UTC, datetime
 from typing import Any
@@ -427,11 +429,13 @@ def _require_store() -> Any:
     return remote
 
 
-def _rows(params: dict[str, str]) -> list[dict[str, Any]] | None:
+def _rows(params: dict[str, str], *, timeout: float | None = None) -> list[dict[str, Any]] | None:
     from database import remote
 
     try:
-        return remote.select(TABLE, params)
+        if timeout is None:
+            return remote.select(TABLE, params)
+        return remote.select(TABLE, params, timeout=timeout)
     except Exception as exc:
         log.warning("personalities unreadable: %s", exc)
         return None
@@ -480,18 +484,106 @@ def get(settings: Any, slug: str) -> Personality | None:
     return next((person for person in list_all(settings) if person.slug == slug), None)
 
 
-def active(settings: Any = None) -> Personality:
-    """The persona answering the phone. Falls back to the first seed rather
-    than raising: an unreachable store must not stop a call from being
-    answered."""
+#: How long a read of the active persona stays good. Who answers the phone is
+#: changed by hand on the board, minutes apart at the very fastest, and every
+#: write here clears the cache — so this only ever bounds how long an edit made
+#: in *another* process takes to land.
+ACTIVE_TTL_S = 60.0
+
+#: The longest a call will wait for the store before it opens its mouth. The
+#: page-sized default (database.remote.TIMEOUT_S, 20s) is a lifetime on a live
+#: phone line: the caller hangs up, the pipeline is cancelled and the call
+#: answers with silence. Observed on 20 Sep 2026 — a slow persona read held
+#: every call 23 seconds and all of them returned zero audio.
+CALL_READ_TIMEOUT_S = 2.0
+
+_active_cache: tuple[float, Personality] | None = None
+_active_lock = threading.Lock()
+_active_refreshing = False
+
+
+def _read_active(timeout: float | None = None) -> Personality | None:
+    """One read. ``None`` means the store did not answer — which is not the
+    same as answering that no persona is active."""
     rows = _rows(
-        {"select": "*", "active": "eq.1", "order": "sort_order.asc,name.asc", "limit": "1"}
+        {"select": "*", "active": "eq.1", "order": "sort_order.asc,name.asc", "limit": "1"},
+        timeout=timeout,
     )
     if rows:
         return _from_row(rows[0])
     if rows is not None:
         log.warning("no active personality stored, falling back to %s", SEEDS[0].slug)
-    return SEEDS[0].model_copy(update={"active": True})
+        return SEEDS[0].model_copy(update={"active": True})
+    return None
+
+
+def _refresh_active() -> None:
+    global _active_refreshing
+    try:
+        person = _read_active()
+        if person is not None:
+            _remember_active(person)
+    except Exception:
+        log.exception("background persona refresh failed")
+    finally:
+        with _active_lock:
+            _active_refreshing = False
+
+
+def _remember_active(person: Personality) -> None:
+    global _active_cache
+    with _active_lock:
+        _active_cache = (time.monotonic(), person)
+
+
+def invalidate_active() -> None:
+    """Drop the cached persona. Every write below calls this, so a pick made
+    on the board is on the phone for the next call, not sixty seconds later."""
+    global _active_cache
+    with _active_lock:
+        _active_cache = None
+
+
+def active(settings: Any = None) -> Personality:
+    """The persona answering the phone. Falls back to the first seed rather
+    than raising: an unreachable store must not stop a call from being
+    answered.
+
+    Served from a process cache, and stale-while-revalidate past its TTL: a
+    stale persona answers instantly while a background thread refreshes it.
+    Only a cold process ever touches the store on the call path, and even then
+    under ``CALL_READ_TIMEOUT_S`` rather than the page-sized default.
+    """
+    global _active_refreshing
+    with _active_lock:
+        hit = _active_cache
+        if hit and time.monotonic() - hit[0] < ACTIVE_TTL_S:
+            return hit[1]
+        start_refresh = hit is not None and not _active_refreshing
+        if start_refresh:
+            _active_refreshing = True
+    if hit is not None:
+        if start_refresh:
+            threading.Thread(target=_refresh_active, name="persona-refresh", daemon=True).start()
+        return hit[1]
+
+    person = _read_active(timeout=CALL_READ_TIMEOUT_S)
+    if person is None:
+        # The store did not answer inside the call's budget. Take the seed now
+        # and let a background read fill the cache for the next call, rather
+        # than making every call pay the same wait.
+        with _active_lock:
+            start_refresh = not _active_refreshing
+            if start_refresh:
+                _active_refreshing = True
+        if start_refresh:
+            threading.Thread(target=_refresh_active, name="persona-refresh", daemon=True).start()
+        log.warning(
+            "persona read timed out after %.1fs; using %s", CALL_READ_TIMEOUT_S, SEEDS[0].slug
+        )
+        return SEEDS[0].model_copy(update={"active": True})
+    _remember_active(person)
+    return person
 
 
 # --- writing ------------------------------------------------------------------
@@ -522,6 +614,9 @@ def update(settings: Any, slug: str, payload: dict[str, Any] | None) -> Personal
     draft = PersonalityDraft(**{**base, **incoming, "name": name})
     stored = current.model_copy(update={**draft.model_dump(), "updated_at": _now()})
     remote.upsert(TABLE, [_params(stored)], "slug")
+    # The edited persona may be the one on the phone; cheaper and safer to
+    # drop the cache than to work out whether it was.
+    invalidate_active()
     return stored
 
 
@@ -583,4 +678,5 @@ def activate(settings: Any, slug: str) -> Personality:
     )
     stored = target.model_copy(update={"active": True, "updated_at": now})
     remote.upsert(TABLE, [_params(stored)], "slug")
+    _remember_active(stored)
     return stored

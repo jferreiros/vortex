@@ -436,6 +436,13 @@ export default function Analytics() {
         </p>
       </header>
 
+      {data.source?.kind === "error" ? (
+        <p className="analytics-unreachable" role="status">
+          <strong>These numbers are not the clinic&rsquo;s.</strong> The call log did not answer, so
+          every figure below reads zero. {data.source.detail || "The store is unreachable."}
+        </p>
+      ) : null}
+
       <Card padding="lg" className="analytics-panel analytics-funnel">
         <div className="analytics-panel-head">
           <Icon name="funnel" size={18} />
