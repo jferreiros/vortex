@@ -82,6 +82,7 @@ from vortex.line.submit import (
     submitted_action,
     with_verdict_reason,
 )
+from vortex.line.transfer import TRANSFERRED_KEY
 from vortex.line.twilio import StartPayload
 from vortex.line.usage import UsageTotals
 from vortex.observability.calllog import CallLog
@@ -518,6 +519,9 @@ class CallSession:
             submitter=submitter,
             sms=make_sms_client(settings),
         )
+        # Per socket, like the memory above: ``transfer_call`` reads the
+        # language the call is actually being spoken in off it.
+        ctx.session = session  # type: ignore[attr-defined]
         handoff = handoff_from_parameters(start.custom_parameters)
         if handoff is not None:
             session.handoff = handoff
@@ -1095,6 +1099,12 @@ class CallSession:
         if self._pending:
             await asyncio.gather(*tuple(self._pending), return_exceptions=True)
         if self.has_accepted_submission:
+            return
+        if self.ctx.state.get(TRANSFERRED_KEY):
+            # ``transfer_call`` submitted the ESCALATE before it redirected the
+            # call, and the socket died with the redirect. A second action here
+            # would land on top of the record the call already has.
+            self.ctx.log.event("submit.fallback", branch="transferred", skipped=True)
             return
         branch, action, why = self.fallback_action()
         if action == UNSCORED_REFUSAL:
