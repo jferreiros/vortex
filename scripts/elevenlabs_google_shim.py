@@ -1,22 +1,36 @@
-"""ElevenLabs-compatible REST shim backed by Google Cloud TTS (Chirp3)."""
+"""ElevenLabs-compatible REST shim backed by Google Cloud TTS.
+
+The voice path segment is the *resolved* voice name from the caller. With
+per-personality voices enabled it may already be a Google voice name; older
+callers may still send an opaque provider id, so a named fallback keeps the
+line audible instead of guessing silently.
+"""
 import base64, json, os
 from aiohttp import web
 from google.cloud import texttospeech
 
-VOICES = {
-    "es": ("es-ES", "es-ES-Chirp3-HD-Aoede"),
-    "en": ("en-US", "en-US-Chirp3-HD-Aoede"),
-    "ca": ("es-ES", "es-ES-Chirp3-HD-Aoede"),
-    "gl": ("es-ES", "es-ES-Chirp3-HD-Aoede"),
-    "eu": ("es-ES", "es-ES-Chirp3-HD-Aoede"),
+DEFAULT_VOICES = {
+    "es": ("es-ES", "es-ES-Chirp3-HD-Kore"),
+    "en": ("en-US", "en-US-Chirp3-HD-Kore"),
+    "ca": ("es-ES", "es-ES-Chirp3-HD-Kore"),
+    "gl": ("es-ES", "es-ES-Chirp3-HD-Kore"),
+    "eu": ("es-ES", "es-ES-Chirp3-HD-Kore"),
 }
 client = texttospeech.TextToSpeechClient()
+
+
+def _google_voice(raw_voice, lang):
+    voice = (raw_voice or "").strip()
+    if voice.startswith(("es-", "en-", "ca-", "gl-", "eu-")):
+        return voice.split("-Chirp3", 1)[0] if "-Chirp3" in voice else "-".join(voice.split("-")[:2]), voice
+    return DEFAULT_VOICES.get(lang, DEFAULT_VOICES["es"])
+
 
 async def tts(request):
     body = await request.json()
     text = (body.get("text") or "").strip()
     lang = (body.get("language_code") or "es").split("-")[0].lower()
-    lc, name = VOICES.get(lang, VOICES["es"])
+    lc, name = _google_voice(request.match_info.get("voice", ""), lang)
     if not text:
         return web.Response(status=200, text="\n", content_type="application/json")
     req = texttospeech.SynthesizeSpeechRequest(
@@ -29,7 +43,6 @@ async def tts(request):
         ),
     )
     audio = client.synthesize_speech(request=req).audio_content
-    # strip the 44-byte WAV header if present (LINEAR16 comes raw from API)
     if audio[:4] == b"RIFF":
         audio = audio[44:]
     line = json.dumps({"audio_base64": base64.b64encode(audio).decode()}) + "\n"
