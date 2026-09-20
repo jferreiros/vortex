@@ -88,11 +88,19 @@ def load_events(
     try:
         from vortex.observability import supabase_log
 
-        grouped, _meta = supabase_log.fetch_calls(bound, since)
+        grouped, meta = supabase_log.fetch_calls(bound, since)
         events = flatten_grouped(grouped)
+        unreachable = meta.get("unreachable")
         if events:
             _last_good[scope] = events
             result = (events, None, _source(scope, "supabase", events, None))
+        elif unreachable:
+            # The store never answered. Say so: "error" and "empty" look the
+            # same on a page of zeros, and only one of them means the clinic
+            # was quiet.
+            stale = _last_good.get(scope, [])
+            kind = "cache" if stale else "error"
+            result = (stale, None, _source(scope, kind, stale, unreachable))
         elif scope in _last_good:
             stale = _last_good[scope]
             result = (stale, None, _source(scope, "cache", stale, "store returned no calls"))
@@ -102,8 +110,12 @@ def load_events(
         detail = f"{type(exc).__name__}: {exc}"[:200]
         log.warning("supabase %s fetch failed (%s); degrading", scope, detail)
         stale = _last_good.get(scope, [])
-        result = (stale, None, _source(scope, "cache" if stale else "empty", stale, detail))
+        result = (stale, None, _source(scope, "cache" if stale else "error", stale, detail))
 
-    if cache_ttl:
+    # Never cache a read that failed. A TTL is a promise that the answer is
+    # good for that long; caching an outage makes one bad second last the
+    # whole window, and the next caller — who might have got through — is
+    # handed the failure instead of trying.
+    if cache_ttl and result[2].get("kind") != "error":
         _scope_cache[scope] = (time.monotonic(), *result)
     return result
