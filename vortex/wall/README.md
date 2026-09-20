@@ -13,6 +13,29 @@ page's own stylesheet reads colour/type/spacing/radius/shadow/motion from
 comment). No other runtime dependencies — check `package.json` before adding
 one.
 
+## Where the data comes from
+
+`/api/wall/*` and nothing else. The handlers live in `vortex/api/` — one
+module per topic (`timeline.py`, `live_calls.py`, `agenda.py`,
+`analytics.py`, `settings.py`, `patient_timeline.py`, `voice.py`), each an
+`APIRouter` mounted once under `/api/wall` by `vortex/api/wall.py`'s
+`attach(app)`. Same origin as this app, so no CORS and no second process.
+Behind them is Supabase/Postgres: there is no SQLite file, no
+`logs/calls.jsonl`, and the SPA never talks to Supabase itself (the
+service-role key is server-side only, and there is no Realtime subscription
+here — the live pages use SSE off `/api/wall/*/stream`).
+
+There are no mock fixtures left in `src/`. A page with nothing to show
+renders its empty state and waits for the endpoint; it does not invent
+numbers. The two documents the Pathways and Patterns editors edit live in
+the `wall_documents` table and are seeded once by
+`database/seed/wall_documents.sql`.
+
+`src/data/` still holds `shapeTypes.json` and `patternShapes.json`. Those
+are the editors' tray vocabulary — families, types, emoji, labels, gap
+units — not clinic data, and nothing in the product writes them, so they
+stay in the bundle.
+
 ## Local dev
 
 ```bash

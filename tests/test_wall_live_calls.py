@@ -1,24 +1,31 @@
-"""``/api/wall/live-calls`` — the Live Calls page's real feed.
+"""``/api/wall/live-calls`` and ``/api/wall/timeline`` — the SPA's live feed.
 
-Replaces the page's ``PLACEHOLDER_CALLS`` mock: a call still in progress
-(no ``call.ended`` line yet) shows up here, off the same "recent" feed
-every other live card on the board reads (hosted Supabase first, then the
-line API, then this process's JSONL — see
-``vortex.observability.callfeed.load_events``). Ended no-action / escalate
-calls land in ``rejected`` / ``escalated``.
+A call still in progress (no ``call.ended`` line yet) shows up in ``calls``;
+ended no-action / escalate calls land in ``rejected`` / ``escalated``. Both
+routes read ``call_events`` in Supabase through
+``vortex.observability.callfeed.load_events``, so these need a migrated
+project to write into — there is no local log to seed any more.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
+import os
 
+import pytest
 from nicegui.testing import User
 
 from vortex.observability.calllog import CallLog
 
+needs_db = pytest.mark.skipif(
+    not (os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_SERVICE_ROLE_KEY")),
+    reason="needs migrated Supabase",
+)
 
-def _live_call(path: Path, cid: str = "CA-live") -> None:
-    log = CallLog(cid, path)
+pytestmark = needs_db
+
+
+def _live_call(cid: str = "CA-live") -> None:
+    log = CallLog(cid)
     log.event("call.started", from_number="+34612345678", voice="stub", clinic="fake")
     log.user_turn("Hola, quería pedir cita para mi hija")
     log.assistant_turn("Claro, ¿me dice el nombre?")
@@ -27,16 +34,16 @@ def _live_call(path: Path, cid: str = "CA-live") -> None:
     # No call.ended: the card is still open, i.e. `card.live` is True.
 
 
-def _ended_call(path: Path, cid: str = "CA-done") -> None:
-    log = CallLog(cid, path)
+def _ended_call(cid: str = "CA-done") -> None:
+    log = CallLog(cid)
     log.event("call.started", from_number="+34600000000", voice="stub", clinic="fake")
     log.user_turn("Quiero cancelar mi cita")
     log.event("call.ended", reason="hangup")
     log.summary(reason="hangup")
 
 
-def _refused_call(path: Path, cid: str = "CA-refused") -> None:
-    log = CallLog(cid, path)
+def _refused_call(cid: str = "CA-refused") -> None:
+    log = CallLog(cid)
     log.event("call.started", from_number="+34611111111", voice="stub", clinic="fake")
     log.user_turn("Quiero una cita mañana")
     log.action_submitted(
@@ -48,16 +55,17 @@ def _refused_call(path: Path, cid: str = "CA-refused") -> None:
     log.summary(reason="hangup")
 
 
-async def test_live_calls_lists_only_calls_still_in_progress(offline_settings, user: User) -> None:
-    _live_call(Path(offline_settings.calls_log_path))
-    _ended_call(Path(offline_settings.calls_log_path))
+async def test_live_calls_lists_only_calls_still_in_progress(user: User) -> None:
+    _live_call()
+    _ended_call()
 
     response = await user.http_client.get("/api/wall/live-calls")
     assert response.status_code == 200
     calls = response.json()["calls"]
 
-    assert [c["id"] for c in calls] == ["CA-live"]
-    live = calls[0]
+    assert "CA-live" in [c["id"] for c in calls]
+    assert "CA-done" not in [c["id"] for c in calls]
+    live = next(c for c in calls if c["id"] == "CA-live")
     assert live["status"] == "live"
     assert live["direction"] == "inbound"
     assert live["phone"] == "+34612345678"
@@ -73,23 +81,17 @@ async def test_live_calls_lists_only_calls_still_in_progress(offline_settings, u
     assert "escalated" in response.json()
 
 
-async def test_live_calls_is_empty_with_no_calls_in_progress(offline_settings, user: User) -> None:
-    _ended_call(Path(offline_settings.calls_log_path))
-    response = await user.http_client.get("/api/wall/live-calls")
-    assert response.json()["calls"] == []
-
-
-async def test_live_calls_lists_refused_calls_in_rejected(offline_settings, user: User) -> None:
-    _refused_call(Path(offline_settings.calls_log_path))
+async def test_live_calls_lists_refused_calls_in_rejected(user: User) -> None:
+    _refused_call()
     response = await user.http_client.get("/api/wall/live-calls")
     body = response.json()
-    assert body["calls"] == []
-    assert [c["id"] for c in body["rejected"]] == ["CA-refused"]
-    assert body["rejected"][0]["reason"] == "no_availability"
+    rejected = {c["id"]: c for c in body["rejected"]}
+    assert "CA-refused" in rejected
+    assert rejected["CA-refused"]["reason"] == "no_availability"
 
 
-async def test_timeline_includes_stored_turns(offline_settings, user: User) -> None:
-    _live_call(Path(offline_settings.calls_log_path))
+async def test_timeline_includes_stored_turns(user: User) -> None:
+    _live_call()
     response = await user.http_client.get("/api/wall/timeline/CA-live")
     assert response.status_code == 200
     items = response.json()["items"]
@@ -98,11 +100,21 @@ async def test_timeline_includes_stored_turns(offline_settings, user: User) -> N
     assert ("assistant", "Claro, ¿me dice el nombre?") in turns
 
 
-async def test_timeline_stream_pushes_a_data_frame(offline_settings, user: User) -> None:
-    _live_call(Path(offline_settings.calls_log_path))
+async def test_timeline_stream_pushes_a_data_frame(user: User) -> None:
+    """``once=true`` is the test hook on the SSE routes: one data frame, then
+    the stream closes, so the client does not hang on an endless response."""
+    _live_call()
     response = await user.http_client.get("/api/wall/timeline/CA-live/stream?once=true")
     assert response.status_code == 200
     assert "text/event-stream" in response.headers.get("content-type", "")
     body = response.text
     assert '"call_id": "CA-live"' in body
     assert "Hola, quería pedir cita para mi hija" in body
+
+
+async def test_live_calls_stream_pushes_a_data_frame(user: User) -> None:
+    _live_call()
+    response = await user.http_client.get("/api/wall/live-calls/stream?once=true")
+    assert response.status_code == 200
+    assert "text/event-stream" in response.headers.get("content-type", "")
+    assert '"calls"' in response.text

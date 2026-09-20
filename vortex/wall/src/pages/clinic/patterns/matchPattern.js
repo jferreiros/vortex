@@ -1,4 +1,5 @@
-// Deterministic matcher for patterns.json `match` rules.
+// Deterministic matcher for the `match` rules on a patterns document
+// (GET /api/wall/patterns).
 // Input: a patient's events (+ optional referrals), a pattern, specialty, asOf date.
 // Output: { matches: boolean, evidenceEventIds: string[] } — evidence is only
 // real timeline events that the rule used (never condition nodes).
@@ -82,10 +83,10 @@ function eventsAfter(events, dateIso) {
  * @param {object} opts
  * @param {Array} opts.events - patient timeline events (sorted or unsorted)
  * @param {string[]} [opts.referrals] - open referral specialty ids
- * @param {object} opts.pattern - one entry from patterns.json
+ * @param {object} opts.pattern - one entry from the patterns document
  * @param {string} opts.specialty - specialty under test (required when match.perSpecialty)
  * @param {string} opts.asOf - ISO date "today" for gap calculations
- * @param {object} opts.specialtyRecallDays - map from patterns.json
+ * @param {object} opts.specialtyRecallDays - map from the patterns document
  */
 export function evaluatePattern({ events, referrals = [], pattern, specialty, asOf, specialtyRecallDays }) {
   const rule = pattern.match;

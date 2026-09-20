@@ -631,8 +631,9 @@ def _kpis(
             "key": "share",
             "label": "Habla el agente",
             "value": f"{convo['agent_share_pct']}%",
-            "caption": f"{convo['words_agent']:,} palabras frente a "
-            f"{convo['words_user']:,}".replace(",", "."),
+            "caption": (
+                f"{convo['words_agent']:,} palabras frente a {convo['words_user']:,}"
+            ).replace(",", "."),
         },
         {
             "key": "duration",
