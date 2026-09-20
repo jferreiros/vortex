@@ -82,7 +82,7 @@ def wall_business_insights_api(days: int = 30) -> JSONResponse:
 #: for the live cards, where a read is one request — here it expires before
 #: the read finishes, so every poll starts another full fetch and they queue.
 #: Two minutes is well inside how fast these aggregates move.
-ANALYTICS_CACHE_TTL_S = 120.0
+ANALYTICS_CACHE_TTL_S = callfeed.ttl_env("VORTEX_ANALYTICS_TTL_S", 600.0)
 ANALYTICS_WINDOWS = (7, 30, 90)
 #: How many calls one build reads. Bounded on purpose: the whole log is
 #: ~32k events and 13 MB, which the hosted project cannot aggregate inside
