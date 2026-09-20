@@ -828,6 +828,32 @@ class SubmitResult(BaseModel):
     detail: str = ""
 
 
+class TransferCallInput(BaseModel):
+    """Hand the caller to a human on the clinic's transfer number."""
+
+    reason: str = Field(
+        default="out_of_scope",
+        description=(
+            "Why the call is leaving the agent, as one of the closed decline "
+            "reasons. It is submitted as the ESCALATE reason before the caller "
+            "is handed over; anything not in the vocabulary is recorded as "
+            "out_of_scope."
+        ),
+    )
+
+
+class TransferResult(BaseModel):
+    """What the transfer did.
+
+    ``reason`` is empty on a transfer and otherwise names the one blocker, so
+    the model has a word to speak around and never a sentence to interpret.
+    """
+
+    status: Literal["transferred", "unavailable"]
+    number: str = ""
+    reason: Literal["", "not_configured", "not_a_phone_call", "twilio_failed"] = ""
+
+
 # ---------------------------------------------------------------------------
 # 6. Frozen signatures
 # ---------------------------------------------------------------------------
@@ -901,6 +927,10 @@ class ClinicFactsTool(Protocol):
 
 class SubmitTool(Protocol):
     async def __call__(self, ctx: ToolContext, args: SubmitInput) -> SubmitResult: ...
+
+
+class TransferCallTool(Protocol):
+    async def __call__(self, ctx: ToolContext, args: TransferCallInput) -> TransferResult: ...
 
 
 # ---------------------------------------------------------------------------
@@ -1082,3 +1112,7 @@ async def stub_clinic_facts(ctx: ToolContext, args: ClinicFactsInput) -> ClinicF
 
 async def stub_submit(ctx: ToolContext, args: SubmitInput) -> SubmitResult:
     return SubmitResult(status="dry_run", detail="stub: nothing was sent")
+
+
+async def stub_transfer_call(ctx: ToolContext, args: TransferCallInput) -> TransferResult:
+    return TransferResult(status="unavailable", reason="not_configured")

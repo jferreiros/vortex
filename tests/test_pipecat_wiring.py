@@ -370,7 +370,7 @@ def test_make_tts_speaks_with_the_active_persona(voice_settings) -> None:
     pytest.importorskip("pipecat")
     pytest.importorskip("pipecat.services.elevenlabs.tts")
 
-    from vortex.conversation.language import ALEJANDRO, GEORGE, MATILDA, SOFIA
+    from vortex.conversation.language import ALEJANDRO, MATILDA, SOFIA
     from vortex.line.pipecat_voice import _make_tts
 
     settings = voice_settings(ELEVENLABS_API_KEY="el-x")
@@ -380,7 +380,7 @@ def test_make_tts_speaks_with_the_active_persona(voice_settings) -> None:
     from vortex.line.voice_config import VoiceConfig
 
     male = VoiceConfig(voice="male")
-    assert _make_tts(settings, vcfg=male, persona="carla")._settings.voice == GEORGE
+    assert _make_tts(settings, vcfg=male, persona="carla")._settings.voice == ALEJANDRO
     assert _make_tts(settings, vcfg=male, persona="lucia")._settings.voice == ALEJANDRO
 
 
