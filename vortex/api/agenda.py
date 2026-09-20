@@ -147,7 +147,7 @@ async def _enqueue_call_now_rebooking_calls(bookings: list[cal.Booking]) -> int:
     which also mirrors the row into the product database. A failed queue
     must not roll back a cancel that already committed, so this logs and
     degrades to 0 instead of propagating."""
-    from vortex.line.confirmation_calls import queue_cancellation_rebooking_call
+    from vortex.line.pathways import PathwayEvent, fire_pathway, resolve_target_phone
 
     catalogue = _shared.agenda_catalogue()
     patients = _shared.agenda_patients()
@@ -156,13 +156,14 @@ async def _enqueue_call_now_rebooking_calls(bookings: list[cal.Booking]) -> int:
     queued = 0
     for booking in bookings:
         person = patients.get(booking.patient_id)
-        phone = (person.phone if person else "") or ""
-        if not phone:
-            # Demo/testing aid: with no phone on record there is nobody to
-            # rebook, so production skips. VORTEX_CANCEL_CALL_FALLBACK_TO
-            # names a stand-in recipient; whoever sets it chooses (and must
-            # have the agreement of) the person who receives the call.
-            phone = settings.cancel_call_fallback_to.strip()
+        # The call goes to the patient the cancelled visit belonged to.
+        # VORTEX_CANCEL_CALL_FALLBACK_TO is the demo/testing stand-in when
+        # the record has no phone; whoever sets it chooses (and must have
+        # the agreement of) the person who receives the call.
+        phone = resolve_target_phone(
+            (person.phone if person else "") or "",
+            settings.cancel_call_fallback_to,
+        )
         if not phone:
             continue
         provider = next(
@@ -172,16 +173,19 @@ async def _enqueue_call_now_rebooking_calls(bookings: list[cal.Booking]) -> int:
             (s for s in catalogue.locations if s.location_id == booking.location_id), None
         )
         try:
-            call = await queue_cancellation_rebooking_call(
+            call = await fire_pathway(
                 settings,
-                to=phone,
-                appointment_at=booking.start,
-                provider_name=provider.name if provider else "",
-                location_name=location.name if location else "",
-                provider_id=booking.provider_id,
-                location_id=booking.location_id,
-                patient_id=booking.patient_id,
-                appointment_id=booking.appointment_id or "",
+                "appointment_cancelled",
+                PathwayEvent(
+                    to=phone,
+                    appointment_at=booking.start,
+                    provider_name=provider.name if provider else "",
+                    location_name=location.name if location else "",
+                    provider_id=booking.provider_id,
+                    location_id=booking.location_id,
+                    patient_id=booking.patient_id,
+                    appointment_id=booking.appointment_id or "",
+                ),
                 now=now,
             )
         except Exception:
