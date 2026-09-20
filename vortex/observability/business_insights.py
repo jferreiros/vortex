@@ -1538,7 +1538,7 @@ def is_real_call(card: CallCard) -> bool:
       whether the *call* is real);
     - the console's "replay demo" button (``observability/demo.py``) marks
       its scripted calls ``voice="demo"``, a value ``voice_label`` never
-      returns (real calls get "gemini-live", "pipecat" or "stub").
+      returns (real calls get "pipecat" or "stub").
 
     Any one of these three checks alone would catch most of the log; kept
     together because either offline family evolving its ``call_id`` shape

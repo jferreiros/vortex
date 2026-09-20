@@ -34,11 +34,12 @@ submit client. Build your lane against that first.
 | --- | --- | --- |
 | `PLATFORM_API_KEY` | The team's `pk-…` key. One per team, handed out at the desk. **Not in the repo. Ask on WhatsApp. Never commit it.** | `FakeClinicClient` fixtures + submit logs instead of POSTing |
 | `PLATFORM_API_BASE_URL` | The API host the desk gives | Fake data; nothing is called |
-| `DEEPGRAM_API_KEY` | Speech to text (nova-3) | Stub voice pipeline: beeps out, counts frames in |
-| `OPENAI_API_KEY` | LLM and TTS | Stub voice pipeline |
-| `OPENAI_LLM_MODEL`, `OPENAI_TTS_MODEL`, `OPENAI_TTS_VOICE`, `DEEPGRAM_STT_MODEL` | Model overrides | Defaults from `.env.example` |
+| `SONIOX_API_KEY` | Speech to text (`stt-rt-v5`) | Stub voice pipeline: beeps out, counts frames in |
+| `ELEVENLABS_API_KEY` | Text to speech, all five languages | Stub voice pipeline |
+| `HELMCODE_API_KEY` *or* `AZURE_OPENAI_ENDPOINT` + `AZURE_OPENAI_API_KEY` | The LLM, picked by `LLM_PROVIDER` (`helmcode` \| `azure`) | Stub voice pipeline |
+| `SONIOX_STT_MODEL`, `ELEVENLABS_MODEL`, `LLM_MODEL` | Model overrides | Defaults from `.env.example` |
 | `VORTEX_HOST`, `VORTEX_PORT`, `VORTEX_WS_PATH` | Bind address, port, socket path | `0.0.0.0`, `7860`, `/ws` |
-| `VORTEX_VOICE_MODE` | `auto`, `stub`, `pipecat`, `gemini-live` | `auto`: pipecat only if both voice keys exist; `gemini-live` is jury demo only |
+| `VORTEX_VOICE_MODE` | `auto`, `stub`, `pipecat` | `auto`: pipecat only if the STT, LLM and TTS keys all exist |
 | `VORTEX_CLINIC_MODE` | `auto`, `fake`, `live` | `auto`: live only if the platform key exists |
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | The store, over PostgREST | Nothing is persisted; the call still runs and still submits |
 | `SUPABASE_DB_URL` | Direct Postgres URI, read only by `make supabase-migrate` | You cannot apply migrations |

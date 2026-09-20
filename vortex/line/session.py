@@ -432,7 +432,7 @@ class CallSession:
     submitter: SubmitApi
     media_frames_in: int = 0
     media_frames_out: int = 0
-    # What this call spent at Soniox, the LLM host and Google TTS. Filled by
+    # What this call spent at Soniox, the LLM host and ElevenLabs. Filled by
     # the pipecat observer from pipecat's own usage metrics; left at zero with
     # ``metered`` False by the lanes that do not measure. One per socket.
     usage: UsageTotals = field(default_factory=UsageTotals)

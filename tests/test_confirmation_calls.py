@@ -444,7 +444,9 @@ async def test_ensure_confirmation_audio_synthesises_and_caches(
         name = await ensure_confirmation_audio(settings, "Hola, le llamamos de la clínica.", "es")
         assert name is not None and valid_audio_name(name)
         assert (tmp_path / "audio" / name).read_bytes() == b"fake-mp3"
-        assert calls == ["es-ES|es-ES-Chirp3-HD-Aoede"]
+        from vortex.conversation.language import VoicePreset
+
+        assert calls == [f"es|{VoicePreset.ES.female}"]
         # second render of the same line reuses the file, no new synthesis
         again = await ensure_confirmation_audio(settings, "Hola, le llamamos de la clínica.", "es")
         assert again == name

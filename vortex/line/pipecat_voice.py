@@ -2,21 +2,14 @@
 
     transport.input -> STT (Soniox stt-rt-v5) -> language watcher
                     -> user aggregator -> LLM (OpenAI-compatible, EU)
-                    -> TTS (Google Chirp / Gemini-TTS, or ElevenLabs)
+                    -> TTS (ElevenLabs)
                     -> transport.output -> assistant aggregator
 
 Soniox transcribes, an OpenAI-compatible endpoint named by ``LLM_PROVIDER``
-answers, and the voice is Google Cloud Text-to-Speech — the only provider here
-with Catalan, Galician *and* Basque.
-
-Two TTS services can run at once. ``VORTEX_TTS_PROVIDER`` speaks Spanish and
-``VORTEX_TTS_PROVIDER_ALT`` speaks what the primary cannot, so
-``VORTEX_TTS_PROVIDER=elevenlabs`` with the default ``_ALT=google`` gives
-ElevenLabs Spanish and Google ca/gl/eu. When the two are the same (the
-default, google/google) English and Spanish stay on Chirp 3 HD
-(``GoogleHttpTTSService``) and ca/gl/eu speak through ``GeminiTTSService``
-(``gemini-2.5-flash-tts``). ``GOOGLE_TTS_STANDARD_FALLBACK`` restores the old
-single ``GoogleHttpTTSService`` with Standard-* voices.
+(``helmcode`` or ``azure``) answers, and ElevenLabs speaks. One TTS service
+carries the whole line: its multilingual models say English, Spanish, Catalan,
+Galician and Basque, so a language switch is a new voice id on the same
+service, never a second service to route to.
 
 One pipeline per socket. The serializer takes the ``stream_sid`` of this call,
 the context takes this call's prompt, and every tool handler closes over this
@@ -35,11 +28,10 @@ and the socket closes. ``auto_hang_up`` stays False: that flag is the
 serializer's own Twilio REST call, and we have no Twilio account.
 
 TODO(line):
-- Run one real call end to end once the four keys exist.
+- Run one real call end to end once the three keys exist.
 - Confirm the 8 kHz µ-law path: serializer ``twilio_sample_rate=8000`` in, and
-  the TTS asked for 8 kHz PCM out (Google LINEAR16 @ 8000, ElevenLabs
-  ``pcm_8000``; Gemini-TTS stays at 24 kHz and the transport resamples).
-  Check for choppy audio.
+  the TTS asked for 8 kHz PCM out (ElevenLabs ``pcm_8000``). Check for choppy
+  audio.
 """
 
 from __future__ import annotations
@@ -81,7 +73,6 @@ from vortex.line.llm_timeout import first_token_guard
 from vortex.line.session import CallSession
 from vortex.line.soniox_stall import make_stall_guarded_soniox_stt
 from vortex.observability.tracing import traced_openai_llm_service
-from vortex.settings import GEMINI_TTS_LANGUAGES
 
 log = logging.getLogger(__name__)
 
@@ -328,7 +319,12 @@ async def run_pipecat_call(
     # prompt can open knowing who the line belongs to instead of spending the
     # first minute of the call asking.
     caller = await session.resolve_caller_line()
-    messages = initial_messages(ctx.now, caller=caller, handoff=session.handoff)
+    # The prompt's LANGUAGE line renders this. Without it the system prompt said
+    # "Answer in English" on every call, including a handoff that already knew
+    # the patient's language from the confirmation call.
+    messages = initial_messages(
+        ctx.now, language=language_state.language, caller=caller, handoff=session.handoff
+    )
     # Tono/Amabilidad are not TTS fields: they arrive as one extra line on the
     # system prompt. Empty at neutral, so an untouched card changes nothing.
     if directive := voice_config.style_directive(voice_cfg):
@@ -351,10 +347,13 @@ async def run_pipecat_call(
     filler_guard = _ToolFillerGuard()
 
     stages: list[Any] = [transport.input(), stt]
-    if settings.tts_supports_language_switch:
-        # Only worth a processor when the pair can say more than one language.
-        # ElevenLabs alone is Spanish-only, so the watcher would be a no-op.
-        stages.append(_LanguageWatcher(session, language_state, voice_cfg))
+    # Always on: one multilingual service speaks all five languages, so there
+    # is no configuration in which the watcher is a no-op. It used to be gated
+    # on ``tts_supports_language_switch``, which was False whenever the primary
+    # provider was declared Spanish-only — and that silently froze the call in
+    # English *and* left ``session.language`` unset, so the day-before
+    # confirmation call was dialled in the wrong language too.
+    stages.append(_LanguageWatcher(session, language_state, voice_cfg))
     stages += [
         aggregators.user(),
         llm,
@@ -424,7 +423,7 @@ def _providers(settings: Any) -> dict[str, object]:
         "stt": f"soniox/{settings.soniox_stt_model}",
         "llm": settings.llm_model,
         "tts": settings.tts_provider,
-        "tts_alt": settings.tts_provider_alt,
+        "tts_model": settings.elevenlabs_model,
         "aic_filter": "on" if settings.aic_filter_enabled and settings.aic_sdk_license else "off",
     }
 
@@ -520,13 +519,8 @@ class _ToolFillerGuard:
 def _make_tts_stage(
     settings: Any, state: _LanguageState, vcfg: voice_config.VoiceConfig | None = None
 ) -> Any:
-    """One TTS service, or a router over two when primary and alternate differ."""
-    primary = _make_tts(settings, settings.tts_provider, state, vcfg)
-    if not settings.tts_is_routed:
-        return primary
-    return _TTSRouter(
-        settings, state, primary, _make_tts(settings, settings.tts_provider_alt, state, vcfg)
-    )
+    """The call's one TTS service. One provider, so there is nothing to route."""
+    return _make_tts(settings, settings.tts_provider, state, vcfg)
 
 
 def _llm_extra_body(settings: Any) -> dict[str, Any]:
@@ -545,6 +539,10 @@ def _llm_extra_body(settings: Any) -> dict[str, Any]:
         extra["extra_body"] = {"chat_template_kwargs": {"enable_thinking": False}}
     if settings.llm_reasoning_effort:
         extra["reasoning_effort"] = settings.llm_reasoning_effort
+    # Azure's /openai/v1 surface needs no api-version; a dated endpoint does,
+    # and it only fits in the query string.
+    if settings.llm_provider == "azure" and settings.azure_openai_api_version:
+        extra["extra_query"] = {"api-version": settings.azure_openai_api_version}
     return extra
 
 
@@ -554,147 +552,34 @@ def _make_tts(
     state: _LanguageState | None = None,
     vcfg: voice_config.VoiceConfig | None = None,
 ) -> Any:
-    """Build one TTS service (or a Chirp|Gemini pair for Google).
+    """Build the call's ElevenLabs TTS service, asked for 8 kHz PCM.
 
-    Google Chirp / ElevenLabs are asked for 8 kHz PCM. Gemini-TTS only emits
-    24 kHz; the Twilio serializer resamples on the way out. The wire format
-    never changes with the provider.
+    The wire format never changes with the language: a switch is a new voice id
+    pushed as a ``TTSUpdateSettingsFrame``, which the same service applies in
+    place. See ``_LanguageWatcher``.
     """
     name = provider or settings.tts_provider
     start_language = state.language if state is not None else DEFAULT_LANGUAGE
-    voice, language = tts_voice_for(start_language, settings, name)
-    if vcfg:
-        voice = voice_config.apply_gender(voice, vcfg.voice)
+    gender = vcfg.voice if vcfg else "female"
+    voice, language = tts_voice_for(start_language, settings, name, gender)
     if not voice:
         # Builds fine, then fails on every utterance. Say so once, loudly.
-        log.warning("TTS provider %s has no Spanish voice configured", name)
+        log.warning("TTS provider %s has no voice id configured", name)
 
-    if name == "elevenlabs":
-        from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
+    from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 
-        return ElevenLabsTTSService(
-            api_key=settings.elevenlabs_api_key,
-            # A WebSocket origin, so an AI Gateway in front of ElevenLabs goes
-            # here. Empty keeps the service's own default.
-            **({"url": settings.elevenlabs_base_url} if settings.elevenlabs_base_url else {}),
-            sample_rate=LINE_SAMPLE_RATE,
-            settings=ElevenLabsTTSService.Settings(
-                voice=voice,
-                model=settings.elevenlabs_model,
-                language=language,
-                **({"speed": voice_config.elevenlabs_speed(vcfg)} if vcfg else {}),
-            ),
-        )
-
-    return _make_google_tts(settings, voice, language, state, vcfg)
-
-
-def _make_google_tts(
-    settings: Any,
-    voice: str,
-    language: Any,
-    state: _LanguageState | None,
-    vcfg: voice_config.VoiceConfig | None = None,
-) -> Any:
-    """Chirp HTTP for en/es; Gemini-TTS for ca/gl/eu unless Standard fallback."""
-    from pipecat.services.google.tts import GoogleHttpTTSService
-
-    chirp = GoogleHttpTTSService(
-        # Inline JSON wins when both are set, matching pipecat's own order.
-        credentials=settings.google_tts_credentials_json or None,
-        credentials_path=settings.google_application_credentials or None,
+    return ElevenLabsTTSService(
+        api_key=settings.elevenlabs_api_key,
+        # A WebSocket origin, so an AI Gateway in front of ElevenLabs goes
+        # here. Empty keeps the service's own default.
+        **({"url": settings.elevenlabs_base_url} if settings.elevenlabs_base_url else {}),
         sample_rate=LINE_SAMPLE_RATE,
-        settings=GoogleHttpTTSService.Settings(
+        settings=ElevenLabsTTSService.Settings(
             voice=voice,
+            model=settings.elevenlabs_model,
             language=language,
-            **({"speaking_rate": voice_config.speaking_rate(vcfg)} if vcfg else {}),
+            **({"speed": voice_config.elevenlabs_speed(vcfg)} if vcfg else {}),
         ),
-    )
-    if not settings.google_tts_uses_gemini:
-        # Research 06 fallback: one HTTP service, Standard-* for ca/gl/eu.
-        return chirp
-
-    from pipecat.services.google.tts import GeminiTTSService
-
-    gemini_voice, gemini_language = tts_voice_for("ca", settings, "google")
-    if vcfg:
-        gemini_voice = voice_config.apply_gender(gemini_voice, vcfg.voice)
-    gemini = GeminiTTSService(
-        credentials=settings.google_tts_credentials_json or None,
-        credentials_path=settings.google_application_credentials or None,
-        # Gemini-TTS is fixed at 24 kHz; the transport resamples to 8 kHz.
-        settings=GeminiTTSService.Settings(
-            model=settings.google_tts_gemini_model,
-            voice=gemini_voice,
-            language=gemini_language,
-            # No speaking_rate on this service: pace goes in its prompt.
-            **({"prompt": voice_config.gemini_prompt(vcfg)} if vcfg else {}),
-        ),
-    )
-    language_state = state if state is not None else _LanguageState()
-    return _language_gate_router(language_state, GEMINI_TTS_LANGUAGES, gemini, chirp)
-
-
-def _language_gate_router(
-    state: _LanguageState,
-    primary_languages: frozenset[str],
-    primary: Any,
-    alternate: Any,
-) -> Any:
-    """ParallelPipeline that feeds ``primary`` only when ``state.language`` matches."""
-    from pipecat.pipeline.parallel_pipeline import ParallelPipeline
-    from pipecat.processors.filters.function_filter import FunctionFilter
-    from pipecat.processors.frame_processor import FrameDirection
-
-    async def to_primary(_frame: Any) -> bool:
-        return state.language in primary_languages
-
-    async def to_alternate(_frame: Any) -> bool:
-        return state.language not in primary_languages
-
-    def gate(fn: Any) -> Any:
-        return FunctionFilter(
-            filter=fn, direction=FrameDirection.DOWNSTREAM, enable_direct_mode=True
-        )
-
-    return ParallelPipeline([gate(to_primary), primary], [gate(to_alternate), alternate])
-
-
-def _TTSRouter(  # noqa: N802 - factory that returns a processor
-    settings: Any, state: _LanguageState, primary: Any, alternate: Any
-) -> Any:
-    """Route each spoken language to the service that can say it.
-
-    A ``ParallelPipeline`` with two branches, each fronted by a
-    ``FunctionFilter`` keyed on ``state.language``: the primary branch takes
-    every language in its capability set, the alternate branch takes the rest.
-    Only one branch is ever fed text, so only one branch produces audio.
-
-    Why the filters are shaped this way:
-
-    - ``FunctionFilter`` lets ``StartFrame``/``EndFrame``/``CancelFrame``
-      through unconditionally, so both services start, stop and cancel with the
-      pipeline even while idle.
-    - System frames are left unfiltered (``filter_system_frames`` off), so an
-      interruption reaches both services and neither is left mid-utterance.
-      ``ParallelPipeline`` de-duplicates by frame id on the way out, so a frame
-      that crossed both branches still leaves once.
-    - Everything that makes a TTS speak — ``TextFrame``, ``TTSSpeakFrame``, the
-      ``LLMFullResponse*`` brackets — is a data or control frame, so it is
-      gated, and the idle branch stays silent.
-    - ``TTSUpdateSettingsFrame`` is gated too, which is what makes the watcher
-      work unchanged: it writes the language first, so its voice update lands
-      on whichever branch is about to speak.
-
-    This is the same construction pipecat's own ``ServiceSwitcher`` uses
-    (``ParallelPipeline`` of filter + service). We key the filters on the
-    detected language directly instead of driving a switcher with
-    ``ManuallySwitchServiceFrame``: routing is a pure function of the language,
-    so a second source of truth about which service is "active" would only be
-    something else to keep in sync.
-    """
-    return _language_gate_router(
-        state, settings.tts_languages(settings.tts_provider), primary, alternate
     )
 
 
@@ -789,17 +674,10 @@ def _LanguageWatcher(  # noqa: N802 - factory that returns a processor
     public ``update_settings()`` coroutine on ``TTSService`` in pipecat 1.11 —
     the control frame is the supported way in.
 
-    The voice comes from the provider that serves the new language, which is
-    the primary unless the alternate is the one that covers it. The state is
-    written *before* the frame is pushed, so when a router is in the pipeline
-    the update travels down the branch that is about to speak.
-
-    ``TTSService._update_settings`` converts the pipecat ``Language`` we send
-    into the provider's own code before storing it, which is what
-    ``GoogleHttpTTSService.run_tts`` passes as ``language_code`` next to the
-    new voice name. Google's verified map only lists the Chirp 3 HD locales,
-    so ca/gl/eu log a "not verified" warning and fall through to the full code
-    ("ca-ES", "gl-ES", "eu-ES") — the right value either way.
+    One provider speaks all five languages, so the update is a voice id and a
+    ``Language`` on the service that is already running: nothing is rebuilt and
+    nothing is routed. ``TTSService._update_settings`` converts the pipecat
+    ``Language`` into the provider's own code before storing it.
     """
     from pipecat.frames.frames import Frame, TranscriptionFrame, TTSUpdateSettingsFrame
     from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -828,10 +706,9 @@ def _LanguageWatcher(  # noqa: N802 - factory that returns a processor
                 )
                 if language == self._state.language:
                     return
-                provider = settings.tts_provider_for(language)
-                voice, tts_language = tts_voice_for(language, settings, provider)
-                if vcfg:
-                    voice = voice_config.apply_gender(voice, vcfg.voice)
+                provider = settings.tts_provider
+                gender = vcfg.voice if vcfg else "female"
+                voice, tts_language = tts_voice_for(language, settings, provider, gender)
                 previous, self._state.language = self._state.language, language
                 # The session carries it too: the day-before confirmation call
                 # is dialled in the language this caller actually spoke.
