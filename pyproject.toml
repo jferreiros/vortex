@@ -17,6 +17,7 @@ dependencies = [
     "email-validator>=2.3.0",
     "phonenumbers>=9.0.39",
     "tzdata>=2026.4",
+    "psycopg[binary]>=3.2",
 ]
 
 

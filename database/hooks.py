@@ -10,21 +10,21 @@ lands here is exactly what the platform accepted, not a plan that was later
 revised.
 
 Never raises into the call: a database problem must not end or distort a
-call any more than a broken ``voiceconfig.db`` read does
-(``vortex/line/voice_config.py``'s own rule). Every public function here
-catches broadly and logs; the call keeps going either way.
+call any more than a broken read anywhere else in the telemetry path.
+``persist_submission`` catches broadly and logs loudly; the call keeps going
+either way. It always *attempts* the write, including when Supabase is not
+configured — the ``RuntimeError("supabase not configured")`` that raises is
+caught here and logged, so a keyless local run is loud, not silent.
 """
 
 from __future__ import annotations
 
 import logging
 from datetime import timedelta
-from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 from database import db
-from database.db import DEFAULT_DB_PATH
 from vortex.contract import (
     Action,
     BookAction,
@@ -86,9 +86,7 @@ async def _provider_site_type(
     return provider, site, appt_type
 
 
-async def _backfill_appointment(
-    ctx: ToolContext, conn: Any, appointment_id: str, call_pk: int
-) -> Any:
+async def _backfill_appointment(ctx: ToolContext, appointment_id: str, call_pk: int) -> Any:
     """An appointment this database has never seen before: it predates this
     system, or a cancel/reschedule was the first call to ever touch it here.
 
@@ -136,7 +134,6 @@ async def _backfill_appointment(
     )
     slot_end = match.start + timedelta(minutes=match.duration_minutes)
     return db.insert_appointment(
-        conn,
         id=appointment_id,
         booking_call_id=call_pk,
         status="scheduled",
@@ -170,146 +167,140 @@ def _rebooking_source(ctx: ToolContext, new_appointment_id: str) -> str | None:
     return str(source)
 
 
-async def _record_booking(ctx: ToolContext, action: BookAction, db_path: Path | str | None) -> None:
-    with db.connection(db_path) as conn:
-        existing = db.get_call_by_call_id(conn, ctx.call_id)
-        if existing is not None and existing.appointment_id is not None:
-            return  # a retried identical submit; nothing new to write
+async def _record_booking(ctx: ToolContext, action: BookAction) -> None:
+    existing = db.get_call_by_call_id(ctx.call_id)
+    if existing is not None and existing.appointment_id is not None:
+        return  # a retried identical submit; nothing new to write
 
-        patient = recall_patient(ctx, action.patient_id)
-        provider, site, appt_type = await _provider_site_type(
-            ctx, action.provider_id, action.location_id, action.appointment_type_id
-        )
-        duration = appt_type.duration_minutes if appt_type else 15
-        slot_end = action.slot + timedelta(minutes=duration)
+    patient = recall_patient(ctx, action.patient_id)
+    provider, site, appt_type = await _provider_site_type(
+        ctx, action.provider_id, action.location_id, action.appointment_type_id
+    )
+    duration = appt_type.duration_minutes if appt_type else 15
+    slot_end = action.slot + timedelta(minutes=duration)
 
-        call = db.insert_call(
-            conn,
-            call_id=ctx.call_id,
-            direction="inbound",
-            purpose="booking",
-            language=_call_language(ctx),
-            from_number=ctx.from_number,
-            started_at=ctx.now.isoformat(),
-            outcome="book",
-        )
-        # A locally-minted id: the clinic is read-only, so a book
-        # submission never gets one back (see _backfill_appointment's
-        # docstring for the other side of this same fact).
-        appointment_id = f"LCL-{uuid4().hex[:16]}"
-        db.insert_appointment(
-            conn,
-            id=appointment_id,
-            booking_call_id=call.id,
-            patient_id=action.patient_id,
-            patient_name=patient.full_name if patient else None,
-            patient_phone=patient.phone if patient else None,
-            patient_email=patient.email if patient else None,
-            provider_id=action.provider_id,
-            provider_name=provider.name if provider else None,
-            specialty_id=provider.specialty_id if provider else None,
-            specialty_name=provider.specialty_name if provider else None,
-            site_id=action.location_id,
-            site_name=site.name if site else None,
-            slot_start=action.slot.isoformat(),
-            slot_end=slot_end.isoformat(),
-            insurer=action.policy_id,
-            appointment_type_id=action.appointment_type_id,
-            appointment_type_name=appt_type.name if appt_type else None,
-            reason=_reason(ctx),
-            rebooked_from_id=_rebooking_source(ctx, appointment_id),
-        )
-        db.link_call_to_appointment(conn, call.id, appointment_id)
+    call = db.insert_call(
+        call_id=ctx.call_id,
+        direction="inbound",
+        purpose="booking",
+        language=_call_language(ctx),
+        from_number=ctx.from_number,
+        started_at=ctx.now.isoformat(),
+        outcome="book",
+    )
+    # A locally-minted id: the clinic is read-only, so a book submission
+    # never gets one back (see _backfill_appointment's docstring for the
+    # other side of this same fact).
+    appointment_id = f"LCL-{uuid4().hex[:16]}"
+    db.insert_appointment(
+        id=appointment_id,
+        booking_call_id=call.id,
+        patient_id=action.patient_id,
+        patient_name=patient.full_name if patient else None,
+        patient_phone=patient.phone if patient else None,
+        patient_email=patient.email if patient else None,
+        provider_id=action.provider_id,
+        provider_name=provider.name if provider else None,
+        specialty_id=provider.specialty_id if provider else None,
+        specialty_name=provider.specialty_name if provider else None,
+        site_id=action.location_id,
+        site_name=site.name if site else None,
+        slot_start=action.slot.isoformat(),
+        slot_end=slot_end.isoformat(),
+        insurer=action.policy_id,
+        appointment_type_id=action.appointment_type_id,
+        appointment_type_name=appt_type.name if appt_type else None,
+        reason=_reason(ctx),
+        rebooked_from_id=_rebooking_source(ctx, appointment_id),
+    )
+    db.link_call_to_appointment(call.id, appointment_id)
 
 
-async def _record_cancellation(
-    ctx: ToolContext, action: CancelAction, db_path: Path | str | None
-) -> None:
-    with db.connection(db_path) as conn:
-        # appointment_id starts NULL: the row it should point at may not
-        # exist yet (the "unseen appointment" backfill case below), and the
-        # column is FK-enforced, so linking happens only once the
-        # appointment is known to exist.
-        call = db.insert_call(
-            conn,
-            call_id=ctx.call_id,
-            direction="inbound",
-            purpose="cancellation",
-            language=_call_language(ctx),
-            from_number=ctx.from_number,
-            started_at=ctx.now.isoformat(),
-            outcome="cancel",
-        )
-        appt = db.get_appointment(conn, action.appointment_id)
+async def _record_cancellation(ctx: ToolContext, action: CancelAction) -> None:
+    # appointment_id starts NULL: the row it should point at may not exist
+    # yet (the "unseen appointment" backfill case below), so linking happens
+    # only once the appointment is known to exist.
+    call = db.insert_call(
+        call_id=ctx.call_id,
+        direction="inbound",
+        purpose="cancellation",
+        language=_call_language(ctx),
+        from_number=ctx.from_number,
+        started_at=ctx.now.isoformat(),
+        outcome="cancel",
+    )
+    appt = db.get_appointment(action.appointment_id)
+    if appt is None:
+        appt = await _backfill_appointment(ctx, action.appointment_id, call.id)
         if appt is None:
-            appt = await _backfill_appointment(ctx, conn, action.appointment_id, call.id)
-            if appt is None:
-                return
-        db.link_call_to_appointment(conn, call.id, action.appointment_id)
-        db.update_appointment(conn, action.appointment_id, status="cancelled")
+            return
+    db.link_call_to_appointment(call.id, action.appointment_id)
+    db.update_appointment(action.appointment_id, status="cancelled")
 
 
-async def _record_reschedule(
-    ctx: ToolContext, action: RescheduleAction, db_path: Path | str | None
-) -> None:
-    with db.connection(db_path) as conn:
-        # Same NULL-then-link order as _record_cancellation — see its comment.
-        call = db.insert_call(
-            conn,
-            call_id=ctx.call_id,
-            direction="inbound",
-            purpose="reschedule",
-            language=_call_language(ctx),
-            from_number=ctx.from_number,
-            started_at=ctx.now.isoformat(),
-            outcome="reschedule",
-        )
-        appt = db.get_appointment(conn, action.appointment_id)
+async def _record_reschedule(ctx: ToolContext, action: RescheduleAction) -> None:
+    # Same NULL-then-link order as _record_cancellation — see its comment.
+    call = db.insert_call(
+        call_id=ctx.call_id,
+        direction="inbound",
+        purpose="reschedule",
+        language=_call_language(ctx),
+        from_number=ctx.from_number,
+        started_at=ctx.now.isoformat(),
+        outcome="reschedule",
+    )
+    appt = db.get_appointment(action.appointment_id)
+    if appt is None:
+        appt = await _backfill_appointment(ctx, action.appointment_id, call.id)
         if appt is None:
-            appt = await _backfill_appointment(ctx, conn, action.appointment_id, call.id)
-            if appt is None:
-                return
-        db.link_call_to_appointment(conn, call.id, action.appointment_id)
-        provider, site, appt_type = await _provider_site_type(
-            ctx, action.provider_id, action.location_id, appt.appointment_type_id
-        )
-        duration = appt_type.duration_minutes if appt_type else 15
-        slot_end = action.slot + timedelta(minutes=duration)
-        db.update_appointment(
-            conn,
-            action.appointment_id,
-            # A new date needs its own confirmation call — an earlier
-            # "confirmed" for the old slot says nothing about this one.
-            status="scheduled",
-            provider_id=action.provider_id,
-            provider_name=provider.name if provider else appt.provider_name,
-            specialty_id=provider.specialty_id if provider else appt.specialty_id,
-            specialty_name=provider.specialty_name if provider else appt.specialty_name,
-            site_id=action.location_id,
-            site_name=site.name if site else appt.site_name,
-            slot_start=action.slot.isoformat(),
-            slot_end=slot_end.isoformat(),
-            insurer=action.policy_id,
-        )
+            return
+    db.link_call_to_appointment(call.id, action.appointment_id)
+    provider, site, appt_type = await _provider_site_type(
+        ctx, action.provider_id, action.location_id, appt.appointment_type_id
+    )
+    duration = appt_type.duration_minutes if appt_type else 15
+    slot_end = action.slot + timedelta(minutes=duration)
+    db.update_appointment(
+        action.appointment_id,
+        # A new date needs its own confirmation call — an earlier
+        # "confirmed" for the old slot says nothing about this one.
+        status="scheduled",
+        provider_id=action.provider_id,
+        provider_name=provider.name if provider else appt.provider_name,
+        specialty_id=provider.specialty_id if provider else appt.specialty_id,
+        specialty_name=provider.specialty_name if provider else appt.specialty_name,
+        site_id=action.location_id,
+        site_name=site.name if site else appt.site_name,
+        slot_start=action.slot.isoformat(),
+        slot_end=slot_end.isoformat(),
+        insurer=action.policy_id,
+    )
 
 
-async def persist_submission(
-    ctx: ToolContext, action: Action, *, db_path: Path | str | None = DEFAULT_DB_PATH
-) -> None:
+async def persist_submission(ctx: ToolContext, action: Action, db_path: Any = None) -> None:
     """Persist a book/cancel/reschedule submission. A no-op for register,
     no-action and escalate: this database models appointments, and none of
     those three touch one (see ``database/README.md``, "What this database
     does not model").
 
+    ``db_path`` is accepted and ignored. There is no file any more — the
+    store is the hosted Postgres — but the keyword outlived the SQLite file
+    at a handful of call sites, and a scoring call is not where a
+    ``TypeError`` should first show up.
+
     Never raises: logs and returns on any failure, same rule as every other
-    piece of call telemetry in this codebase.
+    piece of call telemetry in this codebase. The write is always attempted,
+    including with no Supabase configured — that failure is logged, loudly,
+    not skipped quietly.
     """
+    if db_path is not None:
+        log.debug("persist_submission ignores db_path=%r; the store is Supabase", db_path)
     try:
         if isinstance(action, BookAction):
-            await _record_booking(ctx, action, db_path)
+            await _record_booking(ctx, action)
         elif isinstance(action, CancelAction):
-            await _record_cancellation(ctx, action, db_path)
+            await _record_cancellation(ctx, action)
         elif isinstance(action, RescheduleAction):
-            await _record_reschedule(ctx, action, db_path)
+            await _record_reschedule(ctx, action)
     except Exception:
         log.exception("could not persist %s submission for call %s", action.kind, ctx.call_id)
