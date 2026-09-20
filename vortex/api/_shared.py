@@ -325,6 +325,17 @@ def wall_cancelled_keys() -> set[cal.BookingKey]:
         key = cal.cancel_key(row.provider_id, row.site_id, row.slot_start)
         if key is not None:
             keys.add(key)
+    # Offline board: with no Supabase the cancel API writes to the local file
+    # store instead (remote reads then return empty rather than raising), so
+    # merge whichever local rows exist. Empty when Supabase serves cancels.
+    from database import local_wall
+
+    for row in local_wall.list_all():
+        key = cal.cancel_key(
+            row.get("provider_id"), row.get("site_id"), row.get("slot_start")
+        )
+        if key is not None:
+            keys.add(key)
     return keys
 
 

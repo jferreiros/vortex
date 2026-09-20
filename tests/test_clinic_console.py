@@ -130,13 +130,19 @@ async def test_patient_timeline_merges_visits_and_calls(user: User) -> None:
 
 
 @pytest.mark.skipif(HAS_DB, reason="describes an unconfigured store")
-async def test_documents_serve_an_empty_default_with_no_store(user: User) -> None:
-    """No Supabase configured: a read answers the in-code empty document
-    rather than a 500, so the editors open on a blank canvas."""
-    for path, key in (("/api/wall/pathways", "pathways"), ("/api/wall/patterns", "patterns")):
-        response = await user.http_client.get(path)
-        assert response.status_code == 200
-        assert response.json()[key] == []
+async def test_documents_serve_defaults_with_no_store(user: User) -> None:
+    """No Supabase configured: patterns stay an empty canvas, while pathways
+    serve the runnable built-ins so the UI never shows dead rows."""
+    response = await user.http_client.get("/api/wall/pathways")
+    assert response.status_code == 200
+    assert {row["id"] for row in response.json()["pathways"]} >= {
+        "cancel-rebooking-call",
+        "booked-confirmation-call",
+        "annual-physical-exam",
+    }
+    response = await user.http_client.get("/api/wall/patterns")
+    assert response.status_code == 200
+    assert response.json()["patterns"] == []
 
 
 @pytest.mark.skipif(HAS_DB, reason="describes an unconfigured store")
