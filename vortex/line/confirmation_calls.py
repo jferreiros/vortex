@@ -1366,6 +1366,31 @@ _CALL_NOW_DB_OUTCOME: dict[str, str] = {
 }
 
 
+
+_ES_NATIONAL = re.compile(r"^[6789]\d{8}$")
+
+
+def normalise_call_phone(phone: str) -> str:
+    """Best-effort E.164 for outbound calls, Spanish clinic records first.
+
+    Patient records reach the dial path as stored: ``612 34 56 78``,
+    ``612345678``, ``0034 612 34 56 78`` or already ``+34 612...``. Twilio
+    rejects anything that is not E.164, so a raw national number fails the
+    rebooking call outright with an opaque 21211. Nine national digits with
+    a Spanish landline/mobile leading digit gain ``+34``; an explicit
+    ``+``/``00`` international prefix is honoured as-is; anything else is
+    returned cleaned so Twilio's own error names it in ``detail``.
+    """
+    digits = re.sub(r"[^\d+]", "", phone or "")
+    if digits.startswith("00"):
+        digits = "+" + digits[2:]
+    if not digits.startswith("+"):
+        national = digits.lstrip("0")
+        if _ES_NATIONAL.match(national):
+            digits = "+34" + national
+    return digits
+
+
 async def queue_cancellation_rebooking_call(
     settings: Settings,
     *,
@@ -1397,6 +1422,7 @@ async def queue_cancellation_rebooking_call(
     covers the rest — cancelling the same visit twice must not queue two
     calls.
     """
+    to = normalise_call_phone(to)
     if already_offered_reschedule or not to.strip() or not settings.confirmation_calls:
         return None
     store = confirmation_store_from_settings(settings)
