@@ -28,6 +28,7 @@ pytest_plugins = ["nicegui.testing.user_plugin"]
 #: Keys that must never leak in from a developer's ``.env``.
 _BLANK_KEYS = (
     "PLATFORM_API_KEY",
+    "VORTEX_DEFAULT_LANGUAGE",
     "SONIOX_API_KEY",
     "LLM_API_KEY",
     "LLM_BASE_URL",
@@ -37,6 +38,8 @@ _BLANK_KEYS = (
     "AZURE_OPENAI_DEPLOYMENT",
     "AZURE_OPENAI_API_VERSION",
     "ELEVENLABS_API_KEY",
+    "ELEVENLABS_BASE_URL",
+    "VORTEX_TTS_HTTP_BASE_URL",
     "ELEVENLABS_VOICE_ID_ES",
     "ELEVENLABS_VOICE_ID_DEFAULT",
     "DISCORD_WEBHOOK_URL",
