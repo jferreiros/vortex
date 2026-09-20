@@ -1,26 +1,30 @@
-"""database/ — the product's own persistence layer.
+"""database/ — the product's own persistence layer, on Postgres.
 
-Not a refactor of ``logs/calls.jsonl``: that log stays exactly as it is, read
-by every observability view (``vortex/observability/``) and by the wall. This
-is a second, purpose-built store for the two things a clinic's own system
-would actually keep — appointments and the calls that touched them — queried
-by id and by date, not replayed event by event.
+One hosted store (Supabase), reached over PostgREST. Nothing here opens a
+file or a connection: every call is a stateless HTTPS request with the
+service-role key, so ten concurrent sockets share nothing at all.
 
 Modules:
 
-- ``schema.py``        versioned SQL migrations, applied in order once each.
-- ``models.py``        ``CallRecord`` / ``AppointmentRecord`` — plain,
+- ``remote.py``         the PostgREST client — ``select`` / ``upsert`` /
+                        ``update`` / ``delete`` / ``count``, and
+                        ``enabled()``, which is false when the keys are unset.
+- ``models.py``         ``CallRecord`` / ``AppointmentRecord`` — plain,
                         typed rows, no ORM.
-- ``db.py``             connection handling and every read/write query.
+- ``db.py``             every read and write the product does, by name.
 - ``hooks.py``          the glue a lane calls: turns a submitted
                         book/cancel/reschedule ``Action`` into rows.
 - ``confirmations.py``  the day-before-the-appointment outbound confirmation
                         job, and the ``ConfirmationCaller`` interface the
                         line will implement for real once it can dial out.
-- ``scripts/``          standalone entry points (``run_confirmations.py``,
-                        the pre-existing ``refresh_slots.py`` auxiliary cache
-                        builder, unrelated to this layer).
+- ``supabase/``         ``migrations/*.sql`` and ``migrate.py``, the only
+                        thing in the repo that opens a real Postgres
+                        connection (``SUPABASE_DB_URL``) — DDL cannot go
+                        through PostgREST.
+- ``seed/``             the demo's starting diary, as re-runnable SQL.
+- ``scripts/``          standalone entry points (``load_seed.py``,
+                        ``run_confirmations.py``).
 
 See ``database/README.md`` for the schema, the design decisions behind it,
-and what still has to be built before a real outbound call can be placed.
+and how to apply a migration.
 """
