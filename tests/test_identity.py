@@ -9,12 +9,12 @@ the line, which is legitimate and must never be blocked, only made visible.
 
 from __future__ import annotations
 
-import json
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
+import vortex.clinic_policy as clinic_policy
 from vortex.clinic.client import FakeClinicClient
 from vortex.contract import (
     MADRID,
@@ -49,15 +49,15 @@ def ctx(tmp_path: Path) -> ToolContext:
         now=NOW,
         from_number="+34612345678",  # the mother's line
         clinic=FakeClinicClient(),
-        log=CallLog("CA-identity", tmp_path / "calls.jsonl"),
+        log=CallLog("CA-identity"),
         submitter=DryRunSubmitClient(),
     )
 
 
 def logged(ctx: ToolContext) -> list[dict]:
-    if not ctx.log.path.exists():
-        return []
-    return [json.loads(line) for line in ctx.log.path.read_text().splitlines() if line.strip()]
+    """What this call wrote. The events live on the log itself now — there is
+    no file to read back."""
+    return list(ctx.log.events)
 
 
 # ---- dictated email / phone (problem 4; docs/research/05 §3) ---------------
@@ -217,13 +217,34 @@ async def test_an_unshared_line_finds_its_own_owner(tmp_path: Path) -> None:
         now=NOW,
         from_number="+34699000111",  # P00043's own, unshared line
         clinic=FakeClinicClient(),
-        log=CallLog("CA-identity-solo", tmp_path / "calls.jsonl"),
+        log=CallLog("CA-identity-solo"),
         submitter=DryRunSubmitClient(),
     )
     result = await find_patient(solo, FindPatientInput())
     assert result.status == "found"
     assert result.patient is not None
     assert result.patient.patient_id == "P00043"
+
+
+async def test_clinic_settings_can_require_a_second_identifying_field(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(clinic_policy, "identification_fields_required", lambda: 2)
+    solo = ToolContext(
+        call_id="CA-identity-lead",
+        now=NOW,
+        from_number="+34699000111",
+        clinic=FakeClinicClient(),
+        log=CallLog("CA-identity-lead"),
+        submitter=DryRunSubmitClient(),
+    )
+    by_line = await find_patient(solo, FindPatientInput())
+    assert by_line.status == "ambiguous"
+    by_two = await find_patient(
+        solo,
+        FindPatientInput(name="Marta Ruiz García", date_of_birth=date(1992, 11, 2)),
+    )
+    assert by_two.status == "found"
 
 
 # ---- problem 9: caller identity vs. the patient actually booked -----------
@@ -363,7 +384,7 @@ async def test_no_caller_id_still_asks_for_the_phone(tmp_path: Path) -> None:
         now=NOW,
         from_number="",
         clinic=FakeClinicClient(),
-        log=CallLog("CA-no-caller-id", tmp_path / "calls.jsonl"),
+        log=CallLog("CA-no-caller-id"),
         submitter=DryRunSubmitClient(),
     )
     result = await build_registration(blind, a_registration())

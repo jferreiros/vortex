@@ -5,12 +5,13 @@ agent resolved on its own, when they land in the day, and how full the
 diary already is.
 
 Calls, resolution rate and volume come from ``synthetic-data/``.
-``synthetic-data/logs/*.jsonl`` is CallLog-shaped exactly like the live
-``logs/calls.jsonl`` (see ``synthetic-data/README.md``), so it is read with
-the same ``calllog.read_recent`` + ``view.build_calls`` pipeline the console
-uses for a real call, one file at a time, concatenated. ``probe:`` calls
-(tool-shape smoke tests, empty ``from_number``, no real caller) are excluded
-from every count here — they are not a patient call.
+``synthetic-data/logs/*.jsonl`` is CallLog-shaped exactly like a row of
+``public.call_events`` (see ``synthetic-data/README.md``), so it goes through
+the same ``view.build_calls`` pipeline the console uses for a real call, one
+file at a time, concatenated. These fixture files are the only JSONL left:
+real call events live in Postgres. ``probe:`` calls (tool-shape smoke tests,
+empty ``from_number``, no real caller) are excluded from every count here —
+they are not a patient call.
 
 Occupancy is different: a call log never carries the capacity a booking was
 made against, only the booking itself, so it can't be read the same way.
@@ -23,6 +24,7 @@ for how. This module just reads the file.
 from __future__ import annotations
 
 import json
+import time
 from collections import Counter
 from dataclasses import dataclass
 from datetime import date as date_cls
@@ -31,7 +33,6 @@ from statistics import median
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from vortex.observability.calllog import read_recent
 from vortex.observability.view import CallCard, build_calls
 from vortex.settings import REPO_ROOT
 
@@ -68,7 +69,14 @@ def load_synthetic_cards() -> list[CallCard]:
     """Every real (non-probe) call in ``synthetic-data/logs/``, newest first."""
     events: list[dict[str, Any]] = []
     for path in sorted(SYNTHETIC_LOG_DIR.glob("*.jsonl")):
-        events.extend(read_recent(path, limit=100_000))
+        for raw in path.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line:
+                continue
+            try:
+                events.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
     cards = build_calls(events)
     return [c for c in cards if not c.call_id.startswith("probe:")]
 
@@ -228,6 +236,78 @@ def _matching_cells(
     ]
 
 
+#: One 15-minute step, the unit ``scripts/precompute_wall_cache.py`` counts
+#: capacity in, so a booked half-hour has to weigh two.
+SLOT_MINUTES = 15
+
+
+def _busy_from_database() -> dict[tuple[str, str, str], int]:
+    """Booked 15-minute steps per (day, site, specialty), from the real diary.
+
+    The cached ``busy_slots`` is only as real as the clinic client that built
+    it, which offline is ``vortex/clinic/fixtures.py``. The product database
+    holds what the line actually booked, so it is the better answer whenever
+    it has rows — and the only one that reflects real traffic.
+
+    Counted over distinct (provider, site, minute) steps rather than over
+    appointments: several calls in this log booked the same opening, and a
+    diary slot can only be taken once.
+    """
+    try:
+        from database import db
+
+        rows = db.list_appointments()
+    except Exception:
+        return {}
+
+    steps: set[tuple[str, str, str, str, str]] = set()
+    for row in rows:
+        if not row.site_id or not row.specialty_id:
+            continue
+        try:
+            start = datetime.fromisoformat(row.slot_start)
+            end = datetime.fromisoformat(row.slot_end)
+        except (TypeError, ValueError):
+            continue
+        local = start.astimezone(MADRID)
+        minutes = max(SLOT_MINUTES, int((end - start).total_seconds() // 60))
+        for offset in range(0, minutes, SLOT_MINUTES):
+            step = local + timedelta(minutes=offset)
+            steps.add(
+                (
+                    step.date().isoformat(),
+                    row.site_id,
+                    row.specialty_id,
+                    row.provider_id or "",
+                    step.isoformat(),
+                )
+            )
+
+    busy: Counter[tuple[str, str, str]] = Counter()
+    for day, site_id, specialty_id, _provider, _minute in steps:
+        busy[(day, site_id, specialty_id)] += 1
+    return dict(busy)
+
+
+#: How long a diary read is reused. Unlike the occupancy file beside it, this
+#: one is not fixed at start-up: the database gains rows while the board runs,
+#: so caching it for the life of the process would freeze the Home page's
+#: occupancy at whatever the diary held when the first tab opened.
+BUSY_CACHE_TTL_S = 30.0
+
+_busy_cache: dict[tuple[str, str, str], int] | None = None
+_busy_cached_at = 0.0
+
+
+def _database_busy() -> dict[tuple[str, str, str], int]:
+    """The booked steps, re-read once every ``BUSY_CACHE_TTL_S``."""
+    global _busy_cache, _busy_cached_at
+    if _busy_cache is None or (time.monotonic() - _busy_cached_at) > BUSY_CACHE_TTL_S:
+        _busy_cache = _busy_from_database()
+        _busy_cached_at = time.monotonic()
+    return _busy_cache
+
+
 def _day_pct(
     by_date: dict[str, list[dict[str, Any]]], day: date_cls, *, location_id: str, specialty_id: str
 ) -> int:
@@ -237,7 +317,16 @@ def _day_pct(
     capacity = sum(c["capacity_slots"] for c in cells)
     if capacity <= 0:
         return 0
-    busy = sum(c["busy_slots"] for c in cells)
+    # The larger of the two, never one replacing the other: the cached number
+    # is capacity minus what /availability still offered, so it covers the
+    # clinic's own seed bookings; the database covers what this line booked,
+    # which the clinic (read-only) never learned about. Each is a floor the
+    # other does not see, so a booking can only ever make a day fuller.
+    real = _database_busy()
+    busy = sum(
+        max(c["busy_slots"], real.get((day.isoformat(), c["location_id"], c["specialty_id"]), 0))
+        for c in cells
+    )
     return max(0, min(100, round(100 * busy / capacity)))
 
 

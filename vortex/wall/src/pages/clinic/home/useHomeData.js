@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 
-// Every number on this page comes from synthetic-data/ through the two
-// endpoints below (see vortex/observability/home_overview.py) — no mock,
-// no per-render random walk. The pack is a fixed corpus, so one fetch on
-// mount is enough; there is no live socket to poll for this page.
+// KPI briefing comes from GET /api/wall/home-overview (useHomeOverview.js).
+// Occupancy is wall-cache/occupancy.json plus booked steps from the product
+// database — see vortex/observability/home_pack.py.
 
 export function useHomeOverview() {
   const [data, setData] = useState(null);

@@ -1,4 +1,4 @@
-.PHONY: install run smoke test call replay try-api tunnel tail lint fmt board design-sync didactica rehearse confirmations evals evals-logic evals-conversation evals-voice evals-replay evals-report evals-accept evals-selftest evals-discord logs-discord langfuse-check
+.PHONY: install run smoke test call try-api tunnel lint fmt board design-sync didactica rehearse confirmations evals evals-logic evals-conversation evals-voice evals-replay evals-report evals-accept evals-selftest evals-discord logs-discord langfuse-check supabase-migrate supabase-ping supabase-count seed-demo
 
 PORT ?= 7860
 BOARD_PORT ?= 8080
@@ -25,17 +25,23 @@ test:
 call:
 	uv run python scripts/fake_caller.py --url ws://localhost:$(PORT)/ws --calls $(N)
 
-replay:           ## drip synthetic-data calls into logs/calls.jsonl for the live board; ARGS="--speed 2 --concurrency 6"
-	uv run python scripts/replay_synthetic.py $(ARGS)
+supabase-migrate: ## apply database/supabase/migrations/*.sql to SUPABASE_DB_URL; ARGS=--dry-run
+	uv run python -m database.supabase.migrate $(ARGS)
+
+supabase-ping:    ## check SUPABASE_URL + service-role can reach call_events
+	uv run python scripts/supabase_logs.py ping
+
+supabase-count:   ## print remote row counts for every hosted table
+	uv run python scripts/supabase_logs.py count
+
+seed-demo:        ## write the scripted demo calls into call_events; ARGS=--dry-run
+	uv run python scripts/seed_demo_calls.py $(ARGS)
 
 try-api:
 	uv run python scripts/api/try_api.py
 
 tunnel:
 	ngrok http $(PORT)
-
-tail:
-	tail -f logs/calls.jsonl
 
 rehearse:         ## text rehearsal of the prompt against the real LLM: ONLY=p1|p4|p6, ARGS=--verbose
 	VORTEX_CLINIC_MODE=fake uv run python scripts/rehearse_text.py \
@@ -111,8 +117,8 @@ evals-jev:         ## offline TypeSafe Jev spike (arbiter + triage fallback). Ne
 evals-discord:    ## post the latest summary.json to #github (needs DISCORD_WEBHOOK_URL)
 	scripts/notify-discord.sh --evals
 
-logs-discord:     ## post a redacted digest of the call log (LOG= path, default live log)
-	scripts/notify-discord.sh --calls $(LOG)
+logs-discord:     ## post a redacted digest of recent calls read from public.call_events
+	scripts/notify-discord.sh --calls
 
 langfuse-check:   ## project, keys on the line, recent traces
 	uv run python -m vortex.observability.langfuse_status

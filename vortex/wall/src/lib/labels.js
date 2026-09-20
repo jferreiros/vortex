@@ -68,3 +68,26 @@ export const REASON_LABEL = {
   out_of_scope: "Fuera del alcance de la línea",
   medical_emergency: "Síntomas de urgencia médica",
 };
+
+// The phase a live call is in. Two vocabularies reach this: the board's own
+// four stages (explain.STAGES -> "Listen", "Identify", "Decide", "Submit")
+// and the demo feed's freer phrases ("Talking", "Waitlist offer"). Both are
+// shown to a Spanish-speaking clinic, so both are mapped here, and anything
+// unmapped falls through unchanged rather than becoming a blank chip.
+export const PHASE_LABEL = {
+  Listen: "Escuchando",
+  Identify: "Identificando",
+  Decide: "Decidiendo",
+  Submit: "Enviando",
+  Listening: "Escuchando",
+  Talking: "Hablando",
+  "Confirming slot": "Confirmando hueco",
+  "Waitlist offer": "Ofreciendo hueco",
+  Escalated: "Escalada",
+  Reminder: "Recordatorio",
+};
+
+export function phaseView(call) {
+  const raw = String(call?.phase || "").trim();
+  return { key: raw, label: PHASE_LABEL[raw] || raw || "En llamada" };
+}

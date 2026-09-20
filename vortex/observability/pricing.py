@@ -1,8 +1,8 @@
 """What one call costs, from the provider counters the line lane meters.
 
 The line lane writes one ``call.usage`` event per call, just before
-``call.ended``: seconds of audio through Soniox, tokens through Helmcode, and
-characters through each Google TTS service. This module turns those counters
+``call.ended``: seconds of audio through Soniox, tokens through the LLM host,
+and characters through ElevenLabs. This module turns those counters
 into euros with an explicit price table. Nothing here estimates: a model with
 no verified price is *unpriced*, the call is flagged ``partial``, and the
 console says so instead of showing a made-up number.
@@ -66,40 +66,9 @@ STT_PRICES: dict[str, dict[str, Any]] = {
 }
 
 #: Text to speech. Voices are matched by substring against the voice or model
-#: id, first match wins, so a whole Google voice family is one row. ``usd:
-#: None`` means the vendor publishes no price we have verified.
+#: id, first match wins, so a whole model family is one row. ``usd: None``
+#: means the vendor publishes no price we have verified.
 TTS_PRICES: tuple[tuple[str, dict[str, Any]], ...] = (
-    (
-        "Chirp3-HD",
-        {
-            "label": "Google Cloud TTS · Chirp 3 HD",
-            "usd": 30.0,
-            "unit": "1M characters",
-            "source": "https://cloud.google.com/text-to-speech/pricing",
-            "read_on": READ_ON,
-        },
-    ),
-    (
-        "Standard",
-        {
-            "label": "Google Cloud TTS · Standard",
-            "usd": 4.0,
-            "unit": "1M characters",
-            "source": "https://cloud.google.com/text-to-speech/pricing",
-            "read_on": READ_ON,
-        },
-    ),
-    (
-        "gemini-",
-        {
-            "label": "Google Gemini TTS",
-            "usd": None,
-            "unit": "1M characters",
-            "source": "https://cloud.google.com/text-to-speech/pricing",
-            "read_on": READ_ON,
-            "note": "Gemini TTS is not on the published character table; unverified.",
-        },
-    ),
     (
         "eleven_",
         {
@@ -134,6 +103,15 @@ LLM_PRICES: dict[str, dict[str, Any]] = {
         "source": "https://helmcode.com/pricing",
         "read_on": READ_ON,
         "note": "Unlimited inside the perk; no published per-token list price.",
+    },
+    "azure/gpt-4.1": {
+        "label": "GPT-4.1 (Azure OpenAI)",
+        "usd_in": None,
+        "usd_out": None,
+        "unit": "1M tokens",
+        "source": "https://azure.microsoft.com/pricing/details/cognitive-services/openai-service/",
+        "read_on": READ_ON,
+        "note": "Region- and tier-dependent; no single list price verified here.",
     },
 }
 

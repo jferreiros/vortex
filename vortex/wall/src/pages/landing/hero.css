@@ -91,14 +91,7 @@
   color: var(--color-primary-deep);
 }
 
-/* CTA, pinned to the very bottom of the section, independent of the row -----------*/
-
-.landing-hero-cta-wrap {
-  flex: 0 0 auto;
-  display: flex;
-  justify-content: center;
-  padding: var(--space-6) 0 var(--space-7);
-}
+/* CTA, stacked under the copy as the third piece of the text column --------------*/
 
 .landing-hero-cta {
   appearance: none;
@@ -106,9 +99,11 @@
   background: transparent;
   cursor: pointer;
   display: inline-flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
-  gap: var(--space-2);
+  align-self: flex-start;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
   color: var(--color-primary-deep);
 }
 
@@ -131,8 +126,8 @@
 }
 
 @keyframes landing-bob {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(8px); }
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(8px); }
 }
 
 /* Responsive -----------------------------------------------------------------------*/
@@ -147,6 +142,9 @@
   .landing-hero-text-col {
     align-items: center;
     text-align: center;
+  }
+  .landing-hero-cta {
+    align-self: center;
   }
   .landing-hero-text-col p {
     max-width: 40ch;

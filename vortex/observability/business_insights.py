@@ -1,7 +1,7 @@
 """Business-facing insights for the Clinic View's Insights page.
 
 Five questions a clinic manager actually asks, all answered from
-``calls.jsonl`` through ``view.build_calls`` — no synthetic numbers, same
+``public.call_events`` through ``view.build_calls`` — no synthetic numbers, same
 rule as ``insights.py`` next to this file (read that one first; ``Bar`` and
 ``mask_phone`` live there and this module follows the same shape):
 
@@ -51,7 +51,7 @@ from zoneinfo import ZoneInfo
 
 from vortex.clinic.client import fixtures_catalogue
 from vortex.clinic.fixtures import PROVIDERS, SPECIALTIES
-from vortex.contract import Catalogue, LocationRecord
+from vortex.contract import Catalogue, LocationRecord, ProviderRecord
 from vortex.observability.view import CallCard
 
 MADRID = ZoneInfo("Europe/Madrid")
@@ -692,6 +692,52 @@ def _extra_providers_needed(n_providers: int, occupancy_pct: float | None) -> in
     return needed - n_providers
 
 
+def _providers_from_slots(cards: list[CallCard]) -> dict[str, ProviderRecord]:
+    """Minimal provider records recovered straight from ``find_slots``
+    results — id, name, specialty and the one site the slot was offered at.
+
+    Thinner than a real ``/clinic`` ``find_provider`` record (no schedules,
+    no insurers — not enough to draw the Agenda's grid, which is why
+    ``calendar.provider_names_from_events`` only *corrects* an existing
+    fixture provider instead of adding one), but enough to count a
+    specialty's real doctors. It matters because ``occupancy_pct`` below is
+    computed from these same ``find_slots`` results independently of the
+    provider catalogue: a specialty the offline fixtures never modelled at
+    all (there is no gynaecologist anywhere in ``vortex/clinic/fixtures.py``)
+    can show real demand and a real offered slot yet count 0 providers,
+    reading as "0 médicos, N% ocupación" on a service that plainly has at
+    least one doctor — the exact doctor this recovers.
+    """
+    out: dict[str, ProviderRecord] = {}
+    for card in cards:
+        for step in card.tools:
+            if step.name != "find_slots":
+                continue
+            result = _as_dict(step.result)
+            for slot in result.get("slots") or []:
+                slot_d = slot if isinstance(slot, dict) else _as_dict(slot)
+                provider_id = str(slot_d.get("provider_id") or "")
+                specialty_id = slot_d.get("specialty_id")
+                if not provider_id or not specialty_id or provider_id in out:
+                    continue
+                location_id = slot_d.get("location_id")
+                out[provider_id] = ProviderRecord(
+                    provider_id=provider_id,
+                    name=str(slot_d.get("provider_name") or provider_id),
+                    specialty_id=str(specialty_id),
+                    location_ids=[str(location_id)] if location_id else [],
+                )
+    return out
+
+
+def _occupancy_providers(cards: list[CallCard], catalogue: Catalogue) -> list[ProviderRecord]:
+    """``catalogue.providers`` plus any doctor ``find_slots`` named that the
+    catalogue does not already know by id — see ``_providers_from_slots``."""
+    known = {p.provider_id for p in catalogue.providers}
+    extra = [p for pid, p in _providers_from_slots(cards).items() if pid not in known]
+    return [*catalogue.providers, *extra]
+
+
 def _service_occupancy_rows(
     cards: list[CallCard], catalogue: Catalogue, *, site_id: str | None = None
 ) -> list[dict[str, Any]]:
@@ -704,6 +750,7 @@ def _service_occupancy_rows(
     offered: Counter[str] = Counter()
     declined_full: Counter[str] = Counter()
     booked: Counter[str] = Counter()
+    providers = _occupancy_providers(cards, catalogue)
 
     for card in cards:
         declined = is_unmet_demand(card) and classify_unmet(card) == "no_slot_in_window"
@@ -739,7 +786,7 @@ def _service_occupancy_rows(
         n_providers = len(
             [
                 p
-                for p in catalogue.providers
+                for p in providers
                 if p.specialty_id == specialty_id and (site_id is None or site_id in p.location_ids)
             ]
         )
@@ -1072,7 +1119,7 @@ def _cancel_reason_sort_key(item: tuple[str, int]) -> tuple[int, int]:
 #: a hit wins. "me equivoqué" beats "no puedo" — a mistaken booking gets
 #: cancelled however the caller frames the rest of the sentence.
 #:
-#: ``no_longer_needed`` was added by reading every call in ``logs/calls.jsonl``
+#: ``no_longer_needed`` was added by reading every call in ``public.call_events``
 #: that ``classify_cancel_reason`` put in "Otro motivo": "porque al final no
 #: me hace falta" was the only real phrase there, appearing twice, so it
 #: clears the "at least 2 real cases" bar this file's cancellation panel
@@ -1491,7 +1538,7 @@ def is_real_call(card: CallCard) -> bool:
       whether the *call* is real);
     - the console's "replay demo" button (``observability/demo.py``) marks
       its scripted calls ``voice="demo"``, a value ``voice_label`` never
-      returns (real calls get "gemini-live", "pipecat" or "stub").
+      returns (real calls get "pipecat" or "stub").
 
     Any one of these three checks alone would catch most of the log; kept
     together because either offline family evolving its ``call_id`` shape
@@ -1504,15 +1551,27 @@ def is_real_call(card: CallCard) -> bool:
     return card.voice != "demo"
 
 
-def business_insights(cards: list[CallCard], *, now: datetime | None = None) -> dict[str, Any]:
+def business_insights(
+    cards: list[CallCard], *, now: datetime | None = None, catalogue: Catalogue | None = None
+) -> dict[str, Any]:
     """The full payload the Insights page's business-insights endpoint
     returns. ``cards`` is filtered to ``is_real_call`` first: eval probes,
     synthetic corpus cases and scripted "replay demo" calls share this same
     log for visibility elsewhere in the console, but they are not a call a
     clinic manager should see counted as business volume.
+
+    ``catalogue`` defaults to the offline fixtures (``site_catalogue()``),
+    but the caller should pass one already widened with the real roster the
+    call log has seen (``vortex.observability.calendar.catalogue_with_log_
+    roster``, the same widening the Agenda page applies) whenever it has
+    one: the fixtures model seven of the platform's providers and are
+    missing a gynaecologist entirely, so a specialty with real demand in
+    the log but no matching fixture provider reads as "0 médicos, N%
+    ocupación" — a real service the fixtures never heard of, not a service
+    with no doctors.
     """
     cards = [c for c in cards if is_real_call(c)]
-    catalogue = site_catalogue()
+    catalogue = catalogue or site_catalogue()
     return {
         "calls_considered": len(cards),
         "unavailability": unavailability_reasons(cards, catalogue=catalogue),

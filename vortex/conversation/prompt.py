@@ -317,6 +317,11 @@ def build_system_prompt(
     on disk); ``version`` pins one explicitly.
     """
     local = now.astimezone(MADRID)
+    notes = "\n\n".join(
+        part.strip()
+        for part in (caller_note_for(caller), handoff_note_for(handoff))
+        if part.strip()
+    )
     return load_prompt_template(version).format(
         clinic_name=CLINIC_NAME,
         now_human=local.strftime("%H:%M on %A %d %B %Y"),
@@ -324,9 +329,10 @@ def build_system_prompt(
         language=language_name(language or DEFAULT_LANGUAGE),
         sites_brief=SITES_BRIEF,
         specialties_brief=SPECIALTIES_BRIEF,
-        caller_note="\n".join(
-            part for part in (caller_note_for(caller), handoff_note_for(handoff)) if part
-        ),
+        # The template writes ``{caller_note}FLOW.``, so the block has to close
+        # its own paragraph. Without this the note ran straight into the next
+        # heading: "...continue in Spanish.FLOW."
+        caller_note=f"{notes}\n\n" if notes else "",
         tool_guide=TOOL_GUIDE,
     )
 
@@ -524,6 +530,7 @@ def _line(table: dict[str, str], language: str | None) -> str:
 
 
 def greeting_for(language: str | None = None) -> str:
+    """The opening line, in the language the call is in."""
     return _line(GREETINGS, language)
 
 

@@ -25,9 +25,8 @@ BOOK_TURNS = [
 
 #: What the providers metered on a scripted call. The same shape the line lane
 #: writes for a real one, so every page shows a cost without a live call.
-#: The refusal leans on two Google TTS services on purpose: the Gemini voice
-#: has no published per-character price, which is what a *partial* call looks
-#: like on screen.
+#: ElevenLabs publishes no verified per-character list price, which is what a
+#: *partial* call looks like on screen.
 BOOK_USAGE: dict[str, object] = {
     "metered": True,
     "stt": {"provider": "soniox", "model": "stt-rt-v5", "audio_seconds": 47.3, "requests": 12},
@@ -42,9 +41,9 @@ BOOK_USAGE: dict[str, object] = {
     },
     "tts": [
         {
-            "provider": "google",
-            "service": "GoogleHttpTTSService",
-            "model": "es-ES-Chirp3-HD-Aoede",
+            "provider": "elevenlabs",
+            "service": "ElevenLabsTTSService",
+            "model": "eleven_flash_v2_5",
             "characters": 1180,
             "requests": 6,
         }
@@ -65,18 +64,11 @@ REFUSE_USAGE: dict[str, object] = {
     },
     "tts": [
         {
-            "provider": "google",
-            "service": "GoogleHttpTTSService",
-            "model": "es-ES-Chirp3-HD-Aoede",
-            "characters": 226,
-            "requests": 3,
-        },
-        {
-            "provider": "google",
-            "service": "GeminiTTSService",
-            "model": "gemini-2.5-flash-tts",
-            "characters": 90,
-            "requests": 1,
+            "provider": "elevenlabs",
+            "service": "ElevenLabsTTSService",
+            "model": "eleven_flash_v2_5",
+            "characters": 316,
+            "requests": 4,
         },
     ],
 }
@@ -88,14 +80,30 @@ REFUSE_TURNS = [
 ]
 
 
+def _append_pack(path: Path | None, log: CallLog) -> None:
+    """Also write this call to a fixture file.
+
+    Every demo call goes to ``public.call_events`` through ``CallLog``. A
+    ``path`` on top of that is only ever the ``synthetic-data/`` pack being
+    regenerated (``scripts/make_cancellation_pack.py``) — never the live log,
+    which no longer exists as a file.
+    """
+    if path is None:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as fh:
+        for event in log.events:
+            fh.write(json.dumps(event, default=str, ensure_ascii=False) + "\n")
+
+
 async def write_scripted_call(
-    path: Path,
+    path: Path | None = None,
     *,
     scenario: str = "book",
     delay_s: float = 0.35,
 ) -> str:
     call_id = f"demo-{scenario}-{int(time.time())}"
-    log = CallLog(call_id, path)
+    log = CallLog(call_id)
     log.event(
         "call.started",
         stream_sid=f"MZ-{call_id}",
@@ -273,7 +281,7 @@ CANCELLATION_PACK = REPO_ROOT / "synthetic-data" / "logs" / "cancellation_demo.j
 #: still ahead ("pending"). A last caller asks for the very doctor whose slots
 #: got lost and goes away empty — the implicit waiting list. Five freed slots
 #: also unlock the per-day chart.
-async def write_cancellation_pack(path: Path, *, delay_s: float = 0.0) -> list[str]:
+async def write_cancellation_pack(path: Path | None = None, *, delay_s: float = 0.0) -> list[str]:
     """Write the demo batch to ``path`` — the synthetic-data pack file."""
     now = datetime.now(MADRID)
 
@@ -401,7 +409,7 @@ async def write_cancellation_pack(path: Path, *, delay_s: float = 0.0) -> list[s
 
 
 async def _cancel_call(
-    path: Path,
+    path: Path | None,
     call_id: str,
     name: str,
     patient_id: str,
@@ -417,7 +425,7 @@ async def _cancel_call(
 ) -> str:
     """One caller cancelling one appointment — the same tool chain a real
     cancel runs: identify, list the appointments, prepare, submit."""
-    log = CallLog(call_id, path)
+    log = CallLog(call_id)
     log.event(
         "call.started",
         stream_sid=f"MZ-{call_id}",
@@ -506,11 +514,12 @@ async def _cancel_call(
     log.event("call.usage", **REFUSE_USAGE)
     log.event("call.ended", reason="hangup", media_frames_in=0, media_frames_out=0)
     log.summary(reason="hangup")
+    _append_pack(path, log)
     return call_id
 
 
 async def _book_into(
-    path: Path,
+    path: Path | None,
     call_id: str,
     name: str,
     patient_id: str,
@@ -522,7 +531,7 @@ async def _book_into(
 ) -> str:
     """One caller booking the exact (provider, minute) a cancellation freed —
     the relocation the panel counts."""
-    log = CallLog(call_id, path)
+    log = CallLog(call_id)
     log.event(
         "call.started",
         stream_sid=f"MZ-{call_id}",
@@ -634,11 +643,12 @@ async def _book_into(
     log.event("call.usage", **BOOK_USAGE)
     log.event("call.ended", reason="hangup", media_frames_in=0, media_frames_out=0)
     log.summary(reason="hangup")
+    _append_pack(path, log)
     return call_id
 
 
 async def _unmet_call(
-    path: Path,
+    path: Path | None,
     call_id: str,
     name: str,
     patient_id: str,
@@ -650,7 +660,7 @@ async def _unmet_call(
 ) -> str:
     """One caller asking for a doctor who has nothing left — the demand the
     waiting-list metric matches against the lost slots."""
-    log = CallLog(call_id, path)
+    log = CallLog(call_id)
     log.event(
         "call.started",
         stream_sid=f"MZ-{call_id}",
@@ -717,6 +727,7 @@ async def _unmet_call(
     log.event("call.usage", **REFUSE_USAGE)
     log.event("call.ended", reason="hangup", media_frames_in=0, media_frames_out=0)
     log.summary(reason="hangup")
+    _append_pack(path, log)
     return call_id
 
 
@@ -724,6 +735,207 @@ async def write_cancellation_demo(path: Path, *, delay_s: float = 0.0) -> list[s
     """Deprecated name kept for callers that still generate straight into the
     log; the pack-file path is ``write_cancellation_pack`` + ``replay_cancellation_demo``."""
     return await write_cancellation_pack(path, delay_s=delay_s)
+
+
+# ---------------------------------------------------------------------------
+# The two outcomes the packs above never produce
+# ---------------------------------------------------------------------------
+# ``write_scripted_call`` covers book and no-action, ``write_cancellation_pack``
+# covers cancel and the booking that relocates it. A wall that only ever shows
+# those four reads as if the agent cannot move or hand over a call, so the
+# scripted demo set (``scripts/seed_demo_calls.py``) adds one of each.
+
+
+async def write_reschedule_call(
+    call_id: str,
+    *,
+    name: str = "Bea Torres Nogueira",
+    patient_id: str = "P00081",
+    appointment_id: str = "APT-910",
+    provider_name: str = "Dra. Ortiz",
+    provider_id: str = "PR01",
+    slot: datetime | None = None,
+    delay_s: float = 0.0,
+) -> str:
+    """A caller moving an appointment: identify, list, prepare, submit."""
+    start = slot or (datetime.now(MADRID) + timedelta(days=3)).replace(
+        hour=12, minute=30, second=0, microsecond=0
+    )
+    log = CallLog(call_id)
+    log.event(
+        "call.started",
+        stream_sid=f"MZ-{call_id}",
+        from_number="+34611000011",
+        voice="demo",
+        clinic="fake",
+    )
+    await _turns(
+        log,
+        [
+            ("assistant", "Clínica Arenal, buenos días. ¿En qué puedo ayudarle?"),
+            ("user", f"Tengo cita con {provider_name} y necesito cambiarla de día."),
+            ("assistant", "Claro. ¿Me confirma su nombre completo?"),
+            ("user", name),
+        ],
+        delay_s,
+    )
+    given, *rest = name.split()
+    log.tool_called("find_patient", {"name": name})
+    log.tool_returned(
+        "find_patient",
+        {
+            "status": "found",
+            "patient": {
+                "patient_id": patient_id,
+                "given_name": given,
+                "first_surname": rest[0] if rest else "",
+                "second_surname": rest[1] if len(rest) > 1 else "",
+                "insurer": "sanitas",
+            },
+        },
+        37.0,
+    )
+    log.tool_called("list_appointments", {"patient_id": patient_id, "when": "upcoming"})
+    log.tool_returned(
+        "list_appointments",
+        {
+            "appointments": [
+                {
+                    "appointment_id": appointment_id,
+                    "patient_id": patient_id,
+                    "provider_id": provider_id,
+                    "location_id": "centro",
+                    "appointment_type_id": "review",
+                    "start": start - timedelta(days=1),
+                    "duration_minutes": 15,
+                    "status": "scheduled",
+                    "provider": {"name": provider_name},
+                }
+            ]
+        },
+        43.0,
+    )
+    log.tool_called(
+        "find_slots",
+        {
+            "patient_id": patient_id,
+            "provider_id": provider_id,
+            "date_from": start.date().isoformat(),
+            "date_to": start.date().isoformat(),
+        },
+    )
+    log.tool_returned(
+        "find_slots",
+        {
+            "slots": [
+                {
+                    "start": start.isoformat(),
+                    "provider_id": provider_id,
+                    "location_id": "centro",
+                    "appointment_type_id": "review",
+                    "provider": {"name": provider_name},
+                }
+            ],
+            "blocked": [],
+            "appointment_type": {"appointment_type_id": "review", "name": "Review"},
+        },
+        51.0,
+    )
+    await _turns(
+        log,
+        [
+            (
+                "assistant",
+                f"Le puedo pasar la cita al {start.strftime('%d/%m')} "
+                f"a las {start.strftime('%H:%M')} con {provider_name}. ¿Se la cambio?",
+            ),
+            ("user", "Sí, mucho mejor así."),
+            ("assistant", "Cambiada. Le llegará el recordatorio. Hasta luego."),
+        ],
+        delay_s,
+    )
+    action = {
+        "kind": "reschedule",
+        "appointment_id": appointment_id,
+        "provider_id": provider_id,
+        "location_id": "centro",
+        "appointment_type_id": "review",
+        "slot": start.isoformat(),
+    }
+    log.tool_called("prepare_reschedule", {"appointment_id": appointment_id})
+    log.tool_returned("prepare_reschedule", {"action": action, "rejection": None}, 8.0)
+    log.action_submitted(
+        "/api/v1/submit/reschedule",
+        {"call_id": call_id, **{k: v for k, v in action.items() if k != "kind"}},
+        {"status": "dry_run", "http_status": None, "detail": "demo"},
+    )
+    log.event("call.usage", **BOOK_USAGE)
+    log.event("call.ended", reason="hangup", media_frames_in=0, media_frames_out=0)
+    log.summary(reason="hangup")
+    return call_id
+
+
+async def write_escalate_call(
+    call_id: str,
+    *,
+    name: str = "Julián Peña Abad",
+    patient_id: str = "P00082",
+    reason: str = "medical_emergency",
+    delay_s: float = 0.0,
+) -> str:
+    """A caller the agent hands to a person — the escalate tail of the wall."""
+    log = CallLog(call_id)
+    log.event(
+        "call.started",
+        stream_sid=f"MZ-{call_id}",
+        from_number="+34611000012",
+        voice="demo",
+        clinic="fake",
+    )
+    await _turns(
+        log,
+        [
+            ("assistant", "Clínica Arenal, buenos días. ¿En qué puedo ayudarle?"),
+            ("user", "Mi padre tiene un dolor fuerte en el pecho desde hace media hora."),
+            (
+                "assistant",
+                "Eso no puede esperar a una cita. Cuelgue y llame al 112 ahora mismo; "
+                "le paso también con el mostrador.",
+            ),
+        ],
+        delay_s,
+    )
+    given, *rest = name.split()
+    log.tool_called("triage", {"words": "dolor fuerte en el pecho"})
+    log.tool_returned(
+        "triage",
+        {"kind": "escalate", "reason": reason, "patient": {"patient_id": patient_id}},
+        11.0,
+    )
+    log.tool_called("find_patient", {"name": name})
+    log.tool_returned(
+        "find_patient",
+        {
+            "status": "found",
+            "patient": {
+                "patient_id": patient_id,
+                "given_name": given,
+                "first_surname": rest[0] if rest else "",
+                "second_surname": rest[1] if len(rest) > 1 else "",
+                "insurer": "sanitas",
+            },
+        },
+        35.0,
+    )
+    log.action_submitted(
+        "/api/v1/submit/escalate",
+        {"call_id": call_id, "reason": reason},
+        {"status": "dry_run", "http_status": None, "detail": "demo"},
+    )
+    log.event("call.usage", **REFUSE_USAGE)
+    log.event("call.ended", reason="hangup", media_frames_in=0, media_frames_out=0)
+    log.summary(reason="hangup")
+    return call_id
 
 
 def load_cancellation_pack(pack_path: Path = CANCELLATION_PACK) -> list[list[dict]]:
@@ -742,7 +954,7 @@ def load_cancellation_pack(pack_path: Path = CANCELLATION_PACK) -> list[list[dic
 
 
 async def replay_cancellation_demo(
-    log_path: Path,
+    log_path: Path | None = None,
     *,
     pack_path: Path = CANCELLATION_PACK,
     run_tag: str | None = None,
@@ -752,4 +964,4 @@ async def replay_cancellation_demo(
     Insights window and repeated clicks never collide."""
     calls = load_cancellation_pack(pack_path)
     tag = run_tag or f"r{int(time.time())}"
-    return [await replay_call(log_path, events, speed=0, run_tag=tag) for events in calls]
+    return [await replay_call(events, speed=0, run_tag=tag) for events in calls]

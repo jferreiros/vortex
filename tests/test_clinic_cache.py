@@ -102,7 +102,7 @@ def _context(tmp_path: Path, clinic) -> ToolContext:
         now=NOW,
         from_number="+34612345678",
         clinic=clinic,
-        log=CallLog("CA-cache", tmp_path / "calls.jsonl"),
+        log=CallLog("CA-cache"),
         submitter=AcceptedSubmitter(),
     )
 
@@ -237,7 +237,6 @@ async def test_accepted_diary_writes_invalidate_availability(
     # tmp_path, never the repo's real database/.
     from vortex import settings as settings_module
 
-    monkeypatch.setenv("VORTEX_PRODUCT_DB", str(tmp_path / "vortex_product.db"))
     settings_module.reset_settings()
 
     clinic = CountingFakeClinic()
