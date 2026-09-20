@@ -48,6 +48,8 @@ from vortex.contract import action_route
 from vortex.conversation.language import (
     DEFAULT_LANGUAGE,
     detect_language,
+    elevenlabs_model_for,
+    elevenlabs_voice_id,
     normalise_language,
     tts_voice_for,
 )
@@ -67,7 +69,7 @@ from vortex.conversation.turns import (
     is_refusal_acceptance,
     user_turn_strategies,
 )
-from vortex.line import voice_config
+from vortex.line import personalities, voice_config
 from vortex.line.aic_filter import build_audio_in_filter
 from vortex.line.llm_timeout import first_token_guard
 from vortex.line.session import CallSession
@@ -294,10 +296,20 @@ async def run_pipecat_call(
         timeout_log_event=ctx.log.event,
     )
 
-    # The wall's "Voz del agente" card, read per socket: a change lands on the
-    # next call, never mid-flight.
+    # The wall's "Voz del agente" card and the receptionist on the phone, both
+    # read per socket: a change lands on the next call, never mid-flight, and
+    # nothing about the sound is shared between two concurrent calls.
     voice_cfg = voice_config.load(settings)
-    tts = _make_tts_stage(settings, language_state, voice_cfg)
+    persona = personalities.active(settings)
+    tts = _make_tts_stage(settings, language_state, voice_cfg, persona.slug)
+    ctx.log.event(
+        "voice.persona",
+        persona=persona.slug,
+        name=persona.name,
+        voice=elevenlabs_voice_id(language_state.language, settings, voice_cfg.voice, persona.slug),
+        model=elevenlabs_model_for(persona.slug, settings),
+        gender=voice_cfg.voice,
+    )
 
     # ---- tools: every registry entry becomes a function the model can call ----
     def make_handler(tool_name: str):
@@ -353,7 +365,7 @@ async def run_pipecat_call(
     # provider was declared Spanish-only — and that silently froze the call in
     # English *and* left ``session.language`` unset, so the day-before
     # confirmation call was dialled in the wrong language too.
-    stages.append(_LanguageWatcher(session, language_state, voice_cfg))
+    stages.append(_LanguageWatcher(session, language_state, voice_cfg, persona.slug))
     stages += [
         aggregators.user(),
         llm,
@@ -517,10 +529,13 @@ class _ToolFillerGuard:
 
 
 def _make_tts_stage(
-    settings: Any, state: _LanguageState, vcfg: voice_config.VoiceConfig | None = None
+    settings: Any,
+    state: _LanguageState,
+    vcfg: voice_config.VoiceConfig | None = None,
+    persona: str | None = None,
 ) -> Any:
     """The call's one TTS service. One provider, so there is nothing to route."""
-    return _make_tts(settings, settings.tts_provider, state, vcfg)
+    return _make_tts(settings, settings.tts_provider, state, vcfg, persona)
 
 
 def _llm_extra_body(settings: Any) -> dict[str, Any]:
@@ -551,17 +566,22 @@ def _make_tts(
     provider: str | None = None,
     state: _LanguageState | None = None,
     vcfg: voice_config.VoiceConfig | None = None,
+    persona: str | None = None,
 ) -> Any:
     """Build the call's ElevenLabs TTS service, asked for 8 kHz PCM.
 
     The wire format never changes with the language: a switch is a new voice id
     pushed as a ``TTSUpdateSettingsFrame``, which the same service applies in
     place. See ``_LanguageWatcher``.
+
+    ``persona`` is the receptionist the Clinic View put on the phone. It picks
+    the voice id and, if that persona needs one, the TTS model — both read
+    once here, so the sound of a call is decided when the socket opens.
     """
     name = provider or settings.tts_provider
     start_language = state.language if state is not None else DEFAULT_LANGUAGE
     gender = vcfg.voice if vcfg else "female"
-    voice, language = tts_voice_for(start_language, settings, name, gender)
+    voice, language = tts_voice_for(start_language, settings, name, gender, persona)
     if not voice:
         # Builds fine, then fails on every utterance. Say so once, loudly.
         log.warning("TTS provider %s has no voice id configured", name)
@@ -576,7 +596,7 @@ def _make_tts(
         sample_rate=LINE_SAMPLE_RATE,
         settings=ElevenLabsTTSService.Settings(
             voice=voice,
-            model=settings.elevenlabs_model,
+            model=elevenlabs_model_for(persona, settings),
             language=language,
             **({"speed": voice_config.elevenlabs_speed(vcfg)} if vcfg else {}),
         ),
@@ -664,6 +684,7 @@ def _LanguageWatcher(  # noqa: N802 - factory that returns a processor
     session: CallSession,
     state: _LanguageState | None = None,
     vcfg: voice_config.VoiceConfig | None = None,
+    persona: str | None = None,
 ):
     """Switch the voice when the caller switches language.
 
@@ -708,7 +729,9 @@ def _LanguageWatcher(  # noqa: N802 - factory that returns a processor
                     return
                 provider = settings.tts_provider
                 gender = vcfg.voice if vcfg else "female"
-                voice, tts_language = tts_voice_for(language, settings, provider, gender)
+                # The same persona the pipeline was built with: the caller
+                # switching to Catalan must not switch receptionist too.
+                voice, tts_language = tts_voice_for(language, settings, provider, gender, persona)
                 previous, self._state.language = self._state.language, language
                 # The session carries it too: the day-before confirmation call
                 # is dialled in the language this caller actually spoke.
@@ -719,6 +742,7 @@ def _LanguageWatcher(  # noqa: N802 - factory that returns a processor
                     now=language,
                     voice=voice,
                     provider=provider,
+                    persona=persona,
                 )
                 await self.push_frame(
                     TTSUpdateSettingsFrame(delta=TTSSettings(voice=voice, language=tts_language)),

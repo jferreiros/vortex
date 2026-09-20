@@ -182,23 +182,35 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             # No store: the card must not report a save that went nowhere.
             raise HTTPException(503, str(exc)) from exc
 
+    @app.get("/voice-current")
+    async def get_voice_current() -> dict[str, object]:
+        """Who is on the phone and the ElevenLabs voice and model it resolves
+        to — what the next call will sound like, without reading the code.
+        Same payload the board serves at /api/wall/voice-current."""
+        return voice_config.current_voice(settings)
+
     @app.post("/voice-preview")
     async def voice_preview(payload: Annotated[dict | None, Body()] = None) -> Response:
-        """One MP3 of the greeting with the posted (or stored) settings, for
-        the wall's Try button. Synthesised off the event loop — the ElevenLabs
-        HTTP call is blocking."""
+        """One MP3 with the posted (or stored) settings, for the wall's Try
+        button: the greeting, or the generic test line when the payload says
+        ``{"sample": "test"}``, in the voice of the persona on the phone.
+        Synthesised off the event loop — the ElevenLabs HTTP call is
+        blocking."""
         cfg = voice_config.preview_config(settings, payload)
+        text = voice_config.TEST_TEXT if (payload or {}).get("sample") == "test" else None
         try:
-            audio = await asyncio.to_thread(voice_config.synthesize_preview, settings, cfg)
+            audio = await asyncio.to_thread(
+                voice_config.synthesize_preview, settings, cfg, None, text
+            )
         except Exception as exc:
             raise HTTPException(503, f"voice preview unavailable: {exc}") from exc
         return Response(content=audio, media_type="audio/mpeg")
 
     # ---- the Clinic View's "Personalidades" picker --------------------------
     # Same shape as the voice card above: the board proxies these four and the
-    # rows live in ``public.personalities``. Foundation only — activating a
-    # persona stores the choice; reading it on the call (prompt tone,
-    # greeting, TTS voice) is a separate change.
+    # rows live in ``public.personalities``. Activating a persona now moves
+    # the TTS voice of the next call (see conversation.language.PERSONA_VOICES);
+    # the prompt tone and the greeting are still a separate change.
 
     @app.get("/personalities")
     async def get_personalities() -> dict[str, object]:

@@ -183,10 +183,17 @@ a new voice id pushed at the running service, not a second service to route to.
 | `elevenlabs` (the only one) | en / es / ca / gl / eu | `ELEVENLABS_API_KEY`, `ELEVENLABS_MODEL` (default `eleven_flash_v2_5`), `ELEVENLABS_BASE_URL` (optional gateway origin) |
 
 Which voice says which language, and which one the wall's female/male switch
-picks, is a fixed preset in code — `conversation.language.VoicePreset` — not a
-row of environment variables. `ELEVENLABS_VOICE_ID_DEFAULT` overrides its
-female column for every language and `ELEVENLABS_VOICE_ID_ES` for Spanish
-alone.
+picks, is a fixed map in code — not a row of environment variables. The
+receptionist the Clinic View has on the phone picks the pair
+(`conversation.language.PERSONA_VOICES`, read once per socket) and
+`VoicePreset` answers for a persona nobody has mapped yet. Three personas,
+five languages and two genders are 30 combinations and five voice ids: every
+id in the map is multilingual, so a persona sounds the same in Catalan as in
+English. `ELEVENLABS_VOICE_ID_DEFAULT` overrides the female column for every
+language and `ELEVENLABS_VOICE_ID_ES` for Spanish alone; `GET /voice-current`
+(on the line and on the board) answers which voice and model the next call
+will use, and says `source: env_override` when a variable, not the picker,
+decided it.
 
 STT is Soniox `stt-rt-v5` throughout: language identification on, clinic
 vocabulary boosted, `SONIOX_API_KEY` and `SONIOX_STT_MODEL`.

@@ -556,15 +556,27 @@ def confirmation_audio_dir(settings: Settings) -> Path:
 def confirmation_voice_name(
     cfg: voice_config.VoiceConfig, language: str | None, settings: Settings | None = None
 ) -> str:
-    """The ElevenLabs voice id for the call's language, female or male."""
+    """The ElevenLabs voice id for the call's language, female or male.
+
+    The persona on the phone picks it, so the patient hears the receptionist
+    who took the booking calling them back about it.
+    """
     from vortex.conversation.language import elevenlabs_voice_id
 
-    return elevenlabs_voice_id(call_language(language), settings, cfg.voice)
+    return elevenlabs_voice_id(
+        call_language(language), settings, cfg.voice, voice_config.active_persona(settings)
+    )
 
 
-def audio_filename(cfg: voice_config.VoiceConfig, language: str | None, text: str) -> str:
-    """Deterministic cache key: same words, voice and rate reuse the same MP3."""
-    key = f"{cfg.voice}|{cfg.speech_rate}|{call_language(language)}|{text}"
+def audio_filename(
+    cfg: voice_config.VoiceConfig, language: str | None, text: str, persona: str = ""
+) -> str:
+    """Deterministic cache key: same words, voice and rate reuse the same MP3.
+
+    The persona is part of the key. Without it, activating a new receptionist
+    would keep replaying the previous one's cached lines.
+    """
+    key = f"{cfg.voice}|{cfg.speech_rate}|{call_language(language)}|{persona}|{text}"
     return hashlib.sha256(key.encode()).hexdigest()[:24] + ".mp3"
 
 
@@ -578,8 +590,11 @@ async def ensure_confirmation_audio(settings: Settings, text: str, language: str
     None means "keep the <Say>": no TTS key, a synthesis error or a slow
     ElevenLabs all land there, and the call still says its line.
     """
+    from vortex.conversation.language import elevenlabs_model_for
+
     cfg = voice_config.load(settings)
-    name = audio_filename(cfg, language, text)
+    persona = voice_config.active_persona(settings)
+    name = audio_filename(cfg, language, text, persona)
     directory = confirmation_audio_dir(settings)
     if (directory / name).is_file():
         return name
@@ -592,6 +607,7 @@ async def ensure_confirmation_audio(settings: Settings, text: str, language: str
                 text,
                 language_code=call_language(language),
                 voice_name=confirmation_voice_name(cfg, language, settings),
+                model_id=elevenlabs_model_for(persona, settings),
             ),
             timeout=AUDIO_BUDGET_SECS,
         )

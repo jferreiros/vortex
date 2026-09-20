@@ -271,6 +271,36 @@ async def test_language_watcher_pushes_a_tts_settings_frame(voice_settings) -> N
     assert [kwargs["provider"] for _, kwargs in events] == ["elevenlabs", "elevenlabs"]
 
 
+async def test_a_language_switch_keeps_the_same_receptionist(voice_settings) -> None:
+    """The caller moving to Catalan must not hand them to another persona."""
+    pytest.importorskip("pipecat")
+    from pipecat.frames.frames import TranscriptionFrame
+    from pipecat.processors.frame_processor import FrameDirection
+    from pipecat.transcriptions.language import Language
+
+    from vortex.conversation.language import MATILDA
+    from vortex.line.pipecat_voice import _LanguageWatcher
+
+    settings = voice_settings(ELEVENLABS_API_KEY="el-x")
+    events: list[tuple[str, dict]] = []
+    pushed: list[object] = []
+    watcher = _LanguageWatcher(_session(settings, events), persona="carla")
+
+    async def capture(frame: object, direction: object = FrameDirection.DOWNSTREAM) -> None:
+        pushed.append(frame)
+
+    watcher.push_frame = capture  # type: ignore[method-assign]
+
+    def transcript(text: str, language: Language) -> TranscriptionFrame:
+        return TranscriptionFrame(text=text, user_id="u", timestamp="t", language=language)
+
+    await watcher._maybe_switch(transcript("bon dia", Language.CA))
+    await watcher._maybe_switch(transcript("buenos días", Language.ES_ES))
+
+    assert [f.delta.voice for f in pushed] == [MATILDA, MATILDA]
+    assert [kwargs["persona"] for _, kwargs in events] == ["carla", "carla"]
+
+
 async def test_language_watcher_reaches_galician_and_basque(voice_settings) -> None:
     """One multilingual voice says gl and eu too, so the watcher must reach them."""
     pytest.importorskip("pipecat")
@@ -331,6 +361,40 @@ def test_make_tts_builds_the_elevenlabs_service(voice_settings) -> None:
     assert tts._settings.language == "en"
     # No override -> the service's own origin.
     assert tts._url == "wss://api.elevenlabs.io"
+
+
+def test_make_tts_speaks_with_the_active_persona(voice_settings) -> None:
+    """The receptionist the Clinic View put on the phone picks the voice id,
+    read once when the socket opens."""
+    pytest.importorskip("pipecat")
+    pytest.importorskip("pipecat.services.elevenlabs.tts")
+
+    from vortex.conversation.language import ALEJANDRO, GEORGE, MATILDA, SOFIA
+    from vortex.line.pipecat_voice import _make_tts
+
+    settings = voice_settings(ELEVENLABS_API_KEY="el-x")
+    assert _make_tts(settings, persona="carla")._settings.voice == MATILDA
+    assert _make_tts(settings, persona="lucia")._settings.voice == SOFIA
+    # The card's male switch picks the second column of the same persona.
+    from vortex.line.voice_config import VoiceConfig
+
+    male = VoiceConfig(voice="male")
+    assert _make_tts(settings, vcfg=male, persona="carla")._settings.voice == GEORGE
+    assert _make_tts(settings, vcfg=male, persona="lucia")._settings.voice == ALEJANDRO
+
+
+def test_make_tts_uses_the_personas_model(voice_settings, monkeypatch) -> None:
+    """A persona on a voice with no flash build carries its own model."""
+    pytest.importorskip("pipecat")
+    pytest.importorskip("pipecat.services.elevenlabs.tts")
+
+    from vortex.conversation import language
+    from vortex.line.pipecat_voice import _make_tts
+
+    monkeypatch.setitem(language.PERSONA_MODELS, "carla", "eleven_multilingual_v2")
+    settings = voice_settings(ELEVENLABS_API_KEY="el-x")
+    assert _make_tts(settings, persona="carla")._settings.model == "eleven_multilingual_v2"
+    assert _make_tts(settings, persona="lucia")._settings.model == "eleven_flash_v2_5"
 
 
 def test_elevenlabs_base_url_override_is_passed_through(voice_settings) -> None:
