@@ -17,13 +17,9 @@ networks:
   coolify:
     external: true
 
-volumes:
-  line-logs:
-    # Fixed name so the board (deploy/compose.yml) can mount this exact volume
-    # read-only as its JSONL fallback. This is the volume the line already
-    # writes /app/logs/calls.jsonl to — pinning the name keeps the data that
-    # is already there.
-    name: vortex-line_line-logs
+# No volumes. Everything the line persists goes to Supabase/Postgres over
+# PostgREST (SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY in deploy/.env), so the
+# container holds no state and a rebuild loses nothing.
 
 services:
   line:
@@ -46,10 +42,10 @@ services:
       VORTEX_HOST: 0.0.0.0
       VORTEX_PORT: "7860"
       VORTEX_WS_PATH: /ws
-      VORTEX_CALLS_LOG: /app/logs/calls.jsonl
-
-    volumes:
-      - line-logs:/app/logs
+      # SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY — the store — arrive through
+      # env_file above, like every other key. They are deliberately not
+      # repeated here: an entry under `environment` wins over env_file, so a
+      # placeholder would silently blank the real value.
 
     networks:
       - coolify

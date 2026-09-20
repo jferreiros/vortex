@@ -32,11 +32,17 @@ logs/*
 api_results/
 database/processed/*
 !database/processed/.gitkeep
-database/vortex.db
-database/vortex.db-*
 wall-cache/*.json
 scripts/video/output/*
 !scripts/video/output/.gitkeep
+
+# No local database is part of the product any more — the store is Supabase /
+# Postgres only. Anything that lands here is a scratch file somebody made by
+# hand, and it must never reach a branch.
+*.db
+*.db-shm
+*.db-wal
+*.sqlite3
 
 # Coverage (CI job `coverage`, and local `pytest --cov`)
 .coverage
