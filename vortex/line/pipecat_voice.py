@@ -451,19 +451,33 @@ def _active_personality(settings: Any) -> Any | None:
 
 
 
-def _persona_voice(person: Any | None, language: str) -> str:
+def _persona_voice(person: Any | None, language: str, settings: Any) -> str:
     """Provider voice selected by the active persona for ``language``.
 
-    Personality voice maps contain Google voice names. They are applied only
-    by callers that selected the Google-compatible HTTP adapter, so an
-    ElevenLabs deployment never receives a Google name by mistake.
+    On the Google HTTP adapter the persona's stored ``voices`` map is used
+    directly. On stock ElevenLabs, stored ElevenLabs ids win when they are
+    present; otherwise the persona slug maps to the team's per-persona
+    ElevenLabs ids, preserving distinct agents without a global override.
     """
     if person is None:
         return ""
     try:
         code = normalise_language(language) or DEFAULT_LANGUAGE
         voices = getattr(person, "voices", None) or {}
-        return str(voices.get(code) or voices.get("es") or voices.get(DEFAULT_LANGUAGE) or "").strip()
+        stored = str(
+            voices.get(code) or voices.get("es") or voices.get(DEFAULT_LANGUAGE) or ""
+        ).strip()
+        if getattr(settings, "tts_http_base_url", ""):
+            return stored
+        if stored and not stored.startswith(("es-", "en-", "ca-", "gl-", "eu-")):
+            return stored
+        elevenlabs_voices = getattr(person, "elevenlabs_voices", None) or {}
+        return str(
+            elevenlabs_voices.get(code)
+            or elevenlabs_voices.get("es")
+            or elevenlabs_voices.get(DEFAULT_LANGUAGE)
+            or ""
+        ).strip()
     except Exception as exc:
         log.warning("personality voice unusable: %s", exc)
         return ""
@@ -649,8 +663,7 @@ def _make_tts(
     start_language = state.language if state is not None else DEFAULT_LANGUAGE
     gender = vcfg.voice if vcfg else "female"
     voice, language = tts_voice_for(start_language, settings, name, gender)
-    if settings.tts_http_base_url:
-        voice = _persona_voice(persona, start_language) or voice
+    voice = _persona_voice(persona, start_language, settings) or voice
     if not voice:
         # Builds fine, then fails on every utterance. Say so once, loudly.
         log.warning("TTS provider %s has no voice id configured", name)
@@ -905,8 +918,7 @@ def _LanguageWatcher(  # noqa: N802 - factory that returns a processor
                 provider = settings.tts_provider
                 gender = vcfg.voice if vcfg else "female"
                 voice, tts_language = tts_voice_for(language, settings, provider, gender)
-                if settings.tts_http_base_url:
-                    voice = _persona_voice(persona, language) or voice
+                voice = _persona_voice(persona, language, settings) or voice
                 previous, self._state.language = self._state.language, language
                 # The session carries it too: the day-before confirmation call
                 # is dialled in the language this caller actually spoke.

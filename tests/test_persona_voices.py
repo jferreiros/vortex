@@ -42,14 +42,25 @@ def google_persona():
             "es": "es-ES-Chirp3-HD-Kore",
             "en": "en-US-Chirp3-HD-Kore",
         },
+        elevenlabs_voices={
+            "es": "eleven-lucia-es",
+            "en": "eleven-lucia-en",
+        },
         avatar="headset.svg",
     )
 
 
-def test_persona_voice_picks_language_and_fallback(google_persona):
-    assert _persona_voice(google_persona, "es") == "es-ES-Chirp3-HD-Kore"
-    assert _persona_voice(google_persona, "gl") == "es-ES-Chirp3-HD-Kore"
-    assert _persona_voice(None, "es") == ""
+def test_persona_voice_picks_google_language_and_fallback(voice_settings, google_persona):
+    settings = voice_settings(VORTEX_TTS_HTTP_BASE_URL="http://127.0.0.1:8799")
+    assert _persona_voice(google_persona, "es", settings) == "es-ES-Chirp3-HD-Kore"
+    assert _persona_voice(google_persona, "gl", settings) == "es-ES-Chirp3-HD-Kore"
+    assert _persona_voice(None, "es", settings) == ""
+
+
+def test_stock_elevenlabs_uses_its_own_persona_map(voice_settings, google_persona):
+    settings = voice_settings(ELEVENLABS_API_KEY="el-x")
+    assert _persona_voice(google_persona, "es", settings) == "eleven-lucia-es"
+    assert _persona_voice(google_persona, "en", settings) == "eleven-lucia-en"
 
 
 def test_google_adapter_uses_persona_voice(voice_settings, google_persona):
@@ -71,8 +82,8 @@ def test_elevenlabs_keeps_its_own_voice(voice_settings, google_persona):
 
     settings = voice_settings(
         ELEVENLABS_API_KEY="el-x",
-        ELEVENLABS_VOICE_ID_DEFAULT="eleven-voice-id",
+        ELEVENLABS_VOICE_ID_DEFAULT="eleven-global-id",
     )
     tts = _make_tts(settings, state=_State(), persona=google_persona)
     assert isinstance(tts, ElevenLabsTTSService)
-    assert tts._settings.voice == "eleven-voice-id"
+    assert tts._settings.voice == "eleven-lucia-es"
