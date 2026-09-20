@@ -1,14 +1,16 @@
 """Talk to the hosted call log and product tables.
 
     uv run python scripts/supabase_logs.py ping
+    uv run python scripts/supabase_logs.py schema          # how to apply DDL
     uv run python scripts/supabase_logs.py push            # upload logs/calls.jsonl
     uv run python scripts/supabase_logs.py push --dry-run
     uv run python scripts/supabase_logs.py push-db         # sqlite product tables
     uv run python scripts/supabase_logs.py count           # remote row counts
 
 Needs ``SUPABASE_URL`` and ``SUPABASE_SERVICE_ROLE_KEY`` (or
-``SUPABASE_SECRET_KEY``) in ``.env``. Run ``database/supabase/schema.sql``
-in the SQL editor once before the first push.
+``SUPABASE_SECRET_KEY``) in ``.env``. There is no Alembic. Paste
+``database/supabase/schema.sql`` in the SQL editor once (or run
+``make supabase-schema``), then push.
 """
 
 from __future__ import annotations
@@ -21,7 +23,7 @@ from pathlib import Path
 
 from database.remote import count as remote_count
 from database.remote import upsert as upsert_table
-from vortex.observability.supabase_log import configured, ping, upsert_events
+from vortex.observability.supabase_log import apply_schema, configured, ping, upsert_events
 from vortex.settings import get_settings, reset_settings
 
 BATCH = 200
@@ -81,6 +83,29 @@ def _upsert_batches(table: str, rows: list[dict], on_conflict: str, *, dry_run: 
         sent += upsert_table(table, chunk, on_conflict)
         print(f"  {table}: {min(i + BATCH, len(rows))}/{len(rows)}", flush=True)
     return sent
+
+
+def cmd_schema() -> int:
+    """There is no migration runner. DDL is one SQL file, pasted once."""
+    from vortex.settings import REPO_ROOT
+
+    path = REPO_ROOT / "database" / "supabase" / "schema.sql"
+    print("No Alembic / supabase db push for this project.")
+    print("1. Open the SQL editor for the project (Dashboard → SQL → New).")
+    print(f"2. Paste and run: {path}")
+    print("3. Then: make supabase-ping && make supabase-push")
+    print("   Optional product rows: make supabase-push-db")
+    reset_settings()
+    if not configured():
+        print("SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are empty — not trying HTTP apply.")
+        return 0
+    try:
+        apply_schema()
+    except Exception as exc:
+        print(f"automatic apply failed (expected on hosted PostgREST): {exc}")
+        return 0
+    print("automatic apply: ok")
+    return 0
 
 
 def cmd_ping() -> int:
@@ -174,12 +199,14 @@ def cmd_count() -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Hosted call log (Supabase).")
-    parser.add_argument("command", choices=("ping", "push", "push-db", "count"))
+    parser.add_argument("command", choices=("ping", "schema", "push", "push-db", "count"))
     parser.add_argument("--log", type=Path, default=None)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     if args.command == "ping":
         return cmd_ping()
+    if args.command == "schema":
+        return cmd_schema()
     if args.command == "push-db":
         return cmd_push_db(dry_run=args.dry_run)
     if args.command == "count":

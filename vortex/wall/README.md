@@ -64,7 +64,3 @@ transcript (fixed 2026-09-19) — the `/wall/vorty-face` line was missing.
   directly (1:1, e.g. shrinking something as you scroll) vs. when to use a
   React Spring transition instead (a discrete on/off state, e.g. "has this
   scrolled into view").
-- `src/designs/design11/` is the Live Call detail view actually in use
-  (embedded by `LiveCallDetail.jsx`). `src/designs/` also holds ten other,
-  untouched historical concepts — don't "clean those up"; they're kept for
-  reference. Swapping which one the app embeds is one import.

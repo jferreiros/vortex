@@ -261,6 +261,15 @@
   color: var(--color-faint);
 }
 
+.home-call-turn {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-xs);
+  color: var(--color-mute);
+}
+
 .home-call-glyph {
   flex: 0 0 auto;
   color: var(--color-primary);
