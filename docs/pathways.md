@@ -23,9 +23,15 @@ clinic event -> trigger site -> PathwayEvent -> fire_pathway
   queueing through the existing `confirmation_calls` implementation.
 - `CallJob`: already present in main. It owns the prompt, answer classifier,
   acknowledgement and optional live-agent handoff.
-- `GET /api/wall/pathways/status`: read-only demo/ops proof of every runtime
-  pathway, its job wiring and live readiness. It deliberately does not replace
-  the existing `/api/wall/pathways` admin document endpoint.
+- `GET /api/wall/pathways/status`: read-only demo/ops proof of the code-level
+  runtime pathways, their job wiring and live readiness.
+- `GET /api/wall/pathways/runtime`: joins each UI editor row to the runtime
+  pathway that executes it, auto-registering editor-created rows so nothing
+  in the UI is dead.
+- `POST /api/wall/pathways/{id}/test-fire` and
+  `POST /api/wall/patterns/{id}/test-fire`: queue the corresponding call or
+  suggestion against synthetic `UI-TEST` data only, proving end-to-end wiring
+  without touching real appointments or dialling a real patient.
 
 ## Included pathways
 
@@ -33,6 +39,11 @@ clinic event -> trigger site -> PathwayEvent -> fire_pathway
 |---|---|---|---|---|
 | `appointment_cancelled` | single/range wall cancel; phone `CancelAction` | patient on cancelled visit | `cancellation_rebooking` | immediately |
 | `appointment_booked` | phone `BookAction` | patient on new visit | `appointment_confirmation` | day before |
+
+The wall editor rows `cancel-rebooking-call` and `booked-confirmation-call`
+map to those built-ins exactly. Additional editor-defined rows are
+auto-registered as follow-up pathways so every saved UI pathway has an
+executable backend path.
 
 For synthetic demo visits with no record phone,
 `VORTEX_CANCEL_CALL_FALLBACK_TO` can name a stand-in recipient. It is never
