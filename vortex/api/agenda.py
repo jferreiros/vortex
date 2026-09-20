@@ -158,6 +158,12 @@ async def _enqueue_call_now_rebooking_calls(bookings: list[cal.Booking]) -> int:
         person = patients.get(booking.patient_id)
         phone = (person.phone if person else "") or ""
         if not phone:
+            # Demo/testing aid: with no phone on record there is nobody to
+            # rebook, so production skips. VORTEX_CANCEL_CALL_FALLBACK_TO
+            # names a stand-in recipient; whoever sets it chooses (and must
+            # have the agreement of) the person who receives the call.
+            phone = settings.cancel_call_fallback_to.strip()
+        if not phone:
             continue
         provider = next(
             (p for p in catalogue.providers if p.provider_id == booking.provider_id), None
