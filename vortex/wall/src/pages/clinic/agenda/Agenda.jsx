@@ -172,10 +172,7 @@ export default function Agenda() {
     <div className="agenda-page">
       <SectionHeader
         title={data?.doctor?.name || "Schedule"}
-        subtitle={
-          data?.doctor?.specialty
-            || "Choose a specialty or doctor. The calendar shows the pack's appointments."
-        }
+        subtitle={data?.doctor?.specialty}
         action={
           <Button variant="secondary" type="button" onClick={() => setRangeOpen(true)}>
             Cancel

@@ -14,6 +14,16 @@
   font-size: var(--text-3xl);
 }
 
+.insights-page .home-kpis {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+@media (max-width: 720px) {
+  .insights-page .home-kpis {
+    grid-template-columns: 1fr;
+  }
+}
+
 .insights-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -27,6 +37,10 @@
   font-weight: var(--weight-semibold);
   letter-spacing: -0.02em;
   margin-bottom: var(--space-4);
+}
+
+.insights-panel-occupancy h2 {
+  margin-bottom: var(--space-6);
 }
 
 .insights-panel-sub {

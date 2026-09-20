@@ -151,7 +151,7 @@ function ServiceTile({ service, active, onClick }) {
         />
       </span>
       <span className="service-tile-meta">
-        {service.requested} pet · {noData ? "-" : service.providers} médico
+        {service.requested} req · {noData ? "-" : service.providers} doctor
         {service.providers === 1 ? "" : "s"}
       </span>
     </button>
@@ -167,37 +167,36 @@ function ServiceDetail({ service }) {
   if (pct == null) {
     return (
       <p className="service-detail-empty">
-        {service.name}: se pidió cita pero no quedó registrado ningún hueco ofrecido — no se
-        puede calcular la ocupación en este período.
+        {service.name}: appointments were requested but no offered slot was ever logged — occupancy
+        can't be calculated for this period.
       </p>
     );
   }
   if (extra <= 0) {
     return (
       <p className="service-detail-empty">
-        {service.name} tiene margen: {service.providers || "0"} médico{service.providers === 1 ? "" : "s"}{" "}
-        cubren la demanda pedida ({pct}%).
+        {service.name} has room to spare: {service.providers || "0"} doctor{service.providers === 1 ? "" : "s"}{" "}
+        cover the requested demand ({pct}%).
       </p>
     );
   }
   return (
     <div className="service-detail">
       <p className="service-detail-head">
-        {service.name}: {service.requested} peticiones contra {service.offered} huecos ofrecidos
-        ({pct}% de ocupación)
-        {service.declined_full > 0 ? `, ${service.declined_full} rechazadas por no quedar hueco` : ""}
+        {service.name}: {service.requested} requests against {service.offered} slots offered
+        ({pct}% occupancy)
+        {service.declined_full > 0 ? `, ${service.declined_full} declined for being full` : ""}
         .
       </p>
       <p className="service-detail-calc">
-        Con <strong>{extra} médico{extra === 1 ? "" : "s"} más</strong> de esta especialidad
-        (sobre los {service.providers} actuales) se habría podido atender a todos los que la
-        pidieron.
+        With <strong>{extra} more doctor{extra === 1 ? "" : "s"}</strong> in this specialty
+        (on top of the {service.providers} on staff) every request would have been met.
       </p>
     </div>
   );
 }
 
-// Ocupación por servicio: pick a centre (or all of them), see every
+// Occupancy by service: pick a site (or all of them), see every
 // specialty's demand-vs-capacity in one glance, tap a tile for the hiring
 // math behind it. Data comes precomputed in the same business-insights
 // payload as the rest of the page — no calculation duplicated here.
@@ -210,7 +209,7 @@ function ServiceOccupancy({ occupancy }) {
 
   return (
     <div className="service-occupancy">
-      <div className="home-toolbar" role="tablist" aria-label="Centro">
+      <div className="home-toolbar" role="tablist" aria-label="Site">
         <button
           type="button"
           className={`home-chip ${site === "all" ? "on" : ""}`}
@@ -219,7 +218,7 @@ function ServiceOccupancy({ occupancy }) {
             setOpenId(null);
           }}
         >
-          Todos los centros
+          All
         </button>
         {sites.map((s) => (
           <button
@@ -250,7 +249,7 @@ function ServiceOccupancy({ occupancy }) {
           {active && <ServiceDetail service={active} />}
         </>
       ) : (
-        <p className="insights-empty">Sin peticiones de especialidad en este período.</p>
+        <p className="insights-empty">No specialty requests in this period.</p>
       )}
     </div>
   );
@@ -333,7 +332,6 @@ export default function Insights() {
   const heatmap = data.heatmap;
   const heatmapView = selectHeatmapView(heatmap, site);
   const unmetPct = calls ? Math.round((100 * (unmet.unmet_total ?? 0)) / calls) : 0;
-  const topReason = unmet.buckets?.[0];
   // Seven-point trend ending on the value shown: the earlier points sit
   // around it so the sparkline reads as a trend at any scale (7 or 90 days).
   const trend = (value, shape) => shape.map((k) => Math.round((value || 1) * k)).concat(value || 0);
@@ -356,7 +354,6 @@ export default function Insights() {
             ))}
           </div>
         </div>
-        <p className="home-lead">What the line could not honour, and where the agenda is leaking.</p>
       </header>
 
       <div className="home-kpis">
@@ -379,12 +376,6 @@ export default function Insights() {
           hint={`${cancel.relocated ?? 0} rebooked · ${cancel.lost ?? 0} lost`}
           spark={trend(cancel.recovery_rate_pct, [0.69, 0.78, 0.74, 0.87, 0.94, 0.97])}
         />
-        <Kpi
-          label="Top miss"
-          value={topReason ? `${topReason.pct}%` : "—"}
-          hint={topReason?.label ?? "No unmet demand"}
-          spark={trend(topReason?.pct, [0.85, 0.9, 0.81, 0.96, 0.94, 0.98])}
-        />
       </div>
 
       <div className="insights-grid">
@@ -402,11 +393,8 @@ export default function Insights() {
           {cancel.suggested_action ? <p className="insights-panel-sub insights-note">{cancel.suggested_action}</p> : null}
         </Card>
 
-        <Card padding="lg" className="insights-panel">
+        <Card padding="lg" className="insights-panel insights-panel-occupancy">
           <h2>Occupancy by service</h2>
-          <p className="insights-panel-sub">
-            Toca un servicio para ver cuantos médicos más harían falta para atender toda la demanda.
-          </p>
           <ServiceOccupancy occupancy={data.occupancy} />
         </Card>
       </div>
