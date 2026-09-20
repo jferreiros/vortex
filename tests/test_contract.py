@@ -134,7 +134,6 @@ SAMPLE_ARGS: dict[str, dict] = {
     "find_provider": {"spoken_name": "Sáez"},
     "clinic_facts": {"weekday": "saturday"},
     "submit_action": {"action": {"kind": "no-action", "reason": "out_of_scope"}},
-    "transfer_call": {"reason": "out_of_scope"},
 }
 
 

@@ -9,7 +9,6 @@ const DEFAULTS = {
   minimumBookingLeadHours: 24,
   patientIdentificationFieldsRequired: 1,
   callTimeCapMinutes: 3,
-  transferNumber: "",
 };
 
 const LEAD_OPTIONS_HOURS = [2, 3, 4, 5, 6, 7, 8, 12, 24, 48, 72, 96];
@@ -29,7 +28,6 @@ function fromApi(json) {
     patientIdentificationFieldsRequired:
       json.patientIdentificationFieldsRequired ?? DEFAULTS.patientIdentificationFieldsRequired,
     callTimeCapMinutes: json.callTimeCapMinutes ?? DEFAULTS.callTimeCapMinutes,
-    transferNumber: json.transferNumber ?? DEFAULTS.transferNumber,
   };
 }
 
@@ -189,21 +187,6 @@ export default function Settings() {
                 </div>
                 <div className="settings-cap-display">
                   <input type="text" value={`${settings.callTimeCapMinutes} min`} readOnly disabled className="ui-cap-input" />
-                </div>
-              </div>
-              <div className="settings-row settings-row-cap">
-                <div>
-                  <span className="settings-row-label">Teléfono de transferencia</span>
-                  <span className="settings-row-desc">Where the agent hands a caller over. Empty means transfers are off.</span>
-                </div>
-                <div className="settings-cap-display">
-                  <input
-                    type="tel"
-                    className="ui-cap-input settings-transfer-input"
-                    value={settings.transferNumber}
-                    onChange={(e) => updateSetting("transferNumber", e.target.value)}
-                    placeholder="+34600000000"
-                  />
                 </div>
               </div>
             </div>
