@@ -9,7 +9,6 @@ orthopaedic surgeon. A doctor the catalogue knows outranks that residue, in
 
 from __future__ import annotations
 
-import json
 from datetime import datetime
 
 from vortex.clinic.client import FakeClinicClient
@@ -28,7 +27,7 @@ def make_ctx(tmp_path) -> ToolContext:
         now=datetime(2026, 9, 18, 9, 0, tzinfo=MADRID),
         from_number="+34612345678",
         clinic=FakeClinicClient(),
-        log=CallLog("CA-routing", tmp_path / "calls.jsonl"),
+        log=CallLog("CA-routing"),
     )
 
 
@@ -265,11 +264,7 @@ async def test_the_override_is_logged_with_what_the_table_had_said(tmp_path):
     ctx = make_ctx(tmp_path)
     await triage(ctx, TriageInput(complaint="a gynaecology appointment"))
 
-    events = [
-        json.loads(line)
-        for line in ctx.log.path.read_text().splitlines()
-        if line.strip() and "triage.specialty_named_by_caller" in line
-    ]
+    events = [e for e in ctx.log.events if e["kind"] == "triage.specialty_named_by_caller"]
     assert events
     assert events[-1]["specialty_id"] == "gynaecology"
     assert events[-1]["table_said"] == "general_practice"
@@ -378,10 +373,6 @@ async def test_the_transcript_override_says_where_it_came_from(tmp_path):
     caller_said(ctx, "the earliest physiotherapy appointment you have")
     await triage(ctx, TriageInput(complaint="my back has been sore"))
 
-    events = [
-        json.loads(line)
-        for line in ctx.log.path.read_text().splitlines()
-        if line.strip() and "triage.specialty_named_by_caller" in line
-    ]
+    events = [e for e in ctx.log.events if e["kind"] == "triage.specialty_named_by_caller"]
     assert events[-1]["specialty_id"] == "physiotherapy"
     assert events[-1]["from_transcript"] is True

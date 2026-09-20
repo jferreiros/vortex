@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import base64
 import json
-from pathlib import Path
 
 from starlette.testclient import TestClient
 
@@ -37,7 +36,7 @@ def _media(seq: int, chunk: int) -> str:
     )
 
 
-def test_one_call_over_the_wire(offline_settings) -> None:
+def test_one_call_over_the_wire(offline_settings, _stub_call_events) -> None:
     app = create_app(offline_settings)
     client = TestClient(app)
 
@@ -102,9 +101,9 @@ def test_one_call_over_the_wire(offline_settings) -> None:
             )
         )
 
-    # The call log tells the whole story, tagged with the call_id.
-    log_path = Path(offline_settings.calls_log_path)
-    lines = [json.loads(line) for line in log_path.read_text().splitlines()]
+    # The call log tells the whole story, tagged with the call_id. Offline it
+    # is caught in ``_stub_call_events`` instead of reaching call_events.
+    lines = list(_stub_call_events)
     kinds = [line["kind"] for line in lines if line["call_id"] == CALL_SID]
     assert kinds[0] == "call.started"
     assert "submit.result" in kinds

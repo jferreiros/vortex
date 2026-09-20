@@ -5,12 +5,13 @@ agent resolved on its own, when they land in the day, and how full the
 diary already is.
 
 Calls, resolution rate and volume come from ``synthetic-data/``.
-``synthetic-data/logs/*.jsonl`` is CallLog-shaped exactly like the live
-``logs/calls.jsonl`` (see ``synthetic-data/README.md``), so it is read with
-the same ``calllog.read_recent`` + ``view.build_calls`` pipeline the console
-uses for a real call, one file at a time, concatenated. ``probe:`` calls
-(tool-shape smoke tests, empty ``from_number``, no real caller) are excluded
-from every count here — they are not a patient call.
+``synthetic-data/logs/*.jsonl`` is CallLog-shaped exactly like a row of
+``public.call_events`` (see ``synthetic-data/README.md``), so it goes through
+the same ``view.build_calls`` pipeline the console uses for a real call, one
+file at a time, concatenated. These fixture files are the only JSONL left:
+real call events live in Postgres. ``probe:`` calls (tool-shape smoke tests,
+empty ``from_number``, no real caller) are excluded from every count here —
+they are not a patient call.
 
 Occupancy is different: a call log never carries the capacity a booking was
 made against, only the booking itself, so it can't be read the same way.
@@ -32,7 +33,6 @@ from statistics import median
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from vortex.observability.calllog import read_recent
 from vortex.observability.view import CallCard, build_calls
 from vortex.settings import REPO_ROOT
 
@@ -69,7 +69,14 @@ def load_synthetic_cards() -> list[CallCard]:
     """Every real (non-probe) call in ``synthetic-data/logs/``, newest first."""
     events: list[dict[str, Any]] = []
     for path in sorted(SYNTHETIC_LOG_DIR.glob("*.jsonl")):
-        events.extend(read_recent(path, limit=100_000))
+        for raw in path.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line:
+                continue
+            try:
+                events.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
     cards = build_calls(events)
     return [c for c in cards if not c.call_id.startswith("probe:")]
 
@@ -248,10 +255,8 @@ def _busy_from_database() -> dict[tuple[str, str, str], int]:
     """
     try:
         from database import db
-        from vortex.settings import get_settings
 
-        with db.connection(get_settings().product_db_path) as conn:
-            rows = db.list_appointments(conn)
+        rows = db.list_appointments()
     except Exception:
         return {}
 

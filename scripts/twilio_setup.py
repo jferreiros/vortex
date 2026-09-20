@@ -64,6 +64,7 @@ EU_ISO_ORDER = (
     "MT",
 )
 
+
 def _err_snippet(response: httpx.Response) -> str:
     return response.text[:600]
 
@@ -202,9 +203,7 @@ def main() -> int:
                     phone = str(row.get("phone_number") or "")
                     if not is_european_e164(phone):
                         continue
-                    print(
-                        f"  {iso}/{row.get('_kind')} {phone}  {row.get('friendly_name') or ''}"
-                    )
+                    print(f"  {iso}/{row.get('_kind')} {phone}  {row.get('friendly_name') or ''}")
                     found.append((iso, row))
                 if found and iso == "ES":
                     break
@@ -224,9 +223,7 @@ def main() -> int:
                 address_sid, address_iso = _first_address(http, sid)
                 if address_sid:
                     print(f"using AddressSid={address_sid} country={address_iso or '?'}")
-                ordered = sorted(
-                    found, key=lambda item: 0 if item[0] == address_iso else 1
-                )
+                ordered = sorted(found, key=lambda item: 0 if item[0] == address_iso else 1)
                 bought = None
                 for iso, row in ordered:
                     phone = str(row.get("phone_number") or "")

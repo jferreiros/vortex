@@ -222,8 +222,8 @@ def test_solved_calls_are_not_queued() -> None:
     assert analyze_call(events) is None
 
 
-def test_store_is_idempotent_when_the_same_call_is_analyzed_twice(tmp_path: Path) -> None:
-    store = RebookingStore(tmp_path / "rebooking.sqlite3")
+def test_store_is_idempotent_when_the_same_call_is_analyzed_twice(fake_store) -> None:
+    store = RebookingStore()
     [request] = analyze_calls(_book_events() + _book_events())
 
     first = store.add(request)
@@ -243,8 +243,8 @@ def test_latest_call_helper_only_queues_the_last_call() -> None:
     assert request.call_id == CALL_ID
 
 
-async def test_reopened_slot_creates_draft_booking(tmp_path: Path) -> None:
-    store = RebookingStore(tmp_path / "rebooking.sqlite3")
+async def test_reopened_slot_creates_draft_booking(fake_store) -> None:
+    store = RebookingStore()
     request = analyze_call(_book_events())
     assert request is not None
     store.add(request)
@@ -263,8 +263,8 @@ async def test_reopened_slot_creates_draft_booking(tmp_path: Path) -> None:
     assert matched.draft_action.slot == matched.matched_slot.start
 
 
-async def test_reopened_slot_can_draft_a_reschedule(tmp_path: Path) -> None:
-    store = RebookingStore(tmp_path / "rebooking.sqlite3")
+async def test_reopened_slot_can_draft_a_reschedule(fake_store) -> None:
+    store = RebookingStore()
     request = analyze_call(_reschedule_events())
     assert request is not None
     assert request.intent == "reschedule"
@@ -280,8 +280,8 @@ async def test_reopened_slot_can_draft_a_reschedule(tmp_path: Path) -> None:
     assert matched.draft_action.provider_id == "PR01"
 
 
-async def test_a_window_that_ended_today_is_never_queried_again(tmp_path: Path) -> None:
-    store = RebookingStore(tmp_path / "rebooking.sqlite3")
+async def test_a_window_that_ended_today_is_never_queried_again(fake_store) -> None:
+    store = RebookingStore()
     request = analyze_call(_book_events())
     assert request is not None
     store.add(request)
@@ -295,8 +295,8 @@ async def test_a_window_that_ended_today_is_never_queried_again(tmp_path: Path) 
     assert clinic.windows == []
 
 
-async def test_the_queried_window_starts_the_day_after_the_check(tmp_path: Path) -> None:
-    store = RebookingStore(tmp_path / "rebooking.sqlite3")
+async def test_the_queried_window_starts_the_day_after_the_check(fake_store) -> None:
+    store = RebookingStore()
     events = _book_events()
     events[3]["args"] |= {"date_from": "2026-09-16", "date_to": "2026-09-20"}
     request = analyze_call(events)
@@ -311,8 +311,8 @@ async def test_the_queried_window_starts_the_day_after_the_check(tmp_path: Path)
     assert matched.matched_slot.start.astimezone(MADRID).date() > NOW.date()
 
 
-async def test_a_rejected_query_does_not_abort_the_rest_of_the_batch(tmp_path: Path) -> None:
-    store = RebookingStore(tmp_path / "rebooking.sqlite3")
+async def test_a_rejected_query_does_not_abort_the_rest_of_the_batch(fake_store) -> None:
+    store = RebookingStore()
     for events in (_book_events(), _reschedule_events()):
         request = analyze_call(events)
         assert request is not None
@@ -326,8 +326,8 @@ async def test_a_rejected_query_does_not_abort_the_rest_of_the_batch(tmp_path: P
     assert len(store.pending()) == 1
 
 
-async def test_a_transport_failure_leaves_the_row_pending(tmp_path: Path) -> None:
-    store = RebookingStore(tmp_path / "rebooking.sqlite3")
+async def test_a_transport_failure_leaves_the_row_pending(fake_store) -> None:
+    store = RebookingStore()
     request = analyze_call(_book_events())
     assert request is not None
     store.add(request)
@@ -338,9 +338,9 @@ async def test_a_transport_failure_leaves_the_row_pending(tmp_path: Path) -> Non
 
 
 async def test_the_time_range_is_read_in_madrid_whatever_offset_the_slot_carries(
-    tmp_path: Path,
+    fake_store,
 ) -> None:
-    store = RebookingStore(tmp_path / "rebooking.sqlite3")
+    store = RebookingStore()
     events = _book_events()
     events[3]["args"] |= {"time_from": "10:00", "time_to": "11:00"}
     request = analyze_call(events)
@@ -355,7 +355,7 @@ async def test_the_time_range_is_read_in_madrid_whatever_offset_the_slot_carries
     assert time(10, 0) <= matched.matched_slot.start.astimezone(MADRID).time() < time(11, 0)
 
 
-def test_wall_cancel_request_queues_a_reschedule_callback(tmp_path: Path) -> None:
+def test_wall_cancel_request_queues_a_reschedule_callback(fake_store) -> None:
     """A hand-cancelled slot becomes one pending reschedule: deterministic id
     and WALLC- call_id off the slot key, window from tomorrow to slot+30d."""
     from vortex.diary.rebooking import wall_cancel_request
@@ -378,7 +378,7 @@ def test_wall_cancel_request_queues_a_reschedule_callback(tmp_path: Path) -> Non
     assert request.date_to == date(2026, 10, 22)
     assert request.call_id.startswith("WALLC-")
 
-    store = RebookingStore(tmp_path / "rebooking.sqlite3")
+    store = RebookingStore()
     store.add(request)
     store.add(request)  # same slot confirmed twice stays one row
     assert [row.request_id for row in store.pending()] == [request.request_id]

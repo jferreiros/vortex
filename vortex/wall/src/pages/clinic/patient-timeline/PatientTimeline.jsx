@@ -2,8 +2,6 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import Card from "../../../components/ui/Card";
 import Button from "../../../components/ui/Button";
-import patientTimelines from "../../../data/patientTimelines.json";
-import patternsData from "../../../data/patterns.json";
 import shapeTypesData from "../../../data/shapeTypes.json";
 import { findMatchingPattern } from "../patterns/matchPattern";
 import "../live-calls/live-call-detail.css";
@@ -13,8 +11,20 @@ import "./patient-timeline.css";
 // /clinic/patient-timeline/:patientId while this is being built out. Meant
 // to eventually open when clicking a call in Live Calls: sort that patient's
 // calls/messages/visits by time, filter by specialty, and if they match a
-// pattern (see src/data/patterns.json), show the suggested next step ghosted
+// pattern (GET /api/wall/patterns), show the suggested next step ghosted
 // at the end of the timeline, plus a separate "why" box explaining the match.
+
+// What a patient reads as before GET /api/wall/patient-timeline answers,
+// and what a patient with no history reads as: their own id and nothing
+// else. There is no local pack of example patients any more.
+function emptyPatient(patientId) {
+  return { patientId, name: patientId, events: [], referrals: [] };
+}
+
+//: The patterns document before GET /api/wall/patterns answers. No pattern
+//: matches an empty list, so the page simply shows no suggestion until it
+//: lands.
+const EMPTY_PATTERNS_DOC = { patterns: [], specialtyRecallDays: {} };
 
 const FAMILY_EMOJI = { call: "☎️", visit: "🏥", message: "📥", condition: "🔍" };
 const SUBFAMILY_ARROW = { incoming: "↙️", outgoing: "↗️" };
@@ -176,25 +186,13 @@ function TimelineArrow({ gridColumn }) {
 export default function PatientTimeline() {
   const { patientId } = useParams();
   const navigate = useNavigate();
-  const fallback = patientTimelines.patients.find((p) => p.patientId === patientId) || {
-    patientId,
-    name: patientId,
-    events: [],
-    referrals: [],
-  };
-
-  const [patient, setPatient] = useState(fallback);
-  const [patternsDoc, setPatternsDoc] = useState(patternsData);
+  const [patient, setPatient] = useState(() => emptyPatient(patientId));
+  const [patternsDoc, setPatternsDoc] = useState(EMPTY_PATTERNS_DOC);
   const [suggestionStatus, setSuggestionStatus] = useState(null);
   const [rejectedMap, setRejectedMap] = useState(loadRejectedMap);
 
   useEffect(() => {
-    const nextFallback = patientTimelines.patients.find((p) => p.patientId === patientId) || {
-      patientId,
-      name: patientId,
-      events: [],
-      referrals: [],
-    };
+    const nextFallback = emptyPatient(patientId);
     setPatient(nextFallback);
     setSuggestionStatus(null);
     let cancelled = false;
@@ -218,7 +216,7 @@ export default function PatientTimeline() {
     fetch("/api/wall/patterns")
       .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then((json) => {
-        if (!cancelled && Array.isArray(json?.patterns)) setPatternsDoc({ ...patternsData, ...json });
+        if (!cancelled && Array.isArray(json?.patterns)) setPatternsDoc(json);
       })
       .catch(() => {});
     return () => {

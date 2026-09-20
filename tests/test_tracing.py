@@ -127,9 +127,7 @@ def test_call_input_exports_no_number_and_no_raw_call_id(clean_langfuse, tmp_pat
             "customParameters": {"from_number": "+34600111222", "problem_id": "p1"},
         }
     )
-    session = CallSession.open(
-        start, settings=Settings(calls_log_path=tmp_path / "calls.jsonl"), now=NOW
-    )
+    session = CallSession.open(start, settings=Settings(), now=NOW)
     payload = tracing._call_input(session)
     assert payload["call_id"] == tracing.pseudonym("CA-trace")
     assert payload["from_number"] == tracing.pseudonym("+34600111222")
@@ -153,9 +151,7 @@ def _open_session(tmp_path) -> CallSession:
             "customParameters": {"from_number": "+34600111222"},
         }
     )
-    return CallSession.open(
-        start, settings=Settings(calls_log_path=tmp_path / "calls.jsonl"), now=NOW
-    )
+    return CallSession.open(start, settings=Settings(), now=NOW)
 
 
 def test_trace_call_is_a_noop_without_keys(clean_langfuse, tmp_path) -> None:

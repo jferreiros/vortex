@@ -39,7 +39,7 @@ served at `/wall`, `/clinic` shell). Three sections in the `/clinic` nav:
 
 All new surface is additive. No contract signature changes.
 
-### New/changed events in `logs/calls.jsonl`
+### New/changed events in `public.call_events`
 
 | kind | fields | emitted by |
 | --- | --- | --- |
@@ -53,17 +53,18 @@ All new surface is additive. No contract signature changes.
 | --- | --- | --- |
 | `GET /api/wall/calls/active` | board (`live.py`) | `[{call_id, from_masked, started_ts, stage, intent, phase, tools_run}]` — calls without `call.ended`. |
 | `GET /recordings/{call_id}` | line (`server.py`) | the WAV file, `audio/wav`, `Content-Disposition` for download. |
-| `GET /api/wall/analytics?days=N` | board | aggregates read from SQLite: status mix, duration buckets, talk ratio, words/turn, TTFB p50/p95, outcome funnel, cost. |
+| `GET /api/wall/analytics?days=N` | board | aggregates read from Supabase: status mix, duration buckets, talk ratio, words/turn, TTFB p50/p95, outcome funnel, cost. |
 
 ### Persistence
 
 - Recordings: `recordings/{call_id}.wav`, written by the line at `call.ended`.
   Git-ignored. `VORTEX_RECORDINGS_DIR` overrides the path.
-- SQLite: `logs/calls.db` via `vortex/observability/store.py`. The JSONL stays
-  the source of truth; the DB is a query layer rebuilt by re-ingesting.
-  Tables: `calls`, `turns`, `tool_calls`, `submissions`, `usage`, `events`.
-  `store.ingest(log_path, db_path)` is idempotent (keyed on `call_id`+`kind`+`ts`).
-  Board ingests on startup and on each poll tick (cheap: offset-tracked tail).
+- Everything else: Supabase/Postgres, the one persistent store. The line writes
+  `public.call_events` as the call happens; the aggregate tables (`calls`,
+  `turns`, `tool_calls`, `submissions`, `usage`) are derived from it in the same
+  database, so there is nothing to ingest and nothing to rebuild. Schema lives
+  only in `database/supabase/migrations/NNNN_*.sql`, applied with
+  `make supabase-migrate`. There is no SQLite file and no JSONL log.
 
 ## Workstreams — one worktree, one PR each
 
@@ -74,7 +75,7 @@ All new surface is additive. No contract signature changes.
 | `wt-cc-design` | `feat/wall-shadcn-ui` | `vortex/wall` toolchain: Tailwind, `components.json`, `src/components/elevenlabs/`, `package.json`, token mapping | pages, routes |
 | `wt-cc-live` | `feat/clinic-live-calls` | `src/pages/clinic/LiveCalls*`, `src/lib/` additions, router entry | `package.json`, `vortex/` python |
 | `wt-cc-calls` | `feat/clinic-calls-table` | `src/pages/clinic/Calls*`, `src/lib/` additions, router entry | `package.json` (adds deps only if unavoidable — prefer the design worktree's components), `vortex/` python |
-| `wt-cc-analytics` | `feat/clinic-analytics` | `vortex/observability/store.py` + ingest + `/api/wall/analytics`, `src/pages/clinic/Insights*` extension, router entry | `vortex/line/`, other pages |
+| `wt-cc-analytics` | `feat/clinic-analytics` | `vortex/observability/store.py` + `/api/wall/analytics`, `src/pages/clinic/Insights*` extension, router entry | `vortex/line/`, other pages |
 
 Coordination rules for the parallel PRs:
 
@@ -89,8 +90,8 @@ Coordination rules for the parallel PRs:
   wrapper) to swap.
 - Every PR: `make test`, `make lint`, `npm run build` where applicable.
   New copy strings in `explain.py` style — plain words, no jargon.
-- No shared state between calls (hard rule 3). The store reads the log; the
-  line never reads the store.
+- No shared state between calls (hard rule 3). The line only ever appends its
+  own events; it never reads another call's rows back.
 
 ## Reference products (why each choice)
 

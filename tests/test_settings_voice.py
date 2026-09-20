@@ -1,4 +1,4 @@
-"""Provider selection from the environment: LLM presets and the TTS pair.
+"""Provider selection from the environment: the LLM presets and the one TTS.
 
 Nothing here touches the network. These tests pin the two things a teammate
 changes without reading the code: which variable picks a provider, and which
@@ -21,28 +21,20 @@ VOICE_KEYS = (
     "LLM_ALT_MODEL",
     "HELMCODE_BASE_URL",
     "HELMCODE_API_KEY",
-    "CLOUDFLARE_ACCOUNT_ID",
-    "CLOUDFLARE_API_TOKEN",
-    "VERCEL_AI_GATEWAY_KEY",
+    "AZURE_OPENAI_ENDPOINT",
+    "AZURE_OPENAI_API_KEY",
+    "AZURE_OPENAI_DEPLOYMENT",
+    "AZURE_OPENAI_API_VERSION",
     "ARBITER_PROVIDER",
     "ARBITER_BASE_URL",
     "ARBITER_API_KEY",
     "ARBITER_MODEL",
-    "GOOGLE_APPLICATION_CREDENTIALS",
-    "GOOGLE_TTS_CREDENTIALS_JSON",
-    "GOOGLE_TTS_VOICE_EN",
-    "GOOGLE_TTS_VOICE_ES",
-    "GOOGLE_TTS_VOICE_CA",
-    "GOOGLE_TTS_VOICE_GL",
-    "GOOGLE_TTS_VOICE_EU",
-    "GOOGLE_TTS_GEMINI_MODEL",
-    "GOOGLE_TTS_STANDARD_FALLBACK",
     "ELEVENLABS_API_KEY",
     "ELEVENLABS_VOICE_ID_ES",
+    "ELEVENLABS_VOICE_ID_DEFAULT",
     "ELEVENLABS_MODEL",
     "ELEVENLABS_BASE_URL",
     "VORTEX_TTS_PROVIDER",
-    "VORTEX_TTS_PROVIDER_ALT",
     "VORTEX_VOICE_MODE",
     "VORTEX_AIC_FILTER",
     "AIC_SDK_LICENSE",
@@ -55,9 +47,6 @@ VOICE_KEYS = (
     "LANGFUSE_TRACING_ENVIRONMENT",
     "HF_TOKEN",
     "VORTEX_ENV",
-    "GOOGLE_API_KEY",
-    "GEMINI_LIVE_MODEL",
-    "GEMINI_LIVE_VOICE",
 )
 
 
@@ -89,25 +78,39 @@ def test_helmcode_is_the_default_preset(clean_env) -> None:
     assert s.llm_api_key == ""  # no key yet
 
 
-def test_each_preset_fills_base_url_and_model(clean_env) -> None:
-    s = _settings(clean_env, LLM_PROVIDER="custom")
-    assert s.llm_base_url == ""  # custom brings its own
-    assert s.llm_model == "Qwen/Qwen3-30B-A3B-Instruct-2507"
+def test_azure_builds_the_openai_compatible_v1_base_url(clean_env) -> None:
+    """Verified live on 20 Sep 2026: <endpoint>/openai/v1 with a bearer key."""
+    s = _settings(
+        clean_env,
+        LLM_PROVIDER="azure",
+        AZURE_OPENAI_ENDPOINT="https://hackspain-vortex.openai.azure.com",
+        AZURE_OPENAI_API_KEY="az-x",
+    )
+    assert s.llm_base_url == "https://hackspain-vortex.openai.azure.com/openai/v1"
+    assert s.llm_api_key == "az-x"
+    # The deployment name is what Azure calls a model.
+    assert s.llm_model == "gpt-4.1"
+    assert _settings(clean_env, AZURE_OPENAI_DEPLOYMENT="gpt-4.1-mini").llm_model == "gpt-4.1-mini"
+    # A trailing slash, and an endpoint that already carries the path, both fold.
+    assert (
+        _settings(
+            clean_env, AZURE_OPENAI_ENDPOINT="https://hackspain-vortex.openai.azure.com/"
+        ).llm_base_url
+        == "https://hackspain-vortex.openai.azure.com/openai/v1"
+    )
+    assert (
+        _settings(
+            clean_env, AZURE_OPENAI_ENDPOINT="https://hackspain-vortex.openai.azure.com/openai/v1"
+        ).llm_base_url
+        == "https://hackspain-vortex.openai.azure.com/openai/v1"
+    )
 
-    s = _settings(clean_env, LLM_PROVIDER="vercel")
-    assert s.llm_base_url == "https://ai-gateway.vercel.sh/v1"
-    assert s.llm_model == "anthropic/claude-haiku-4.5"
 
-    s = _settings(clean_env, LLM_PROVIDER="cloudflare", CLOUDFLARE_ACCOUNT_ID="acc-123")
-    assert s.llm_base_url == "https://api.cloudflare.com/client/v4/accounts/acc-123/ai/v1"
-    assert s.llm_model == "@cf/qwen/qwen3-30b-a3b-fp8"
-
-
-def test_cloudflare_without_an_account_id_has_no_base_url(clean_env) -> None:
-    """Half a Cloudflare URL would look configured and 404 on the first call."""
-    s = _settings(clean_env, LLM_PROVIDER="cloudflare", CLOUDFLARE_API_TOKEN="cf-x")
+def test_azure_without_an_endpoint_has_no_base_url(clean_env) -> None:
+    """Half an Azure URL would look configured and 404 on the first call."""
+    s = _settings(clean_env, LLM_PROVIDER="azure", AZURE_OPENAI_API_KEY="az-x")
     assert s.llm_base_url == ""
-    assert s.llm_api_key == "cf-x"
+    assert s.llm_api_key == "az-x"
     assert s.voice_is_pipecat is False
 
 
@@ -117,24 +120,21 @@ def test_helmcode_base_url_has_its_own_override(clean_env) -> None:
 
 
 def test_each_preset_reads_its_own_key_variable(clean_env) -> None:
-    """All four keys can sit in one .env; the preset picks which one is used."""
+    """Both keys can sit in one .env; the preset picks which one is used."""
     keys = {
         "HELMCODE_API_KEY": "helm-x",
-        "CLOUDFLARE_API_TOKEN": "cf-x",
-        "VERCEL_AI_GATEWAY_KEY": "vercel-x",
+        "AZURE_OPENAI_API_KEY": "az-x",
         "LLM_API_KEY": "",
     }
     assert _settings(clean_env, LLM_PROVIDER="helmcode", **keys).llm_api_key == "helm-x"
-    assert _settings(clean_env, LLM_PROVIDER="cloudflare").llm_api_key == "cf-x"
-    assert _settings(clean_env, LLM_PROVIDER="vercel").llm_api_key == "vercel-x"
-    assert _settings(clean_env, LLM_PROVIDER="custom").llm_api_key == ""
+    assert _settings(clean_env, LLM_PROVIDER="azure").llm_api_key == "az-x"
 
 
 def test_the_overrides_always_win(clean_env) -> None:
     s = _settings(
         clean_env,
-        LLM_PROVIDER="vercel",
-        VERCEL_AI_GATEWAY_KEY="vercel-x",
+        LLM_PROVIDER="azure",
+        AZURE_OPENAI_API_KEY="az-x",
         LLM_BASE_URL="https://mine.example.invalid/v1",
         LLM_API_KEY="mine-x",
         LLM_MODEL="mine/model-1",
@@ -159,13 +159,13 @@ def test_the_arbiter_resolves_like_the_llm(clean_env) -> None:
 
     s = _settings(
         clean_env,
-        ARBITER_PROVIDER="cloudflare",
-        CLOUDFLARE_ACCOUNT_ID="acc-9",
-        CLOUDFLARE_API_TOKEN="cf-x",
+        ARBITER_PROVIDER="azure",
+        AZURE_OPENAI_ENDPOINT="https://judge.openai.azure.com",
+        AZURE_OPENAI_API_KEY="az-x",
         ARBITER_MODEL="my/judge",
     )
-    assert s.arbiter_base_url == "https://api.cloudflare.com/client/v4/accounts/acc-9/ai/v1"
-    assert s.arbiter_api_key == "cf-x"
+    assert s.arbiter_base_url == "https://judge.openai.azure.com/openai/v1"
+    assert s.arbiter_api_key == "az-x"
     assert s.arbiter_model == "my/judge"
     # The arbiter is its own choice: the chat model stays on its own preset.
     assert s.llm_provider == "helmcode"
@@ -232,112 +232,50 @@ def test_no_keys_means_stub(clean_env) -> None:
     assert _settings(clean_env).voice_is_pipecat is False
 
 
-def test_google_gates_on_the_credentials_path(clean_env) -> None:
-    s = _settings(
-        clean_env,
-        SONIOX_API_KEY="soniox-x",
-        HELMCODE_API_KEY="helm-x",
-    )
-    assert s.voice_is_pipecat is False  # no Google credentials yet
-
-    s = _settings(clean_env, GOOGLE_APPLICATION_CREDENTIALS="google-tts.json")
-    assert s.has_google_tts_credentials is True
-    assert s.voice_is_pipecat is True
-
-    # An ElevenLabs key does not stand in for the Google credentials.
-    s = _settings(clean_env, GOOGLE_APPLICATION_CREDENTIALS="", ELEVENLABS_API_KEY="el-x")
-    assert s.voice_is_pipecat is False
-
-
-def test_inline_json_credentials_count_too(clean_env) -> None:
-    s = _settings(
-        clean_env,
-        SONIOX_API_KEY="soniox-x",
-        HELMCODE_API_KEY="helm-x",
-        GOOGLE_TTS_CREDENTIALS_JSON='{"type": "service_account"}',
-    )
-    assert s.google_application_credentials == ""
-    assert s.has_google_tts_credentials is True
-    assert s.voice_is_pipecat is True
-
-
 def test_a_missing_llm_base_url_keeps_the_stub(clean_env) -> None:
     s = _settings(
         clean_env,
-        LLM_PROVIDER="cloudflare",  # no account id -> no base URL
-        CLOUDFLARE_API_TOKEN="cf-x",
+        LLM_PROVIDER="azure",  # no endpoint -> no base URL
+        AZURE_OPENAI_API_KEY="az-x",
         SONIOX_API_KEY="soniox-x",
-        GOOGLE_APPLICATION_CREDENTIALS="google-tts.json",
-    )
-    assert s.voice_is_pipecat is False
-    assert _settings(clean_env, CLOUDFLARE_ACCOUNT_ID="acc-1").voice_is_pipecat is True
-
-
-def test_elevenlabs_gates_on_the_elevenlabs_key(clean_env) -> None:
-    s = _settings(
-        clean_env,
-        VORTEX_TTS_PROVIDER="elevenlabs",
-        VORTEX_TTS_PROVIDER_ALT="elevenlabs",
-        SONIOX_API_KEY="soniox-x",
-        HELMCODE_API_KEY="helm-x",
-        GOOGLE_APPLICATION_CREDENTIALS="google-tts.json",
-    )
-    assert s.tts_provider == "elevenlabs"
-    assert s.tts_is_routed is False
-    # Spanish only, so there is nothing to switch to.
-    assert s.tts_supports_language_switch is False
-    assert s.voice_is_pipecat is False  # the Google credentials are irrelevant here
-
-    s = _settings(clean_env, ELEVENLABS_API_KEY="el-x")
-    assert s.voice_is_pipecat is True
-
-
-def test_a_routed_pair_needs_both_keys(clean_env) -> None:
-    s = _settings(
-        clean_env,
-        VORTEX_TTS_PROVIDER="elevenlabs",  # ALT defaults to google
-        SONIOX_API_KEY="soniox-x",
-        HELMCODE_API_KEY="helm-x",
         ELEVENLABS_API_KEY="el-x",
     )
-    assert s.tts_is_routed is True
-    assert s.tts_providers_in_use == ("elevenlabs", "google")
-    assert s.voice_is_pipecat is False  # the alternate has no credentials
+    assert s.voice_is_pipecat is False
+    assert (
+        _settings(clean_env, AZURE_OPENAI_ENDPOINT="https://r.openai.azure.com").voice_is_pipecat
+        is True
+    )
 
-    s = _settings(clean_env, GOOGLE_APPLICATION_CREDENTIALS="google-tts.json")
+
+def test_the_pipeline_gates_on_the_elevenlabs_key(clean_env) -> None:
+    s = _settings(
+        clean_env,
+        SONIOX_API_KEY="soniox-x",
+        HELMCODE_API_KEY="helm-x",
+    )
+    assert s.tts_provider == "elevenlabs"
+    assert s.has_tts_key is False
+    assert s.voice_is_pipecat is False
+
+    s = _settings(clean_env, ELEVENLABS_API_KEY="el-x")
+    assert s.has_tts_key is True
     assert s.voice_is_pipecat is True
-    assert s.tts_supports_language_switch is True
-    assert sorted(s.tts_covered_languages) == ["ca", "en", "es", "eu", "gl"]
 
 
-def test_an_unknown_provider_falls_back_to_google(clean_env) -> None:
-    assert _settings(clean_env, VORTEX_TTS_PROVIDER="cartesia").tts_provider == "google"
-    assert _settings(clean_env, VORTEX_TTS_PROVIDER="").tts_provider == "google"
-    assert _settings(clean_env, VORTEX_TTS_PROVIDER="GOOGLE").tts_provider == "google"
-    assert _settings(clean_env, VORTEX_TTS_PROVIDER_ALT="azure").tts_provider_alt == "google"
-
-
-def test_google_is_the_default_on_both_sides(clean_env) -> None:
+def test_elevenlabs_is_the_only_provider_and_speaks_all_five(clean_env) -> None:
     s = _settings(clean_env)
-    assert s.tts_provider == "google"
-    assert s.tts_provider_alt == "google"
-    assert s.tts_is_routed is False
+    assert settings_module.TTS_PROVIDERS == ("elevenlabs",)
+    assert s.tts_provider == "elevenlabs"
+    assert sorted(s.tts_covered_languages) == ["ca", "en", "es", "eu", "gl"]
+    # More than one language, so the pipeline always installs the watcher.
     assert s.tts_supports_language_switch is True
-    assert s.has_google_tts_credentials is False
     assert s.has_tts_key is False
 
 
-def test_which_provider_speaks_which_language(clean_env) -> None:
-    s = _settings(clean_env, VORTEX_TTS_PROVIDER="elevenlabs")  # ALT google
-    assert s.tts_provider_for("es") == "elevenlabs"
-    for code in ("ca", "gl", "eu"):
-        assert s.tts_provider_for(code) == "google"
-    # A language neither covers stays with the primary, which answers in Spanish.
-    assert s.tts_provider_for("de") == "elevenlabs"
-
-    s = _settings(clean_env, VORTEX_TTS_PROVIDER="google", VORTEX_TTS_PROVIDER_ALT="google")
-    for code in ("es", "ca", "gl", "eu", "de"):
-        assert s.tts_provider_for(code) == "google"
+def test_an_unknown_provider_falls_back_to_elevenlabs(clean_env) -> None:
+    assert _settings(clean_env, VORTEX_TTS_PROVIDER="cartesia").tts_provider == "elevenlabs"
+    assert _settings(clean_env, VORTEX_TTS_PROVIDER="").tts_provider == "elevenlabs"
+    assert _settings(clean_env, VORTEX_TTS_PROVIDER="ELEVENLABS").tts_provider == "elevenlabs"
 
 
 def test_voice_mode_overrides_the_keys(clean_env) -> None:
@@ -348,67 +286,57 @@ def test_voice_mode_overrides_the_keys(clean_env) -> None:
             VORTEX_VOICE_MODE="stub",
             SONIOX_API_KEY="soniox-x",
             HELMCODE_API_KEY="helm-x",
-            GOOGLE_APPLICATION_CREDENTIALS="google-tts.json",
+            ELEVENLABS_API_KEY="el-x",
         ).voice_is_pipecat
         is False
     )
-    gemini = _settings(clean_env, VORTEX_VOICE_MODE="gemini-live", GOOGLE_API_KEY="g-x")
-    assert gemini.voice_is_gemini_live is True
-    assert gemini.voice_is_pipecat is False
-    # A GOOGLE_API_KEY alone must not flip auto onto the demo path.
-    assert (
-        _settings(clean_env, VORTEX_VOICE_MODE="auto", GOOGLE_API_KEY="g-x").voice_is_gemini_live
-        is False
-    )
+    assert _settings(clean_env, VORTEX_VOICE_MODE="stub").voice_label == "stub"
 
 
-def test_google_voice_defaults_cover_the_five_languages(clean_env) -> None:
+def test_the_voice_preset_covers_every_language_and_both_genders(clean_env) -> None:
+    """Voice ids are a preset in code, not a row of environment variables."""
+    from vortex.conversation.language import SUPPORTED_LANGUAGES, VoicePreset
+
     s = _settings(clean_env)
-    assert s.google_tts_voice_en == "en-GB-Chirp3-HD-Aoede"
-    assert s.google_tts_voice_es == "es-ES-Chirp3-HD-Aoede"
-    # Gemini-TTS short names for ca/gl/eu (same identity as Spanish Chirp Aoede).
-    assert s.google_tts_voice_ca == "Aoede"
-    assert s.google_tts_voice_gl == "Aoede"
-    assert s.google_tts_voice_eu == "Aoede"
-    assert s.google_tts_uses_gemini is True
-    assert s.google_tts_gemini_model == "gemini-2.5-flash-tts"
-    assert s.tts_voice == s.google_tts_voice_es
-    assert s.describe()["google_tts_gemini"] is True
-    assert s.describe()["google_tts_gemini_model"] == "gemini-2.5-flash-tts"
-
-
-def test_google_standard_fallback_restores_standard_voices(clean_env) -> None:
-    """GOOGLE_TTS_STANDARD_FALLBACK keeps the old Standard-* path for ca/gl/eu."""
-    s = _settings(clean_env, GOOGLE_TTS_STANDARD_FALLBACK="true")
-    assert s.google_tts_standard_fallback is True
-    assert s.google_tts_uses_gemini is False
-    assert s.google_tts_voice_ca == "ca-ES-Standard-B"
-    assert s.google_tts_voice_gl == "gl-ES-Standard-A"
-    assert s.google_tts_voice_eu == "eu-ES-Standard-A"
-    assert s.describe()["google_tts_gemini"] is False
-    assert s.describe()["google_tts_gemini_model"] == ""
-
-
-def test_google_speaks_english_and_it_can_be_overridden(clean_env) -> None:
-    """69 of 73 published cases are English; google must cover it out of the box."""
-    s = _settings(clean_env)
-    assert "en" in s.tts_languages("google")
-    assert s.tts_provider_for("en") == "google"
-
-    s = _settings(clean_env, GOOGLE_TTS_VOICE_EN="en-US-Chirp3-HD-Puck")
-    assert s.google_tts_voice_en == "en-US-Chirp3-HD-Puck"
-
-
-def test_elevenlabs_has_no_default_voice(clean_env) -> None:
-    s = _settings(clean_env, VORTEX_TTS_PROVIDER="elevenlabs", ELEVENLABS_API_KEY="el-x")
-    assert s.elevenlabs_model == "eleven_flash_v2_5"
-    assert s.tts_voice == ""
-    assert s.tts_voices_missing == ["elevenlabs"]
-    assert s.describe()["tts_voices_missing"] == ["elevenlabs"]
-
-    s = _settings(clean_env, ELEVENLABS_VOICE_ID_ES="voice-1")
-    assert s.tts_voice == "voice-1"
+    for code in SUPPORTED_LANGUAGES:
+        row = VoicePreset[code.upper()]
+        assert row.female.strip(), code
+        assert row.male.strip(), code
+        assert s.elevenlabs_voice_for(code) == row.female
+        assert s.elevenlabs_voice_for(code, "male") == row.male
+    assert s.tts_voice == VoicePreset.ES.female
     assert s.tts_voices_missing == []
+
+
+def test_the_two_env_overrides_beat_the_preset(clean_env) -> None:
+    from vortex.conversation.language import VoicePreset
+
+    s = _settings(clean_env, ELEVENLABS_VOICE_ID_DEFAULT="voice-all")
+    assert s.elevenlabs_voice_for("en") == "voice-all"
+    assert s.elevenlabs_voice_for("es") == "voice-all"
+    # Male stays on the preset: the switch never lands on a voice nobody chose.
+    assert s.elevenlabs_voice_for("es", "male") == VoicePreset.ES.male
+
+    s = _settings(clean_env, ELEVENLABS_VOICE_ID_ES="voice-es")
+    assert s.elevenlabs_voice_for("es") == "voice-es"
+    assert s.elevenlabs_voice_for("ca") == "voice-all"
+
+
+def test_the_http_base_url_ignores_a_websocket_gateway(clean_env) -> None:
+    """The pipeline speaks over the WebSocket API; pre-rendered MP3s do not."""
+    assert _settings(clean_env).elevenlabs_http_base_url == "https://api.elevenlabs.io"
+    assert (
+        _settings(
+            clean_env, ELEVENLABS_BASE_URL="wss://gw.example.invalid"
+        ).elevenlabs_http_base_url
+        == "https://api.elevenlabs.io"
+    )
+    assert (
+        _settings(
+            clean_env, ELEVENLABS_BASE_URL="https://gw.example.invalid/"
+        ).elevenlabs_http_base_url
+        == "https://gw.example.invalid"
+    )
 
 
 # --- geocoder ----------------------------------------------------------------
@@ -446,17 +374,17 @@ def test_describe_never_leaks_a_key(clean_env) -> None:
         "PLATFORM_API_KEY": "platform-secret",
         "SONIOX_API_KEY": "soniox-secret",
         "HELMCODE_API_KEY": "helmcode-secret",
+        "AZURE_OPENAI_API_KEY": "azure-secret",
         "ELEVENLABS_API_KEY": "elevenlabs-secret",
         "ARBITER_API_KEY": "arbiter-secret",
         "TYPESAFE_API_KEY": "typesafe-secret",
         "LANGFUSE_PUBLIC_KEY": "pk-lf-secret",
         "LANGFUSE_SECRET_KEY": "sk-lf-secret",
-        "GOOGLE_API_KEY": "google-api-secret",
         "HF_TOKEN": "hf-secret",
         "SUPABASE_URL": "https://xxxx.supabase.co",
         "SUPABASE_SERVICE_ROLE_KEY": "supabase-service-secret",
     }
-    s = _settings(clean_env, VORTEX_TTS_PROVIDER="elevenlabs", **secrets)
+    s = _settings(clean_env, **secrets)
     described = s.describe()
     text = repr(described)
     for value in secrets.values():
@@ -470,99 +398,53 @@ def test_describe_never_leaks_a_key(clean_env) -> None:
     assert described["has_langfuse_keys"] is True
     assert described["has_supabase"] is True
     assert described["has_hf_token"] is True
-    assert described["has_google_api_key"] is True
     assert described["llm_provider"] == "helmcode"
     assert described["tts_provider"] == "elevenlabs"
-    assert described["tts_provider_alt"] == "google"
-    assert described["tts_routed"] is True
+    assert described["tts_model"] == "eleven_flash_v2_5"
 
 
-def test_describe_reports_google_without_the_credentials(clean_env) -> None:
-    s = _settings(
-        clean_env,
-        GOOGLE_TTS_CREDENTIALS_JSON='{"private_key": "google-secret"}',
-        GOOGLE_APPLICATION_CREDENTIALS="/secrets/google-tts.json",
-    )
+def test_describe_reports_the_voice_without_a_key(clean_env) -> None:
+    s = _settings(clean_env)
     described = s.describe()
-    assert described["tts_provider"] == "google"
-    assert described["tts_voice"] == s.google_tts_voice_es
-    assert described["has_google_tts_credentials"] is True
+    assert described["tts_provider"] == "elevenlabs"
+    assert described["tts_voice"] == s.tts_voice_es()
+    assert described["has_elevenlabs_key"] is False
     assert described["tts_language_switch"] is True
     assert described["tts_languages"] == ["ca", "en", "es", "eu", "gl"]
-    text = repr(described)
-    assert "google-secret" not in text
-    assert "/secrets/google-tts.json" not in text
 
 
-# --- tts_voice_for: the voice map, per provider ------------------------------
+# --- tts_voice_for: the voice map --------------------------------------------
 
 
-def test_google_voice_map_covers_es_ca_gl_eu(clean_env) -> None:
+def test_the_voice_map_covers_every_language(clean_env) -> None:
     pytest.importorskip("pipecat")
     from pipecat.transcriptions.language import Language
 
-    from vortex.conversation.language import tts_voice_for
+    from vortex.conversation.language import VoicePreset, tts_voice_for
 
-    s = _settings(clean_env)
-    assert tts_voice_for("es", s) == (s.google_tts_voice_es, Language.ES_ES)
-    assert tts_voice_for("ca", s) == (s.google_tts_voice_ca, Language.CA_ES)
-    assert tts_voice_for("gl", s) == (s.google_tts_voice_gl, Language.GL_ES)
-    assert tts_voice_for("eu", s) == (s.google_tts_voice_eu, Language.EU_ES)
-    # A pipecat Language, a regional string and an unsupported one all fold.
-    assert tts_voice_for(Language.CA_ES, s) == (s.google_tts_voice_ca, Language.CA_ES)
-    assert tts_voice_for("gl-ES", s) == (s.google_tts_voice_gl, Language.GL_ES)
-    # English is the clinic's default: it has its own voice, and it is the
-    # fallback for anything unsupported.
-    from vortex.conversation.language import DEFAULT_GOOGLE_VOICE_EN
-
-    assert tts_voice_for("en", s) == (DEFAULT_GOOGLE_VOICE_EN, Language.EN_GB)
-    assert tts_voice_for("de", s) == (DEFAULT_GOOGLE_VOICE_EN, Language.EN_GB)
-    # A configured GOOGLE_TTS_VOICE_EN wins over the language module's fallback.
-    s = _settings(clean_env, GOOGLE_TTS_VOICE_EN="en-US-Chirp3-HD-Puck")
-    assert tts_voice_for("en", s) == ("en-US-Chirp3-HD-Puck", Language.EN_GB)
-
-
-def test_elevenlabs_says_english_and_spanish_with_one_voice(clean_env) -> None:
-    pytest.importorskip("pipecat")
-    from pipecat.transcriptions.language import Language
-
-    from vortex.conversation.language import tts_voice_for
-
-    s = _settings(clean_env, VORTEX_TTS_PROVIDER="elevenlabs", ELEVENLABS_VOICE_ID_ES="voice-1")
-    # ElevenLabs takes a bare code, not the regional one; its voices are
-    # multilingual, so the one id speaks Spanish and English.
+    s = _settings(clean_env, ELEVENLABS_VOICE_ID_DEFAULT="voice-1")
+    # ElevenLabs takes a bare code, not the regional one.
     assert tts_voice_for("es", s) == ("voice-1", Language.ES)
     assert tts_voice_for("en", s) == ("voice-1", Language.EN)
-    # What it cannot say falls back to English, the clinic's default.
-    for code in ("ca", "gl", "eu", "de"):
-        assert tts_voice_for(code, s) == ("voice-1", Language.EN)
-
-
-def test_the_provider_argument_overrides_the_primary(clean_env) -> None:
-    """A routed call asks for the provider that serves the language, not the primary."""
-    pytest.importorskip("pipecat")
-    from pipecat.transcriptions.language import Language
-
-    from vortex.conversation.language import tts_voice_for
-
-    s = _settings(clean_env, VORTEX_TTS_PROVIDER="elevenlabs", ELEVENLABS_VOICE_ID_ES="voice-1")
-    assert tts_voice_for("es", s, s.tts_provider_for("es")) == ("voice-1", Language.ES)
-    assert tts_voice_for("ca", s, s.tts_provider_for("ca")) == (
-        s.google_tts_voice_ca,
-        Language.CA_ES,
-    )
-    assert tts_voice_for("gl", s, "google") == (s.google_tts_voice_gl, Language.GL_ES)
-    # An unknown provider name reads the Google map rather than raising.
-    assert tts_voice_for("ca", s, "nope") == (s.google_tts_voice_ca, Language.CA_ES)
+    assert tts_voice_for("ca", s) == ("voice-1", Language.CA)
+    assert tts_voice_for("gl", s) == ("voice-1", Language.GL)
+    assert tts_voice_for("eu", s) == ("voice-1", Language.EU)
+    # A pipecat Language and a regional string both fold to our code.
+    assert tts_voice_for(Language.CA_ES, s) == ("voice-1", Language.CA)
+    assert tts_voice_for("gl-ES", s) == ("voice-1", Language.GL)
+    # Anything outside the five falls back to English, the clinic's default.
+    assert tts_voice_for("de", s) == ("voice-1", Language.EN)
+    # The male column comes from the preset.
+    assert tts_voice_for("es", s, gender="male") == (VoicePreset.ES.male, Language.ES)
 
 
 def test_tts_voice_for_never_raises(clean_env) -> None:
     pytest.importorskip("pipecat")
     from pipecat.transcriptions.language import Language
 
-    from vortex.conversation.language import DEFAULT_GOOGLE_VOICE_EN, tts_voice_for
+    from vortex.conversation.language import VoicePreset, tts_voice_for
 
     s = _settings(clean_env)
-    assert tts_voice_for(None, s) == (DEFAULT_GOOGLE_VOICE_EN, Language.EN_GB)  # type: ignore[arg-type]
-    # A settings stand-in with nothing on it still answers.
-    assert tts_voice_for("ca", object()) == ("", Language.CA_ES)
+    assert tts_voice_for(None, s) == (VoicePreset.EN.female, Language.EN)  # type: ignore[arg-type]
+    # A settings stand-in with nothing on it still answers, off the preset.
+    assert tts_voice_for("ca", object()) == (VoicePreset.CA.female, Language.CA)

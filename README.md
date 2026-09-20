@@ -19,12 +19,14 @@ make call                   # dial the running server with 1 fake call
 make call N=10              # ... with 10 concurrent fake calls
 make tunnel                 # ngrok http 7860 -> wss://<host>/ws for the dashboard
 make test                   # the whole test suite
-make tail                   # follow logs/calls.jsonl
+make supabase-migrate       # apply database/supabase/migrations/*.sql (needs SUPABASE_DB_URL)
+make supabase-ping          # can the service-role key reach call_events?
 make logs-discord           # redacted digest of the call log to Discord
 make langfuse-check         # project URL + whether the live line has keys
 ```
 
-`make smoke` and `make test` need no key and no network.
+`make smoke` and `make test` need no key and no network: the tests that want a
+database skip themselves unless `VORTEX_TEST_DB=1` opts them in.
 
 ## Day-before confirmation calls
 
@@ -51,12 +53,12 @@ appointment, the already-identified patient and the language on the start
 message, so the booking agent's rebooking flow continues without re-asking any
 data and the patient moves the appointment in the same call. Without the live
 voice pipeline the stored callback promise stands. The Twilio-only segments
-sound in the wall's own voice: when Google TTS credentials are set each line
+sound in the wall's own voice: when `ELEVENLABS_API_KEY` is set each line
 (the question, the reprompt, the "le paso con mi compañero" bridge, the
-fallback acknowledgements) is synthesised with the configured Chirp 3 HD
-persona and rate from `voiceconfig.db`, cached under
+fallback acknowledgements) is synthesised with the configured voice and rate
+from `voiceconfig.db`, cached under
 `logs/confirmation_audio/`, served by `GET /confirmation/audio/{name}` and
-played with `<Play>`; without credentials, or if synthesis fails, the TwiML
+played with `<Play>`; without the key, or if synthesis fails, the TwiML
 keeps Twilio's standard `<Say>` voice for that line. Every row lives in
 `logs/confirmation_calls.json` — the hooks a waitlist filler or a retry/SMS
 fallback would subscribe to. Try it: `uv run python scripts/try_confirmation_call.py`
@@ -132,12 +134,18 @@ The server always starts. Missing keys switch components to fake mode:
 | Key(s) missing | What runs instead |
 | --- | --- |
 | `PLATFORM_API_KEY` | `FakeClinicClient` (fixtures in `vortex/clinic/fixtures.py`) and a dry-run submit client that logs instead of POSTing |
-| any of `SONIOX_API_KEY`, the LLM key and base URL the active `LLM_PROVIDER` resolves to, or the credentials of `VORTEX_TTS_PROVIDER` (and of `VORTEX_TTS_PROVIDER_ALT` when it differs) | the stub voice pipeline: beeps out, counts frames in, submits a typed refusal at the end |
+| any of `SONIOX_API_KEY`, `ELEVENLABS_API_KEY`, or the LLM key and base URL the active `LLM_PROVIDER` resolves to | the stub voice pipeline: beeps out, counts frames in, submits a typed refusal at the end |
+| `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | no store at all: calls are answered and submitted, nothing is persisted, every board screen reads zero |
 
-`GET /health` says which mode is active. `VORTEX_VOICE_MODE` and
-`VORTEX_CLINIC_MODE` force a mode (see `.env.example`). Set
-`VORTEX_VOICE_MODE=gemini-live` with `GOOGLE_API_KEY` for the jury-only
-speech-to-speech demo (`GeminiLiveLLMService`); `auto` never picks it.
+There is one persistent store and it is Supabase/Postgres. No SQLite file, no
+JSONL log, no dual write. Schema lives only in
+`database/supabase/migrations/NNNN_*.sql` and is applied with
+`make supabase-migrate`, which reads `SUPABASE_DB_URL` (the direct Postgres URI
+from the dashboard, not the REST URL). The line and the board never use that
+URI: they go through PostgREST with the service-role key, server-side only.
+
+`GET /health` says which mode is active. `VORTEX_VOICE_MODE` (`auto`, `stub`,
+`pipecat`) and `VORTEX_CLINIC_MODE` force a mode (see `.env.example`).
 
 ## Providers
 
@@ -155,29 +163,30 @@ submission arbiter; nothing consumes it yet.
 
 | `LLM_PROVIDER` | Base URL | Key | Default model |
 | --- | --- | --- | --- |
-| `custom` | `LLM_BASE_URL` | `LLM_API_KEY` | `Qwen/Qwen3-30B-A3B-Instruct-2507` |
-| `helmcode` (default) | `HELMCODE_BASE_URL`, default `https://api.helmcode.com/v1` | `HELMCODE_API_KEY` | `qwen3.6` (also `deepseek-v4-flash`, `gemma4`, `glm5.3` add-on) |
-| `cloudflare` | `https://api.cloudflare.com/client/v4/accounts/<CLOUDFLARE_ACCOUNT_ID>/ai/v1` | `CLOUDFLARE_API_TOKEN` | `@cf/qwen/qwen3-30b-a3b-fp8` (UNVERIFIED) |
-| `vercel` | `https://ai-gateway.vercel.sh/v1` | `VERCEL_AI_GATEWAY_KEY` | `anthropic/claude-haiku-4.5` |
+| `helmcode` (default) | `HELMCODE_BASE_URL`, default `https://api.helmcode.com/v1` | `HELMCODE_API_KEY` | `deepseek-v4-flash` (also `qwen3.6`, `gemma4`, `glm5.3` add-on) |
+| `azure` | `<AZURE_OPENAI_ENDPOINT>/openai/v1` | `AZURE_OPENAI_API_KEY` (sent as a bearer token) | `AZURE_OPENAI_DEPLOYMENT`, default `gpt-4.1` |
 
-UNVERIFIED means nobody has called that URL or model id yet. `LLM_TEMPERATURE`,
-`LLM_MAX_TOKENS`, `LLM_DISABLE_THINKING` and `LLM_REASONING_EFFORT` (default
-`none`; Helmcode models reason by default otherwise) apply to every preset.
+Azure's OpenAI-compatible surface is the resource endpoint plus `/openai/v1`,
+and the model id is the *deployment* name. `AZURE_OPENAI_API_VERSION` is only
+needed on the older dated endpoints; on `/openai/v1` it is ignored.
+`LLM_TEMPERATURE`, `LLM_MAX_TOKENS`, `LLM_DISABLE_THINKING` and
+`LLM_REASONING_EFFORT` (default `none`; Helmcode models reason by default
+otherwise) apply to both presets.
 
-### TTS: a primary and an alternate
+### TTS: ElevenLabs
 
-`VORTEX_TTS_PROVIDER` speaks Spanish. `VORTEX_TTS_PROVIDER_ALT` speaks any
-language the primary cannot, and the pipeline routes each detected language to
-whichever of the two can say it.
-
-Both set to the same provider (the default, `google`/`google`) means one
-service and the plain voice-swap path; `VORTEX_TTS_PROVIDER=elevenlabs` with
-the default alternate gives ElevenLabs Spanish and Google ca/gl/eu.
+One provider, one multilingual model, all five languages. A language switch is
+a new voice id pushed at the running service, not a second service to route to.
 
 | `VORTEX_TTS_PROVIDER` | Languages | Env vars |
 | --- | --- | --- |
-| `google` (default) | es / ca / gl / eu — the only one that covers all four. Chirp 3 HD for Spanish, Standard voices for ca/gl/eu | `GOOGLE_APPLICATION_CREDENTIALS` *or* `GOOGLE_TTS_CREDENTIALS_JSON`, `GOOGLE_TTS_VOICE_ES`, `GOOGLE_TTS_VOICE_CA`, `GOOGLE_TTS_VOICE_GL`, `GOOGLE_TTS_VOICE_EU` |
-| `elevenlabs` | es | `ELEVENLABS_API_KEY`, `ELEVENLABS_MODEL`, `ELEVENLABS_VOICE_ID_ES` (no default — set it), `ELEVENLABS_BASE_URL` (optional gateway origin) |
+| `elevenlabs` (the only one) | en / es / ca / gl / eu | `ELEVENLABS_API_KEY`, `ELEVENLABS_MODEL` (default `eleven_flash_v2_5`), `ELEVENLABS_BASE_URL` (optional gateway origin) |
+
+Which voice says which language, and which one the wall's female/male switch
+picks, is a fixed preset in code — `conversation.language.VoicePreset` — not a
+row of environment variables. `ELEVENLABS_VOICE_ID_DEFAULT` overrides its
+female column for every language and `ELEVENLABS_VOICE_ID_ES` for Spanish
+alone.
 
 STT is Soniox `stt-rt-v5` throughout: language identification on, clinic
 vocabulary boosted, `SONIOX_API_KEY` and `SONIOX_STT_MODEL`.
@@ -288,7 +297,7 @@ GitHub, not in a file.
 
 `docs/research/` holds the September 2026 survey of the voice-agent market:
 noise filters, STT vendors, turn detection, industry launches, structured-data
-libraries and the Google/TTS stack. Start at
+libraries and the TTS stack. Start at
 [`docs/research/README.md`](docs/research/README.md): it ranks the moves by
 points per hour and says what the repo already has.
 
@@ -304,7 +313,9 @@ One folder per person. Touch your folder; ask before you touch another.
 | `vortex/diary/` | the agenda | availability, relative dates to the exact minute in Europe/Madrid, site hours, reschedule and cancel |
 | `vortex/rules/` | what the clinic refuses | age limits, referrals, insurance matrix, provider matching, triage, nearest site, closed reason vocabulary |
 | `vortex/clinic/` | shared | read-only HTTP client for the clinic API + offline fixtures |
-| `vortex/observability/` | shared | JSONL call log and the live view for the jury |
+| `vortex/api/` | shared | the FastAPI `/api/wall` router the clinic SPA calls |
+| `vortex/observability/` | shared | call event writer and the live view for the jury |
+| `database/supabase/migrations/` | shared | the only source of schema, `NNNN_*.sql` |
 
 Shared files, change only with the whole team on the call:
 
@@ -329,7 +340,7 @@ platform ──ws──> line/server.py ── CallSession (per socket)
                       ▼
             line/submit.py ── POST /api/v1/submit/<action> ── within 30 s of socket close
                       ▼
-            observability/ logs/calls.jsonl (one JSON line per event, tagged call_id)
+            observability/ public.call_events in Supabase (one row per event, tagged call_id)
 ```
 
 Every lane function has this shape and is `async`:
@@ -367,16 +378,17 @@ run: a Run All holds ten sockets open at once.
 
 ## Observability
 
-`logs/calls.jsonl` gets one JSON line per event, every line tagged with
+`public.call_events` in Supabase gets one row per event, every row tagged with
 `call_id`: `call.started`, `turn.user`, `turn.assistant`, `tool.called`,
 `tool.returned`, `submit.sent`, `submit.result`, `call.ended`, `call.summary`.
-`GET /calls` returns the recent events grouped by call.
+`GET /calls` returns the recent events grouped by call. With no Supabase keys
+nothing is written and that endpoint is empty — the call itself is unaffected.
 
 `make board` is the live view (NiceGUI, port 8080). `/wall` is public (jury).
 `/` ops, `/evals` and `/bench` ask for `VORTEX_OPS_PASSWORD` when that env is
 set (always in production). Play dials `scripts/fake_caller.py` against `:7860`.
-Replay writes a scripted book/refuse into the JSONL. The wall tails `GET /calls`
-when line is up, otherwise the JSONL file.
+The wall tails `GET /calls` when the line is up, and reads Supabase directly
+otherwise.
 
 Production: `https://vortex.167.233.80.47.sslip.io/wall` (público) and
 `https://vortex.167.233.80.47.sslip.io/` (equipo). That hostname is the VPS

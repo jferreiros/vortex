@@ -10,7 +10,6 @@ import asyncio
 import json
 from collections.abc import Iterator
 from datetime import date, datetime
-from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -155,9 +154,13 @@ def make_session(
 
 
 def sms_events(settings: Settings, call_id: str) -> list[dict[str, Any]]:
-    path = Path(settings.calls_log_path)
-    lines = [json.loads(line) for line in path.read_text().splitlines()]
-    return [x for x in lines if x["call_id"] == call_id and x["kind"].startswith("sms.")]
+    """``settings`` is vestigial: the events come from the store, which the
+    test harness catches in memory."""
+    from conftest import captured_events
+
+    return [
+        x for x in captured_events() if x["call_id"] == call_id and x["kind"].startswith("sms.")
+    ]
 
 
 def one_sms_event(settings: Settings, call_id: str, kind: str) -> dict[str, Any]:

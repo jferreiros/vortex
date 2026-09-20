@@ -1,7 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import { useLayoutEffect, useRef, useState } from "react";
 import Card from "../../../components/ui/Card";
-import { MOCK_OVERVIEW, useHomeOverview } from "./useHomeOverview";
+import { EMPTY_OVERVIEW, useHomeOverview } from "./useHomeOverview";
 import { useOccupancy, withDate } from "./useHomeData";
 import useLiveCalls from "../live-calls/useLiveCalls";
 import { PHASE_LABEL, REASON_LABEL } from "../../../lib/labels";
@@ -234,10 +234,10 @@ function initials(name) {
 export default function Home() {
   const navigate = useNavigate();
   const [liveFilter, setLiveFilter] = useState("all");
-  const data = useHomeOverview() ?? MOCK_OVERVIEW;
+  const data = useHomeOverview() ?? EMPTY_OVERVIEW;
   const occupancy = useOccupancy();
   const { calls: liveFeed, rejected, escalated } = useLiveCalls();
-  const today = data.today ?? MOCK_OVERVIEW.today;
+  const today = data.today ?? EMPTY_OVERVIEW.today;
   const moved = today.rescheduled + today.cancelled;
   const liveCalls =
     liveFilter === "all" ? liveFeed : liveFeed.filter((c) => c.direction === liveFilter);
@@ -340,6 +340,12 @@ export default function Home() {
                       <span className="dot">·</span>
                       {call.phone}
                     </span>
+                    {call.lastTurn ? (
+                      <span className="home-call-turn">
+                        {call.lastRole === "assistant" ? "Vorty: " : ""}
+                        {call.lastTurn}
+                      </span>
+                    ) : null}
                   </span>
                   <span className="home-call-time">{call.duration}</span>
                   <button

@@ -11,9 +11,7 @@ watcher is driven with the frames the output transport would have pushed.
 
 from __future__ import annotations
 
-import json
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -87,9 +85,11 @@ def a_rule_that_bit(session: CallSession) -> None:
 
 
 def events(settings: Any, call_id: str, kind: str) -> list[dict[str, Any]]:
-    path = Path(settings.calls_log_path)
-    lines = [json.loads(line) for line in path.read_text().splitlines()]
-    return [x for x in lines if x["call_id"] == call_id and x["kind"] == kind]
+    """What that call recorded. ``settings`` is vestigial — the events come
+    from the store, which the test harness catches in memory."""
+    from conftest import captured_events
+
+    return [x for x in captured_events() if x["call_id"] == call_id and x["kind"] == kind]
 
 
 # --- the session flag --------------------------------------------------------

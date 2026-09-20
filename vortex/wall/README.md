@@ -13,6 +13,29 @@ page's own stylesheet reads colour/type/spacing/radius/shadow/motion from
 comment). No other runtime dependencies — check `package.json` before adding
 one.
 
+## Where the data comes from
+
+`/api/wall/*` and nothing else. The handlers live in `vortex/api/` — one
+module per topic (`timeline.py`, `live_calls.py`, `agenda.py`,
+`analytics.py`, `settings.py`, `patient_timeline.py`, `voice.py`), each an
+`APIRouter` mounted once under `/api/wall` by `vortex/api/wall.py`'s
+`attach(app)`. Same origin as this app, so no CORS and no second process.
+Behind them is Supabase/Postgres: there is no SQLite file, no
+`logs/calls.jsonl`, and the SPA never talks to Supabase itself (the
+service-role key is server-side only, and there is no Realtime subscription
+here — the live pages use SSE off `/api/wall/*/stream`).
+
+There are no mock fixtures left in `src/`. A page with nothing to show
+renders its empty state and waits for the endpoint; it does not invent
+numbers. The two documents the Pathways and Patterns editors edit live in
+the `wall_documents` table and are seeded once by
+`database/seed/wall_documents.sql`.
+
+`src/data/` still holds `shapeTypes.json` and `patternShapes.json`. Those
+are the editors' tray vocabulary — families, types, emoji, labels, gap
+units — not clinic data, and nothing in the product writes them, so they
+stay in the bundle.
+
 ## Local dev
 
 ```bash
@@ -52,11 +75,19 @@ transcript (fixed 2026-09-19) — the `/wall/vorty-face` line was missing.
 
 ## Patterns worth reusing
 
+- **`src/pages/landing/useCrossfadeScroll.js`** — an eased, JS-driven
+  scroll-to that fades a full-viewport veil (colour = the destination
+  section's background) in, scrolls underneath it, then fades it out.
+  Use this instead of `scrollIntoView({behavior: "smooth"})` anywhere a
+  section change should read as a deliberate transition rather than an
+  instant jump — see `Landing.jsx` for the wiring (veil element + passing
+  `scrollToId` down to the trigger).
+- **`src/pages/landing/useHeroScroll.js`** vs. `Reveal.jsx`'s spring: read
+  the comment in `useHeroScroll.js` for when to track scroll position
+  directly (1:1, e.g. shrinking something as you scroll) vs. when to use a
+  React Spring transition instead (a discrete on/off state, e.g. "has this
+  scrolled into view").
 - **`src/app/pageWipe.js` + `PageWipeOverlay.jsx`** — a full-screen wipe
   transition fired from anywhere (`triggerPageWipe(toPath)`) that covers the
   screen, swaps the route while covered, then reveals it. Mounted at the
   router root and ready to reuse; nothing wires it right now.
-- `src/designs/design11/` is the Live Call detail view actually in use
-  (embedded by `LiveCallDetail.jsx`). `src/designs/` also holds ten other,
-  untouched historical concepts — don't "clean those up"; they're kept for
-  reference. Swapping which one the app embeds is one import.

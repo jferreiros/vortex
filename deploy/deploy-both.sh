@@ -105,6 +105,18 @@ else
   what="${SUBJECT}"
 fi
 
+# The schema comes before both containers. deploy.sh applies
+# database/supabase/migrations/ from the image it just built and exits non-zero
+# if the migration fails, so the abort below leaves the previous version
+# serving rather than starting new code on an old schema. The migrator reads
+# SUPABASE_DB_URL — the direct Postgres URI, not the REST URL — from
+# deploy/.env; refuse early rather than deploy a line with no store.
+if ! grep -qE '^[[:space:]]*SUPABASE_DB_URL=[^[:space:]]' "${SCRIPT_DIR}/.env"; then
+  notify "No puedo publicar ${what}: falta SUPABASE_DB_URL en deploy/.env. Sigue la versión de antes."
+  echo "REFUSE: SUPABASE_DB_URL is not set in ${SCRIPT_DIR}/.env" >&2
+  exit 1
+fi
+
 if ! "${SCRIPT_DIR}/deploy.sh" --skip-pull; then
   notify "El servidor no pudo publicar ${what}. Sigue la versión de antes. Hay que mirarlo."
   exit 1

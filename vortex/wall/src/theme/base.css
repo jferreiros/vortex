@@ -1,5 +1,5 @@
-/* Base resets for the app shell only — scoped under .app-root so the
-   existing Live Call design concepts (src/designs/*) are never affected. */
+/* Base resets for the app shell only — scoped under .app-root so nothing
+   outside the SPA's own root element is touched. */
 
 .app-root {
   font-family: var(--font-body);
