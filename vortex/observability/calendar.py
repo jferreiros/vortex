@@ -443,6 +443,38 @@ def catalogue_with_log_roster(catalogue: Catalogue, events: list[dict[str, Any]]
     )
 
 
+def catalogue_with_appointment_roster(catalogue: Catalogue, appointments: list[Any]) -> Catalogue:
+    """``catalogue`` with every provider a real ``public.appointments`` row
+    names but the catalogue does not already know by id.
+
+    ``catalogue_with_log_roster`` closes the same gap from ``find_slots``
+    transcript events, which misses a provider entirely when a call never
+    logged that tool under that exact name (a stub pipeline, an older
+    transcript, a booking ``database/hooks.py`` wrote straight through). An
+    appointment already carries its provider's id, name, specialty and site
+    with no tool-log dependency at all — the most direct "the catalogue
+    never heard of this doctor" fix there is, and the one
+    ``service_occupancy``'s Gynaecology case ultimately needs: a booked
+    appointment is proof a doctor exists even when nothing in the log ever
+    asked ``find_slots`` for them.
+    """
+    providers = {row.provider_id: row for row in catalogue.providers}
+    for appt in appointments:
+        provider_id = str(getattr(appt, "provider_id", None) or "")
+        specialty_id = getattr(appt, "specialty_id", None)
+        if not provider_id or not specialty_id or provider_id in providers:
+            continue
+        site_id = getattr(appt, "site_id", None)
+        providers[provider_id] = ProviderRecord(
+            provider_id=provider_id,
+            name=str(getattr(appt, "provider_name", None) or provider_id),
+            specialty_id=str(specialty_id),
+            specialty_name=str(getattr(appt, "specialty_name", None) or ""),
+            location_ids=[str(site_id)] if site_id else [],
+        )
+    return catalogue.model_copy(update={"providers": list(providers.values())})
+
+
 def load_database_agenda() -> tuple[list[Any], dict[str, str]]:
     """Open appointments and their call ids, or ``([], {})`` if unavailable.
 

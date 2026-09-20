@@ -1,192 +1,350 @@
+// Demo numbers for the Insights page, in the exact shape
+// GET /api/wall/business-insights serves (business_insights.py). The page
+// starts on these and only swaps in the live payload when it is rich enough
+// to read (see Insights.jsx: isRichPayload) — a thin log paints a page full
+// of zeros, which reads as "the product is broken", not "the day is young".
+//
+// Everything is derived from one 30-day base through `mockInsights(days)`,
+// so the 7 / 30 / 90-day chips actually move the numbers and every derived
+// figure (percentages, shares, occupancy, suggestions) stays consistent
+// with the counts shown beside it.
 
-// Placeholder numbers for the panels whose real endpoint is not wired yet.
-// Everything the board already serves (Home, live calls, business insights)
-// reads its own API; these are the leftovers, kept together so the next
-// endpoint to land can delete its block outright.
-export const MOCK_UNAVAILABILITY = {
-  unmet_total: 19,
-  buckets: [
-    { key: "no_slot_in_window", label: "No slot in the requested window", count: 9, share: 1, pct: 47.4 },
-    { key: "provider_unavailable", label: "Specific provider unavailable", count: 5, share: 0.556, pct: 26.3 },
-    { key: "policy_not_covered", label: "Policy not covered", count: 3, share: 0.333, pct: 15.8 },
-    { key: "out_of_hours", label: "Outside opening hours", count: 2, share: 0.222, pct: 10.5 },
-  ],
-  suggested_action:
-    "47% of unmet demand is due to no slot in the requested window, concentrated on Thursday afternoons: extending the schedule for that slot would capture most of these declines.",
-};
+const BASE_DAYS = 30;
 
-export const MOCK_CANCELLATIONS = {
-  freed_total: 11,
-  relocated: 7,
-  lost: 3,
-  pending: 1,
-  recovery_rate_pct: 70,
-  suggested_action:
-    "Of the 11 slots freed by cancellation, 7 were rebooked (70%) but 3 went unfilled on the appointment day: notifying the waitlist the moment a cancellation happens would recover some of those slots.",
-};
+// ---- what the line could not honour ---------------------------------------
 
-// One mock row per catalogue specialty — the six Arenal services, network-wide.
-export const MOCK_SERVICES = [
-  { id: "general_practice", name: "General practice", requested: 21, offered: 18, booked: 15, declined_full: 3, providers: 3, occupancy_pct: 116.7, extra_providers_needed: 1 },
-  { id: "paediatrics", name: "Paediatrics", requested: 9, offered: 12, booked: 8, declined_full: 0, providers: 2, occupancy_pct: 75.0, extra_providers_needed: 0 },
-  { id: "dermatology", name: "Dermatology", requested: 6, offered: 8, booked: 5, declined_full: 0, providers: 1, occupancy_pct: 75.0, extra_providers_needed: 0 },
-  { id: "orthopaedics", name: "Orthopaedics", requested: 5, offered: 10, booked: 4, declined_full: 0, providers: 2, occupancy_pct: 50.0, extra_providers_needed: 0 },
-  { id: "gynaecology", name: "Gynaecology", requested: 3, offered: 6, booked: 3, declined_full: 0, providers: 1, occupancy_pct: 50.0, extra_providers_needed: 0 },
-  { id: "physiotherapy", name: "Physiotherapy", requested: 2, offered: 9, booked: 2, declined_full: 0, providers: 1, occupancy_pct: 22.2, extra_providers_needed: 0 },
+const BASE_UNMET_BUCKETS = [
+  { key: "no_slot_in_window", label: "No slot in the requested window", count: 17 },
+  { key: "provider_unavailable", label: "Specific provider unavailable", count: 9 },
+  { key: "policy_not_covered", label: "Policy not covered", count: 6 },
+  { key: "out_of_hours", label: "Outside opening hours", count: 4 },
+  { key: "referral_required", label: "Referral required", count: 2 },
 ];
 
-// Per-site mock rows, distinct from each other and from the network-wide
-// total above — the real service_occupancy() scopes every count to one
-// site's own find_slots calls, so these three must actually differ or the
-// site picker looks broken even when the wiring is correct.
-export const MOCK_SERVICES_CENTRO = [
-  { id: "general_practice", name: "General practice", requested: 12, offered: 10, booked: 9, declined_full: 2, providers: 2, occupancy_pct: 120.0, extra_providers_needed: 1 },
-  { id: "paediatrics", name: "Paediatrics", requested: 5, offered: 6, booked: 4, declined_full: 0, providers: 1, occupancy_pct: 83.3, extra_providers_needed: 0 },
-  { id: "dermatology", name: "Dermatology", requested: 4, offered: 5, booked: 3, declined_full: 0, providers: 1, occupancy_pct: 80.0, extra_providers_needed: 0 },
-  { id: "orthopaedics", name: "Orthopaedics", requested: 3, offered: 6, booked: 3, declined_full: 0, providers: 1, occupancy_pct: 50.0, extra_providers_needed: 0 },
-  { id: "gynaecology", name: "Gynaecology", requested: 2, offered: 4, booked: 2, declined_full: 0, providers: 1, occupancy_pct: 50.0, extra_providers_needed: 0 },
-  { id: "physiotherapy", name: "Physiotherapy", requested: 1, offered: 5, booked: 1, declined_full: 0, providers: 1, occupancy_pct: 20.0, extra_providers_needed: 0 },
+// ---- cancellations ---------------------------------------------------------
+
+const BASE_CANCELLATIONS = { freed_total: 24, relocated: 17, lost: 5, pending: 2 };
+
+const BASE_CANCELLATION_DAILY = [
+  { date: "2026-09-08", freed: 2, relocated: 2, lost: 0 },
+  { date: "2026-09-09", freed: 1, relocated: 1, lost: 0 },
+  { date: "2026-09-10", freed: 3, relocated: 2, lost: 1 },
+  { date: "2026-09-11", freed: 2, relocated: 1, lost: 1 },
+  { date: "2026-09-12", freed: 1, relocated: 1, lost: 0 },
+  { date: "2026-09-14", freed: 3, relocated: 2, lost: 0 },
+  { date: "2026-09-15", freed: 2, relocated: 2, lost: 0 },
+  { date: "2026-09-16", freed: 2, relocated: 1, lost: 1 },
+  { date: "2026-09-17", freed: 1, relocated: 1, lost: 0 },
+  { date: "2026-09-18", freed: 3, relocated: 2, lost: 1 },
+  { date: "2026-09-19", freed: 2, relocated: 1, lost: 1 },
+  { date: "2026-09-20", freed: 2, relocated: 1, lost: 0 },
 ];
-export const MOCK_SERVICES_NORTE = [
-  { id: "general_practice", name: "General practice", requested: 6, offered: 5, booked: 4, declined_full: 1, providers: 1, occupancy_pct: 120.0, extra_providers_needed: 1 },
-  { id: "paediatrics", name: "Paediatrics", requested: 3, offered: 4, booked: 3, declined_full: 0, providers: 1, occupancy_pct: 75.0, extra_providers_needed: 0 },
-  { id: "dermatology", name: "Dermatology", requested: 1, offered: 2, booked: 1, declined_full: 0, providers: 0, occupancy_pct: 50.0, extra_providers_needed: 0 },
-  { id: "orthopaedics", name: "Orthopaedics", requested: 1, offered: 2, booked: 1, declined_full: 0, providers: 1, occupancy_pct: 50.0, extra_providers_needed: 0 },
-  { id: "gynaecology", name: "Gynaecology", requested: 1, offered: 1, booked: 1, declined_full: 0, providers: 0, occupancy_pct: 100.0, extra_providers_needed: 0 },
-  { id: "physiotherapy", name: "Physiotherapy", requested: 1, offered: 3, booked: 1, declined_full: 0, providers: 0, occupancy_pct: 33.3, extra_providers_needed: 0 },
+
+// ---- occupancy by service ---------------------------------------------------
+
+// requested / offered / booked / declined_full / providers, per specialty.
+const BASE_SERVICES = [
+  ["general_practice", "General practice", 128, 96, 88, 14, 3],
+  ["dermatology", "Dermatology", 20, 17, 15, 3, 1],
+  ["paediatrics", "Paediatrics", 41, 52, 36, 1, 2],
+  ["physiotherapy", "Physiotherapy", 37, 60, 31, 0, 1],
+  ["orthopaedics", "Orthopaedics", 29, 44, 24, 1, 2],
+  ["gynaecology", "Gynaecology", 22, 30, 19, 0, 1],
 ];
-export const MOCK_SERVICES_SUR = [
-  { id: "general_practice", name: "General practice", requested: 3, offered: 3, booked: 2, declined_full: 0, providers: 1, occupancy_pct: 100.0, extra_providers_needed: 0 },
-  { id: "paediatrics", name: "Paediatrics", requested: 1, offered: 2, booked: 1, declined_full: 0, providers: 0, occupancy_pct: 50.0, extra_providers_needed: 0 },
-  { id: "dermatology", name: "Dermatology", requested: 1, offered: 1, booked: 1, declined_full: 0, providers: 0, occupancy_pct: 100.0, extra_providers_needed: 0 },
-  { id: "orthopaedics", name: "Orthopaedics", requested: 1, offered: 2, booked: 0, declined_full: 0, providers: 0, occupancy_pct: 50.0, extra_providers_needed: 0 },
-  { id: "gynaecology", name: "Gynaecology", requested: 0, offered: 1, booked: 0, declined_full: 0, providers: 0, occupancy_pct: 0.0, extra_providers_needed: 0 },
-  { id: "physiotherapy", name: "Physiotherapy", requested: 0, offered: 1, booked: 0, declined_full: 0, providers: 0, occupancy_pct: 0.0, extra_providers_needed: 0 },
+
+const BASE_SERVICES_CENTRO = [
+  ["general_practice", "General practice", 71, 48, 47, 9, 2],
+  ["dermatology", "Dermatology", 20, 17, 15, 3, 1],
+  ["paediatrics", "Paediatrics", 24, 28, 21, 1, 1],
+  ["physiotherapy", "Physiotherapy", 9, 16, 8, 0, 0],
+  ["orthopaedics", "Orthopaedics", 17, 24, 14, 1, 1],
+  ["gynaecology", "Gynaecology", 22, 30, 19, 0, 1],
 ];
+
+const BASE_SERVICES_NORTE = [
+  ["general_practice", "General practice", 39, 32, 28, 4, 1],
+  ["dermatology", "Dermatology", 0, 0, 0, 0, 0],
+  ["paediatrics", "Paediatrics", 17, 24, 15, 0, 1],
+  ["physiotherapy", "Physiotherapy", 6, 12, 5, 0, 0],
+  ["orthopaedics", "Orthopaedics", 12, 20, 10, 0, 1],
+  ["gynaecology", "Gynaecology", 0, 0, 0, 0, 0],
+];
+
+const BASE_SERVICES_SUR = [
+  ["general_practice", "General practice", 18, 16, 13, 1, 0],
+  ["dermatology", "Dermatology", 0, 0, 0, 0, 0],
+  ["paediatrics", "Paediatrics", 0, 0, 0, 0, 0],
+  ["physiotherapy", "Physiotherapy", 22, 32, 18, 0, 1],
+  ["orthopaedics", "Orthopaedics", 0, 0, 0, 0, 0],
+  ["gynaecology", "Gynaecology", 0, 0, 0, 0, 0],
+];
+
+// ---- demand / supply heatmap ------------------------------------------------
 
 export const BAND_NAMES = ["Morning", "Midday", "Afternoon", "Evening"];
+const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
-// weekday + one [demand, availability] pair per band -> a heatmap row. Kept
-// as a helper so the three per-site grids below (and the network-wide one)
-// stay readable instead of one giant object literal per weekday.
-export function heatRow(weekday, pairs) {
-  return {
-    weekday,
-    all_day_demand: 0,
-    cells: BAND_NAMES.map((band, i) => ({ band, demand: pairs[i][0], availability: pairs[i][1] })),
-  };
-}
+// One [demand, availability] pair per band, per weekday.
+const BASE_HEAT_ALL = [
+  [[22, 18], [9, 12], [31, 16], [11, 6]],
+  [[18, 18], [7, 11], [26, 19], [9, 3]],
+  [[16, 16], [6, 10], [22, 21], [7, 4]],
+  [[20, 13], [10, 7], [38, 4], [15, 1]],
+  [[24, 20], [8, 10], [21, 17], [0, 0]],
+  [[11, 8], [4, 3], [0, 0], [0, 0]],
+  [[0, 0], [0, 0], [0, 0], [0, 0]],
+];
+const BASE_HEAT_CENTRO = [
+  [[13, 10], [5, 6], [19, 9], [8, 4]],
+  [[11, 10], [4, 6], [15, 11], [6, 2]],
+  [[9, 9], [3, 5], [13, 12], [5, 3]],
+  [[12, 7], [6, 4], [24, 2], [11, 1]],
+  [[14, 11], [4, 5], [13, 10], [0, 0]],
+  [[0, 0], [0, 0], [0, 0], [0, 0]],
+  [[0, 0], [0, 0], [0, 0], [0, 0]],
+];
+const BASE_HEAT_NORTE = [
+  [[6, 5], [3, 4], [9, 5], [3, 2]],
+  [[5, 5], [2, 3], [8, 6], [3, 1]],
+  [[5, 5], [2, 3], [6, 6], [2, 1]],
+  [[6, 4], [3, 2], [11, 2], [4, 0]],
+  [[7, 6], [3, 3], [6, 5], [0, 0]],
+  [[11, 8], [4, 3], [0, 0], [0, 0]],
+  [[0, 0], [0, 0], [0, 0], [0, 0]],
+];
+const BASE_HEAT_SUR = [
+  [[3, 3], [1, 2], [3, 2], [0, 0]],
+  [[2, 3], [1, 2], [3, 2], [0, 0]],
+  [[2, 2], [1, 2], [3, 3], [0, 0]],
+  [[2, 2], [1, 1], [3, 0], [0, 0]],
+  [[3, 3], [1, 2], [2, 2], [0, 0]],
+  [[0, 0], [0, 0], [0, 0], [0, 0]],
+  [[0, 0], [0, 0], [0, 0], [0, 0]],
+];
 
-// Per-site grids, zeroed on the bands each site's own hours_label below
-// says it is closed — demand_supply_heatmap() never mixes a site's numbers
-// into another's, so these three (and their `open` matrices) must actually
-// differ or the "Closed" cells and the site picker both look broken.
-export const MOCK_HEATMAP_CENTRO = [
-  heatRow("Monday", [[5, 4], [2, 2], [7, 3], [3, 1]]),
-  heatRow("Tuesday", [[4, 4], [1, 2], [5, 4], [2, 0]]),
-  heatRow("Wednesday", [[3, 3], [1, 2], [4, 5], [1, 1]]),
-  heatRow("Thursday", [[4, 2], [2, 1], [9, 0], [4, 0]]),
-  heatRow("Friday", [[5, 4], [1, 2], [5, 4], [0, 0]]),
-  heatRow("Saturday", [[0, 0], [0, 0], [0, 0], [0, 0]]),
-  heatRow("Sunday", [[0, 0], [0, 0], [0, 0], [0, 0]]),
+const OPEN_ALL = [
+  [true, true, true, true],
+  [true, true, true, true],
+  [true, true, true, true],
+  [true, true, true, true],
+  [true, true, true, false],
+  [true, true, false, false],
+  [false, false, false, false],
 ];
 export const MOCK_OPEN_CENTRO = [
   [true, true, true, true],
   [true, true, true, true],
   [true, true, true, true],
   [true, true, true, true],
-  [true, true, true, true],
+  [true, true, true, false],
   [false, false, false, false],
   [false, false, false, false],
-];
-export const MOCK_HEATMAP_NORTE = [
-  heatRow("Monday", [[2, 1], [1, 1], [4, 2], [1, 1]]),
-  heatRow("Tuesday", [[1, 1], [1, 1], [3, 2], [1, 0]]),
-  heatRow("Wednesday", [[1, 1], [0, 1], [2, 2], [1, 0]]),
-  heatRow("Thursday", [[2, 1], [1, 1], [4, 0], [2, 0]]),
-  heatRow("Friday", [[3, 2], [1, 1], [2, 1], [0, 0]]),
-  heatRow("Saturday", [[3, 2], [1, 1], [0, 0], [0, 0]]),
-  heatRow("Sunday", [[0, 0], [0, 0], [0, 0], [0, 0]]),
 ];
 export const MOCK_OPEN_NORTE = [
   [true, true, true, true],
   [true, true, true, true],
   [true, true, true, true],
   [true, true, true, true],
-  [true, true, true, true],
+  [true, true, true, false],
   [true, true, false, false],
   [false, false, false, false],
 ];
-export const MOCK_HEATMAP_SUR = [
-  heatRow("Monday", [[1, 1], [0, 1], [0, 0], [0, 0]]),
-  heatRow("Tuesday", [[1, 1], [0, 1], [0, 0], [0, 0]]),
-  heatRow("Wednesday", [[1, 1], [0, 0], [0, 0], [0, 0]]),
-  heatRow("Thursday", [[1, 1], [1, 0], [0, 0], [0, 0]]),
-  heatRow("Friday", [[1, 1], [0, 0], [0, 0], [0, 0]]),
-  heatRow("Saturday", [[0, 0], [0, 0], [0, 0], [0, 0]]),
-  heatRow("Sunday", [[0, 0], [0, 0], [0, 0], [0, 0]]),
-];
 export const MOCK_OPEN_SUR = [
-  [true, true, false, false],
-  [true, true, false, false],
-  [true, true, false, false],
-  [true, true, false, false],
-  [true, true, false, false],
+  [true, true, true, false],
+  [true, true, true, false],
+  [true, true, true, false],
+  [true, true, true, false],
+  [true, true, true, false],
   [false, false, false, false],
   [false, false, false, false],
 ];
 
-export const MOCK_STATS = {
-  calls_considered: 214,
-  unavailability: MOCK_UNAVAILABILITY,
-  cancellations: {
-    ...MOCK_CANCELLATIONS,
-    daily: [
-      { date: "2026-09-15", freed: 3, relocated: 2, lost: 1 },
-      { date: "2026-09-16", freed: 2, relocated: 1, lost: 0 },
-      { date: "2026-09-17", freed: 1, relocated: 1, lost: 0 },
-      { date: "2026-09-18", freed: 3, relocated: 2, lost: 1 },
-      { date: "2026-09-19", freed: 2, relocated: 1, lost: 1 },
-    ],
-  },
-  // Same shape business_insights.service_occupancy serves: one row per
-  // specialty, network-wide ("all") and once per site.
-  occupancy: {
-    all: MOCK_SERVICES,
-    sites: [
-      { id: "centro", name: "Arenal Centro", services: MOCK_SERVICES_CENTRO },
-      { id: "norte", name: "Arenal Norte", services: MOCK_SERVICES_NORTE },
-      { id: "sur", name: "Arenal Sur", services: MOCK_SERVICES_SUR },
-    ],
-  },
-  // Same shape business_insights.demand_supply_heatmap serves: 7 weekday
-  // rows x the 4 bands, an `open` matrix per site for the "Closed" cells,
-  // and `suggested_action` naming the hottest gap.
-  heatmap: {
-    bands: ["Morning", "Midday", "Afternoon", "Evening"],
-    open: [
-      [true, true, true, true],
-      [true, true, true, true],
-      [true, true, true, true],
-      [true, true, true, true],
-      [true, true, true, false],
-      [true, true, false, false],
-      [false, false, false, false],
-    ],
-    rows: [
-      { weekday: "Monday", all_day_demand: 0, cells: [{ band: "Morning", demand: 8, availability: 6 }, { band: "Midday", demand: 3, availability: 4 }, { band: "Afternoon", demand: 12, availability: 5 }, { band: "Evening", demand: 4, availability: 2 }] },
-      { weekday: "Tuesday", all_day_demand: 0, cells: [{ band: "Morning", demand: 6, availability: 6 }, { band: "Midday", demand: 2, availability: 4 }, { band: "Afternoon", demand: 9, availability: 7 }, { band: "Evening", demand: 3, availability: 0 }] },
-      { weekday: "Wednesday", all_day_demand: 0, cells: [{ band: "Morning", demand: 5, availability: 5 }, { band: "Midday", demand: 1, availability: 3 }, { band: "Afternoon", demand: 7, availability: 8 }, { band: "Evening", demand: 2, availability: 1 }] },
-      { weekday: "Thursday", all_day_demand: 0, cells: [{ band: "Morning", demand: 7, availability: 4 }, { band: "Midday", demand: 4, availability: 2 }, { band: "Afternoon", demand: 14, availability: 0 }, { band: "Evening", demand: 6, availability: 0 }] },
-      { weekday: "Friday", all_day_demand: 0, cells: [{ band: "Morning", demand: 9, availability: 7 }, { band: "Midday", demand: 2, availability: 3 }, { band: "Afternoon", demand: 8, availability: 6 }, { band: "Evening", demand: 0, availability: 0 }] },
-      { weekday: "Saturday", all_day_demand: 0, cells: [{ band: "Morning", demand: 4, availability: 3 }, { band: "Midday", demand: 1, availability: 1 }, { band: "Afternoon", demand: 0, availability: 0 }, { band: "Evening", demand: 0, availability: 0 }] },
-      { weekday: "Sunday", all_day_demand: 0, cells: [{ band: "Morning", demand: 0, availability: 0 }, { band: "Midday", demand: 0, availability: 0 }, { band: "Afternoon", demand: 0, availability: 0 }, { band: "Evening", demand: 0, availability: 0 }] },
-    ],
-    sites: [
-      { id: "centro", name: "Arenal Centro", hours_label: "Mon–Fri 09:00–20:00", open: MOCK_OPEN_CENTRO, rows: MOCK_HEATMAP_CENTRO },
-      { id: "norte", name: "Arenal Norte", hours_label: "Mon–Fri 09:00–20:00 · Sat 09:00–14:00", open: MOCK_OPEN_NORTE, rows: MOCK_HEATMAP_NORTE },
-      { id: "sur", name: "Arenal Sur", hours_label: "Mon–Fri 10:00–14:00", open: MOCK_OPEN_SUR, rows: MOCK_HEATMAP_SUR },
-    ],
-    suggested_action: "Thursday afternoons account for 14 appointment requests with only 0 slots offered in that band: opening up the schedule there would capture the largest pool of unmet demand.",
-  },
-};
+// ---- scaling helpers --------------------------------------------------------
+
+// Counts scale with the window; a 7-day window is not a flat 30/7th of the
+// month (it holds this week's Thursday rush) and 90 days grows sub-linearly
+// (the line only went live in the summer), so the factor is tuned, not
+// proportional.
+function factorFor(days) {
+  if (days <= 7) return 0.31;
+  if (days <= 30) return 1;
+  return 2.6;
+}
+
+function scale(n, f) {
+  if (!n) return 0;
+  return Math.max(1, Math.round(n * f));
+}
+
+function pct(part, whole, digits = 1) {
+  if (!whole) return 0;
+  return Number(((100 * part) / whole).toFixed(digits));
+}
+
+function scaleUnmet(f) {
+  const buckets = BASE_UNMET_BUCKETS.map((b) => ({ ...b, count: scale(b.count, f) }));
+  const total = buckets.reduce((sum, b) => sum + b.count, 0);
+  const top = buckets[0];
+  const withShares = buckets.map((b) => ({
+    ...b,
+    share: Number((b.count / top.count).toFixed(3)),
+    pct: pct(b.count, total),
+  }));
+  return {
+    unmet_total: total,
+    buckets: withShares,
+    suggested_action:
+      `${withShares[0].pct}% of unmet demand (${top.count} of ${total} calls) is a missing slot in the ` +
+      "requested window, concentrated on Thursday afternoons at Arenal Centro: extending general " +
+      "practice hours in that band would absorb most of these declines.",
+  };
+}
+
+function scaleCancellations(f) {
+  const freed = scale(BASE_CANCELLATIONS.freed_total, f);
+  const relocated = scale(BASE_CANCELLATIONS.relocated, f);
+  const pending = Math.min(scale(BASE_CANCELLATIONS.pending, f), Math.max(freed - relocated, 0));
+  const lost = Math.max(freed - relocated - pending, 0);
+  const rate = pct(relocated, freed, 0);
+  const daily = f >= 1 ? BASE_CANCELLATION_DAILY : BASE_CANCELLATION_DAILY.slice(-5);
+  return {
+    freed_total: freed,
+    relocated,
+    lost,
+    pending,
+    recovery_rate_pct: rate,
+    daily,
+    lead_time: {
+      count: freed,
+      median_hours: 41,
+      buckets: [
+        { key: "under_24h", label: "< 24 h", count: scale(7, f), share: 0.29 },
+        { key: "h24_48", label: "24–48 h", count: scale(6, f), share: 0.25 },
+        { key: "h48_7d", label: "48 h – 7 d", count: scale(8, f), share: 0.33 },
+        { key: "over_7d", label: "> 7 d", count: scale(3, f), share: 0.13 },
+      ],
+    },
+    suggested_action:
+      `Of the ${freed} slots freed by cancellation, ${relocated} were rebooked (${rate}%) but ` +
+      `${lost} went unfilled on the appointment day, most of them cancelled under 24 h before: ` +
+      "calling the waitlist the moment a cancellation lands would recover a good share of those.",
+  };
+}
+
+function serviceRow([id, name, requested, offered, booked, declined, providers], f) {
+  const req = requested ? scale(requested, f) : 0;
+  const off = offered ? scale(offered, f) : 0;
+  const bkd = booked ? Math.min(scale(booked, f), req) : 0;
+  const occupancy = off ? pct(req, off) : requested ? null : 0;
+  const extra = occupancy != null && occupancy > 110 && providers > 0 ? Math.ceil((req - off) / (off / providers)) : 0;
+  return {
+    id,
+    name,
+    requested: req,
+    offered: off,
+    booked: bkd,
+    declined_full: declined ? scale(declined, f) : 0,
+    providers,
+    occupancy_pct: occupancy,
+    extra_providers_needed: extra,
+  };
+}
+
+function scaleServices(rows, f) {
+  return rows.map((r) => serviceRow(r, f));
+}
+
+export function heatRow(weekday, pairs, f = 1) {
+  const cells = BAND_NAMES.map((band, i) => ({
+    band,
+    demand: pairs[i][0] ? scale(pairs[i][0], f) : 0,
+    availability: pairs[i][1] ? scale(pairs[i][1], f) : 0,
+  }));
+  return { weekday, all_day_demand: 0, cells };
+}
+
+function scaleHeat(grid, f) {
+  return grid.map((pairs, i) => heatRow(WEEKDAYS[i], pairs, f));
+}
+
+function hottestGap(rows) {
+  let best = null;
+  rows.forEach((row) =>
+    row.cells.forEach((cell) => {
+      const gap = cell.demand - cell.availability;
+      if (!best || gap > best.gap) best = { gap, weekday: row.weekday, ...cell };
+    })
+  );
+  return best;
+}
+
+// ---- the payload ------------------------------------------------------------
+
+export function mockInsights(days = BASE_DAYS) {
+  const f = factorFor(days);
+  const allRows = scaleHeat(BASE_HEAT_ALL, f);
+  const gap = hottestGap(allRows);
+  const services = scaleServices(BASE_SERVICES, f);
+  const requested = services.reduce((sum, s) => sum + s.requested, 0);
+  return {
+    calls_considered: scale(412, f),
+    unavailability: scaleUnmet(f),
+    cancellations: scaleCancellations(f),
+    occupancy: {
+      all: services,
+      sites: [
+        { id: "centro", name: "Arenal Centro", services: scaleServices(BASE_SERVICES_CENTRO, f) },
+        { id: "norte", name: "Arenal Norte", services: scaleServices(BASE_SERVICES_NORTE, f) },
+        { id: "sur", name: "Arenal Sur", services: scaleServices(BASE_SERVICES_SUR, f) },
+      ],
+      requested_total: requested,
+    },
+    heatmap: {
+      bands: [...BAND_NAMES],
+      open: OPEN_ALL.map((row) => [...row]),
+      rows: allRows,
+      sites: [
+        {
+          id: "centro",
+          name: "Arenal Centro",
+          hours_label: "Mon–Thu 09:00–20:00 · Fri 09:00–17:00",
+          open: MOCK_OPEN_CENTRO.map((row) => [...row]),
+          rows: scaleHeat(BASE_HEAT_CENTRO, f),
+        },
+        {
+          id: "norte",
+          name: "Arenal Norte",
+          hours_label: "Mon–Thu 09:00–20:00 · Fri 09:00–17:00 · Sat 09:00–14:00",
+          open: MOCK_OPEN_NORTE.map((row) => [...row]),
+          rows: scaleHeat(BASE_HEAT_NORTE, f),
+        },
+        {
+          id: "sur",
+          name: "Arenal Sur",
+          hours_label: "Mon–Fri 09:00–17:00",
+          open: MOCK_OPEN_SUR.map((row) => [...row]),
+          rows: scaleHeat(BASE_HEAT_SUR, f),
+        },
+      ],
+      suggested_action: gap
+        ? `${gap.weekday} ${gap.band.toLowerCase()}s account for ${gap.demand} appointment requests with ` +
+          `only ${gap.availability} slots offered in that band: opening the schedule there would capture ` +
+          "the largest pool of unmet demand."
+        : null,
+    },
+    providers: { providers: [] },
+    data_gaps: [],
+  };
+}
+
+// The 30-day view, for callers (and tests) that want one fixed payload.
+export const MOCK_STATS = mockInsights(BASE_DAYS);
+export const MOCK_UNAVAILABILITY = MOCK_STATS.unavailability;
+export const MOCK_CANCELLATIONS = MOCK_STATS.cancellations;
+export const MOCK_SERVICES = MOCK_STATS.occupancy.all;
+export const MOCK_SERVICES_CENTRO = MOCK_STATS.occupancy.sites[0].services;
+export const MOCK_SERVICES_NORTE = MOCK_STATS.occupancy.sites[1].services;
+export const MOCK_SERVICES_SUR = MOCK_STATS.occupancy.sites[2].services;
+export const MOCK_HEATMAP_CENTRO = MOCK_STATS.heatmap.sites[0].rows;
+export const MOCK_HEATMAP_NORTE = MOCK_STATS.heatmap.sites[1].rows;
+export const MOCK_HEATMAP_SUR = MOCK_STATS.heatmap.sites[2].rows;
