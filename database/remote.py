@@ -65,9 +65,19 @@ def _rows(response: httpx.Response) -> list[dict[str, Any]]:
     return [body] if isinstance(body, dict) else []
 
 
-def select(table: str, params: dict[str, str] | None = None) -> list[dict[str, Any]] | None:
+def select(
+    table: str,
+    params: dict[str, str] | None = None,
+    *,
+    timeout: float = TIMEOUT_S,
+) -> list[dict[str, Any]] | None:
     """A GET. ``None`` when Supabase is off or the request failed — never an
-    exception, so a read can never be what ends a call or a page render."""
+    exception, so a read can never be what ends a call or a page render.
+
+    ``timeout`` is for readers on a deadline. The default suits a page, which
+    can spend twenty seconds; a caller holding an open phone line passes
+    something far shorter and takes the fallback.
+    """
     if not enabled():
         return None
     try:
@@ -75,7 +85,7 @@ def select(table: str, params: dict[str, str] | None = None) -> list[dict[str, A
             _rest(f"/rest/v1/{table}"),
             params=params or {},
             headers=_headers(),
-            timeout=TIMEOUT_S,
+            timeout=timeout,
         )
         response.raise_for_status()
         rows = response.json()

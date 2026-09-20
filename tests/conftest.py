@@ -265,6 +265,19 @@ def _isolate_board_sources(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(callfeed, "_scope_cache", {})
 
 
+@pytest.fixture(autouse=True)
+def _isolate_active_persona(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The persona a call answers with is cached for the life of the process.
+
+    That is the point in production — a call must never wait on the store —
+    but across tests it means one test's fake store answers the next one.
+    """
+    from vortex.line import personalities
+
+    monkeypatch.setattr(personalities, "_active_cache", None)
+    monkeypatch.setattr(personalities, "_active_refreshing", False)
+
+
 @pytest.fixture
 def offline_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> settings_module.Settings:
     """Settings with every key blank and every scratch file in a temp dir."""

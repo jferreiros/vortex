@@ -33,6 +33,12 @@ PAGE_SIZE = 1000
 #: than the timeout allows; below it, 600 calls come back in about 5 s.
 WINDOW_MAX_CALLS = 1000
 
+
+class StoreUnreachable(Exception):
+    """The store did not answer — as opposed to answering that it holds
+    nothing. Only the second of those is a clinic with no calls."""
+
+
 _queue: queue.Queue[dict[str, Any]] = queue.Queue()
 _worker_started = False
 _lock = threading.Lock()
@@ -196,9 +202,12 @@ def fetch_window(
 
         grouped = group_by_call([e for e in events if isinstance(e, dict)])
         return _complete_calls(grouped, max_calls=max_calls, since=since)
-    except Exception:
+    except Exception as exc:
+        # Raised, not swallowed into None: `None` here already means "the
+        # window is empty", and a caller that cannot tell the two apart
+        # renders a database outage as a quiet clinic.
         log.exception("supabase fetch_window failed")
-        return None
+        raise StoreUnreachable(f"{type(exc).__name__}: {exc}"[:200]) from exc
 
 
 def _complete_calls(
@@ -347,10 +356,18 @@ def fetch_calls(
 
     ``limit`` caps the result to the most recent N calls; ``since`` keeps only
     calls that started at or after that timestamp. Always returns a pair, so a
-    caller never has to branch on ``None`` — an unreachable or unconfigured
-    store is an empty window, not an exception.
+    caller never has to branch on ``None``.
+
+    An unreachable store still answers with an empty window — a read must not
+    be what ends a page render — but the meta then carries ``unreachable``
+    with the reason. A screen that shows "0 calls" for a database that never
+    answered is telling the operator the clinic was quiet, which is a
+    different and much worse thing than saying it could not look.
     """
-    window = fetch_window(max_calls=limit, since=since)
+    try:
+        window = fetch_window(max_calls=limit, since=since)
+    except StoreUnreachable as exc:
+        return {}, {"calls": 0, "events": 0, "truncated": False, "unreachable": str(exc)}
     if window is None:
         return {}, {"calls": 0, "events": 0, "truncated": False}
     return window
