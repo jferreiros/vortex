@@ -59,6 +59,10 @@ const CLINIC_ITEMS = [
   { to: "/clinic/patterns-pathways", label: "Pathways & Patterns", icon: "patternsPathways" },
 ];
 
+// Analytics sits apart, at the foot: it reads the call log rather than running
+// the clinic, and the Calls page still opens it from its own button.
+const FOOT_ITEMS = [{ to: "/clinic/analytics", label: "Analytics", icon: "analytics" }];
+
 export function NavIcon({ name }) {
   return (
     <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -96,6 +100,12 @@ export default function Sidebar() {
 
       <div className="clinic-sidebar-nav">
         {CLINIC_ITEMS.map((item) => (
+          <Item key={item.to} {...item} />
+        ))}
+      </div>
+
+      <div className="clinic-sidebar-footnav">
+        {FOOT_ITEMS.map((item) => (
           <Item key={item.to} {...item} />
         ))}
       </div>
