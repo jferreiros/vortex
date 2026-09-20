@@ -20,7 +20,7 @@ fast model on a phone line (short replies, one question per turn, no lists)
 and it is built per call from the version file.
 
 It is sent on every turn, so it has a budget: ``tests/test_prompt.py`` fails
-the build over ~1,400 tokens. That is what keeps this file procedural rather
+the build over ~1,650 tokens. That is what keeps this file procedural rather
 than literary - every sentence has to earn its place against a rule the
 scorer or the jury can see. ``TOOL_GUIDE`` is part of that budget and says
 only what a tool's own JSON schema cannot: which field of the answer the next
@@ -39,8 +39,9 @@ What it must achieve, and why each rule is there:
   record is a failed case, so every path ends in ``submit_action``.
 - Ids only from tools. A guessed ``patient_id`` or ``slot`` fails the case
   even when the conversation was perfect.
-- English by default. 69 of the 73 public cases are English; the caller who
-  speaks Spanish or Catalan is the exception, and we follow them.
+- Spanish by default. The clinic is in Madrid, so that is the language it
+  answers in; 69 of the 73 public cases are English, and the call follows the
+  caller from their first sentence.
 - Nothing from a chart is read aloud. Problem 14 scans our turns for a
   patient's national id and phone after normalisation, digit by digit
   included. The name is not protected; everything else stays off the line.
@@ -74,6 +75,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import random
 import re
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -308,7 +310,7 @@ def build_system_prompt(
     """The system prompt for one call, with the clock rendered in.
 
     ``language`` is the language the caller opened in when it is already
-    known (a repeat caller, a language header); the default is English.
+    known (a repeat caller, a language header); the default is Spanish.
     ``caller`` is the caller-id lookup, when the line lane got one back in
     time; it saves the call the whole identify exchange. The fixed text is
     the prompt version in force (``VORTEX_PROMPT_VERSION``, else the latest
@@ -386,6 +388,93 @@ IDLE_PATIENCE_PROMPTS: dict[str, str] = {
     "eu": "Lasai. Hartu behar duzun denbora.",
 }
 
+# Spoken the instant a tool call starts (vortex/line/pipecat_voice.py). One
+# finished sentence each: TTS flushes on sentence boundaries. WAIT_LINES is
+# the LLM-timeout prompt, a different thing. Keep these short — the keyboard
+# bed is the rest of the wait.
+TOOL_FILLERS: dict[str, tuple[str, ...]] = {
+    "es": (
+        "Lo compruebo.",
+        "Un segundo.",
+        "Lo miro.",
+        "Lo consulto.",
+    ),
+    "en": (
+        "Let me check.",
+        "One second.",
+        "I'll look that up.",
+    ),
+    "ca": (
+        "Ho comprovo.",
+        "Un segon.",
+        "Ho miro.",
+    ),
+    "gl": (
+        "Compróboo.",
+        "Un segundo.",
+        "Míroo.",
+    ),
+    "eu": (
+        "Begiratuko dut.",
+        "Segundo bat.",
+    ),
+}
+
+
+class FillerPicker:
+    """Pick a tool filler, never the same line twice in a row on one call."""
+
+    def __init__(self, rng: random.Random | None = None) -> None:
+        self._rng = rng if rng is not None else random.Random()
+        self._last: str | None = None
+
+    def pick(self, language: str | None = None) -> str:
+        line = tool_filler_for(language, rng=self._rng, avoid=self._last)
+        self._last = line
+        return line
+
+
+def tool_filler_for(
+    language: str | None = None,
+    *,
+    rng: random.Random | None = None,
+    avoid: str | None = None,
+) -> str:
+    """A short tool-lookup filler. Stateless callers get a random line."""
+    code = normalise_language(language) or DEFAULT_LANGUAGE
+    pool = TOOL_FILLERS.get(code, TOOL_FILLERS[DEFAULT_LANGUAGE])
+    choices = tuple(line for line in pool if line != avoid) or pool
+    picker = rng if rng is not None else random
+    return picker.choice(choices)
+
+
+_WAIT_TALK = re.compile(
+    r"(un momento|un segundo|un momentito|un momentet|un momentíño|"
+    r"momentu bat|"
+    r"lo (compruebo|consulto|reviso|miro|busco)|"
+    r"ho (comprovo|consulto|miro|busco)|"
+    r"voy a comprob|"
+    r"d[eé]jame que|deja que lo mir|"
+    r"dame un segundo|"
+    r"(give me|just) a second|one sec|"
+    r"let me (check|look|pull)|"
+    r"i'?ll look that up|"
+    r"checking now|look that up|"
+    r"begiratuko dut|utzi bilatzen)",
+    re.IGNORECASE,
+)
+
+
+def strip_tool_wait_talk(text: str) -> str:
+    """Drop 'I'll look it up' sentences. The line already said that and is typing."""
+    raw = (text or "").strip()
+    if not raw:
+        return ""
+    parts = re.split(r"(?<=[.!?])\s*", raw)
+    kept = [part.strip() for part in parts if part.strip() and not _WAIT_TALK.search(part)]
+    return " ".join(kept)
+
+
 # Said when *we* are the ones who went quiet: the model's completion produced
 # no first token and the line gave up on it (vortex/line/llm_timeout.py). It
 # has to be a finished sentence — the TTS flushes on sentence boundaries, and
@@ -440,6 +529,11 @@ def _line(table: dict[str, str], language: str | None) -> str:
     return table.get(normalise_language(language) or DEFAULT_LANGUAGE, table[DEFAULT_LANGUAGE])
 
 
+def greeting_for(language: str | None = None) -> str:
+    """The opening line, in the language the call is in."""
+    return _line(GREETINGS, language)
+
+
 def idle_prompt_for(language: str | None = None) -> str:
     """The first "are you still there?", in the language the call is in."""
     return _line(IDLE_PROMPTS, language)
@@ -470,6 +564,8 @@ def goodbye_for(language: str | None = None) -> str:
     return _line(GOODBYE_LINES, language)
 
 
-# The opening line, spoken before the caller says a word. English: the
-# clinic's default; the model switches as soon as the caller does.
+# The opening line, spoken before the caller says a word. Spanish: the
+# clinic's default, and the language of the city it is in; the model switches
+# as soon as the caller does. The wall's active personality can replace it
+# with its own greeting (``vortex/line/pipecat_voice.py``).
 GREETING = GREETINGS[DEFAULT_LANGUAGE]

@@ -39,6 +39,8 @@ packages = ["vortex"]
 "vortex/observability/board.css" = "vortex/observability/board.css"
 "vortex/observability/design.css" = "vortex/observability/design.css"
 "vortex/observability/live.css" = "vortex/observability/live.css"
+"vortex/line/sounds/office.wav" = "vortex/line/sounds/office.wav"
+"vortex/line/sounds/typing.wav" = "vortex/line/sounds/typing.wav"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
