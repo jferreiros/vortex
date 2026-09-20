@@ -61,6 +61,21 @@ the host. Give it ten seconds, then retry.
 
 ## Deploy
 
+**Continuous deployment.** `.github/workflows/deploy.yml` runs on every push
+to `main`: it SSHes into the box (`DEPLOY_HOST`, key `DEPLOY_SSH_KEY`, both
+repository secrets) and runs `deploy/deploy-both.sh --force` in `/root/vortex`.
+The box pulls the private repo with the job's own short-lived `GITHUB_TOKEN`,
+handed to git through `GIT_CONFIG_*` for that run only. Re-run it by hand from
+the Actions tab (`workflow_dispatch`).
+
+The box is `2.28.66.152`, root, repo at `/root/vortex`, secrets in
+`deploy/.env`. Ports 80 and 443 belong to another project's Caddy; vortex is
+published through `/root/merkl-api/caddy/vortex.caddy` (one `import` line in
+that Caddyfile) on `line.2.28.66.152.sslip.io` and `board.2.28.66.152.sslip.io`.
+The `coolify` network exists only so the compose files stay unchanged; the
+Caddy container is attached to it.
+
+
 A push or merge into `main` is enough. On the VPS a systemd user timer
 (`vortex-deploy.timer`) looks at `origin/main` every minute and, when it
 moved, runs `deploy/deploy-both.sh`: pull, rebuild the call socket and the
