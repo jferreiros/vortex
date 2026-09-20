@@ -631,6 +631,21 @@ def _make_tts(
         # Builds fine, then fails on every utterance. Say so once, loudly.
         log.warning("TTS provider %s has no voice id configured", name)
 
+    if settings.elevenlabs_base_url:
+        import aiohttp
+        from pipecat.services.elevenlabs.tts import ElevenLabsHttpTTSService
+        return ElevenLabsHttpTTSService(
+            api_key=settings.elevenlabs_api_key or "shim",
+            base_url=settings.elevenlabs_base_url,
+            aiohttp_session=aiohttp.ClientSession(),
+            sample_rate=LINE_SAMPLE_RATE,
+            settings=ElevenLabsHttpTTSService.Settings(
+                voice=voice or "shim",
+                model=settings.elevenlabs_model,
+                language=language,
+            ),
+        )
+
     from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 
     # The voice character is a hardcoded preset, not an env knob.
