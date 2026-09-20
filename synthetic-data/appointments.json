@@ -1,56 +1,65 @@
 [
-  {
-    "appointment_id": "A000645",
-    "patient_id": "",
-    "provider_id": "",
-    "location_id": "sur",
-    "appointment_type_id": "review",
-    "start_time": "2026-09-28T12:30:00+02:00",
-    "duration_minutes": 15
-  },
-  {
-    "appointment_id": "A001101",
-    "patient_id": "P00005",
-    "provider_id": "",
-    "location_id": "sur",
-    "appointment_type_id": "review",
-    "start_time": "2026-10-13T12:00:00+02:00",
-    "duration_minutes": 15
-  },
-  {
-    "appointment_id": "A001335",
-    "patient_id": "",
-    "provider_id": "",
-    "location_id": "centro",
-    "appointment_type_id": "review",
-    "start_time": "2026-09-28T09:00:00+02:00",
-    "duration_minutes": 15
-  },
-  {
-    "appointment_id": "A001498",
-    "patient_id": "",
-    "provider_id": "PR07",
-    "location_id": "norte",
-    "appointment_type_id": "review",
-    "start_time": "2026-10-13T11:45:00+02:00",
-    "duration_minutes": 15
-  },
-  {
-    "appointment_id": "A001601",
-    "patient_id": "",
-    "provider_id": "",
-    "location_id": "sur",
-    "appointment_type_id": "review",
-    "start_time": "2026-09-29T11:15:00+02:00",
-    "duration_minutes": 15
-  },
-  {
-    "appointment_id": "A001727",
-    "patient_id": "",
-    "provider_id": "PR09",
-    "location_id": "sur",
-    "appointment_type_id": "review",
-    "start_time": "2026-09-28T12:00:00+02:00",
-    "duration_minutes": 15
-  }
+ {
+  "appointment_id": "A000645",
+  "patient_id": "",
+  "provider_id": "",
+  "location_id": "sur",
+  "appointment_type_id": "review",
+  "start_time": "2026-09-28T12:30:00+02:00",
+  "duration_minutes": 15
+ },
+ {
+  "appointment_id": "A001101",
+  "patient_id": "P00005",
+  "provider_id": "",
+  "location_id": "sur",
+  "appointment_type_id": "review",
+  "start_time": "2026-10-13T12:00:00+02:00",
+  "duration_minutes": 15
+ },
+ {
+  "appointment_id": "A001335",
+  "patient_id": "",
+  "provider_id": "",
+  "location_id": "centro",
+  "appointment_type_id": "review",
+  "start_time": "2026-09-28T09:00:00+02:00",
+  "duration_minutes": 15
+ },
+ {
+  "appointment_id": "A001498",
+  "patient_id": "",
+  "provider_id": "PR07",
+  "location_id": "norte",
+  "appointment_type_id": "review",
+  "start_time": "2026-10-13T11:45:00+02:00",
+  "duration_minutes": 15
+ },
+ {
+  "appointment_id": "A001601",
+  "patient_id": "",
+  "provider_id": "",
+  "location_id": "sur",
+  "appointment_type_id": "review",
+  "start_time": "2026-09-29T11:15:00+02:00",
+  "duration_minutes": 15
+ },
+ {
+  "appointment_id": "A001727",
+  "patient_id": "",
+  "provider_id": "PR09",
+  "location_id": "sur",
+  "appointment_type_id": "review",
+  "start_time": "2026-09-28T12:00:00+02:00",
+  "duration_minutes": 15
+ },
+ {
+  "appointment_id": "DEMO-CANCEL-CRIS-1",
+  "patient_id": "DEMO-CRISTINA",
+  "provider_id": "PR01",
+  "location_id": "centro",
+  "appointment_type_id": "review",
+  "start_time": "2026-09-21T10:00:00+02:00",
+  "duration_minutes": 15
+ }
 ]
