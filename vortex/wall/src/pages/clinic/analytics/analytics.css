@@ -12,6 +12,13 @@
   padding-bottom: var(--space-9);
 }
 
+/* The period toolbar sits flush right in the hero row, same edge the
+   ClinicShell close (X) button is pinned to when this page is open —
+   without this the last pill and the X sit on top of each other. */
+.analytics-page .home-hero-row {
+  padding-right: 44px;
+}
+
 /* Shared by every KPI and panel-head glyph (see Analytics.jsx's ICONS). The
    colour is set by the parent that positions it, never here, so one glyph
    works on a mute label and an ink heading alike. */

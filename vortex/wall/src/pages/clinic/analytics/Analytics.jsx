@@ -413,7 +413,6 @@ export default function Analytics() {
   return (
     <div className="analytics-page">
       <header className="home-hero">
-        <p className="home-crumb">Clínica Arenal / Analytics</p>
         <div className="home-hero-row">
           <h1 className="home-title insights-title">Analytics</h1>
           <div className="home-toolbar" role="tablist" aria-label="Period">
