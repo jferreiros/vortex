@@ -177,7 +177,10 @@ def _review_payload(card: CallCard) -> dict[str, Any]:
 
 def live_calls_payload() -> dict[str, Any]:
     cards, _health = _shared.load_cards()
-    real = [c for c in cards if is_real_call(c)]
+    # The live view shows everything on the socket right now, replayed demos
+    # included: the board's "Replay" buttons write voice="demo" calls and the
+    # jury watches them here. Analytics keeps is_real_call so they never count.
+    real = [c for c in cards if is_real_call(c) or c.voice == "demo"]
     live = [c for c in real if c.live]
     today = datetime.now(_shared.MADRID).date()
     # ``cards`` is newest first already (``build_calls`` reverses), so the
