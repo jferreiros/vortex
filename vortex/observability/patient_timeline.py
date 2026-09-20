@@ -58,7 +58,19 @@ def events_from_appointments(rows: list[Any]) -> list[dict[str, Any]]:
     return events
 
 
-def events_from_calls(cards: list[CallCard], *, patient_id: str) -> list[dict[str, Any]]:
+def events_from_calls(
+    cards: list[CallCard], *, patient_id: str, visits: list[Any] | None = None
+) -> list[dict[str, Any]]:
+    """``visits`` (the same rows ``events_from_appointments`` draws on) lets a
+    cancel/reschedule call learn the specialty of the appointment its own
+    payload only names by id — every per-specialty pattern (``cancelled-
+    without-replacement`` included) filters a call out entirely when it
+    carries no specialty at all, so without this a cancellation could never
+    match one."""
+    specialty_by_appt_id = {
+        v.id: (_specialty(v.specialty_name) or _specialty(v.specialty_id))
+        for v in (visits or [])
+    }
     events: list[dict[str, Any]] = []
     for card in cards:
         if card.patient_id != patient_id:
@@ -67,26 +79,32 @@ def events_from_calls(cards: list[CallCard], *, patient_id: str) -> list[dict[st
         if not day:
             continue
         if card.action_kind == "book":
-            desc, chain = "Cita concertada", "Booked call"
+            desc, chain, kind = "Cita concertada", "Booked call", "scheduling"
         elif card.action_kind == "reschedule":
-            desc, chain = "Cita cambiada", "Reschedule"
+            desc, chain, kind = "Cita cambiada", "Reschedule", "scheduling"
         elif card.action_kind == "cancel":
-            desc, chain = "Cita anulada", "Cancel"
+            # Its own type, not the generic "scheduling": matchPattern.js's
+            # isCancellation() (cancelled-without-replacement) reads exactly
+            # this field, not the "action" one the isBook() checks use.
+            desc, chain, kind = "Cita anulada", "Cancel", "cancellation"
         elif card.status == "live":
-            desc, chain = "Llamada en curso", "Live call"
+            desc, chain, kind = "Llamada en curso", "Live call", "scheduling"
         else:
-            desc, chain = "Llamada", "Call"
+            desc, chain, kind = "Llamada", "Call", "scheduling"
+        appointment_id = None
+        if isinstance(card.action_payload, dict):
+            appointment_id = card.action_payload.get("appointment_id")
         events.append(
             {
                 "id": f"call:{card.call_id}",
                 "shape": {
                     "family": "call",
                     "subfamily": "incoming",
-                    "type": "scheduling",
+                    "type": kind,
                 },
                 "description": desc,
                 "date": day,
-                "specialty": None,
+                "specialty": specialty_by_appt_id.get(appointment_id),
                 "chainLabel": chain,
                 "action": card.action_kind,
             }
