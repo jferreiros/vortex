@@ -337,8 +337,8 @@ VOICE_LABELS: dict[str, str] = {
 #: combination nobody asks for; it answers rather than failing.
 PERSONA_VOICES: dict[str, tuple[str, str]] = {
     "lucia": (SOFIA, ALEJANDRO),  # cálida
-    "mateo": (SOFIA, ERIC),  # directa
-    "carla": (MATILDA, GEORGE),  # tranquila
+    "mateo": (SOFIA, ALEJANDRO),  # directa
+    "carla": (MATILDA, ALEJANDRO),  # tranquila
 }
 
 #: A persona that needs its own TTS model, e.g. ``eleven_multilingual_v2`` for
