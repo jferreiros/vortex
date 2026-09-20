@@ -35,7 +35,6 @@ export default function Calls() {
   return (
     <div className="calls-page">
       <header className="home-hero">
-        <p className="home-crumb">Clínica Arenal / Calls</p>
         <div className="home-hero-row">
           <h1 className="home-title">Calls</h1>
         </div>

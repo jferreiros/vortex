@@ -219,7 +219,6 @@ export default function Insights() {
   return (
     <div className="insights-page">
       <header className="home-hero">
-        <p className="home-crumb">Clínica Arenal / Insights</p>
         <div className="home-hero-row">
           <h1 className="home-title insights-title">Insights</h1>
           <div className="home-toolbar" role="tablist" aria-label="Period">

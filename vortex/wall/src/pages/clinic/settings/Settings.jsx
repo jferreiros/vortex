@@ -125,7 +125,6 @@ export default function Settings() {
   return (
     <div className="settings-page">
       <SectionHeader
-        eyebrow="Settings"
         title="Calls"
         subtitle="Clinic rules. Who answers and how they sound is under Customize agent."
         action={

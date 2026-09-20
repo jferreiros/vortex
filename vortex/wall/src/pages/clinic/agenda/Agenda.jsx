@@ -171,7 +171,6 @@ export default function Agenda() {
   return (
     <div className="agenda-page">
       <SectionHeader
-        eyebrow="Agenda"
         title={data?.doctor?.name || "Schedule"}
         subtitle={
           data?.doctor?.specialty
