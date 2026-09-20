@@ -479,8 +479,6 @@ CLINIC_SETTINGS_DEFAULTS: dict[str, Any] = {
     "minimum_booking_lead_hours": 24,
     "patient_identification_fields_required": 1,
     "call_time_cap_minutes": 3,
-    # E.164, or empty. Empty means the clinic takes no transfers.
-    "transfer_number": "",
 }
 
 
@@ -491,8 +489,6 @@ def _settings_from_mapping(row: Any) -> dict[str, Any]:
             row["patient_identification_fields_required"]
         ),
         "call_time_cap_minutes": int(row["call_time_cap_minutes"]),
-        # A database that has not run 0002 yet still answers, with transfers off.
-        "transfer_number": str(row.get("transfer_number") or "").strip(),
     }
 
 
@@ -508,7 +504,6 @@ def put_clinic_settings(values: dict[str, Any]) -> dict[str, Any]:
     lead = max(2, min(96, int(values.get("minimum_booking_lead_hours", 24))))
     fields = max(1, min(4, int(values.get("patient_identification_fields_required", 1))))
     cap = 3
-    transfer_number = str(values.get("transfer_number") or "").strip()
     remote.upsert(
         "clinic_settings",
         [
@@ -517,7 +512,6 @@ def put_clinic_settings(values: dict[str, Any]) -> dict[str, Any]:
                 "minimum_booking_lead_hours": lead,
                 "patient_identification_fields_required": fields,
                 "call_time_cap_minutes": cap,
-                "transfer_number": transfer_number,
                 "updated_at": now_iso(),
             }
         ],

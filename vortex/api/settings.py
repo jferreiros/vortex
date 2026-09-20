@@ -2,9 +2,8 @@
 
 Three editable documents, all in Postgres:
 
-* ``clinic_settings`` — one row, the booking lead time, how many
-  identification fields a caller must confirm, and the phone number
-  ``transfer_call`` hands a live call to. ``vortex/clinic_policy.py``
+* ``clinic_settings`` — one row, the booking lead time and how many
+  identification fields a caller must confirm. ``vortex/clinic_policy.py``
   reads the same row, so a PUT here changes what the line does on the next
   call.
 * ``wall_documents`` — one jsonb row per ``kind``. ``pathways`` and
@@ -20,15 +19,16 @@ server must also load from it, or a reload silently reverts the save.
 from __future__ import annotations
 
 import logging
+from typing import Any
+
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
-from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from vortex.line import sms as line_sms
 from vortex.line.confirmation_calls import CALL_JOBS, ConfirmationCall
+from vortex.line import sms as line_sms
 from vortex.line.pathways import (
     PATHWAYS,
     Pathway,
@@ -172,7 +172,6 @@ def _clinic_settings_json(values: dict[str, Any]) -> dict[str, Any]:
             values["patient_identification_fields_required"]
         ),
         "callTimeCapMinutes": int(values["call_time_cap_minutes"]),
-        "transferNumber": str(values.get("transfer_number") or ""),
     }
 
 
@@ -206,9 +205,6 @@ async def wall_clinic_settings_put(request: Request) -> JSONResponse:
             {
                 "minimum_booking_lead_hours": lead,
                 "patient_identification_fields_required": fields,
-                "transfer_number": payload.get(
-                    "transferNumber", payload.get("transfer_number", "")
-                ),
             }
         )
     except RuntimeError:
@@ -216,6 +212,8 @@ async def wall_clinic_settings_put(request: Request) -> JSONResponse:
         return JSONResponse(STORE_DOWN, status_code=503)
     reset_cache()
     return JSONResponse(_clinic_settings_json(saved))
+
+
 
 
 # --- runtime pathway execution ---------------------------------------------
@@ -307,6 +305,8 @@ def _runtime_pathway_rows(documents: list[dict[str, Any]], kind: str) -> list[di
     return rows
 
 
+
+
 async def fire_document_step(
     pathway_name: str,
     node: dict[str, Any],
@@ -379,7 +379,6 @@ async def fire_document_step(
         "detail": "a visit step is a clinical event, not an outbound action",
     }
 
-
 def _call_to_dict(call: ConfirmationCall) -> dict[str, Any]:
     return asdict(call)
 
@@ -440,7 +439,9 @@ async def wall_pathway_test_fire(pathway_id: str, request: Request) -> JSONRespo
     if not target:
         target = "+34600000000"  # synthetic UI-TEST recipient, never a real patient
     executable = [
-        node for node in nodes if (node.get("shape") or {}).get("family") in {"call", "message"}
+        node
+        for node in nodes
+        if (node.get("shape") or {}).get("family") in {"call", "message"}
     ]
     if node_id:
         executable = [node for node in executable if str(node.get("id")) == node_id]
@@ -491,6 +492,8 @@ async def wall_pathways_put(request: Request) -> JSONResponse:
         log.warning("pathways not saved: no store configured")
         return JSONResponse(STORE_DOWN, status_code=503)
     return JSONResponse(payload)
+
+
 
 
 def _pattern_suggestion_step(pattern: dict[str, Any]) -> dict[str, Any]:
