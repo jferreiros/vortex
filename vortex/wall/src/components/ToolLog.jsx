@@ -24,7 +24,7 @@ export default function ToolLog({ items, IconComponent }) {
 
   return (
     <div className="tool-log" ref={scrollRef}>
-      {tools.length === 0 && <p className="tool-log-empty">Todavía no se ha llamado a ninguna tool.</p>}
+      {tools.length === 0 && <p className="tool-log-empty">No tool has been called yet.</p>}
       {tools.map((tool) => (
         <UsedToolCard key={tool.id} tool={tool} now={now} IconComponent={IconComponent} />
       ))}

@@ -23,12 +23,12 @@ export function readServerPathId() {
 }
 
 // A real, non-demo call_id in the server path should land the visitor
-// straight on that call inside the app shell, not on the marketing
-// landing page. Call once, before the router mounts.
+// straight on that call inside the app shell, not on the clinic home
+// default. Call once, before the router mounts.
 export function bootstrapEntryHash() {
   // Local Vite uses BrowserRouter (real paths). A copied "#/clinic/home"
-  // would otherwise land on the landing page. Fold the hash into the path
-  // before the router mounts.
+  // would otherwise be dropped. Fold the hash into the path before the
+  // router mounts.
   if (import.meta.env.DEV) {
     if (window.location.hash.startsWith("#/")) {
       window.history.replaceState(null, "", window.location.hash.slice(1));

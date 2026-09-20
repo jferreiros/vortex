@@ -3,7 +3,9 @@ import SectionHeader from "../../../components/ui/SectionHeader";
 import Card from "../../../components/ui/Card";
 import Button from "../../../components/ui/Button";
 import Placeholder from "../../../components/ui/Placeholder";
+import ShapeIcon from "../../../components/ui/ShapeIcon";
 import shapeTypesData from "../../../data/shapeTypes.json";
+import pathwaysSeed from "../../../data/pathways.json";
 import "./pathways.css";
 
 // Reached from the Sidebar via the "Pathways & Patterns" toggle page
@@ -34,16 +36,15 @@ function isEntryNode(node) {
   return node.shape.family === "entry";
 }
 
-// The main bubble shows the exact type's emoji. Calls additionally get a
-// small direction arrow badge pinned to the family emoji's own corner
-// (bottom-right of the shape) — every call is an outgoing action we take,
-// so the arrow is unconditional now, not tied to a subfamily. Every node
-// gets that bare family emoji (call/message/visit/condition) there too,
-// unless it's identical to the main one. "condition" only shows up when
-// building a pattern (see pages/clinic/patterns) — it has no place in a
-// real pathway, but lives in the same shared catalog.
+// The bubble shows only the exact type's emoji — one glyph per shape, no
+// family badge stacked on top of it (that clutter is why the shapes read as
+// overloaded). Family is now conveyed by the tray's own selector instead
+// (FAMILY_TRAY_EMOJI below), not repeated on every shape.
 const FAMILY_EMOJI = { call: "☎️", visit: "🏥", message: "📥", condition: "🔍" };
-const CALL_DIRECTION_ARROW = "↗️";
+
+// Rendering-only labels for the tray's family selector (data/shapeTypes.json
+// keeps plain text labels; this prefixes them here rather than in the file).
+const FAMILY_TRAY_EMOJI = { call: "☎️", message: "💬", visit: "🏥", condition: "🔎" };
 
 const GLYPH_BY_KEY = {};
 const DEFAULT_WHEN_BY_KEY = {};
@@ -58,26 +59,10 @@ function typeEmoji(family, type) {
   return (type && GLYPH_BY_KEY[`${family}::${type}`]) || FAMILY_EMOJI[family];
 }
 
-// Renders the main type emoji plus, unless it's a duplicate, the bare
-// family emoji with the call direction arrow pinned to its own corner.
+// One glyph, total — the exact type's emoji, falling back to the bare
+// family emoji when the type isn't decided yet.
 function ShapeGlyphs({ family, type }) {
-  const mainEmoji = typeEmoji(family, type);
-  const familyEmoji = FAMILY_EMOJI[family];
-  const showFamilyBadge = familyEmoji && familyEmoji !== mainEmoji;
-
-  return (
-    <>
-      <span className="pathways-shape-main-emoji">{mainEmoji}</span>
-      {showFamilyBadge && (
-        <span className="pathways-shape-family-wrap">
-          <span className="pathways-shape-family-badge">{familyEmoji}</span>
-          {family === "call" && (
-            <span className="pathways-shape-direction-badge">{CALL_DIRECTION_ARROW}</span>
-          )}
-        </span>
-      )}
-    </>
-  );
+  return <ShapeIcon emoji={typeEmoji(family, type)} className="pathways-shape-main-emoji" />;
 }
 
 const DRAG_MIME = "application/x-pathway-shape";
@@ -140,6 +125,15 @@ function loadStoredState() {
     // corrupt or unavailable storage — wait for the server's copy
   }
   return null;
+}
+
+// The bundled seed (data/pathways.json) — read before ever hitting the
+// database, which runs slow. Only when this has nothing do we fall back to
+// the GET /api/wall/pathways round-trip below.
+function loadSeedState() {
+  if (!Array.isArray(pathwaysSeed?.pathways) || pathwaysSeed.pathways.length === 0) return null;
+  const pathways = migratePathways(pathwaysSeed.pathways);
+  return { pathways, selectedId: pathwaysSeed.selectedId ?? pathways[0].id };
 }
 
 function applyPathwaysDoc(json, setPathways, setSelectedId) {
@@ -395,10 +389,10 @@ function ShapeNode({ node, nodeNumber, totalNodes, onRemove, onWhenKindChange, o
         )}
         {isEntry ? (
           <span className="pathways-shape pathways-shape-entry" title={label}>
-            <span className="pathways-shape-main-emoji">{ENTRY_EMOJI}</span>
+            <ShapeIcon emoji={ENTRY_EMOJI} className="pathways-shape-main-emoji" />
           </span>
         ) : (
-          <span className="pathways-shape" title={label}>
+          <span className={`pathways-shape pathways-shape-${node.shape.family}`} title={label}>
             <ShapeGlyphs family={node.shape.family} type={node.shape.type} />
           </span>
         )}
@@ -536,7 +530,7 @@ function ShapeTray() {
             className={`pathways-tray-family ${family === f.key ? "on" : ""}`}
             onClick={() => setFamily(f.key)}
           >
-            {f.label}
+            {FAMILY_TRAY_EMOJI[f.key]} {f.label}
           </button>
         ))}
       </div>
@@ -552,7 +546,7 @@ function ShapeTray() {
               e.dataTransfer.effectAllowed = "copy";
             }}
           >
-            <span className="pathways-shape">
+            <span className={`pathways-shape pathways-shape-${familyDef.key}`}>
               <ShapeGlyphs family={familyDef.key} type={t.type} />
             </span>
             <span className="pathways-tray-shape-label">{t.type}</span>
@@ -565,7 +559,7 @@ function ShapeTray() {
 
 export default function Pathways() {
   const [initial] = useState(
-    () => loadStoredState() ?? { pathways: [], selectedId: null }
+    () => loadStoredState() ?? loadSeedState() ?? { pathways: [], selectedId: null }
   );
   const [pathways, setPathways] = useState(initial.pathways);
   const [selectedId, setSelectedId] = useState(initial.selectedId);
@@ -574,6 +568,9 @@ export default function Pathways() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   useEffect(() => {
+    // The cache or the bundled seed already has pathways to show — skip the
+    // database round-trip entirely rather than wait on it.
+    if (initial.pathways.length > 0) return;
     let cancelled = false;
     fetch("/api/wall/pathways")
       .then((r) => (r.ok ? r.json() : Promise.reject()))
@@ -584,7 +581,7 @@ export default function Pathways() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [initial]);
 
   const selected = pathways.find((w) => w.id === selectedId) ?? pathways[0];
 
@@ -723,6 +720,17 @@ export default function Pathways() {
     }
     setTimeout(() => setSaveStatus(null), 2000);
   };
+
+  // First render, before either localStorage or the /api/wall/pathways
+  // fetch has produced a pathway to select — render a loading state instead
+  // of crashing on `selected.name` below.
+  if (!selected) {
+    return (
+      <div className="pathways-page">
+        <Placeholder kind="diagram" label="Loading pathways…" minHeight="200px" />
+      </div>
+    );
+  }
 
   return (
     <div className="pathways-page">

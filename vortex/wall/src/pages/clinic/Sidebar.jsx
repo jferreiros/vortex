@@ -4,10 +4,10 @@ const ICONS = {
   home: (
     <path d="M4 11.5L12 4l8 7.5M6 9.5V20h5v-5.5h2V20h5V9.5" />
   ),
-  doctor: (
+  schedule: (
     <>
-      <circle cx="12" cy="8" r="3.2" />
-      <path d="M5 19.5c.8-3.2 3.4-5 7-5s6.2 1.8 7 5" />
+      <rect x="3.5" y="5" width="17" height="15" rx="2.2" />
+      <path d="M3.5 9.7h17M8 3v4M16 3v4M7.5 13.3h2M11.5 13.3h2M15.5 13.3h2M7.5 17h2" />
     </>
   ),
   settings: (
@@ -44,18 +44,20 @@ const ICONS = {
       <path d="M7.1 6.9L16.9 11M7.1 17.1L16.9 13" />
     </>
   ),
+  close: (
+    <path d="M5 5l14 14M19 5L5 19" />
+  ),
 };
 
 const CLINIC_ITEMS = [
   { to: "/clinic/home", label: "Home", icon: "home" },
-  { to: "/clinic/ai", label: "Personalizar agente", icon: "ai" },
+  { to: "/clinic/settings", label: "Agent settings", icon: "settings" },
+  { to: "/clinic/ai", label: "Agent personalization", icon: "ai" },
   { to: "/clinic/calls", label: "Calls", icon: "calls", also: ["/clinic/live-calls"] },
-  { to: "/clinic/analytics", label: "Analytics", icon: "analytics" },
-  { to: "/clinic/doctor", label: "Horarios", icon: "doctor" },
+  { to: "/clinic/insights", label: "Insights", icon: "insights" },
+  { to: "/clinic/doctor", label: "Schedule", icon: "schedule" },
   { to: "/clinic/patterns-pathways", label: "Pathways & Patterns", icon: "patternsPathways" },
 ];
-
-const FOOT_ITEMS = [{ to: "/clinic/settings", label: "Ajustes", icon: "settings" }];
 
 export function NavIcon({ name }) {
   return (
@@ -98,15 +100,9 @@ export default function Sidebar() {
         ))}
       </div>
 
-      <div className="clinic-sidebar-end">
-        {FOOT_ITEMS.map((item) => (
-          <Item key={item.to} {...item} />
-        ))}
-      </div>
-
       <div className="clinic-sidebar-foot">
         <span className="clinic-sidebar-status-dot" />
-        <span>Línea activa</span>
+        <span>Line active</span>
       </div>
     </nav>
   );

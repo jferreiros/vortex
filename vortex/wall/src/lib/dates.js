@@ -1,4 +1,4 @@
-const WEEKDAYS = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"];
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 export function parseDateOnly(value) {
   if (!value) return null;

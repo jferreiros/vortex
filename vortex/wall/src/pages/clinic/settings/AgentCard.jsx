@@ -6,14 +6,14 @@ import "./settings.css";
 const VOICE_DEFAULTS = { tone: 50, friendliness: 50, speechRate: 50, voice: "female" };
 
 const RATES = [
-  { value: 0, label: "Pausado", sample: "Claro, dígame con calma el nombre y la fecha que prefiere, y lo anoto sin prisa." },
-  { value: 50, label: "Medio", sample: "Perfecto, ¿qué día le viene bien para la cita?" },
-  { value: 100, label: "Rápido", sample: "¿Mañana a las diez o el jueves a las doce?" },
+  { value: 0, label: "Slow", sample: "Of course, take your time telling me the name and the date you prefer, and I'll note it down." },
+  { value: 50, label: "Medium", sample: "Perfect, what day works for you for the appointment?" },
+  { value: 100, label: "Fast", sample: "Tomorrow at ten, or Thursday at noon?" },
 ];
 
 const VOICE_SAMPLE = {
-  female: "Buenos días, Clínica Arenal, le atiende Lucía. ¿En qué puedo ayudarle?",
-  male: "Buenos días, Clínica Arenal, le atiende Mateo. ¿En qué puedo ayudarle?",
+  female: "Good morning, Clínica Arenal, this is Lucía speaking. How can I help you?",
+  male: "Good morning, Clínica Arenal, this is Mateo speaking. How can I help you?",
 };
 
 function nearestRate(n) {
@@ -93,22 +93,22 @@ export default function AgentCard() {
 
   return (
     <Card padding="lg" className="agent-panel">
-      {toast === "error" && <div className="settings-toast error">No se pudo guardar la voz</div>}
-      {toast === "preview" && <div className="settings-toast error">Vista previa no disponible</div>}
+      {toast === "error" && <div className="settings-toast error">Could not save the voice settings</div>}
+      {toast === "preview" && <div className="settings-toast error">Preview unavailable</div>}
 
       <section className="agent-block">
         <div className="agent-block-head">
-          <h3>Voz</h3>
+          <h3>Voice</h3>
           <button type="button" className="agent-try" onClick={preview} disabled={isTrying}>
-            {isTrying ? "…" : "Probar"}
+            {isTrying ? "…" : "Try it"}
           </button>
         </div>
         <Pills
-          name="Voz"
+          name="Voice"
           value={cfg.voice}
           options={[
-            { value: "female", label: "Mujer" },
-            { value: "male", label: "Hombre" },
+            { value: "female", label: "Woman" },
+            { value: "male", label: "Man" },
           ]}
           onChange={(value) => setField("voice", value)}
         />
@@ -116,9 +116,9 @@ export default function AgentCard() {
       </section>
 
       <section className="agent-block">
-        <h3>Ritmo</h3>
+        <h3>Rate</h3>
         <Pills
-          name="Ritmo"
+          name="Rate"
           value={rate}
           options={RATES}
           onChange={(value) => setField("speechRate", value)}

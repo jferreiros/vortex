@@ -27,11 +27,11 @@ export default function DurationBar({ call }) {
   return (
     <div className="duration-block">
       <div className="duration-row">
-        <span className="duration-label">Duración</span>
+        <span className="duration-label">Duration</span>
         {call.language && (
           <span className="mini-chip">{LANGUAGE_LABEL[call.language] || call.language}</span>
         )}
-        {call.idle_count > 0 && <span className="mini-chip warn">{call.idle_count}× silencio</span>}
+        {call.idle_count > 0 && <span className="mini-chip warn">{call.idle_count}× silence</span>}
       </div>
       <div className="duration-track">
         <div className={`duration-fill ${ratio > 0.8 ? "warn" : ""}`} style={{ width: `${ratio * 100}%` }} />
