@@ -134,6 +134,19 @@
   color: var(--color-mute);
 }
 
+/* A page of zeros because the store went quiet looks exactly like a page of
+   zeros because the clinic did. Say which one this is, above the numbers. */
+.analytics-unreachable {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-warn);
+  border-radius: var(--radius-md);
+  background: var(--color-warn-soft);
+  color: var(--color-ink);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+}
+
 .analytics-foot {
   margin: 0;
   font-size: var(--text-xs);

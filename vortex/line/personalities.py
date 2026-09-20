@@ -20,12 +20,10 @@ persona, which ``active()`` already answers from the seeds.
 
 The call reads the active persona once per socket (``pipecat_voice``): its name,
 role and tone become the prompt's PERSONA block, its greeting opens the line,
-and its slug picks the ElevenLabs voice and model the line speaks with, from
-``conversation.language.PERSONA_VOICES``.
-
-``voices`` is the one stored field the call ignores — those are leftover Google
-Chirp names, and a voice id is a tuning decision that belongs in the map, not
-in a form field that can hold a string ElevenLabs has never heard of.
+and the line chooses that persona's own provider voice from two per-persona
+maps: ``elevenlabs_voices`` for stock launched calls and ``voices`` for the
+Google HTTP adapter fallback. The two namespaces stay separate so no provider
+receives the other's name by mistake.
 """
 
 from __future__ import annotations
@@ -33,6 +31,8 @@ from __future__ import annotations
 import json
 import logging
 import re
+import threading
+import time
 import unicodedata
 from datetime import UTC, datetime
 from typing import Any
@@ -49,13 +49,62 @@ LANGUAGES: tuple[str, ...] = ("en", "es", "ca", "gl", "eu")
 #: turn, so a persona's tone has to stay a fragment, not a second prompt.
 TONE_MAX_CHARS = 400
 
-#: A persona carries no voice id in the store: which ElevenLabs voice each
-#: receptionist speaks with is ``conversation.language.PERSONA_VOICES``, a
-#: fixed map in code the team tunes together, not a field a form can set to a
-#: string ElevenLabs has never heard of. These two stay empty so the stored
-#: row says "ask the map": ``conversation.language.persona_voice`` is the ask.
-VOICE_ES = ""
-VOICE_EN = ""
+#: Provider voice identity is per persona, never one global voice for every
+#: agent. Keep the two namespaces explicit:
+#: - ElevenLabs ids (stock launched calls when ELEVENLABS_API_KEY is present)
+#: - Google Chirp names (the local HTTP adapter fallback)
+#: VOICE_ES / VOICE_EN remain the fallbacks for callers that create a persona
+#: before the picker has provider-specific names for it.
+ELEVENLABS_PERSONA_VOICES: dict[str, dict[str, str]] = {
+    "lucia": {
+        "es": "eZxqQzb5CuYo3Kl6EXfZ",
+        "en": "eZxqQzb5CuYo3Kl6EXfZ",
+        "ca": "eZxqQzb5CuYo3Kl6EXfZ",
+        "gl": "eZxqQzb5CuYo3Kl6EXfZ",
+        "eu": "eZxqQzb5CuYo3Kl6EXfZ",
+    },
+    "mateo": {
+        "es": "JngPf0lmRkKhY3qSJz0f",
+        "en": "JngPf0lmRkKhY3qSJz0f",
+        "ca": "JngPf0lmRkKhY3qSJz0f",
+        "gl": "JngPf0lmRkKhY3qSJz0f",
+        "eu": "JngPf0lmRkKhY3qSJz0f",
+    },
+    "carla": {
+        "es": "eZxqQzb5CuYo3Kl6EXfZ",
+        "en": "eZxqQzb5CuYo3Kl6EXfZ",
+        "ca": "eZxqQzb5CuYo3Kl6EXfZ",
+        "gl": "eZxqQzb5CuYo3Kl6EXfZ",
+        "eu": "eZxqQzb5CuYo3Kl6EXfZ",
+    },
+}
+
+GOOGLE_PERSONA_VOICES: dict[str, dict[str, str]] = {
+    "lucia": {
+        "es": "es-ES-Chirp3-HD-Kore",
+        "en": "en-US-Chirp3-HD-Kore",
+        "ca": "es-ES-Chirp3-HD-Kore",
+        "gl": "es-ES-Chirp3-HD-Kore",
+        "eu": "es-ES-Chirp3-HD-Kore",
+    },
+    "mateo": {
+        "es": "es-ES-Chirp3-HD-Charon",
+        "en": "en-US-Chirp3-HD-Charon",
+        "ca": "es-ES-Chirp3-HD-Charon",
+        "gl": "es-ES-Chirp3-HD-Charon",
+        "eu": "es-ES-Chirp3-HD-Charon",
+    },
+    "carla": {
+        "es": "es-ES-Chirp3-HD-Leda",
+        "en": "en-US-Chirp3-HD-Leda",
+        "ca": "es-ES-Chirp3-HD-Leda",
+        "gl": "es-ES-Chirp3-HD-Leda",
+        "eu": "es-ES-Chirp3-HD-Leda",
+    },
+}
+
+VOICE_ES = ELEVENLABS_PERSONA_VOICES["lucia"]["es"]
+VOICE_EN = ELEVENLABS_PERSONA_VOICES["lucia"]["en"]
 
 #: Vorty heads from ``vortex/wall/media``: the bare face plus one accessory
 #: overlay. ``none`` is the face without a hat. The picker stores the stem
@@ -165,10 +214,6 @@ def listing(settings: Any = None) -> dict[str, Any]:
     ``GET /personalities`` and the board's ``GET /api/wall/personalities``.
     They read the same table, so the shape is defined once here rather than
     written out twice and drifting.
-
-    No voice id here: the rail is a picker of faces. Which ElevenLabs voice
-    the active one ends up speaking with is ``voice_config.current_voice``,
-    served at ``/voice-current``.
     """
     people = list_all(settings)
     return {
@@ -192,6 +237,7 @@ _COLUMNS = (
     "tone",
     "greetings_json",
     "voices_json",
+    "elevenlabs_voices_json",
     "avatar",
     "sort_order",
     "active",
@@ -217,6 +263,7 @@ class PersonalityDraft(BaseModel):
     tone: str
     greetings: dict[str, str] = Field(default_factory=dict)
     voices: dict[str, str] = Field(default_factory=dict)
+    elevenlabs_voices: dict[str, str] = Field(default_factory=dict)
     avatar: str
     sort_order: int = 0
 
@@ -241,7 +288,7 @@ class PersonalityDraft(BaseModel):
             )
         return text
 
-    @field_validator("greetings", "voices")
+    @field_validator("greetings", "voices", "elevenlabs_voices")
     @classmethod
     def _known_languages(cls, value: dict[str, str]) -> dict[str, str]:
         unknown = sorted(set(value) - set(LANGUAGES))
@@ -289,7 +336,8 @@ SEEDS: tuple[Personality, ...] = (
         name="Lucía",
         **style_fields("warm"),
         greetings=greetings_for("Lucía"),
-        voices={"es": VOICE_ES, "en": VOICE_EN},
+        voices=GOOGLE_PERSONA_VOICES["lucia"],
+        elevenlabs_voices=ELEVENLABS_PERSONA_VOICES["lucia"],
         avatar="headset.svg",
         sort_order=0,
     ),
@@ -298,7 +346,8 @@ SEEDS: tuple[Personality, ...] = (
         name="Mateo",
         **style_fields("brisk"),
         greetings=greetings_for("Mateo"),
-        voices={"es": VOICE_ES, "en": VOICE_EN},
+        voices=GOOGLE_PERSONA_VOICES["mateo"],
+        elevenlabs_voices=ELEVENLABS_PERSONA_VOICES["mateo"],
         avatar="baseball-cap.svg",
         sort_order=1,
     ),
@@ -307,7 +356,8 @@ SEEDS: tuple[Personality, ...] = (
         name="Carla",
         **style_fields("calm"),
         greetings=greetings_for("Carla"),
-        voices={"es": VOICE_ES, "en": VOICE_EN},
+        voices=GOOGLE_PERSONA_VOICES["carla"],
+        elevenlabs_voices=ELEVENLABS_PERSONA_VOICES["carla"],
         avatar="beanie.svg",
         sort_order=2,
     ),
@@ -338,6 +388,7 @@ def _params(person: Personality) -> dict[str, Any]:
         **{key: data[key] for key in _COLUMNS if key in data},
         "greetings_json": json.dumps(data["greetings"], ensure_ascii=False),
         "voices_json": json.dumps(data["voices"], ensure_ascii=False),
+        "elevenlabs_voices_json": json.dumps(data["elevenlabs_voices"], ensure_ascii=False),
         "active": 1 if person.active else 0,
     }
 
@@ -351,6 +402,7 @@ def _from_row(row: dict[str, Any]) -> Personality:
         tone=row["tone"],
         greetings=json.loads(row.get("greetings_json") or "{}"),
         voices=json.loads(row.get("voices_json") or "{}"),
+        elevenlabs_voices=json.loads(row.get("elevenlabs_voices_json") or "{}"),
         avatar=row["avatar"],
         sort_order=row.get("sort_order") or 0,
         active=bool(row.get("active")),
@@ -377,11 +429,13 @@ def _require_store() -> Any:
     return remote
 
 
-def _rows(params: dict[str, str]) -> list[dict[str, Any]] | None:
+def _rows(params: dict[str, str], *, timeout: float | None = None) -> list[dict[str, Any]] | None:
     from database import remote
 
     try:
-        return remote.select(TABLE, params)
+        if timeout is None:
+            return remote.select(TABLE, params)
+        return remote.select(TABLE, params, timeout=timeout)
     except Exception as exc:
         log.warning("personalities unreadable: %s", exc)
         return None
@@ -430,18 +484,121 @@ def get(settings: Any, slug: str) -> Personality | None:
     return next((person for person in list_all(settings) if person.slug == slug), None)
 
 
-def active(settings: Any = None) -> Personality:
-    """The persona answering the phone. Falls back to the first seed rather
-    than raising: an unreachable store must not stop a call from being
-    answered."""
+#: How long a read of the active persona stays good. Who answers the phone is
+#: changed by hand on the board, minutes apart at the very fastest, and every
+#: write here clears the cache — so this only ever bounds how long an edit made
+#: in *another* process takes to land.
+ACTIVE_TTL_S = 60.0
+
+#: The longest a call will wait for the store before it opens its mouth. The
+#: page-sized default (database.remote.TIMEOUT_S, 20s) is a lifetime on a live
+#: phone line: the caller hangs up, the pipeline is cancelled and the call
+#: answers with silence. Observed on 20 Sep 2026 — a slow persona read held
+#: every call 23 seconds and all of them returned zero audio.
+CALL_READ_TIMEOUT_S = 2.0
+
+_active_cache: tuple[float, Personality] | None = None
+_active_lock = threading.Lock()
+_active_refreshing = False
+
+
+def _read_active(timeout: float | None = None) -> Personality | None:
+    """One read. ``None`` means the store did not answer — which is not the
+    same as answering that no persona is active."""
     rows = _rows(
-        {"select": "*", "active": "eq.1", "order": "sort_order.asc,name.asc", "limit": "1"}
+        {"select": "*", "active": "eq.1", "order": "sort_order.asc,name.asc", "limit": "1"},
+        timeout=timeout,
     )
     if rows:
         return _from_row(rows[0])
     if rows is not None:
         log.warning("no active personality stored, falling back to %s", SEEDS[0].slug)
-    return SEEDS[0].model_copy(update={"active": True})
+        return SEEDS[0].model_copy(update={"active": True})
+    return None
+
+
+def _refresh_active() -> None:
+    global _active_refreshing
+    try:
+        person = _read_active()
+        if person is not None:
+            _remember_active(person)
+    except Exception:
+        log.exception("background persona refresh failed")
+    finally:
+        with _active_lock:
+            _active_refreshing = False
+
+
+def _remember_active(person: Personality) -> None:
+    global _active_cache
+    with _active_lock:
+        _active_cache = (time.monotonic(), person)
+
+
+def warm_active() -> None:
+    """Fill the cache in the background, at start-up.
+
+    Without this the first call of a fresh container is the one that pays the
+    cold read — and on a bad day that is two seconds of silence to the first
+    caller after every deploy.
+    """
+    global _active_refreshing
+    with _active_lock:
+        if _active_refreshing or _active_cache is not None:
+            return
+        _active_refreshing = True
+    threading.Thread(target=_refresh_active, name="persona-warm", daemon=True).start()
+
+
+def invalidate_active() -> None:
+    """Drop the cached persona. Every write below calls this, so a pick made
+    on the board is on the phone for the next call, not sixty seconds later."""
+    global _active_cache
+    with _active_lock:
+        _active_cache = None
+
+
+def active(settings: Any = None) -> Personality:
+    """The persona answering the phone. Falls back to the first seed rather
+    than raising: an unreachable store must not stop a call from being
+    answered.
+
+    Served from a process cache, and stale-while-revalidate past its TTL: a
+    stale persona answers instantly while a background thread refreshes it.
+    Only a cold process ever touches the store on the call path, and even then
+    under ``CALL_READ_TIMEOUT_S`` rather than the page-sized default.
+    """
+    global _active_refreshing
+    with _active_lock:
+        hit = _active_cache
+        if hit and time.monotonic() - hit[0] < ACTIVE_TTL_S:
+            return hit[1]
+        start_refresh = hit is not None and not _active_refreshing
+        if start_refresh:
+            _active_refreshing = True
+    if hit is not None:
+        if start_refresh:
+            threading.Thread(target=_refresh_active, name="persona-refresh", daemon=True).start()
+        return hit[1]
+
+    person = _read_active(timeout=CALL_READ_TIMEOUT_S)
+    if person is None:
+        # The store did not answer inside the call's budget. Take the seed now
+        # and let a background read fill the cache for the next call, rather
+        # than making every call pay the same wait.
+        with _active_lock:
+            start_refresh = not _active_refreshing
+            if start_refresh:
+                _active_refreshing = True
+        if start_refresh:
+            threading.Thread(target=_refresh_active, name="persona-refresh", daemon=True).start()
+        log.warning(
+            "persona read timed out after %.1fs; using %s", CALL_READ_TIMEOUT_S, SEEDS[0].slug
+        )
+        return SEEDS[0].model_copy(update={"active": True})
+    _remember_active(person)
+    return person
 
 
 # --- writing ------------------------------------------------------------------
@@ -472,6 +629,9 @@ def update(settings: Any, slug: str, payload: dict[str, Any] | None) -> Personal
     draft = PersonalityDraft(**{**base, **incoming, "name": name})
     stored = current.model_copy(update={**draft.model_dump(), "updated_at": _now()})
     remote.upsert(TABLE, [_params(stored)], "slug")
+    # The edited persona may be the one on the phone; cheaper and safer to
+    # drop the cache than to work out whether it was.
+    invalidate_active()
     return stored
 
 
@@ -499,6 +659,7 @@ def create(settings: Any, payload: dict[str, Any] | None) -> Personality:
         **style_fields(style_id),
         greetings=greetings_for(name),
         voices={"es": VOICE_ES, "en": VOICE_EN},
+        elevenlabs_voices={"es": VOICE_ES, "en": VOICE_EN},
         avatar=normalize_look(str(incoming.get("look") or "headset")),
         sort_order=max((person.sort_order for person in people), default=-1) + 1,
         active=False,
@@ -532,4 +693,5 @@ def activate(settings: Any, slug: str) -> Personality:
     )
     stored = target.model_copy(update={"active": True, "updated_at": now})
     remote.upsert(TABLE, [_params(stored)], "slug")
+    _remember_active(stored)
     return stored

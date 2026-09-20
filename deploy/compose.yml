@@ -4,6 +4,15 @@ networks:
   coolify:
     external: true
 
+# Same named volume the vortex-line project mounts: the confirmation-call
+# queue is a JSON file written HERE (wall cancel buttons, pathway test-fire)
+# and drained by the line container's ConfirmationWorker. Without sharing it,
+# wall-cancelled visits never reach the dial step.
+
+volumes:
+  vortex-logs:
+    name: vortex-logs
+
 services:
   board:
     build:
@@ -26,6 +35,14 @@ services:
       # same Supabase project the line writes, and the wall's Horarios cancel
       # buttons write wall_cancellations rows straight back to it. No volume:
       # the two containers share one database, not a mounted file.
+    # Run as the line's uid (10001, see deploy/Dockerfile): the shared
+    # vortex-logs volume is initialised from the line image, so the queue
+    # file and directory belong to 10001. The board image's own vortex user
+    # is 1001 and could not write the shared queue (test-fire returned 500).
+    # Everything else the board touches is read-only or lives in that volume.
+    user: "10001"
+    volumes:
+      - vortex-logs:/app/logs
     networks:
       - coolify
     expose:

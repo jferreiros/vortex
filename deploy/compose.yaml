@@ -17,9 +17,17 @@ networks:
   coolify:
     external: true
 
-# No volumes. Everything the line persists goes to Supabase/Postgres over
-# PostgREST (SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY in deploy/.env), so the
-# container holds no state and a rebuild loses nothing.
+# One named volume, shared with the vortex-board project: the outbound-call
+# queue (logs/confirmation_calls.json) is a JSON file, and the wall's cancel
+# buttons and pathway test-fire write it from the BOARD container while the
+# ConfirmationWorker that dials those rows runs HERE. Without the shared file
+# a wall-cancelled visit queues into the void and the call never launches.
+# Everything else the line persists still goes to Supabase/Postgres over
+# PostgREST (SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY in deploy/.env).
+
+volumes:
+  vortex-logs:
+    name: vortex-logs
 
 services:
   line:
@@ -46,6 +54,9 @@ services:
       # env_file above, like every other key. They are deliberately not
       # repeated here: an entry under `environment` wins over env_file, so a
       # placeholder would silently blank the real value.
+
+    volumes:
+      - vortex-logs:/app/logs
 
     networks:
       - coolify

@@ -647,6 +647,44 @@ def _make_tts(
         # Builds fine, then fails on every utterance. Say so once, loudly.
         log.warning("TTS provider %s has no voice id configured", name)
 
+    if settings.tts_http_base_url and not settings.elevenlabs_api_key:
+        # An HTTP REST stand-in for ElevenLabs (VORTEX_TTS_HTTP_BASE_URL) —
+        # e.g. scripts/elevenlabs_google_shim.py backed by Google Chirp3 —
+        # speaks the with-timestamps endpoint, so the pipeline swaps the
+        # websocket client for pipecat's HTTP one. A real key always takes
+        # the stock path below. Distinct from ELEVENLABS_BASE_URL, which
+        # stays a *websocket* AI-gateway origin.
+        import aiohttp
+        from pipecat.services.elevenlabs.tts import ElevenLabsHttpTTSService
+
+        class _LazySession:
+            """ClientSession created on first use: _make_tts can run
+            outside a running loop (tests), run_tts never does."""
+
+            def __init__(self) -> None:
+                self._real: aiohttp.ClientSession | None = None
+
+            def post(self, *args: Any, **kwargs: Any) -> Any:
+                if self._real is None or self._real.closed:
+                    self._real = aiohttp.ClientSession()
+                return self._real.post(*args, **kwargs)
+
+            async def close(self) -> None:
+                if self._real is not None and not self._real.closed:
+                    await self._real.close()
+
+        return ElevenLabsHttpTTSService(
+            api_key=settings.elevenlabs_api_key or "shim",
+            base_url=settings.tts_http_base_url,
+            aiohttp_session=_LazySession(),
+            sample_rate=LINE_SAMPLE_RATE,
+            settings=ElevenLabsHttpTTSService.Settings(
+                voice=voice or "shim",
+                model=elevenlabs_model_for(persona, settings),
+                language=language,
+            ),
+        )
+
     from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 
     # The voice character is a hardcoded preset, not an env knob.

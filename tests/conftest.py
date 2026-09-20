@@ -28,6 +28,7 @@ pytest_plugins = ["nicegui.testing.user_plugin"]
 #: Keys that must never leak in from a developer's ``.env``.
 _BLANK_KEYS = (
     "PLATFORM_API_KEY",
+    "VORTEX_DEFAULT_LANGUAGE",
     "SONIOX_API_KEY",
     "LLM_API_KEY",
     "LLM_BASE_URL",
@@ -37,6 +38,8 @@ _BLANK_KEYS = (
     "AZURE_OPENAI_DEPLOYMENT",
     "AZURE_OPENAI_API_VERSION",
     "ELEVENLABS_API_KEY",
+    "ELEVENLABS_BASE_URL",
+    "VORTEX_TTS_HTTP_BASE_URL",
     "ELEVENLABS_VOICE_ID_ES",
     "ELEVENLABS_VOICE_ID_DEFAULT",
     "DISCORD_WEBHOOK_URL",
@@ -184,8 +187,15 @@ class FakeTables:
         return True
 
     def select(
-        self, table: str, params: dict[str, str] | None = None
+        self,
+        table: str,
+        params: dict[str, str] | None = None,
+        *,
+        timeout: float | None = None,
     ) -> list[dict[str, Any]] | None:
+        # ``timeout`` is accepted and ignored: a double that does not take the
+        # real signature turns a caller on a deadline into a silent fallback,
+        # and the test then passes on the seed instead of the row it set up.
         params = params or {}
         rows = [dict(r) for r in self.tables.get(table, []) if self._match(r, params)]
         for term in reversed(str(params.get("order", "")).split(",")):
@@ -258,11 +268,28 @@ def fake_store(monkeypatch: pytest.MonkeyPatch) -> FakeTables:
 @pytest.fixture(autouse=True)
 def _isolate_board_sources(monkeypatch: pytest.MonkeyPatch) -> None:
     """A local ``make run`` must not answer the board tests' fetch."""
+    from vortex.api import _shared
     from vortex.observability import callfeed
 
     monkeypatch.setattr(callfeed, "LINE_URL", "http://127.0.0.1:9")
     monkeypatch.setattr(callfeed, "_last_good", {})
     monkeypatch.setattr(callfeed, "_scope_cache", {})
+    # The card cache outlives a test now that its TTL is demo-sized, so one
+    # test's cards would answer the next one's read.
+    monkeypatch.setattr(_shared, "_cards_cache", None)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_active_persona(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The persona a call answers with is cached for the life of the process.
+
+    That is the point in production — a call must never wait on the store —
+    but across tests it means one test's fake store answers the next one.
+    """
+    from vortex.line import personalities
+
+    monkeypatch.setattr(personalities, "_active_cache", None)
+    monkeypatch.setattr(personalities, "_active_refreshing", False)
 
 
 @pytest.fixture

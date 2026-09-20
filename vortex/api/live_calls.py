@@ -22,7 +22,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from vortex.api import _shared
 from vortex.observability import analytics as analytics_pack_module
-from vortex.observability import explain
+from vortex.observability import callfeed, explain
 from vortex.observability.business_insights import is_real_call
 from vortex.observability.view import CallCard
 from vortex.settings import REPO_ROOT
@@ -48,6 +48,7 @@ def _scheduled_outbound_calls_override() -> list[dict[str, Any]]:
         return data
     return data.get("calls", []) if isinstance(data, dict) else []
 
+
 _PHASE_KEY = {
     "listen": "listening",
     "identify": "speaking",
@@ -70,7 +71,7 @@ _ENDED_PHASE = {
 
 #: One ``calls`` read per this many seconds — the SSE stream rebuilds the
 #: payload every 0.4 s and a call's direction never changes.
-_DIRECTIONS_TTL_S = 10.0
+_DIRECTIONS_TTL_S = callfeed.ttl_env("VORTEX_DIRECTIONS_TTL_S", 60.0)
 _directions_cache: tuple[float, dict[str, str]] | None = None
 
 
