@@ -292,7 +292,7 @@ async def run_pipecat_call(
         slug=getattr(persona, "slug", "") if persona else "",
         name=getattr(persona, "name", "") if persona else "",
     )
-    tts = _make_tts_stage(settings, language_state, voice_cfg)
+    tts = _make_tts_stage(settings, language_state, voice_cfg, persona)
 
     # ---- tools: every registry entry becomes a function the model can call ----
     def make_handler(tool_name: str):
@@ -352,7 +352,7 @@ async def run_pipecat_call(
     # provider was declared Spanish-only — and that silently froze the call in
     # English *and* left ``session.language`` unset, so the day-before
     # confirmation call was dialled in the wrong language too.
-    stages.append(_LanguageWatcher(session, language_state, voice_cfg))
+    stages.append(_LanguageWatcher(session, language_state, voice_cfg, persona))
     stages += [
         aggregators.user(),
         llm,
@@ -449,6 +449,24 @@ def _active_personality(settings: Any) -> Any | None:
         log.warning("no personality on this call: %s", exc)
         return None
 
+
+
+def _persona_voice(person: Any | None, language: str) -> str:
+    """Provider voice selected by the active persona for ``language``.
+
+    Personality voice maps contain Google voice names. They are applied only
+    by callers that selected the Google-compatible HTTP adapter, so an
+    ElevenLabs deployment never receives a Google name by mistake.
+    """
+    if person is None:
+        return ""
+    try:
+        code = normalise_language(language) or DEFAULT_LANGUAGE
+        voices = getattr(person, "voices", None) or {}
+        return str(voices.get(code) or voices.get("es") or voices.get(DEFAULT_LANGUAGE) or "").strip()
+    except Exception as exc:
+        log.warning("personality voice unusable: %s", exc)
+        return ""
 
 def _persona_directive(person: Any | None) -> str:
     """The PERSONA line appended to the system prompt, or "" when there is none.
@@ -582,10 +600,13 @@ class _ToolFillerGuard:
 
 
 def _make_tts_stage(
-    settings: Any, state: _LanguageState, vcfg: voice_config.VoiceConfig | None = None
+    settings: Any,
+    state: _LanguageState,
+    vcfg: voice_config.VoiceConfig | None = None,
+    persona: Any | None = None,
 ) -> Any:
-    """The call's one TTS service. One provider, so there is nothing to route."""
-    return _make_tts(settings, settings.tts_provider, state, vcfg)
+    """The call's TTS service, including the selected persona's own voice."""
+    return _make_tts(settings, settings.tts_provider, state, vcfg, persona)
 
 
 def _llm_extra_body(settings: Any) -> dict[str, Any]:
@@ -616,6 +637,7 @@ def _make_tts(
     provider: str | None = None,
     state: _LanguageState | None = None,
     vcfg: voice_config.VoiceConfig | None = None,
+    persona: Any | None = None,
 ) -> Any:
     """Build the call's ElevenLabs TTS service, asked for 8 kHz PCM.
 
@@ -627,6 +649,8 @@ def _make_tts(
     start_language = state.language if state is not None else DEFAULT_LANGUAGE
     gender = vcfg.voice if vcfg else "female"
     voice, language = tts_voice_for(start_language, settings, name, gender)
+    if settings.tts_http_base_url:
+        voice = _persona_voice(persona, start_language) or voice
     if not voice:
         # Builds fine, then fails on every utterance. Say so once, loudly.
         log.warning("TTS provider %s has no voice id configured", name)
@@ -835,6 +859,7 @@ def _LanguageWatcher(  # noqa: N802 - factory that returns a processor
     session: CallSession,
     state: _LanguageState | None = None,
     vcfg: voice_config.VoiceConfig | None = None,
+    persona: Any | None = None,
 ):
     """Switch the voice when the caller switches language.
 
@@ -880,6 +905,8 @@ def _LanguageWatcher(  # noqa: N802 - factory that returns a processor
                 provider = settings.tts_provider
                 gender = vcfg.voice if vcfg else "female"
                 voice, tts_language = tts_voice_for(language, settings, provider, gender)
+                if settings.tts_http_base_url:
+                    voice = _persona_voice(persona, language) or voice
                 previous, self._state.language = self._state.language, language
                 # The session carries it too: the day-before confirmation call
                 # is dialled in the language this caller actually spoke.

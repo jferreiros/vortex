@@ -132,3 +132,148 @@ async def test_status_endpoint_exposes_runtime_readiness(monkeypatch) -> None:
     assert payload["twilio_ready"] is True
     assert {row["name"] for row in payload["pathways"]} == set(PATHWAYS)
     assert all(row["job_registered"] for row in payload["pathways"])
+
+async def test_runtime_rows_join_editor_documents_to_the_registry(monkeypatch) -> None:
+    import json
+
+    import vortex.api.settings as api
+
+    monkeypatch.setattr(
+        api,
+        "_document",
+        lambda kind: {
+            "pathways": [
+                {
+                    "id": "cancel-rebooking-call",
+                    "name": "Cancelación → reagendado",
+                    "nodes": [
+                        {"shape": {"family": "entry"}, "description": "Cancela cita"},
+                        {"shape": {"family": "call", "type": "rebooking offer"}, "when": {"kind": "asap"}},
+                    ],
+                },
+                {
+                    "id": "annual-physical-exam",
+                    "name": "Annual Physical Exam",
+                    "nodes": [
+                        {"shape": {"family": "entry"}, "description": "Annual checkup"},
+                        {"shape": {"family": "call", "type": "appointment suggestion"}, "when": {"kind": "proactive"}},
+                    ],
+                },
+            ]
+        },
+    )
+    monkeypatch.setattr(
+        api,
+        "get_settings",
+        lambda: api.get_settings.__wrapped__()
+        if hasattr(api.get_settings, "__wrapped__")
+        else __import__("vortex.settings", fromlist=["Settings"]).Settings(
+            confirmation_calls=True,
+            twilio_account_sid="AC-test",
+            twilio_auth_token="secret",
+            twilio_from_number="+3197000000000",
+            public_base_url="https://line.example.invalid",
+        ),
+    )
+    payload = json.loads(api.wall_pathways_runtime().body)
+    assert payload["subsystem_enabled"] is True
+    assert payload["twilio_ready"] is True
+    assert {row["registry_name"] for row in payload["pathways"]} == {
+        "appointment_cancelled",
+        "wall_annual_physical_exam",
+    }
+    assert all(row["job_registered"] for row in payload["pathways"])
+
+
+@pytest.mark.anyio
+async def test_editor_pathway_test_fire_queues_synthetically_without_dialling(
+    tmp_path, monkeypatch
+) -> None:
+    import json
+
+    import vortex.api.settings as api
+
+    monkeypatch.setattr(
+        api,
+        "_document",
+        lambda kind: {
+            "pathways": [
+                {
+                    "id": "annual-physical-exam",
+                    "name": "Annual Physical Exam",
+                    "nodes": [
+                        {"shape": {"family": "entry"}, "description": "Annual checkup"},
+                        {"shape": {"family": "call", "type": "appointment suggestion"}, "when": {"kind": "proactive"}},
+                    ],
+                }
+            ]
+        },
+    )
+    settings = Settings(
+        confirmation_calls=True,
+        confirmation_calls_path=str(tmp_path / "calls.json"),
+        cancel_call_fallback_to="+34600000000",
+    )
+    monkeypatch.setattr(api, "get_settings", lambda: settings)
+
+    class Request:
+        async def json(self):
+            return {"hours_ahead": 2}
+
+    response = await api.wall_pathway_test_fire("annual-physical-exam", Request())
+    payload = json.loads(response.body)
+    assert payload["ok"] is True
+    assert payload["queued"] is True
+    assert payload["synthetic"] is True
+    assert payload["dialled"] is False
+    assert payload["calls"][0]["to"] == "+34600000000"
+    assert payload["calls"][0]["patient_id"] == "UI-TEST"
+    assert payload["calls"][0]["job"] == "appointment_confirmation"
+    assert payload["steps"][0]["kind"] == "call"
+    assert payload["steps"][0]["status"] == "queued"
+
+@pytest.mark.anyio
+async def test_pattern_suggestion_test_fire_uses_synthetic_patient(
+    tmp_path, monkeypatch
+) -> None:
+    import json
+
+    import vortex.api.settings as api
+
+    monkeypatch.setattr(
+        api,
+        "_document",
+        lambda kind: {
+            "patterns": [
+                {
+                    "id": "recall-overdue",
+                    "name": "Recall overdue",
+                    "enabled": True,
+                    "suggestionNode": {
+                        "shape": {"family": "call", "type": "appointment suggestion"},
+                        "description": "Offer recall booking",
+                    },
+                }
+            ]
+        },
+    )
+    settings = Settings(
+        confirmation_calls=True,
+        confirmation_calls_path=str(tmp_path / "calls.json"),
+        cancel_call_fallback_to="+34600000000",
+    )
+    monkeypatch.setattr(api, "get_settings", lambda: settings)
+
+    class Request:
+        async def json(self):
+            return {}
+
+    response = await api.wall_pattern_test_fire("recall-overdue", Request())
+    payload = json.loads(response.body)
+    assert payload["ok"] is True
+    assert payload["queued"] is True
+    assert payload["synthetic"] is True
+    assert payload["dialled"] is False
+    assert payload["step"]["status"] == "queued"
+    assert payload["step"]["call"]["patient_id"] == "UI-TEST"
+    assert payload["step"]["call"]["to"] == "+34600000000"

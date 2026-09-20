@@ -19,9 +19,10 @@ the worst a half-applied write can leave behind is a clinic with no active
 persona, which ``active()`` already answers from the seeds.
 
 The call reads the active persona once per socket (``pipecat_voice``): its name,
-role and tone become the prompt's PERSONA block and its greeting opens the line.
-``voices`` is the one field the call ignores — those are Google Chirp names and
-the voice belongs to whichever TTS provider is serving that language.
+role and tone become the prompt's PERSONA block, its greeting opens the line,
+and its ``voices`` map selects that persona's Google voice whenever the Google
+HTTP adapter is active. An ElevenLabs deployment keeps using its own opaque
+voice ids; Google names are never sent to ElevenLabs.
 """
 
 from __future__ import annotations
@@ -45,12 +46,39 @@ LANGUAGES: tuple[str, ...] = ("en", "es", "ca", "gl", "eu")
 #: turn, so a persona's tone has to stay a fragment, not a second prompt.
 TONE_MAX_CHARS = 400
 
-#: A persona carries no voice id of its own: the line speaks with whatever
-#: ``Settings.elevenlabs_voice_for`` resolves, so that once a later change
-#: reads a persona on the call nothing about the sound moves unless somebody
-#: changed the ELEVENLABS_VOICE_ID_* variables on purpose.
-VOICE_ES = ""
-VOICE_EN = ""
+#: A persona's own voices, in the *provider* that has per-voice names today:
+#: Google Chirp. Kept distinct so changing Lucía/Mateo/Carla changes both the
+#: prompt and the sound. These are consumed only by the Google HTTP adapter;
+#: an ElevenLabs deployment continues to resolve its own provider-specific
+#: voice ids.
+#: VOICE_ES / VOICE_EN remain the fallbacks for callers that create a persona
+#: before the picker has Google names for it.
+VOICE_ES = "es-ES-Chirp3-HD-Kore"
+VOICE_EN = "en-US-Chirp3-HD-Kore"
+
+PERSONA_VOICES: dict[str, dict[str, str]] = {
+    "lucia": {
+        "es": "es-ES-Chirp3-HD-Kore",
+        "en": "en-US-Chirp3-HD-Kore",
+        "ca": "es-ES-Chirp3-HD-Kore",
+        "gl": "es-ES-Chirp3-HD-Kore",
+        "eu": "es-ES-Chirp3-HD-Kore",
+    },
+    "mateo": {
+        "es": "es-ES-Chirp3-HD-Charon",
+        "en": "en-US-Chirp3-HD-Charon",
+        "ca": "es-ES-Chirp3-HD-Charon",
+        "gl": "es-ES-Chirp3-HD-Charon",
+        "eu": "es-ES-Chirp3-HD-Charon",
+    },
+    "carla": {
+        "es": "es-ES-Chirp3-HD-Leda",
+        "en": "en-US-Chirp3-HD-Leda",
+        "ca": "es-ES-Chirp3-HD-Leda",
+        "gl": "es-ES-Chirp3-HD-Leda",
+        "eu": "es-ES-Chirp3-HD-Leda",
+    },
+}
 
 #: Vorty heads from ``vortex/wall/media``: the bare face plus one accessory
 #: overlay. ``none`` is the face without a hat. The picker stores the stem
@@ -280,7 +308,7 @@ SEEDS: tuple[Personality, ...] = (
         name="Lucía",
         **style_fields("warm"),
         greetings=greetings_for("Lucía"),
-        voices={"es": VOICE_ES, "en": VOICE_EN},
+        voices=PERSONA_VOICES["lucia"],
         avatar="headset.svg",
         sort_order=0,
     ),
@@ -289,7 +317,7 @@ SEEDS: tuple[Personality, ...] = (
         name="Mateo",
         **style_fields("brisk"),
         greetings=greetings_for("Mateo"),
-        voices={"es": VOICE_ES, "en": VOICE_EN},
+        voices=PERSONA_VOICES["mateo"],
         avatar="baseball-cap.svg",
         sort_order=1,
     ),
@@ -298,7 +326,7 @@ SEEDS: tuple[Personality, ...] = (
         name="Carla",
         **style_fields("calm"),
         greetings=greetings_for("Carla"),
-        voices={"es": VOICE_ES, "en": VOICE_EN},
+        voices=PERSONA_VOICES["carla"],
         avatar="beanie.svg",
         sort_order=2,
     ),
