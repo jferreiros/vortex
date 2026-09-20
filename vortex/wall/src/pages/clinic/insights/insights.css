@@ -36,6 +36,14 @@
   line-height: var(--leading-normal);
 }
 
+/* A suggested action under a panel's table or grid: same muted voice,
+   separated from the data above by a hairline. */
+.insights-note {
+  margin: var(--space-4) 0 0;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+
 .insights-empty {
   margin: 0;
   font-size: var(--text-xs);
