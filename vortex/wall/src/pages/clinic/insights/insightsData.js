@@ -45,7 +45,7 @@ const BASE_CANCELLATION_DAILY = [
 // requested / offered / booked / declined_full / providers, per specialty.
 const BASE_SERVICES = [
   ["general_practice", "General practice", 128, 96, 88, 14, 3],
-  ["dermatology", "Dermatology", 46, 38, 33, 6, 1],
+  ["dermatology", "Dermatology", 20, 17, 15, 3, 1],
   ["paediatrics", "Paediatrics", 41, 52, 36, 1, 2],
   ["physiotherapy", "Physiotherapy", 37, 60, 31, 0, 1],
   ["orthopaedics", "Orthopaedics", 29, 44, 24, 1, 2],
@@ -54,7 +54,7 @@ const BASE_SERVICES = [
 
 const BASE_SERVICES_CENTRO = [
   ["general_practice", "General practice", 71, 48, 47, 9, 2],
-  ["dermatology", "Dermatology", 46, 38, 33, 6, 1],
+  ["dermatology", "Dermatology", 20, 17, 15, 3, 1],
   ["paediatrics", "Paediatrics", 24, 28, 21, 1, 1],
   ["physiotherapy", "Physiotherapy", 9, 16, 8, 0, 0],
   ["orthopaedics", "Orthopaedics", 17, 24, 14, 1, 1],
