@@ -132,6 +132,45 @@ async def test_single_cancel_frees_the_slot_and_refuses_a_repeat(
     assert repeat.json()["error"] == "not_booked"
 
 
+async def test_single_cancel_queues_a_call_now_rebooking_call(
+    user: User, offline_settings, monkeypatch
+) -> None:
+    """The board's own cancel button — not a phone call — still queues the
+    same immediate call_now callback a phone cancellation does (see
+    vortex.line.confirmation_calls.queue_cancellation_rebooking_call)."""
+    from vortex import settings as settings_module
+
+    monkeypatch.setenv("VORTEX_CONFIRMATION_CALLS", "true")
+    settings_module.reset_settings()
+    try:
+        doctor = await _doctor_with_bookings(user)
+        visit = await _first_visit(user, doctor["name"])
+        body = {
+            "provider_id": visit["provider_id"],
+            "location_id": visit["location_id"],
+            "slot_start": visit["slot"],
+        }
+        resp = await user.http_client.post("/api/wall/appointments/cancel", json=body)
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert payload["ok"] is True
+        # A phone is on file for every roster patient in the offline pack,
+        # so the one visit cancelled here queues exactly one call_now.
+        assert payload["call_now_queued"] == 1
+
+        from vortex.line.confirmation_calls import confirmation_store_from_settings
+
+        settings = settings_module.get_settings()
+        store = confirmation_store_from_settings(settings)
+        rows = store._read()
+        call_now_rows = [row for row in rows if row.motivo == "call_now"]
+        assert len(call_now_rows) == 1
+        assert call_now_rows[0].job == "cancellation_rebooking"
+        assert call_now_rows[0].status == "pending"
+    finally:
+        settings_module.reset_settings()
+
+
 async def test_cancel_routes_validate_the_body(user: User, offline_settings) -> None:
     bad = await user.http_client.post("/api/wall/agenda/cancel-preview", json={})
     assert bad.status_code == 400
