@@ -14,7 +14,7 @@ Roles today:
 
 A spec is also addressable by id, ``provider/model``. That is the id the bench
 prints and the one ``--models`` takes: ``helmcode/qwen3.6``,
-``vercel/anthropic/claude-haiku-4.5``, ``openai/gpt-4.1-mini``. The first slash
+``helmcode/deepseek-v4-flash``, ``azure/gpt-4.1``. The first slash
 splits provider from model; the model part may carry more slashes.
 
 ``openai`` is the one provider that is not a settings preset. It reads

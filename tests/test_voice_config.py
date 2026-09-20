@@ -6,6 +6,7 @@ pure function over a VoiceConfig.
 
 from __future__ import annotations
 
+import pytest
 from nicegui.testing import User
 
 from vortex.line import voice_config
@@ -72,23 +73,43 @@ def test_preview_merges_over_stored(offline_settings, fake_store) -> None:
     assert voice_config.load(offline_settings).tone == 10
 
 
-def test_speaking_rate_mapping() -> None:
+def test_speech_rate_mapping() -> None:
     neutral = voice_config.VoiceConfig(speech_rate=50)
     slow = voice_config.VoiceConfig(speech_rate=0)
     fast = voice_config.VoiceConfig(speech_rate=100)
-    assert voice_config.speaking_rate(neutral) == 1.0
-    assert voice_config.speaking_rate(slow) < 1.0 < voice_config.speaking_rate(fast)
+    assert voice_config.elevenlabs_speed(neutral) == 1.0
+    assert voice_config.elevenlabs_speed(slow) < 1.0 < voice_config.elevenlabs_speed(fast)
     assert voice_config.elevenlabs_speed(slow) >= 0.7
     assert voice_config.elevenlabs_speed(fast) <= 1.2
 
 
 def test_apply_gender() -> None:
-    chirp = "es-ES-Chirp3-HD-Aoede"
-    assert voice_config.apply_gender(chirp, "male") == "es-ES-Chirp3-HD-Charon"
-    assert voice_config.apply_gender(chirp, "female") == chirp
-    assert voice_config.apply_gender("Aoede", "male") == "Charon"
-    # A non-Chirp id is left alone rather than mangled.
-    assert voice_config.apply_gender("es-ES-Standard-A", "male") == "es-ES-Standard-A"
+    """An ElevenLabs voice id is opaque: male is a second id, not a rewrite."""
+    assert voice_config.apply_gender("voice-f", "male", "voice-m") == "voice-m"
+    assert voice_config.apply_gender("voice-f", "female", "voice-m") == "voice-f"
+    # No male id configured: the female voice stands rather than a made-up one.
+    assert voice_config.apply_gender("voice-f", "male") == "voice-f"
+
+
+def test_preview_voice_id_follows_the_card(offline_settings) -> None:
+    from vortex.conversation.language import VoicePreset
+
+    female = voice_config.VoiceConfig(voice="female")
+    male = voice_config.VoiceConfig(voice="male")
+    assert voice_config.preview_voice_id(offline_settings, female) == VoicePreset.ES.female
+    assert voice_config.preview_voice_id(offline_settings, male) == VoicePreset.ES.male
+
+
+def test_synthesize_raises_without_a_key(offline_settings) -> None:
+    """The <Say> fallback and the preview 503 both rest on this raising."""
+    with pytest.raises(RuntimeError):
+        voice_config.synthesize(
+            offline_settings,
+            voice_config.VoiceConfig(),
+            "hola",
+            language_code="es",
+            voice_name="voice-1",
+        )
 
 
 def test_style_directive() -> None:

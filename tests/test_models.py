@@ -51,9 +51,9 @@ def test_resolve_reads_the_preset_and_its_key(env: pytest.MonkeyPatch) -> None:
 
 
 def test_model_part_may_carry_slashes(env: pytest.MonkeyPatch) -> None:
-    env.setenv("VERCEL_AI_GATEWAY_KEY", "vk")
-    spec = models.resolve("vercel/anthropic/claude-haiku-4.5", Settings())
-    assert spec.provider == "vercel" and spec.model == "anthropic/claude-haiku-4.5"
+    env.setenv("OPENAI_API_KEY", "ok")
+    spec = models.resolve("openai/anthropic/claude-haiku-4.5", Settings())
+    assert spec.provider == "openai" and spec.model == "anthropic/claude-haiku-4.5"
     assert spec.available
 
 
@@ -140,10 +140,12 @@ def test_new_role_costs_two_variables(env: pytest.MonkeyPatch) -> None:
     env.setenv("LLM_SUMMARY_MODEL", "gemma4")
     assert models.route("summary", Settings()).id == "helmcode/gemma4"
     # Another provider, with its default model.
-    env.setenv("LLM_SUMMARY_PROVIDER", "vercel")
+    env.setenv("LLM_SUMMARY_PROVIDER", "azure")
+    env.setenv("AZURE_OPENAI_API_KEY", "az")
+    env.setenv("AZURE_OPENAI_ENDPOINT", "https://r.openai.azure.com")
     env.delenv("LLM_SUMMARY_MODEL")
     spec = models.route("summary", Settings())
-    assert spec.id == "vercel/anthropic/claude-haiku-4.5" and spec.available
+    assert spec.id == "azure/gpt-4.1" and spec.available
 
 
 def test_routing_table_never_leaks_the_key(env: pytest.MonkeyPatch) -> None:

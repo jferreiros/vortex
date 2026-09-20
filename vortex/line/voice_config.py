@@ -11,15 +11,14 @@ same whether or not somebody set up Supabase — and a write raises
 Each field applies to *new* calls only — pipelines read the config when the
 socket builds, which is why the card can say "aplica a llamadas nuevas":
 
-- ``voice``        female | male — swaps the Chirp 3 HD persona (Aoede/Charon)
-- ``speech_rate``  0-100 -> Google ``speaking_rate`` / ElevenLabs ``speed``
+- ``voice``        female | male — picks the ElevenLabs voice id to speak with
+- ``speech_rate``  0-100 -> ElevenLabs ``speed``
 - ``tone``         0-100 -> a style line appended to the system prompt
 - ``friendliness`` 0-100 -> same
 """
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import asdict, dataclass
 from typing import Any
@@ -28,14 +27,11 @@ log = logging.getLogger("vortex.line.voice_config")
 
 VOICES = ("female", "male")
 
-#: Chirp 3 HD persona names. Aoede is the configured default everywhere;
-#: Charon is its male counterpart in the same family.
-FEMALE_PERSONA = "Aoede"
-MALE_PERSONA = "Charon"
-
 #: The preview speaks the Spanish greeting: same words the line opens with.
 PREVIEW_TEXT = "Clínica Arenal, buenos días. ¿En qué puedo ayudarle?"
-PREVIEW_VOICE = "es-ES-Chirp3-HD-Aoede"
+
+#: MP3 for everything pre-rendered: Twilio's <Play> and the wall's Try button.
+PREVIEW_OUTPUT_FORMAT = "mp3_44100_128"
 
 DEFAULTS: dict[str, Any] = {"voice": "female", "tone": 50, "friendliness": 50, "speech_rate": 50}
 
@@ -131,39 +127,21 @@ def save(settings: Any, data: dict[str, Any] | None) -> VoiceConfig:
 # --- applying it -------------------------------------------------------------
 
 
-def speaking_rate(cfg: VoiceConfig) -> float:
-    """Slider 0-100 -> Google's speaking_rate, centred on 50 = 1.0."""
-    return round(1.0 + (cfg.speech_rate - 50) * 0.005, 2)
-
-
 def elevenlabs_speed(cfg: VoiceConfig) -> float:
-    """Same slider, ElevenLabs' narrower 0.7-1.2 range."""
+    """Slider 0-100 -> ElevenLabs' narrow 0.7-1.2 speed range, centred on 1.0."""
     return round(max(0.7, min(1.2, 1.0 + (cfg.speech_rate - 50) * 0.005)), 2)
 
 
-def apply_gender(voice_name: str, gender: str) -> str:
-    """Swap the persona at the end of a Google voice name.
+def apply_gender(voice_id: str, gender: str, male_voice_id: str = "") -> str:
+    """The voice id to speak with, given the card's female/male switch.
 
-    ``es-ES-Chirp3-HD-Aoede`` -> ``es-ES-Chirp3-HD-Charon``; a bare Gemini short
-    name ``Aoede`` -> ``Charon``. Anything else (Standard-*, a custom id) comes
-    back untouched — better the configured voice than a made-up one.
+    An ElevenLabs voice id is opaque, so a male persona is its own id rather
+    than a name to rewrite. With none configured the female voice stands —
+    better the configured voice than a made-up one.
     """
-    if gender != "male":
-        return voice_name
-    if "Chirp3-HD-" in voice_name:
-        return voice_name.rsplit("-", 1)[0] + f"-{MALE_PERSONA}"
-    if voice_name == FEMALE_PERSONA:
-        return MALE_PERSONA
-    return voice_name
-
-
-def gemini_prompt(cfg: VoiceConfig) -> str:
-    """Gemini-TTS takes a natural-language prompt instead of a rate field."""
-    if cfg.speech_rate <= 33:
-        return "Speak slowly and clearly, at a calm pace."
-    if cfg.speech_rate >= 66:
-        return "Speak quickly but clearly."
-    return "Speak at a natural, steady pace."
+    if gender == "male" and male_voice_id:
+        return male_voice_id
+    return voice_id
 
 
 def style_directive(cfg: VoiceConfig) -> str:
@@ -192,35 +170,43 @@ def preview_config(settings: Any, payload: dict[str, Any] | None) -> VoiceConfig
 def synthesize(
     settings: Any, cfg: VoiceConfig, text: str, *, language_code: str, voice_name: str
 ) -> bytes:
-    """One MP3 of ``text``, straight through Google TTS — no pipeline.
+    """One MP3 of ``text``, straight through the ElevenLabs HTTP API — no pipeline.
 
-    Uses the same credentials the pipeline would. Raises when there are none:
-    callers turn that into a 503 or a <Say> fallback.
+    Blocking on purpose: both callers run it in a worker thread. Raises when
+    ``ELEVENLABS_API_KEY`` is empty or the request fails, which is what keeps
+    the callers' ``<Say>`` fallback and the preview route's 503 honest.
     """
-    from google.cloud import texttospeech
-    from google.oauth2 import service_account
+    import httpx
 
-    if settings.google_tts_credentials_json:
-        creds = service_account.Credentials.from_service_account_info(
-            json.loads(settings.google_tts_credentials_json)
-        )
-        client = texttospeech.TextToSpeechClient(credentials=creds)
-    elif settings.google_application_credentials:
-        client = texttospeech.TextToSpeechClient.from_service_account_file(
-            settings.google_application_credentials
-        )
-    else:
-        client = texttospeech.TextToSpeechClient()
+    api_key = getattr(settings, "elevenlabs_api_key", "")
+    if not api_key:
+        raise RuntimeError("ELEVENLABS_API_KEY is not set: cannot synthesize")
+    if not voice_name:
+        raise RuntimeError("no ElevenLabs voice id configured: cannot synthesize")
 
-    response = client.synthesize_speech(
-        input=texttospeech.SynthesisInput(text=text),
-        voice=texttospeech.VoiceSelectionParams(language_code=language_code, name=voice_name),
-        audio_config=texttospeech.AudioConfig(
-            audio_encoding=texttospeech.AudioEncoding.MP3,
-            speaking_rate=speaking_rate(cfg),
-        ),
+    base = getattr(settings, "elevenlabs_http_base_url", "https://api.elevenlabs.io")
+    response = httpx.post(
+        f"{base}/v1/text-to-speech/{voice_name}",
+        params={"output_format": PREVIEW_OUTPUT_FORMAT},
+        headers={"xi-api-key": api_key},
+        json={
+            "text": text,
+            "model_id": getattr(settings, "elevenlabs_model", "") or "eleven_flash_v2_5",
+            # A multilingual model needs the bare code to pick the accent.
+            "language_code": (language_code or "es").replace("_", "-").split("-", 1)[0].lower(),
+            "voice_settings": {"speed": elevenlabs_speed(cfg)},
+        },
+        timeout=30.0,
     )
-    return response.audio_content
+    response.raise_for_status()
+    return response.content
+
+
+def preview_voice_id(settings: Any, cfg: VoiceConfig) -> str:
+    """The Spanish voice id the Try button speaks with, female or male."""
+    from vortex.conversation.language import elevenlabs_voice_id
+
+    return elevenlabs_voice_id("es", settings, cfg.voice)
 
 
 def synthesize_preview(settings: Any, cfg: VoiceConfig) -> bytes:
@@ -229,6 +215,6 @@ def synthesize_preview(settings: Any, cfg: VoiceConfig) -> bytes:
         settings,
         cfg,
         PREVIEW_TEXT,
-        language_code="es-ES",
-        voice_name=apply_gender(PREVIEW_VOICE, cfg.voice),
+        language_code="es",
+        voice_name=preview_voice_id(settings, cfg),
     )

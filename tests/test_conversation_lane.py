@@ -30,7 +30,6 @@ from vortex.conversation.prompt import (
     build_system_prompt,
     emergency_line_for,
     goodbye_for,
-    greeting_for,
     idle_prompt_for,
     idle_submit_line_for,
     initial_messages,
@@ -75,13 +74,18 @@ def test_detects_each_supported_language_from_the_words(text: str, expected: str
     assert detect_language(text) == expected
 
 
-def test_the_stt_hint_wins_over_the_words() -> None:
+def test_a_move_needs_the_stt_hint_and_the_words_to_agree() -> None:
+    """One mis-tagged Soniox frame must not flip the voice mid-call."""
     pytest.importorskip("pipecat")
     from pipecat.transcriptions.language import Language
 
-    assert detect_language("hello, I would like an appointment", hint=Language.ES_ES) == "es"
-    assert detect_language("hola, quiero cita", hint="ca-ES") == "ca"
-    assert detect_language("hola, quiero cita", hint=Language.EN_US) == "en"
+    # Hint and words agree: the call moves.
+    assert detect_language("hola, quiero cita", hint=Language.ES_ES, current="en") == "es"
+    # Hint alone, against the words: the call stays where it is.
+    assert detect_language("hello, I would like an appointment", hint=Language.ES_ES) == "en"
+    assert detect_language("hola, quiero cita", hint=Language.EN_US, current="es") == "es"
+    # A hint that only confirms the current language is free.
+    assert detect_language("mm, vale", hint=Language.ES_ES, current="es") == "es"
     # An unsupported hint falls through to the words.
     assert detect_language("hola, quiero cita", hint="de") == "es"
     assert detect_language("hola, quiero cita", hint=object()) == "es"
@@ -124,8 +128,8 @@ def test_prompt_renders_the_call_clock_not_the_machine_clock() -> None:
     text = build_system_prompt(NOW)
     assert "09:00 on Friday 18 September 2026" in text
     assert "Tomorrow is Saturday 19 September 2026" in text
-    assert "Answer in English" in text
-    assert "Answer in Catalan" in build_system_prompt(NOW, language="ca")
+    assert "The call is in English" in text
+    assert "The call is in Catalan" in build_system_prompt(NOW, language="ca")
     assert "TODO" not in text
 
 
@@ -157,8 +161,7 @@ def test_prompt_names_every_rule_the_score_depends_on() -> None:
         "policy_id",
         "no_availability",
         "Do not submit before the caller agrees",
-        "Are you still there?",
-        "clinic_facts and say only its answer, never memory",
+        "clinic_facts, and you say only its answer",
     ):
         assert needle in text, needle
 
@@ -208,7 +211,6 @@ def test_initial_messages_is_one_system_turn() -> None:
 def test_canned_lines_exist_in_every_language_and_fall_back_to_english() -> None:
     for code in SUPPORTED_LANGUAGES:
         lines = (
-            greeting_for,
             idle_prompt_for,
             idle_submit_line_for,
             emergency_line_for,
@@ -219,7 +221,6 @@ def test_canned_lines_exist_in_every_language_and_fall_back_to_english() -> None
             assert fn(code).strip(), (fn.__name__, code)
     assert "112" in emergency_line_for("en")
     assert "112" in emergency_line_for("ca")
-    assert greeting_for("de") == greeting_for("en") == GREETING
     assert idle_prompt_for(None) == "Are you still there?"
     assert idle_submit_line_for(None).startswith("I'll note what we have")
     assert prompt_module.CLINIC_NAME in GREETING

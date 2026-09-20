@@ -820,12 +820,8 @@ def integrations_page() -> None:
                                 ),
                                 (
                                     "Text to speech",
-                                    f"{h.get('tts_provider', '')}"
-                                    + (
-                                        f" + {h.get('tts_provider_alt')}"
-                                        if h.get("tts_provider_alt")
-                                        and h.get("tts_provider_alt") != h.get("tts_provider")
-                                        else ""
+                                    f"{h.get('tts_provider', '')} · {h.get('tts_model', '')}".strip(
+                                        " ·"
                                     ),
                                 ),
                                 (
