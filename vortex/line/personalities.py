@@ -536,6 +536,21 @@ def _remember_active(person: Personality) -> None:
         _active_cache = (time.monotonic(), person)
 
 
+def warm_active() -> None:
+    """Fill the cache in the background, at start-up.
+
+    Without this the first call of a fresh container is the one that pays the
+    cold read — and on a bad day that is two seconds of silence to the first
+    caller after every deploy.
+    """
+    global _active_refreshing
+    with _active_lock:
+        if _active_refreshing or _active_cache is not None:
+            return
+        _active_refreshing = True
+    threading.Thread(target=_refresh_active, name="persona-warm", daemon=True).start()
+
+
 def invalidate_active() -> None:
     """Drop the cached persona. Every write below calls this, so a pick made
     on the board is on the phone for the next call, not sixty seconds later."""
