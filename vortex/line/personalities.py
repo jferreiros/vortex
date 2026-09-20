@@ -14,9 +14,10 @@ Exactly one persona is active at a time. ``activate`` is the only way to move
 that flag and it moves it inside a single transaction, so a crash halfway
 cannot leave the clinic with two receptionists or none.
 
-Nothing here reaches the phone call yet: this module stores, lists and edits
-personas. Reading the active one on the line — the system prompt's tone line,
-the opening greeting, the TTS voice — is a separate change.
+The call reads the active persona once per socket (``pipecat_voice``): its name,
+role and tone become the prompt's PERSONA block and its greeting opens the line.
+``voices`` is the one field the call ignores — those are Google Chirp names and
+the voice belongs to whichever TTS provider is serving that language.
 """
 
 from __future__ import annotations

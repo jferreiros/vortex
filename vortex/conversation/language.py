@@ -2,10 +2,12 @@
 
 Owner: the conversation lane.
 
-The clinic answers in **English**. Of the 73 published cases 69 are English,
-3 Spanish and 1 Catalan, and problem 11's private pool draws Catalan far more
-often than its public cases. English is therefore the default and the other
-four are detected, never assumed.
+The clinic answers in **Spanish**. It is in Madrid: a caller who dials it and
+hears "hello" has already been answered in the wrong language, and one turn of
+the call is spent recovering. Of the 73 published cases 69 are English, 3
+Spanish and 1 Catalan, and problem 11's private pool draws Catalan far more
+often than its public cases — so English is one sentence away at any moment,
+but it is detected, like the other three, and never assumed.
 
 Two signals, in order of trust:
 
@@ -38,7 +40,12 @@ if TYPE_CHECKING:  # pragma: no cover - import only for the annotation
 
 SUPPORTED_LANGUAGES: tuple[str, ...] = ("en", "es", "ca", "gl", "eu")
 
-DEFAULT_LANGUAGE = "en"
+DEFAULT_LANGUAGE = "es"
+
+#: A language switch is a sentence, not a word. Soniox tags every token it
+#: hears, misheard fragments included, so a one-word frame used to be enough to
+#: move the whole line. See ``worth_a_language_switch``.
+MIN_WORDS_FOR_LANGUAGE_SWITCH = 3
 
 LANGUAGE_NAMES: dict[str, str] = {
     "en": "English",
@@ -194,13 +201,32 @@ def detect_language(transcript: str, hint: object | None = None, current: str | 
     # A tie between the language we are in and another: stay put.
     if fallback in winners:
         return fallback
-    # A tie among other languages: the first in the supported order (English
-    # first, then Spanish) is the least surprising choice on this line.
+    # A tie the current language is not even in: Spanish, the language of the
+    # city the clinic is in, is the least surprising choice on this line. The
+    # supported order decides only when Spanish is not among the winners.
+    if DEFAULT_LANGUAGE in winners:
+        return DEFAULT_LANGUAGE
     return winners[0]
 
 
+def worth_a_language_switch(transcript: str) -> bool:
+    """Is this transcript long enough to change the language of the call?
+
+    One misheard word ("It", "Apple", "Halo") must not move the line: a real
+    switch shows up as a full sentence. Fewer than
+    ``MIN_WORDS_FOR_LANGUAGE_SWITCH`` words — punctuation and dashes stripped,
+    so "Hola, ¿qué tal?" counts three — is too short to be one. Never raises.
+    """
+    try:
+        return len(_tokens(transcript or "")) >= MIN_WORDS_FOR_LANGUAGE_SWITCH
+    except Exception:
+        return False
+
+
 def language_name(code: str | None) -> str:
-    return LANGUAGE_NAMES.get(normalise_language(code) or DEFAULT_LANGUAGE, "English")
+    return LANGUAGE_NAMES.get(
+        normalise_language(code) or DEFAULT_LANGUAGE, LANGUAGE_NAMES[DEFAULT_LANGUAGE]
+    )
 
 
 def tts_voice_for(
@@ -213,14 +239,15 @@ def tts_voice_for(
     - google      en / es / ca / gl / eu  (Chirp 3 HD for English and Spanish;
                   Gemini-TTS short names for ca/gl/eu, or Standard-* when
                   ``GOOGLE_TTS_STANDARD_FALLBACK`` is on)
-    - elevenlabs  en / es (the same multilingual voice id speaks both)
+    - elevenlabs  es / en (the same multilingual voice id speaks both, so a
+                  switch between the two changes the language and nothing else)
 
     ``provider`` names the service the answer is for; it defaults to the
     primary (``settings.tts_provider``). When a primary and an alternate are
     both running, the caller passes the one that serves this language —
     ``Settings.tts_provider_for(language)`` decides which that is.
 
-    Anything the named provider cannot say falls back to English, the
+    Anything the named provider cannot say falls back to Spanish, the
     clinic's default. Never raises: a failed lookup during a live call must
     not end the call.
     """

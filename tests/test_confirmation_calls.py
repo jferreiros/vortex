@@ -690,7 +690,8 @@ def test_handoff_greeting_is_mid_task_and_localised() -> None:
 
     assert "compañero que le agenda las citas" in handoff_greeting_for("es")
     assert "colleague who books your appointments" in handoff_greeting_for("en")
-    assert handoff_greeting_for("fr") == handoff_greeting_for("en")
+    # An unknown language falls back to Spanish, the clinic's default.
+    assert handoff_greeting_for("fr") == handoff_greeting_for("es")
 
 
 def test_session_open_picks_up_the_handoff(tmp_path: Path, offline_settings) -> None:
