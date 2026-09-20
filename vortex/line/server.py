@@ -287,7 +287,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return Response(status_code=404)
         base = settings.public_base_url.rstrip("/")
         job = confirmations.job_for(call.job)
-        audio_url = await _audio_url(confirmations.ask_speech(call), call.language)
+        audio_url = await _audio_url(job.ask_words(call, reprompt=False), call.language)
         return Response(
             content=job.ask_twiml(call, base, attempt=1, reprompt=False, audio_url=audio_url),
             media_type="application/xml",
@@ -306,9 +306,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         outcome = job.classify(transcript, call.language)
         if outcome == "unknown" and attempt < 2:
             base = settings.public_base_url.rstrip("/")
-            audio_url = await _audio_url(
-                confirmations.ask_speech(call, reprompt=True), call.language
-            )
+            audio_url = await _audio_url(job.ask_words(call, reprompt=True), call.language)
             xml = job.ask_twiml(call, base, attempt=attempt + 1, reprompt=True, audio_url=audio_url)
             return Response(content=xml, media_type="application/xml")
         status: confirmations.ConfirmationStatus = outcome if outcome != "unknown" else "unclear"
@@ -334,6 +332,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             detail=detail,
             transcript=transcript,
             attempts=attempt,
+        )
+        confirmations.sync_call_now_outcome_to_db(
+            confirmation_id=call.confirmation_id,
+            motivo=call.motivo,
+            settings=settings,
+            status=status,
+            transcript=transcript,
+            detail=detail,
         )
         log.info("confirmation %s -> %s (%r)", call.confirmation_id, status, transcript[:80])
         if handoff_xml is not None:
@@ -361,6 +367,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             status="unclear",
             detail="no_speech",
         )
+        confirmations.sync_call_now_outcome_to_db(
+            confirmation_id=call.confirmation_id,
+            motivo=call.motivo,
+            settings=settings,
+            status="unclear",
+            detail="no_speech",
+        )
         text = confirmations.job_for(call.job).no_speech(call.language)
         audio_url = await _audio_url(text, call.language)
         return Response(
@@ -384,26 +397,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         call_status = (form.get("CallStatus") or "").strip()
         call_sid = (form.get("CallSid") or "").strip()
         if call.status == "calling":
+            terminal_status: confirmations.ConfirmationStatus | None = None
+            terminal_detail = call_status
             if call_status in ("no-answer", "busy"):
-                await store.update(
-                    call.confirmation_id,
-                    status="no_answer",
-                    detail=call_status,
-                    twilio_call_sid=call_sid or call.twilio_call_sid,
-                )
+                terminal_status = "no_answer"
             elif call_status in ("failed", "canceled"):
+                terminal_status = "failed"
+            elif call_status == "completed":
+                terminal_status = "unclear"
+                terminal_detail = "hangup_before_answer"
+            if terminal_status is not None:
                 await store.update(
                     call.confirmation_id,
-                    status="failed",
-                    detail=call_status,
+                    status=terminal_status,
+                    detail=terminal_detail,
                     twilio_call_sid=call_sid or call.twilio_call_sid,
                 )
-            elif call_status == "completed":
-                await store.update(
-                    call.confirmation_id,
-                    status="unclear",
-                    detail="hangup_before_answer",
-                    twilio_call_sid=call_sid or call.twilio_call_sid,
+                confirmations.sync_call_now_outcome_to_db(
+                    confirmation_id=call.confirmation_id,
+                    motivo=call.motivo,
+                    settings=settings,
+                    status=terminal_status,
+                    detail=terminal_detail,
                 )
         return Response(status_code=204)
 
