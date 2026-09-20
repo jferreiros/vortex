@@ -1,4 +1,4 @@
-.PHONY: install run smoke test call replay try-api tunnel tail lint fmt board design-sync didactica rehearse confirmations evals evals-logic evals-conversation evals-voice evals-replay evals-report evals-accept evals-selftest evals-discord logs-discord langfuse-check supabase-ping supabase-schema supabase-push supabase-push-db supabase-count
+.PHONY: install run smoke test call try-api tunnel lint fmt board design-sync didactica rehearse confirmations evals evals-logic evals-conversation evals-voice evals-replay evals-report evals-accept evals-selftest evals-discord logs-discord langfuse-check supabase-migrate supabase-ping supabase-count
 
 PORT ?= 7860
 BOARD_PORT ?= 8080
@@ -25,26 +25,11 @@ test:
 call:
 	uv run python scripts/fake_caller.py --url ws://localhost:$(PORT)/ws --calls $(N)
 
-replay:           ## drip synthetic-data calls into logs/calls.jsonl for the live board; ARGS="--speed 2 --concurrency 6"
-	uv run python scripts/replay_synthetic.py $(ARGS)
-
-fetch-prod-calls: ## pull the deployed line's real call log into logs/calls.jsonl; ARGS="--calls 500 --dry-run"
-	uv run python scripts/fetch_prod_calls.py $(ARGS)
-
-db-backfill:      ## build the product database's rows from the call log; ARGS=--dry-run
-	uv run python database/scripts/backfill_from_logs.py $(ARGS)
+supabase-migrate: ## apply database/supabase/migrations/*.sql to SUPABASE_DB_URL; ARGS=--dry-run
+	uv run python -m database.supabase.migrate $(ARGS)
 
 supabase-ping:    ## check SUPABASE_URL + service-role can reach call_events
 	uv run python scripts/supabase_logs.py ping
-
-supabase-schema:  ## print how to apply database/supabase/schema.sql (no Alembic)
-	uv run python scripts/supabase_logs.py schema
-
-supabase-push:    ## upload logs/calls.jsonl to Supabase (idempotent); ARGS=--dry-run
-	uv run python scripts/supabase_logs.py push $(ARGS)
-
-supabase-push-db: ## upload product / rebooking / voice / personality sqlite tables
-	uv run python scripts/supabase_logs.py push-db $(ARGS)
 
 supabase-count:   ## print remote row counts for every hosted table
 	uv run python scripts/supabase_logs.py count
@@ -54,9 +39,6 @@ try-api:
 
 tunnel:
 	ngrok http $(PORT)
-
-tail:
-	tail -f logs/calls.jsonl
 
 rehearse:         ## text rehearsal of the prompt against the real LLM: ONLY=p1|p4|p6, ARGS=--verbose
 	VORTEX_CLINIC_MODE=fake uv run python scripts/rehearse_text.py \
