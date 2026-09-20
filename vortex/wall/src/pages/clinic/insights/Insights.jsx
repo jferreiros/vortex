@@ -118,11 +118,11 @@ function ServiceOccupancy({ occupancy }) {
   const services = occupancy?.all ?? [];
   return (
     <StatTable
-      empty="Sin peticiones de especialidad en este período."
+      empty="No specialty requests in this period."
       columns={[
-        { key: "label", label: "Servicio" },
-        { key: "pct", label: "Ocupación", num: true },
-        { key: "count", label: "Peticiones", num: true },
+        { key: "label", label: "Service" },
+        { key: "pct", label: "Occupancy", num: true },
+        { key: "count", label: "Requests", num: true },
       ]}
       rows={services.map((s) => ({
         id: s.id,
@@ -130,7 +130,7 @@ function ServiceOccupancy({ occupancy }) {
         pct: s.occupancy_pct != null ? `${s.occupancy_pct}%` : "—",
         count:
           s.extra_providers_needed > 0
-            ? `${s.requested} · +${s.extra_providers_needed} méd.`
+            ? `${s.requested} · +${s.extra_providers_needed} drs.`
             : String(s.requested ?? "—"),
       }))}
     />
@@ -138,10 +138,20 @@ function ServiceOccupancy({ occupancy }) {
 }
 
 // Seven day columns x the four bands the clinic splits its hours into.
-// A cell is one (weekday, band): pedidas on top, ofrecidas underneath —
-// or "Cerrado" when the selected centre does not open that band at all,
-// which is why the site picker exists: a demand gap only matters if the
-// clinic could have been open to catch it.
+// A cell is one (weekday, band): "8 / 6" — requested / offered — or
+// "Closed" when the selected centre does not open that band at all, which
+// is why the site picker exists: a demand gap only matters if the clinic
+// could have been open to catch it.
+// The fraction of a band's requested slots the clinic could not offer:
+// (demand - availability) / demand, clamped to [0, 1]. 8 requested / 6
+// offered is a 0.25 miss; 6/6 is a 0 miss (white). Drives the white-to-red
+// fill below — never a flat "gap" cutoff, so a near-miss and a total miss
+// read as different shades, not the same colour.
+function unmetRatio(cell) {
+  if (!cell.demand) return 0;
+  return Math.max(0, Math.min(1, (cell.demand - cell.availability) / cell.demand));
+}
+
 function Heatmap({ view }) {
   const rows = view?.rows ?? [];
   const bands = view?.bands ?? [];
@@ -150,9 +160,8 @@ function Heatmap({ view }) {
   const hasSupply = rows.some((r) => r.cells.some((c) => c.availability > 0));
   const hasClosed = (open ?? []).some((row) => row.some((o) => o === false));
   if (!hasDemand && !hasSupply && !hasClosed) {
-    return <p className="insights-empty">Sin peticiones con franja horaria en este período.</p>;
+    return <p className="insights-empty">No time-banded requests in this period.</p>;
   }
-  const max = Math.max(1, ...rows.flatMap((r) => r.cells.map((c) => c.demand)));
   return (
     <div className="heatmap">
       {view?.hoursLabel && <p className="heatmap-hours">{view.hoursLabel}</p>}
@@ -170,21 +179,20 @@ function Heatmap({ view }) {
               const cell = row.cells[bi] ?? { band, demand: 0, availability: 0 };
               if (open?.[wi]?.[bi] === false) {
                 return (
-                  <div key={row.weekday} className="heatmap-cell closed" title={`${row.weekday} · ${band}: cerrado`}>
-                    <span className="heatmap-closed-label">Cerrado</span>
+                  <div key={row.weekday} className="heatmap-cell closed" title={`${row.weekday} · ${band}: closed`}>
+                    <span className="heatmap-closed-label">Closed</span>
                   </div>
                 );
               }
-              const intensity = cell.demand / max;
-              const gap = cell.demand > 0 && cell.availability === 0;
               return (
                 <div
                   key={row.weekday}
-                  className={`heatmap-cell ${gap ? "gap" : ""}`}
-                  style={{ "--intensity": intensity }}
-                  title={`${row.weekday} · ${band}: ${cell.demand} pedidas, ${cell.availability} ofrecidas`}
+                  className="heatmap-cell"
+                  style={{ "--intensity": unmetRatio(cell) }}
+                  title={`${row.weekday} · ${band}: ${cell.demand} requested, ${cell.availability} offered`}
                 >
                   <span className="heatmap-demand">{cell.demand || "·"}</span>
+                  <span className="heatmap-ratio-sep">/</span>
                   <span className="heatmap-availability">{cell.availability}</span>
                 </div>
               );
@@ -192,18 +200,6 @@ function Heatmap({ view }) {
           </Fragment>
         ))}
       </div>
-      <div className="heatmap-legend">
-        <span>
-          <i className="heatmap-swatch demand" /> N pedidas / ofrecidas
-        </span>
-        <span>
-          <i className="heatmap-swatch gap" /> Demanda sin oferta
-        </span>
-        <span>
-          <i className="heatmap-swatch closed" /> Cerrado
-        </span>
-      </div>
-      {view?.suggestion && <p className="insights-footnote">{view.suggestion}</p>}
     </div>
   );
 }
@@ -284,8 +280,8 @@ export default function Insights() {
         </Card>
 
         <Card padding="lg" className="insights-panel">
-          <h2>Ocupación por servicio</h2>
-          <p className="insights-panel-sub">Peticiones frente a huecos, en toda la red.</p>
+          <h2>Occupancy by service</h2>
+          <p className="insights-panel-sub">Requests versus available slots, network-wide.</p>
           <ServiceOccupancy occupancy={data.occupancy} />
         </Card>
       </div>
@@ -293,18 +289,17 @@ export default function Insights() {
       <Card padding="lg" className="insights-panel">
         <div className="insights-panel-head">
           <div>
-            <h2>Horas pico sin horario</h2>
-            <p className="insights-panel-sub">
-              Demanda solicitada frente a huecos realmente ofrecidos, por día y franja.
-            </p>
+            <h2>
+              Appointments requested <span className="heatmap-title-sep">/ slots available</span>
+            </h2>
           </div>
-          <div className="home-toolbar" role="tablist" aria-label="Centro">
+          <div className="home-toolbar" role="tablist" aria-label="Site">
             <button
               type="button"
               className={`home-chip ${site === "all" ? "on" : ""}`}
               onClick={() => setSite("all")}
             >
-              Todas
+              All
             </button>
             {(heatmap?.sites ?? []).map((s) => (
               <button
@@ -319,34 +314,6 @@ export default function Insights() {
           </div>
         </div>
         <Heatmap view={heatmapView} />
-      </Card>
-
-      <Card padding="lg" className="insights-panel">
-        <h2>Cancelled slots</h2>
-        {cancel.daily?.length ? (
-          <StatTable
-            empty="No cancellations freed a slot in this period."
-            columns={[
-              { key: "date", label: "Day" },
-              { key: "freed", label: "Freed", num: true },
-              { key: "relocated", label: "Rebooked", num: true },
-              { key: "lost", label: "Lost", num: true },
-            ]}
-            rows={cancel.daily.map((d) => ({
-              id: d.date,
-              date: d.date,
-              freed: d.freed,
-              relocated: d.relocated,
-              lost: d.lost,
-            }))}
-          />
-        ) : (
-          <p className="insights-empty">
-            {(cancel.freed_total ?? 0) > 0
-              ? `${cancel.relocated ?? 0} rebooked, ${cancel.lost ?? 0} lost, ${cancel.pending ?? 0} still pending — too few days to chart.`
-              : "No cancellations freed a slot in this period."}
-          </p>
-        )}
       </Card>
     </div>
   );

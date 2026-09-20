@@ -3,16 +3,16 @@
 //           "piece of info" in the middle grid. Tools with keep:false only
 //           ever show up in the top ticker strip, never in that grid.
 export const TOOL_META = {
-  find_patient: { label: "Buscar paciente", big: true, keep: true, icon: "🧾" },
-  find_slots: { label: "Buscar huecos", big: true, keep: true, icon: "📅" },
-  build_registration: { label: "Registrar paciente", big: false, keep: true, icon: "📝" },
-  validate_national_id: { label: "Validar DNI/NIE", big: false, keep: false, icon: "🪪" },
-  prepare_booking: { label: "Preparar reserva", big: false, keep: true, icon: "✅" },
-  list_appointments: { label: "Listar citas", big: false, keep: true, icon: "📋" },
-  prepare_reschedule: { label: "Preparar cambio", big: false, keep: true, icon: "🔁" },
-  prepare_cancel: { label: "Preparar anulación", big: false, keep: true, icon: "🗑️" },
-  triage: { label: "Triaje", big: false, keep: false, icon: "🩺" },
-  submit_action: { label: "Enviar acción", big: false, keep: true, icon: "📤" },
+  find_patient: { label: "Find patient", big: true, keep: true, icon: "🧾" },
+  find_slots: { label: "Find slots", big: true, keep: true, icon: "📅" },
+  build_registration: { label: "Register patient", big: false, keep: true, icon: "📝" },
+  validate_national_id: { label: "Validate DNI/NIE", big: false, keep: false, icon: "🪪" },
+  prepare_booking: { label: "Prepare booking", big: false, keep: true, icon: "✅" },
+  list_appointments: { label: "List appointments", big: false, keep: true, icon: "📋" },
+  prepare_reschedule: { label: "Prepare reschedule", big: false, keep: true, icon: "🔁" },
+  prepare_cancel: { label: "Prepare cancellation", big: false, keep: true, icon: "🗑️" },
+  triage: { label: "Triage", big: false, keep: false, icon: "🩺" },
+  submit_action: { label: "Submit action", big: false, keep: true, icon: "📤" },
 };
 
 export function toolMeta(name) {

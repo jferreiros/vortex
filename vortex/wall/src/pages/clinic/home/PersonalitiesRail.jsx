@@ -19,16 +19,16 @@ function PersonalityCard({ person, on, onActivate, onEdit }) {
   return (
     <article className={`persona-card ${on ? "on" : ""}`}>
       <VortyLook look={lookOf(person)} />
-      <span className="persona-badge">En la línea</span>
+      <span className="persona-badge">On the line</span>
       <span className="persona-name">{person.name}</span>
       <span className="persona-role">{person.role}</span>
       <p className="persona-blurb">{person.description}</p>
       <div className="persona-actions">
         <Button variant={on ? "primary" : "secondary"} disabled={on} onClick={() => onActivate(person.slug)}>
-          {on ? "Activa" : "Activar"}
+          {on ? "Active" : "Activate"}
         </Button>
         <Button variant="ghost" onClick={() => onEdit(person)}>
-          Editar
+          Edit
         </Button>
       </div>
     </article>
@@ -55,12 +55,12 @@ function PersonalityEditor({ person, styles, looks, onClose, onSubmit }) {
   return (
     <form className="persona-form" onSubmit={submit}>
       <label className="persona-field">
-        <span>Nombre</span>
+        <span>Name</span>
         <input value={name} onChange={(e) => setName(e.target.value)} required placeholder="Lucía" autoFocus />
       </label>
 
       <fieldset className="persona-fieldset">
-        <legend>Cómo habla</legend>
+        <legend>How they speak</legend>
         <div className="persona-choices">
           {styles.map((item) => (
             <button
@@ -77,7 +77,7 @@ function PersonalityEditor({ person, styles, looks, onClose, onSubmit }) {
       </fieldset>
 
       <fieldset className="persona-fieldset">
-        <legend>Cara</legend>
+        <legend>Face</legend>
         <div className="persona-looks">
           {looks.map((id) => (
             <button
@@ -85,7 +85,7 @@ function PersonalityEditor({ person, styles, looks, onClose, onSubmit }) {
               key={id}
               className={`persona-look ${look === id ? "on" : ""}`}
               onClick={() => setLook(id)}
-              aria-label={id === "none" ? "Sin accesorio" : id}
+              aria-label={id === "none" ? "No accessory" : id}
             >
               <VortyLook look={id} />
             </button>
@@ -96,10 +96,10 @@ function PersonalityEditor({ person, styles, looks, onClose, onSubmit }) {
       {error && <p className="persona-form-error">{error}</p>}
       <div className="persona-form-actions">
         <Button type="button" variant="ghost" onClick={onClose}>
-          Cancelar
+          Cancel
         </Button>
         <Button type="submit" disabled={busy || !name.trim()}>
-          {busy ? "Guardando…" : isNew ? "Añadir" : "Guardar"}
+          {busy ? "Saving…" : isNew ? "Add" : "Save"}
         </Button>
       </div>
     </form>
@@ -124,14 +124,14 @@ export default function PersonalitiesRail() {
   return (
     <section className="persona-block">
       <SectionHeader
-        eyebrow="Personalizar agente"
-        title="Quién atiende el teléfono"
-        subtitle="Elige una cara y cómo habla. Debajo, voz y ritmo."
+        eyebrow="Customize agent"
+        title="Who answers the phone"
+        subtitle="Choose a face and how they speak. Below, voice and pace."
       />
 
       {error && <p className="persona-note warn">{error}</p>}
       {flash && <p className="persona-note warn">{flash}</p>}
-      {loading && !items.length && <p className="persona-note">Cargando personalidades…</p>}
+      {loading && !items.length && <p className="persona-note">Loading personalities…</p>}
 
       <div className="persona-rail">
         {items.map((person) => (
@@ -145,15 +145,15 @@ export default function PersonalitiesRail() {
         ))}
         <button type="button" className="persona-card persona-add" onClick={() => setEditing({ name: "" })}>
           <span className="persona-add-mark">+</span>
-          <span className="persona-name">Nueva personalidad</span>
-          <span className="persona-blurb">Ponle un nombre, elige cómo habla y una cara.</span>
+          <span className="persona-name">New personality</span>
+          <span className="persona-blurb">Give it a name, choose how it speaks and a face.</span>
         </button>
       </div>
 
       <Modal
         className="wide"
         open={Boolean(editing)}
-        title={editing?.slug ? `Editar · ${editing.name}` : "Nueva personalidad"}
+        title={editing?.slug ? `Edit · ${editing.name}` : "New personality"}
         onClose={() => setEditing(null)}
       >
         {editing && (

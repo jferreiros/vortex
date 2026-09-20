@@ -60,20 +60,20 @@ export function patientRule(patient) {
   if (!patient) return null;
   if (patient.note) return patient.note;
   if (patient.hasVisitedBefore) {
-    return "Ya tiene historial con la clínica: se le trata como paciente habitual.";
+    return "Already has history with the clinic: treated as a returning patient.";
   }
-  return "No hay visitas previas registradas: se le trata como paciente nuevo.";
+  return "No previous visits on record: treated as a new patient.";
 }
 
 export function careRule(care) {
   if (!care) return null;
   if (care.guidance) return care.guidance;
-  return "Primera vez pidiendo esta especialidad, así que se asigna revisión inicial (first review).";
+  return "First time requesting this specialty, so an initial review is assigned (first review).";
 }
 
 export function zoneRule(zone) {
   if (!zone) return null;
-  return "Hueco más cercano disponible con este proveedor.";
+  return "Nearest available slot with this provider.";
 }
 
 // cancel/reschedule never guess which appointment: the id comes straight
@@ -102,7 +102,7 @@ export function deriveAppointment(items) {
 }
 
 export function appointmentRule() {
-  return "El appointment_id viene de /patients/{id}/appointments, nunca de lo que dice quien llama.";
+  return "The appointment_id comes from /patients/{id}/appointments, never from what the caller says.";
 }
 
 // The new slot a reschedule is moving into — straight off prepare_reschedule's
@@ -120,5 +120,5 @@ export function deriveNewSlot(items) {
 }
 
 export function newSlotRule() {
-  return "El hueco que se moverá a esta cita en cuanto se confirme.";
+  return "The slot this appointment will move to once confirmed.";
 }
