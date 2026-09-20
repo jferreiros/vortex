@@ -476,12 +476,21 @@ async def test_ensure_confirmation_audio_returns_none_without_tts(
 @pytest.fixture
 def confirmation_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     from vortex import settings as settings_module
+    from vortex.line import voice_config
 
     monkeypatch.setenv("VORTEX_VOICE_MODE", "stub")
     monkeypatch.setenv("VORTEX_CLINIC_MODE", "fake")
     monkeypatch.setenv("VORTEX_CONFIRMATION_CALLS_PATH", str(tmp_path / "calls.json"))
     monkeypatch.setenv("VORTEX_PUBLIC_BASE_URL", "https://demo.example.com")
+    monkeypatch.setenv("VORTEX_CONFIRMATION_AUDIO_DIR", str(tmp_path / "confirmation_audio"))
     settings_module.reset_settings()
+    # No real TTS in tests: a machine with gcloud credentials would otherwise
+    # synthesise for real and turn every <Say> assertion into a <Play>.
+    monkeypatch.setattr(
+        voice_config,
+        "synthesize",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("no tts in tests")),
+    )
     settings = settings_module.get_settings()
     client = TestClient(create_app(settings))
     yield client, settings
@@ -714,11 +723,18 @@ def test_result_endpoint_hands_off_to_the_voice_agent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from vortex import settings as settings_module
+    from vortex.line import voice_config
 
     monkeypatch.setenv("VORTEX_VOICE_MODE", "pipecat")
     monkeypatch.setenv("VORTEX_CLINIC_MODE", "fake")
     monkeypatch.setenv("VORTEX_CONFIRMATION_CALLS_PATH", str(tmp_path / "calls.json"))
     monkeypatch.setenv("VORTEX_PUBLIC_BASE_URL", "https://demo.example.com")
+    monkeypatch.setenv("VORTEX_CONFIRMATION_AUDIO_DIR", str(tmp_path / "confirmation_audio"))
+    monkeypatch.setattr(
+        voice_config,
+        "synthesize",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("no tts in tests")),
+    )
     settings_module.reset_settings()
     settings = settings_module.get_settings()
     try:

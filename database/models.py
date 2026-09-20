@@ -47,7 +47,7 @@ class CallRecord:
     #: What the patient said, best-effort — set by
     #: ``db.update_call_outcome`` once a scheduled outbound call (e.g. a
     #: cancellation's call_now) resolves. NULL until then and for every
-    #: inbound call, whose transcript lives in logs/calls.jsonl instead.
+    #: inbound call, whose transcript lives in public.call_events instead.
     transcript: str | None = None
     #: A status finer than ``outcome``'s closed vocabulary allows — e.g.
     #: ``unclear``/``no_speech``/``no_answer``/``failed`` for a scheduled

@@ -581,7 +581,6 @@ async def test_confirmation_call_confirms_appointment(
     appointment_id = booking_call.appointment_id
 
     caller = confirmations.SimulatedConfirmationCaller(
-        log_path=tmp_path / "calls.jsonl",
         settings_describe={"clinic": "fake", "voice": "stub"},
     )
     results = await confirmations.run_confirmations(
@@ -624,7 +623,6 @@ async def test_confirmation_call_cancel_and_no_answer_branches(
     no_answer_id = db.get_call_by_call_id(f"NOANSW-{tag}").appointment_id
 
     caller = confirmations.SimulatedConfirmationCaller(
-        log_path=tmp_path / "calls.jsonl",
         force_outcome={cancel_id: "cancel", no_answer_id: "no_answer"},
     )
     results = await confirmations.run_confirmations(
@@ -654,7 +652,7 @@ async def test_confirmation_job_is_idempotent_within_a_day(
         slot=datetime(slot_day.year, slot_day.month, slot_day.day, 10, 0, tzinfo=MADRID),
     )
     appointment_id = db.get_call_by_call_id(f"IDEM-{tag}").appointment_id
-    caller = confirmations.SimulatedConfirmationCaller(log_path=tmp_path / "calls.jsonl")
+    caller = confirmations.SimulatedConfirmationCaller()
     today = slot_day - timedelta(days=1)
 
     first = await confirmations.run_confirmations(caller=caller, today=today)

@@ -114,8 +114,8 @@ evals-jev:         ## offline TypeSafe Jev spike (arbiter + triage fallback). Ne
 evals-discord:    ## post the latest summary.json to #github (needs DISCORD_WEBHOOK_URL)
 	scripts/notify-discord.sh --evals
 
-logs-discord:     ## post a redacted digest of the call log (LOG= path, default live log)
-	scripts/notify-discord.sh --calls $(LOG)
+logs-discord:     ## post a redacted digest of recent calls read from public.call_events
+	scripts/notify-discord.sh --calls
 
 langfuse-check:   ## project, keys on the line, recent traces
 	uv run python -m vortex.observability.langfuse_status

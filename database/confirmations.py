@@ -49,7 +49,7 @@ class ConfirmationResult:
     outcome: ConfirmationOutcome
     #: The event log's own call_id for this outbound call — a confirmation
     #: is a real product event, not a demo, so it is written to
-    #: logs/calls.jsonl like any other call and shows up in the console the
+    #: public.call_events like any other call and shows up in the console the
     #: same way (see ``SimulatedConfirmationCaller.call``).
     call_id: str
     duration_ms: int | None = None
