@@ -27,7 +27,6 @@ from vortex.contract import ToolContext
 from vortex.diary import tools as diary
 from vortex.identity import tools as identity
 from vortex.line import submit as line_submit
-from vortex.line import transfer as line_transfer
 from vortex.observability.tracing import observe_tool, redact
 from vortex.rules import tools as rules
 
@@ -182,16 +181,6 @@ TOOLS: dict[str, ToolSpec] = {
             contract.SubmitInput,
             contract.SubmitResult,
             line_submit.submit_action,
-        ),
-        ToolSpec(
-            "transfer_call",
-            "line",
-            "Hand the caller to a human on the clinic's transfer number. Records the "
-            "call as an escalation first, then puts them through. status "
-            "'unavailable' means nothing happened and you keep the caller.",
-            contract.TransferCallInput,
-            contract.TransferResult,
-            line_transfer.transfer_call,
         ),
     )
 }
