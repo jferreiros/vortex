@@ -100,6 +100,50 @@
   line-height: 1;
 }
 
+/* Leftmost tray column — the History-events vs Suggestions switch. Slightly
+   narrower than the family column beside it and set off with its own divider. */
+.patterns-tray-views {
+  flex: 0 0 128px;
+}
+
+/* Inline parameter editor shown under a parametrized node / suggestion once it
+   has been placed. Constrained to the node's own width so it never widens the
+   track. */
+.patterns-node-params {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  margin-top: var(--space-1);
+}
+
+.patterns-param-select,
+.patterns-param-num {
+  font-size: 10px;
+  max-width: 100%;
+}
+
+.patterns-param-select {
+  min-width: 0;
+}
+
+.patterns-param-gap {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.patterns-param-num {
+  width: 44px;
+  text-align: center;
+}
+
+.patterns-param-suffix {
+  font-size: 10px;
+  color: var(--color-mute);
+}
+
 .patterns-node-type-label,
 .patterns-chain-label-field {
   font-size: var(--text-xs);

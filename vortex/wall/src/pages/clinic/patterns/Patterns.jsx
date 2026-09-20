@@ -6,6 +6,7 @@ import Button from "../../../components/ui/Button";
 import Placeholder from "../../../components/ui/Placeholder";
 import patternsSeed from "../../../data/patterns.json";
 import shapeTypesData from "../../../data/shapeTypes.json";
+import patternShapes from "../../../data/patternShapes.json";
 import "../pathways/pathways.css";
 import "./patterns.css";
 
@@ -36,8 +37,32 @@ function typeEmoji(family, type) {
   return (type && GLYPH_BY_KEY[`${family}::${type}`]) || FAMILY_EMOJI[family];
 }
 
-function ShapeGlyphs({ family, type, subfamily }) {
-  const mainEmoji = typeEmoji(family, type);
+// Labels for the two parametrized dropdowns, keyed by the id stored on a node.
+const APPT_TYPE_LABEL = Object.fromEntries(patternShapes.appointmentTypes.map((a) => [a.id, a.label]));
+const SPECIALTY_LABEL = Object.fromEntries(patternShapes.specialties.map((s) => [s.id, s.label]));
+
+// A parametrized type keeps its template string ("<appointment type> visit",
+// "time gap", ...) as shape.type; this resolves it to what's actually shown
+// once (and if) the node's parameter has been filled in.
+function resolveLabel(shape) {
+  const template = shape.type || SHAPE_META[shape.family]?.label || "";
+  if (shape.param === "appointmentType") {
+    const label = APPT_TYPE_LABEL[shape.appointmentType];
+    return label ? template.replace("<appointment type>", label) : template;
+  }
+  if (shape.param === "specialty") {
+    const label = SPECIALTY_LABEL[shape.specialty];
+    return label ? template.replace("<specialty>", label) : template;
+  }
+  if (shape.param === "gap") {
+    if (shape.gap?.value) return `${shape.gap.value} ${shape.gap.unit || "days"} elapsed`;
+    return template;
+  }
+  return template;
+}
+
+function ShapeGlyphs({ family, type, subfamily, emoji }) {
+  const mainEmoji = emoji || typeEmoji(family, type);
   const familyEmoji = FAMILY_EMOJI[family];
   const showFamilyBadge = familyEmoji && familyEmoji !== mainEmoji;
 
@@ -103,6 +128,17 @@ function TrashIcon() {
 let uid = 0;
 const nextId = (prefix) => `${prefix}-${(uid += 1)}`;
 
+// Turn a tray drag payload into a clean node shape — only the fields that are
+// actually set, so the persisted JSON stays tidy. The parameter value itself
+// (appointmentType / specialty / gap) is added later, once the user picks it.
+function buildShape({ family, type, subfamily, param, emoji }) {
+  const shape = { family, type };
+  if (subfamily) shape.subfamily = subfamily;
+  if (emoji) shape.emoji = emoji;
+  if (param) shape.param = param;
+  return shape;
+}
+
 function makePattern(name) {
   return {
     id: nextId("pat"),
@@ -163,7 +199,10 @@ function DescriptionField({ value, onChange, className = "" }) {
 // not a fixed number. Hovering the shape shows what that resolves to per
 // specialty, so it doesn't read as an arbitrary/unexplained rule.
 function parameterHint(shape) {
-  if (shape.family === "condition" && shape.type === "time gap") {
+  // Only the old-style condition nodes (no explicit gap value on the shape)
+  // fall back to the "recall interval by specialty" hint; parametrized ones
+  // carry their own number and unit, shown inline instead.
+  if (shape.family === "condition" && shape.type === "time gap" && shape.param !== "gap") {
     const days = patternsSeed.specialtyRecallDays || {};
     const values = Object.entries(days)
       .map(([key, value]) => `${key}: ${value} days`)
@@ -173,9 +212,79 @@ function parameterHint(shape) {
   return null;
 }
 
-function ShapeNode({ node, nodeNumber, onRemove, onDescriptionChange }) {
+// Inline editor a parametrized node shows once it lands on the canvas or in
+// the suggestion slot. Whatever is picked is merged onto the node's shape by
+// `onChange` and persisted with the pattern on Save. `draggable={false}` +
+// stopPropagation keep these from starting the node's reorder drag.
+function ParamControls({ shape, onChange }) {
+  const stop = (e) => e.stopPropagation();
+  if (shape.param === "appointmentType") {
+    return (
+      <select
+        className="ui-select patterns-param-select"
+        draggable={false}
+        value={shape.appointmentType || ""}
+        onMouseDown={stop}
+        onChange={(e) => onChange({ appointmentType: e.target.value })}
+      >
+        <option value="" disabled>Pick appointment type</option>
+        {patternShapes.appointmentTypes.map((a) => (
+          <option key={a.id} value={a.id}>{a.label}</option>
+        ))}
+      </select>
+    );
+  }
+  if (shape.param === "specialty") {
+    return (
+      <select
+        className="ui-select patterns-param-select"
+        draggable={false}
+        value={shape.specialty || ""}
+        onMouseDown={stop}
+        onChange={(e) => onChange({ specialty: e.target.value })}
+      >
+        <option value="" disabled>Pick specialty</option>
+        {patternShapes.specialties.map((s) => (
+          <option key={s.id} value={s.id}>{s.label}</option>
+        ))}
+      </select>
+    );
+  }
+  if (shape.param === "gap") {
+    const gap = shape.gap || { unit: "days" };
+    return (
+      <div className="patterns-param-gap" onMouseDown={stop}>
+        <input
+          type="number"
+          min="1"
+          className="patterns-param-num"
+          draggable={false}
+          placeholder="n"
+          value={gap.value ?? ""}
+          onChange={(e) =>
+            onChange({ gap: { ...gap, value: e.target.value === "" ? "" : Number(e.target.value) } })
+          }
+        />
+        <select
+          className="ui-select patterns-param-select"
+          draggable={false}
+          value={gap.unit || "days"}
+          onChange={(e) => onChange({ gap: { ...gap, unit: e.target.value } })}
+        >
+          {patternShapes.gapUnits.map((u) => (
+            <option key={u} value={u}>{u}</option>
+          ))}
+        </select>
+        <span className="patterns-param-suffix">elapsed</span>
+      </div>
+    );
+  }
+  return null;
+}
+
+function ShapeNode({ node, nodeNumber, onRemove, onDescriptionChange, onShapeChange }) {
   const meta = SHAPE_META[node.shape.family];
-  const label = node.shape.type || meta.label;
+  const label = resolveLabel(node.shape) || meta.label;
   const hint = parameterHint(node.shape);
   const title = hint ? `${label}\n${hint}` : label;
 
@@ -201,18 +310,28 @@ function ShapeNode({ node, nodeNumber, onRemove, onDescriptionChange }) {
           ×
         </button>
         <span className={`pathways-shape ${hint ? "patterns-shape-parameterized" : ""}`} title={title}>
-          <ShapeGlyphs family={node.shape.family} type={node.shape.type} subfamily={node.shape.subfamily} />
+          <ShapeGlyphs
+            family={node.shape.family}
+            type={node.shape.type}
+            subfamily={node.shape.subfamily}
+            emoji={node.shape.emoji}
+          />
         </span>
       </div>
       <span className="patterns-node-type-label">{label}</span>
+      {node.shape.param && (
+        <div className="patterns-node-params">
+          <ParamControls shape={node.shape} onChange={onShapeChange} />
+        </div>
+      )}
     </div>
   );
 }
 
-function SuggestionSlot({ suggestion, onDropShape, onDescriptionChange, onChainLabelChange }) {
+function SuggestionSlot({ suggestion, onDropShape, onDescriptionChange, onChainLabelChange, onShapeChange }) {
   const [over, setOver] = useState(false);
   const shape = suggestion?.shape;
-  const label = shape?.type || "Suggestion";
+  const label = shape ? resolveLabel(shape) : "Suggestion";
 
   return (
     <div className="patterns-suggestion-wrap">
@@ -231,8 +350,7 @@ function SuggestionSlot({ suggestion, onDropShape, onDescriptionChange, onChainL
           setOver(false);
           const raw = e.dataTransfer.getData(DRAG_MIME);
           if (!raw) return;
-          const { family, type, subfamily } = JSON.parse(raw);
-          onDropShape(family, type, subfamily);
+          onDropShape(JSON.parse(raw));
         }}
       >
         <span className="pathways-node-index">Suggest</span>
@@ -243,12 +361,17 @@ function SuggestionSlot({ suggestion, onDropShape, onDescriptionChange, onChainL
         <div className="pathways-shape-wrap">
           <span className="pathways-shape patterns-suggestion-shape" title={label}>
             {shape ? (
-              <ShapeGlyphs family={shape.family} type={shape.type} subfamily={shape.subfamily} />
+              <ShapeGlyphs family={shape.family} type={shape.type} subfamily={shape.subfamily} emoji={shape.emoji} />
             ) : (
               <span className="pathways-shape-main-emoji">?</span>
             )}
           </span>
         </div>
+        {shape?.param && (
+          <div className="patterns-node-params">
+            <ParamControls shape={shape} onChange={onShapeChange} />
+          </div>
+        )}
         <DescriptionField
           value={suggestion?.chainLabel || ""}
           onChange={onChainLabelChange}
@@ -266,9 +389,11 @@ function PatternCanvas({
   onReorderNode,
   onRemoveNode,
   onDescriptionChange,
+  onNodeShapeChange,
   onSuggestionDrop,
   onSuggestionDescriptionChange,
   onSuggestionChainLabelChange,
+  onSuggestionShapeChange,
 }) {
   const trackRef = useRef(null);
   const [overIndex, setOverIndex] = useState(null);
@@ -308,8 +433,7 @@ function PatternCanvas({
       setOverIndex(null);
       return;
     }
-    const { family, type, subfamily } = JSON.parse(raw);
-    onDropShape(family, type, subfamily, indexForPoint(e.clientX));
+    onDropShape(JSON.parse(raw), indexForPoint(e.clientX));
     setOverIndex(null);
   };
 
@@ -325,7 +449,7 @@ function PatternCanvas({
         {pattern.nodes.length === 0 ? (
           <Placeholder
             kind="diagram"
-            label="Drag call, visit, message or condition shapes here to build the match sequence"
+            label="Drag History-event shapes here to build the match sequence"
             minHeight="120px"
             className="pathways-canvas-empty"
           />
@@ -334,7 +458,11 @@ function PatternCanvas({
             <div className="pathways-timeline-bg" aria-hidden="true">
               <span className="pathways-node-index" style={{ visibility: "hidden" }}>·</span>
               <span className="pathways-shape-caption above" style={{ visibility: "hidden" }}>·</span>
-              <span className="pathways-timeline-bar" />
+              <div className="pathways-timeline-bars">
+                {pattern.nodes.map((node) => (
+                  <span key={node.id} className="pathways-timeline-bar" />
+                ))}
+              </div>
             </div>
             {pattern.nodes.map((node, i) => (
               <Fragment key={node.id}>
@@ -344,6 +472,7 @@ function PatternCanvas({
                   nodeNumber={i + 1}
                   onRemove={() => onRemoveNode(node.id)}
                   onDescriptionChange={(value) => onDescriptionChange(node.id, value)}
+                  onShapeChange={(patch) => onNodeShapeChange(node.id, patch)}
                 />
               </Fragment>
             ))}
@@ -366,52 +495,86 @@ function PatternCanvas({
           onDropShape={onSuggestionDrop}
           onDescriptionChange={onSuggestionDescriptionChange}
           onChainLabelChange={onSuggestionChainLabelChange}
+          onShapeChange={onSuggestionShapeChange}
         />
       </div>
     </Card>
   );
 }
 
+// Two-level tray: pick a view (History events vs Suggestions), then a family
+// within that view, then drag a type. History-event shapes are meant for the
+// sequence canvas; Suggestion shapes for the suggestion slot. Types whose name
+// carries a placeholder ship a `param`, so a control appears once they land.
 function ShapeTray() {
-  const [family, setFamily] = useState(shapeTypesData.families[0].key);
-  const familyDef = shapeTypesData.families.find((f) => f.key === family);
+  const [viewKey, setViewKey] = useState(patternShapes.views[0].key);
+  const view = patternShapes.views.find((v) => v.key === viewKey) ?? patternShapes.views[0];
+  const [familyKey, setFamilyKey] = useState(view.families[0].key);
+  const familyDef = view.families.find((f) => f.key === familyKey) ?? view.families[0];
+
+  const selectView = (key) => {
+    const next = patternShapes.views.find((v) => v.key === key) ?? patternShapes.views[0];
+    setViewKey(key);
+    setFamilyKey(next.families[0].key);
+  };
 
   return (
-    <Card padding="lg" className="pathways-tray">
+    <Card padding="lg" className="pathways-tray patterns-tray">
+      <div className="pathways-tray-families patterns-tray-views">
+        {patternShapes.views.map((v) => (
+          <button
+            key={v.key}
+            type="button"
+            className={`pathways-tray-family ${viewKey === v.key ? "on" : ""}`}
+            onClick={() => selectView(v.key)}
+          >
+            {v.label}
+          </button>
+        ))}
+      </div>
       <div className="pathways-tray-families">
-        {shapeTypesData.families.map((f) => (
+        {view.families.map((f) => (
           <button
             key={f.key}
             type="button"
-            className={`pathways-tray-family ${family === f.key ? "on" : ""}`}
-            onClick={() => setFamily(f.key)}
+            className={`pathways-tray-family ${familyDef.key === f.key ? "on" : ""}`}
+            onClick={() => setFamilyKey(f.key)}
           >
             {f.label}
           </button>
         ))}
       </div>
       <div className="pathways-tray-types">
-        {familyDef.types.map((t) => (
-          <div
-            key={t.type}
-            className="pathways-tray-shape"
-            draggable
-            tabIndex={0}
-            onDragStart={(e) => {
-              e.dataTransfer.setData(
-                DRAG_MIME,
-                JSON.stringify({ family: familyDef.key, type: t.type, subfamily: t.subfamily })
-              );
-              e.dataTransfer.effectAllowed = "copy";
-            }}
-          >
-            <span className="pathways-shape">
-              <ShapeGlyphs family={familyDef.key} type={t.type} subfamily={t.subfamily} />
-            </span>
-            <span className="pathways-tray-shape-label">{t.type}</span>
-            {t.subfamily && <span className="pathways-tray-shape-subfamily">{t.subfamily}</span>}
-          </div>
-        ))}
+        {familyDef.types.map((t) => {
+          const subfamily = t.subfamily ?? familyDef.subfamily;
+          return (
+            <div
+              key={t.type}
+              className="pathways-tray-shape"
+              draggable
+              tabIndex={0}
+              onDragStart={(e) => {
+                e.dataTransfer.setData(
+                  DRAG_MIME,
+                  JSON.stringify({
+                    family: familyDef.key,
+                    type: t.type,
+                    subfamily,
+                    param: t.param,
+                    emoji: t.emoji,
+                  })
+                );
+                e.dataTransfer.effectAllowed = "copy";
+              }}
+            >
+              <span className="pathways-shape">
+                <ShapeGlyphs family={familyDef.key} type={t.type} subfamily={subfamily} emoji={t.emoji} />
+              </span>
+              <span className="pathways-tray-shape-label">{t.type}</span>
+              {subfamily && <span className="pathways-tray-shape-subfamily">{subfamily}</span>}
+            </div>
+          );
+        })}
       </div>
     </Card>
   );
@@ -458,16 +621,28 @@ export default function Patterns() {
     setRenamingId(null);
   };
 
-  const handleDropShape = (family, type, subfamily, index) => {
+  const handleDropShape = (shapeData, index) => {
     setPatterns((prev) =>
       prev.map((p) => {
         if (p.id !== selectedId) return p;
         const nodes = [...p.nodes];
         nodes.splice(index, 0, {
           id: nextId("node"),
-          shape: subfamily ? { family, subfamily, type } : { family, type },
+          shape: buildShape(shapeData),
           description: "",
         });
+        return { ...p, nodes };
+      })
+    );
+  };
+
+  const handleNodeShapeChange = (nodeId, patch) => {
+    setPatterns((prev) =>
+      prev.map((p) => {
+        if (p.id !== selectedId) return p;
+        const nodes = p.nodes.map((n) =>
+          n.id === nodeId ? { ...n, shape: { ...n.shape, ...patch } } : n
+        );
         return { ...p, nodes };
       })
     );
@@ -504,7 +679,7 @@ export default function Patterns() {
     );
   };
 
-  const handleSuggestionDrop = (family, type, subfamily) => {
+  const handleSuggestionDrop = (shapeData) => {
     setPatterns((prev) =>
       prev.map((p) => {
         if (p.id !== selectedId) return p;
@@ -512,11 +687,21 @@ export default function Patterns() {
           ...p,
           suggestionNode: {
             ...p.suggestionNode,
-            shape: subfamily ? { family, subfamily, type } : { family, type },
-            chainLabel: p.suggestionNode?.chainLabel || type,
+            shape: buildShape(shapeData),
+            chainLabel: p.suggestionNode?.chainLabel || shapeData.type,
           },
         };
       })
+    );
+  };
+
+  const handleSuggestionShapeChange = (patch) => {
+    setPatterns((prev) =>
+      prev.map((p) =>
+        p.id === selectedId
+          ? { ...p, suggestionNode: { ...p.suggestionNode, shape: { ...p.suggestionNode.shape, ...patch } } }
+          : p
+      )
     );
   };
 
@@ -619,7 +804,7 @@ export default function Patterns() {
             <SaveIcon />
           </button>
           <Button variant="secondary" className="pathways-header-create-btn" onClick={handleCreate}>
-            + Create a new
+            + Create a new pattern
           </Button>
         </div>
       </div>
@@ -635,9 +820,11 @@ export default function Patterns() {
           onReorderNode={handleReorderNode}
           onRemoveNode={handleRemoveNode}
           onDescriptionChange={handleUpdateDescription}
+          onNodeShapeChange={handleNodeShapeChange}
           onSuggestionDrop={handleSuggestionDrop}
           onSuggestionDescriptionChange={handleSuggestionDescription}
           onSuggestionChainLabelChange={handleSuggestionChainLabel}
+          onSuggestionShapeChange={handleSuggestionShapeChange}
         />
         <ShapeTray />
       </div>
