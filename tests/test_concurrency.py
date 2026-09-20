@@ -11,7 +11,6 @@ import json
 import socket
 import threading
 import time
-from pathlib import Path
 
 import pytest
 import uvicorn
@@ -107,18 +106,17 @@ async def _one_call(url: str, n: int) -> tuple[str, int]:
     return call_sid, received
 
 
-async def test_ten_concurrent_calls(server, offline_settings) -> None:
+async def test_ten_concurrent_calls(server, offline_settings, _stub_call_events) -> None:
     results = await asyncio.gather(*(_one_call(server, n) for n in range(CALLS)))
     assert len(results) == CALLS
     for _, received in results:
         assert received >= 10, "every call must hear its own greeting"
 
     # Give close() a moment to write the summaries.
-    log_path = Path(offline_settings.calls_log_path)
     deadline = time.monotonic() + 5
+    summaries: list[dict] = []
     while time.monotonic() < deadline:
-        lines = [json.loads(x) for x in log_path.read_text().splitlines()]
-        summaries = [x for x in lines if x["kind"] == "call.summary"]
+        summaries = [x for x in _stub_call_events if x["kind"] == "call.summary"]
         if len(summaries) >= CALLS:
             break
         await asyncio.sleep(0.1)
@@ -132,5 +130,5 @@ async def test_ten_concurrent_calls(server, offline_settings) -> None:
         # stay on that call_id.
         assert len(s["actions"]) >= 1
         assert all(a["payload"]["call_id"] == s["call_id"] for a in s["actions"])
-    ended = {x["call_id"]: x for x in lines if x["kind"] == "call.ended"}
+    ended = {x["call_id"]: x for x in _stub_call_events if x["kind"] == "call.ended"}
     assert all(e["media_frames_in"] == FRAMES_PER_CALL for e in ended.values())

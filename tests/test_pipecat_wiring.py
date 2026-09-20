@@ -1415,8 +1415,6 @@ async def test_the_observer_meters_stt_llm_and_each_tts_service(offline_settings
     pipecat pushes it at every link it crosses: the totals must not double.
     """
     pytest.importorskip("pipecat")
-    import json
-    from pathlib import Path
 
     from pipecat.metrics.metrics import (
         LLMTokenUsage,
@@ -1483,8 +1481,9 @@ async def test_the_observer_meters_stt_llm_and_each_tts_service(offline_settings
 
     await session.close(reason="test")
 
-    log_lines = Path(offline_settings.calls_log_path).read_text().splitlines()
-    lines = [json.loads(line) for line in log_lines]
+    from conftest import captured_events
+
+    lines = captured_events()
     kinds = [line["kind"] for line in lines if line["call_id"] == call_id]
     assert kinds.index("call.usage") == kinds.index("call.ended") - 1
 

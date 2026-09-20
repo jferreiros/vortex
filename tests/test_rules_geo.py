@@ -31,7 +31,7 @@ def ctx(tmp_path: Path) -> ToolContext:
         now=NOW,
         from_number="+34612345678",
         clinic=FakeClinicClient(),
-        log=CallLog("CA-geo", tmp_path / "calls.jsonl"),
+        log=CallLog("CA-geo"),
         submitter=DryRunSubmitClient(),
     )
 

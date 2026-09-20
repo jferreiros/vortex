@@ -7,8 +7,8 @@ how much of the conversation the agent holds, what the models metered, and
 how every call in the window fanned out from one number into its ending.
 
 Everything here is derived from ``CallCard``s, so it reads whatever
-``read_calls`` read — the hosted Supabase log when it is configured, the
-JSONL file when it is not. Nothing is computed twice: the outcome taxonomy
+``supabase_log.fetch_calls`` read of ``public.call_events`` — the one
+store. Nothing is computed twice: the outcome taxonomy
 is ``CallCard.status``, the refusal buckets are ``business_insights``'s, the
 euros are ``pricing.price_call``'s.
 
@@ -220,11 +220,7 @@ def _row(card: CallCard) -> CallRow:
         for e in _events_of(card, "voice.reply_latency")
         if isinstance(e.get("total_secs"), int | float)
     ]
-    tools = [
-        (step.name, step.ms, step.status == "failed")
-        for step in card.tools
-        if step.name
-    ]
+    tools = [(step.name, step.ms, step.status == "failed") for step in card.tools if step.name]
     return CallRow(
         card=card,
         started=_stamp(card.started_at),
@@ -635,9 +631,8 @@ def _kpis(
             "key": "share",
             "label": "Habla el agente",
             "value": f"{convo['agent_share_pct']}%",
-            "caption": f"{convo['words_agent']:,} palabras frente a {convo['words_user']:,}".replace(
-                ",", "."
-            ),
+            "caption": f"{convo['words_agent']:,} palabras frente a "
+            f"{convo['words_user']:,}".replace(",", "."),
         },
         {
             "key": "duration",

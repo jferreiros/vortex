@@ -10,9 +10,7 @@ Everything here runs offline: no key, no socket, a fake submit client.
 
 from __future__ import annotations
 
-import json
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 from vortex.contract import (
@@ -58,10 +56,8 @@ def make_session(settings, call_id: str) -> tuple[CallSession, AcceptingSubmitte
     return session, submitter
 
 
-def events(settings, call_id: str, kind: str) -> list[dict[str, Any]]:
-    path = Path(settings.calls_log_path)
-    lines = [json.loads(line) for line in path.read_text().splitlines()]
-    return [x for x in lines if x["call_id"] == call_id and x["kind"] == kind]
+def events(written: list[dict[str, Any]], call_id: str, kind: str) -> list[dict[str, Any]]:
+    return [x for x in written if x["call_id"] == call_id and x["kind"] == kind]
 
 
 def blocked_on_location() -> EligibilityVerdict:
@@ -74,7 +70,9 @@ def blocked_on_location() -> EligibilityVerdict:
     )
 
 
-async def test_the_eligibility_verdict_beats_the_models_reason(offline_settings) -> None:
+async def test_the_eligibility_verdict_beats_the_models_reason(
+    offline_settings, _stub_call_events
+) -> None:
     """The c9f087a0 failure: tool said location_not_covered, model said specialty."""
     session, submitter = make_session(offline_settings, "CA-c9f087a0")
     session.memory.observe("check_eligibility", blocked_on_location())
@@ -86,10 +84,10 @@ async def test_the_eligibility_verdict_beats_the_models_reason(offline_settings)
     route, payload = submitter.sent[0]
     assert route == "/api/v1/submit/no-action"
     assert payload["reason"] == "location_not_covered"
-    (override,) = events(offline_settings, "CA-c9f087a0", "submit.reason_override")
+    (override,) = events(_stub_call_events, "CA-c9f087a0", "submit.reason_override")
     assert override["model_reason"] == "specialty_not_covered"
     assert override["reason"] == "location_not_covered"
-    assert events(offline_settings, "CA-c9f087a0", "submit.sent")[0]["payload"]["reason"] == (
+    assert events(_stub_call_events, "CA-c9f087a0", "submit.sent")[0]["payload"]["reason"] == (
         "location_not_covered"
     )
 
@@ -110,7 +108,7 @@ async def test_a_blocked_provider_is_the_verdict_too(offline_settings) -> None:
     assert submitter.sent[0][1]["reason"] == "provider_on_leave"
 
 
-async def test_every_tool_refusal_is_the_verdict(offline_settings) -> None:
+async def test_every_tool_refusal_is_the_verdict(offline_settings, _stub_call_events) -> None:
     """A typed Rejection from any tool, not only the rules' two, is what we submit."""
     session, submitter = make_session(offline_settings, "CA-any-tool")
     session.memory.observe(
@@ -123,7 +121,7 @@ async def test_every_tool_refusal_is_the_verdict(offline_settings) -> None:
     )
 
     assert submitter.sent[0][1]["reason"] == "provider_not_found"
-    (override,) = events(offline_settings, "CA-any-tool", "submit.reason_override")
+    (override,) = events(_stub_call_events, "CA-any-tool", "submit.reason_override")
     assert override["model_reason"] == "out_of_scope"
 
 
@@ -141,7 +139,7 @@ async def test_an_escalation_keeps_its_verb(offline_settings) -> None:
     assert payload["reason"] == "location_not_covered"
 
 
-async def test_a_booking_is_never_rewritten(offline_settings) -> None:
+async def test_a_booking_is_never_rewritten(offline_settings, _stub_call_events) -> None:
     """Only NO_ACTION and ESCALATE carry a reason; a BOOK goes out untouched."""
     session, submitter = make_session(offline_settings, "CA-book")
     session.memory.last_verdict = Rejection(reason="location_not_covered")
@@ -159,10 +157,10 @@ async def test_a_booking_is_never_rewritten(offline_settings) -> None:
     route, payload = submitter.sent[0]
     assert route == "/api/v1/submit/book"
     assert "reason" not in payload
-    assert events(offline_settings, "CA-book", "submit.reason_override") == []
+    assert events(_stub_call_events, "CA-book", "submit.reason_override") == []
 
 
-async def test_without_a_verdict_the_model_decides(offline_settings) -> None:
+async def test_without_a_verdict_the_model_decides(offline_settings, _stub_call_events) -> None:
     """No tool refused, so there is no reason to force and the model's stands."""
     session, submitter = make_session(offline_settings, "CA-no-verdict")
     session.memory.observe("triage", EligibilityVerdict(allowed=True))
@@ -172,7 +170,7 @@ async def test_without_a_verdict_the_model_decides(offline_settings) -> None:
     )
 
     assert submitter.sent[0][1]["reason"] == "out_of_scope"
-    assert events(offline_settings, "CA-no-verdict", "submit.reason_override") == []
+    assert events(_stub_call_events, "CA-no-verdict", "submit.reason_override") == []
 
 
 async def test_free_slots_drop_the_verdict(offline_settings) -> None:

@@ -21,7 +21,6 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
-from pathlib import Path
 from typing import Any, Literal, Protocol
 from zoneinfo import ZoneInfo
 
@@ -80,11 +79,9 @@ class SimulatedConfirmationCaller:
     def __init__(
         self,
         *,
-        log_path: Path,
         force_outcome: dict[str, ConfirmationOutcome] | None = None,
         settings_describe: dict[str, Any] | None = None,
     ) -> None:
-        self._log_path = log_path
         self._force_outcome = force_outcome or {}
         self._settings_describe = settings_describe or {}
 
@@ -93,7 +90,7 @@ class SimulatedConfirmationCaller:
 
         outcome = self._force_outcome.get(appointment.id, "confirmed")
         call_id = f"confirm-{appointment.id}-{int(datetime.now(UTC).timestamp() * 1000)}"
-        writer = CallLog(call_id, self._log_path)
+        writer = CallLog(call_id)
         writer.event(
             "call.started",
             stream_sid=f"OUT-{call_id}",
@@ -113,6 +110,7 @@ class SimulatedConfirmationCaller:
             media_frames_out=0,
         )
         writer.summary(reason=outcome)
+        writer.flush()
         duration_ms = None if outcome == "no_answer" else 4000
         return ConfirmationResult(outcome=outcome, call_id=call_id, duration_ms=duration_ms)
 

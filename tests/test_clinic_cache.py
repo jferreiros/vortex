@@ -102,7 +102,7 @@ def _context(tmp_path: Path, clinic) -> ToolContext:
         now=NOW,
         from_number="+34612345678",
         clinic=clinic,
-        log=CallLog("CA-cache", tmp_path / "calls.jsonl"),
+        log=CallLog("CA-cache"),
         submitter=AcceptedSubmitter(),
     )
 
