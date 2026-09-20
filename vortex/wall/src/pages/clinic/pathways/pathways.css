@@ -442,12 +442,12 @@
 }
 
 /* The glyph is now an SVG (ShapeIcon), not emoji text: sized directly
-   instead of via font-size, coloured a plain neutral ink regardless of the
-   bubble's own family colour below (kept a silhouette, not tinted). */
+   instead of via font-size, coloured dark green regardless of the bubble's
+   own family colour below (kept a silhouette, not tinted per family). */
 .pathways-shape-main-emoji {
   width: 52px;
   height: 52px;
-  color: var(--color-ink);
+  color: var(--color-primary-deep);
 }
 
 /* Entry point — every pathway's fixed first node. Same bubble, its own
