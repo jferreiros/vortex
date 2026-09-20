@@ -26,7 +26,7 @@ make langfuse-check         # project URL + whether the live line has keys
 ```
 
 `make smoke` and `make test` need no key and no network: the tests that want a
-database skip themselves when Supabase is not configured.
+database skip themselves unless `VORTEX_TEST_DB=1` opts them in.
 
 ## Day-before confirmation calls
 
