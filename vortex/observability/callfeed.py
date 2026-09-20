@@ -33,8 +33,9 @@ LINE_URL = os.environ.get("VORTEX_LINE_URL", "http://127.0.0.1:7860").rstrip("/"
 
 #: How many complete calls the wall and the per-call pages ask for. Counted
 #: in calls, not events: the old ``limit=800`` tail was about ten calls on a
-#: real log and could cut the oldest one's ``call.started``.
-WALL_CALLS = 60
+#: real log and could cut the oldest one's ``call.started``. Sized to hold a
+#: whole busy day, since the Live list now shows every call that ended today.
+WALL_CALLS = 160
 
 #: One Insights fetch per this many seconds, no matter how many tabs poll.
 #: The page itself only asks every 6 s.
