@@ -120,6 +120,7 @@ DEFAULT_EXPOSED_TOOLS: list[str] = [
     "find_provider",
     "clinic_facts",
     "submit_action",
+    "transfer_call",
 ]
 
 

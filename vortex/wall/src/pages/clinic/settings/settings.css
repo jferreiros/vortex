@@ -359,3 +359,9 @@
 .ui-modal-body li strong {
   color: var(--color-primary-deep);
 }
+/* The transfer number reuses the cap input's shape but is editable. */
+.settings-transfer-input {
+  width: 160px;
+  color: var(--color-ink);
+  cursor: text;
+}

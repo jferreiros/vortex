@@ -135,6 +135,7 @@ TOOL_LINES: dict[str, str] = {
     "find_provider": "status, provider_id.",
     "clinic_facts": "sites, open_days, providers.",
     "submit_action": "status. Nothing counts without it.",
+    "transfer_call": "status. unavailable = you still have the caller.",
 }
 
 
