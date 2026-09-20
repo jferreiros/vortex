@@ -268,9 +268,8 @@ def fake_store(monkeypatch: pytest.MonkeyPatch) -> FakeTables:
 @pytest.fixture(autouse=True)
 def _isolate_board_sources(monkeypatch: pytest.MonkeyPatch) -> None:
     """A local ``make run`` must not answer the board tests' fetch."""
-    from vortex.observability import callfeed
-
     from vortex.api import _shared
+    from vortex.observability import callfeed
 
     monkeypatch.setattr(callfeed, "LINE_URL", "http://127.0.0.1:9")
     monkeypatch.setattr(callfeed, "_last_good", {})
