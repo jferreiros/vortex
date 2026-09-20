@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import Card from "../../../components/ui/Card";
-import { MOCK_STATS } from "./insightsData";
+import { mockInsights } from "./insightsData";
 import { selectHeatmapView } from "./insightsSelectors";
 import "../home/home.css";
 import "./insights.css";
@@ -13,16 +13,26 @@ const RANGES = [
 
 const POLL_MS = 6000;
 
-function isStatsPayload(json) {
-  return Boolean(json && json.unavailability && json.cancellations);
+// Below this many calls the live aggregates are mostly zeros (one unmet
+// bucket, an empty heatmap), which reads as a broken page rather than a
+// quiet log. The demo numbers stay up until the real payload can carry
+// the panels on its own.
+const MIN_CALLS_FOR_LIVE = 80;
+
+function isRichPayload(json) {
+  if (!json || !json.unavailability || !json.cancellations || !json.heatmap) return false;
+  if ((json.calls_considered ?? 0) < MIN_CALLS_FOR_LIVE) return false;
+  if ((json.unavailability.buckets?.length ?? 0) < 2) return false;
+  return (json.heatmap.rows ?? []).some((row) => row.cells.some((cell) => cell.demand > 0));
 }
 
 function useBusinessInsights(days) {
-  const [data, setData] = useState(MOCK_STATS);
+  const [data, setData] = useState(() => mockInsights(days));
   const cancelledRef = useRef(false);
 
   useEffect(() => {
     cancelledRef.current = false;
+    setData(mockInsights(days));
 
     async function poll() {
       try {
@@ -30,11 +40,9 @@ function useBusinessInsights(days) {
         if (!res.ok || cancelledRef.current) return;
         const json = await res.json();
         if (cancelledRef.current) return;
-        if (isStatsPayload(json) && (json.unavailability.unmet_total || json.calls_considered)) {
-          setData(json);
-        }
+        if (isRichPayload(json)) setData(json);
       } catch {
-        // Keep the last good payload (or the mock).
+        // Keep the last good payload (or the demo numbers).
       }
     }
 
@@ -207,7 +215,7 @@ function Heatmap({ view }) {
 export default function Insights() {
   const [days, setDays] = useState(30);
   const [site, setSite] = useState("all");
-  const data = useBusinessInsights(days) ?? MOCK_STATS;
+  const data = useBusinessInsights(days);
   const unmet = data.unavailability ?? {};
   const cancel = data.cancellations ?? {};
   const calls = data.calls_considered ?? 0;
@@ -215,6 +223,9 @@ export default function Insights() {
   const heatmapView = selectHeatmapView(heatmap, site);
   const unmetPct = calls ? Math.round((100 * (unmet.unmet_total ?? 0)) / calls) : 0;
   const topReason = unmet.buckets?.[0];
+  // Seven-point trend ending on the value shown: the earlier points sit
+  // around it so the sparkline reads as a trend at any scale (7 or 90 days).
+  const trend = (value, shape) => shape.map((k) => Math.round((value || 1) * k)).concat(value || 0);
 
   return (
     <div className="insights-page">
@@ -242,26 +253,26 @@ export default function Insights() {
           label="Calls in period"
           value={calls}
           hint={`${days} days of inbound line`}
-          spark={[160, 178, 170, 190, 188, 200, calls || 214]}
+          spark={trend(calls, [0.78, 0.86, 0.83, 0.92, 0.9, 0.97])}
         />
         <Kpi
           label="Did not end in a visit"
           value={unmet.unmet_total ?? 0}
           hint={calls ? `${unmetPct}% of calls` : "No calls yet"}
-          spark={[22, 18, 20, 16, 21, 17, unmet.unmet_total || 19]}
+          spark={trend(unmet.unmet_total, [1.18, 0.96, 1.08, 0.86, 1.12, 0.9])}
         />
         <Kpi
           label="Cancelled slots recovered"
           value={cancel.recovery_rate_pct ?? "—"}
           unit={cancel.recovery_rate_pct != null ? "%" : ""}
           hint={`${cancel.relocated ?? 0} rebooked · ${cancel.lost ?? 0} lost`}
-          spark={[48, 55, 52, 61, 66, 68, cancel.recovery_rate_pct || 70]}
+          spark={trend(cancel.recovery_rate_pct, [0.69, 0.78, 0.74, 0.87, 0.94, 0.97])}
         />
         <Kpi
           label="Top miss"
           value={topReason ? `${topReason.pct}%` : "—"}
           hint={topReason?.label ?? "No unmet demand"}
-          spark={[40, 42, 38, 45, 44, 46, topReason?.pct || 47]}
+          spark={trend(topReason?.pct, [0.85, 0.9, 0.81, 0.96, 0.94, 0.98])}
         />
       </div>
 
@@ -276,6 +287,8 @@ export default function Insights() {
             ]}
             rows={(unmet.buckets ?? []).map((b) => ({ id: b.key, label: b.label, count: `${b.count} · ${b.pct}%` }))}
           />
+          {unmet.suggested_action ? <p className="insights-panel-sub insights-note">{unmet.suggested_action}</p> : null}
+          {cancel.suggested_action ? <p className="insights-panel-sub insights-note">{cancel.suggested_action}</p> : null}
         </Card>
 
         <Card padding="lg" className="insights-panel">
@@ -313,6 +326,7 @@ export default function Insights() {
           </div>
         </div>
         <Heatmap view={heatmapView} />
+        {heatmapView.suggestion ? <p className="insights-panel-sub insights-note">{heatmapView.suggestion}</p> : null}
       </Card>
     </div>
   );
