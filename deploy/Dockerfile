@@ -39,6 +39,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 COPY pyproject.toml uv.lock README.md ./
 COPY vortex ./vortex
 COPY scripts ./scripts
+# database/ carries the Supabase migrations and the migrator, so the image can
+# run `python -m database.supabase.migrate` on its own.
 COPY database ./database
 
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -55,17 +57,20 @@ RUN apt-get update \
 
 RUN useradd --system --create-home --uid 10001 vortex
 
+# No store path here. Everything persistent goes to Supabase/Postgres through
+# PostgREST (SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY at run time), and the
+# `uv sync` above already carries psycopg for `python -m database.supabase.migrate`.
 ENV PATH=/app/.venv/bin:$PATH \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     VORTEX_HOST=0.0.0.0 \
     VORTEX_PORT=7860 \
-    VORTEX_WS_PATH=/ws \
-    VORTEX_CALLS_LOG=/app/logs/calls.jsonl \
-    VORTEX_PRODUCT_DB=/app/logs/vortex_product.db
+    VORTEX_WS_PATH=/ws
 
 WORKDIR /app
 COPY --from=builder --chown=vortex:vortex /app /app
+# Scratch only (confirmation audio the /confirmation routes serve back). It is
+# deliberately not a volume: nothing here has to survive a rebuild.
 RUN mkdir -p /app/logs && chown vortex:vortex /app/logs
 
 USER vortex

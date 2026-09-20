@@ -32,11 +32,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 RUN apt-get update && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/* \
-    && pip install --no-cache-dir nicegui httpx pydantic python-dotenv phonenumbers email-validator
+    && pip install --no-cache-dir nicegui httpx pydantic python-dotenv phonenumbers email-validator "psycopg[binary]"
 
 COPY vortex ./vortex
-# The wall's cancel buttons write through database/ (stdlib-only, no extra
-# pip deps); without this COPY those routes would ImportError.
+# The wall's cancel buttons write through database/; without this COPY those
+# routes would ImportError.
 COPY database ./database
 # live.py shells out to scripts/precompute_wall_cache.py at every start-up.
 # Without this COPY the subprocess dies on a missing file, the occupancy
@@ -44,12 +44,10 @@ COPY database ./database
 COPY scripts ./scripts
 COPY --from=wall /app/wall/dist ./vortex/wall/dist
 
-# board-data must exist here, not just in compose.yml: Docker seeds a fresh
-# named volume from the image directory it covers, owner included. Without it
-# the volume is created root-owned, and the board — uid 1001 — cannot open its
-# own product database ("unable to open database file") on every start-up.
+# No volume and no local database: the board reads and writes Supabase over
+# PostgREST. /app/logs is scratch the wall cache writes into.
 RUN useradd --create-home --uid 1001 vortex \
-    && mkdir -p /app/logs /app/board-data \
+    && mkdir -p /app/logs \
     && chown -R vortex:vortex /app
 USER vortex
 
