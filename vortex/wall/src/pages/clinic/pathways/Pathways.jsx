@@ -887,8 +887,6 @@ export default function Pathways() {
         </div>
       </div>
 
-      <RuntimePathwaysCard refreshToken={runtimeRefresh} />
-
       <div className="pathways-main">
         <PathwayCanvas
           pathway={selected}
@@ -901,6 +899,8 @@ export default function Pathways() {
         />
         <ShapeTray />
       </div>
+
+      <RuntimePathwaysCard refreshToken={runtimeRefresh} />
 
       {showDeleteConfirm && (
         <div className="ui-modal-overlay" onClick={() => setShowDeleteConfirm(false)}>
