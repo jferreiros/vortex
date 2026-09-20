@@ -3,10 +3,10 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
-STATE_FILE="${VORTEX_DEPLOY_STATE:-/home/factory/personal/vortex-deploy.state}"
+STATE_FILE="${VORTEX_DEPLOY_STATE:-${HOME}/vortex-deploy.state}"
 LOCK_FILE="${VORTEX_DEPLOY_LOCK:-/tmp/vortex-deploy.lock}"
-PUBLIC_LINE="${VORTEX_PUBLIC_LINE:-wss://line.203.0.113.20.sslip.io/ws}"
-PUBLIC_WALL="${VORTEX_PUBLIC_WALL:-https://vortex.203.0.113.20.sslip.io/wall}"
+PUBLIC_LINE="${VORTEX_PUBLIC_LINE:-wss://line.203.0.113.10.sslip.io/ws}"
+PUBLIC_WALL="${VORTEX_PUBLIC_WALL:-https://board.203.0.113.10.sslip.io/wall}"
 
 FORCE=0
 for arg in "$@"; do
