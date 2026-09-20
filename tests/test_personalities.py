@@ -204,25 +204,52 @@ def test_post_creates_a_persona(client: TestClient) -> None:
     assert client.post("/personalities", json={"name": ""}).status_code == 422
 
 
-# --- the board's proxy and the art route --------------------------------------
-# Same arrangement as tests/test_call_ingestion.py: the NiceGUI `user` fixture
-# runs the board app, and patching ``httpx.get`` through callfeed (a leaf
-# module holding the same httpx module object live.py uses) stands in for the
-# line being up or down without importing live.py here.
+# --- the board's own handlers and the art route -------------------------------
+# The board reads and writes ``public.personalities`` itself — no hop to the
+# line — so ``fake_store`` is the whole backend here, exactly as it is for the
+# line's routes above. The NiceGUI ``user`` fixture runs the board app.
 
 
-async def test_the_board_falls_back_to_the_seeds_when_the_line_is_down(
-    user: User, monkeypatch: pytest.MonkeyPatch, offline_settings
-) -> None:
-    """No line and no store: the picker still shows three faces, because a
-    clinic with no receptionist reads as a broken page."""
+async def test_the_board_serves_the_table_rows(user: User, fake_store) -> None:
+    """The rail is whatever the table holds, including an edit made a moment
+    ago. Nothing is flagged offline: a board that is up can always answer,
+    because it owns the same rows the line does."""
+    personalities.update(None, "carla", {"name": "Carla V."})
+    personalities.activate(None, "mateo")
+
     resp = await user.http_client.get("/api/wall/personalities")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["offline"] is True
-    assert body["active"] == "lucia"
+    assert "offline" not in body
     assert [p["slug"] for p in body["items"]] == ["lucia", "mateo", "carla"]
+    assert body["items"][2]["name"] == "Carla V."
+    assert body["active"] == "mateo"
+    assert {row["id"] for row in body["styles"]} == {"warm", "brisk", "calm"}
     assert "headset" in body["looks"]
+
+
+async def test_the_board_writes_land_in_the_table(user: User, fake_store) -> None:
+    resp = await user.http_client.post(
+        "/api/wall/personalities", json={"name": "Nora", "style": "calm", "look": "halo"}
+    )
+    assert resp.status_code == 201
+    assert resp.json()["slug"] == "nora"
+
+    activated = await user.http_client.post("/api/wall/personalities/nora/activate")
+    assert activated.status_code == 200
+    assert personalities.active(None).slug == "nora"
+
+    bad = await user.http_client.put("/api/wall/personalities/nora", json={"tone": ""})
+    assert bad.status_code == 422
+    assert (await user.http_client.get("/api/wall/personalities/nope")).status_code == 404
+
+
+async def test_the_board_answers_503_with_no_store(user: User, offline_settings) -> None:
+    """No store at all (``offline_settings`` blanks the keys): a save that
+    cannot land must say so, never 200."""
+    resp = await user.http_client.post("/api/wall/personalities/mateo/activate")
+    assert resp.status_code == 503
+    assert resp.json() == {"error": "store_unavailable"}
 
 
 async def test_the_board_serves_a_vorty_head_and_an_accessory(user: User) -> None:
