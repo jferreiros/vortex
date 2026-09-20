@@ -20,9 +20,10 @@ persona, which ``active()`` already answers from the seeds.
 
 The call reads the active persona once per socket (``pipecat_voice``): its name,
 role and tone become the prompt's PERSONA block, its greeting opens the line,
-and its ``voices`` map selects that persona's Google voice whenever the Google
-HTTP adapter is active. An ElevenLabs deployment keeps using its own opaque
-voice ids; Google names are never sent to ElevenLabs.
+and the line chooses that persona's own provider voice from two per-persona
+maps: ``elevenlabs_voices`` for stock launched calls and ``voices`` for the
+Google HTTP adapter fallback. The two namespaces stay separate so no provider
+receives the other's name by mistake.
 """
 
 from __future__ import annotations
@@ -46,17 +47,37 @@ LANGUAGES: tuple[str, ...] = ("en", "es", "ca", "gl", "eu")
 #: turn, so a persona's tone has to stay a fragment, not a second prompt.
 TONE_MAX_CHARS = 400
 
-#: A persona's own voices, in the *provider* that has per-voice names today:
-#: Google Chirp. Kept distinct so changing Lucía/Mateo/Carla changes both the
-#: prompt and the sound. These are consumed only by the Google HTTP adapter;
-#: an ElevenLabs deployment continues to resolve its own provider-specific
-#: voice ids.
+#: Provider voice identity is per persona, never one global voice for every
+#: agent. Keep the two namespaces explicit:
+#: - ElevenLabs ids (stock launched calls when ELEVENLABS_API_KEY is present)
+#: - Google Chirp names (the local HTTP adapter fallback)
 #: VOICE_ES / VOICE_EN remain the fallbacks for callers that create a persona
-#: before the picker has Google names for it.
-VOICE_ES = "es-ES-Chirp3-HD-Kore"
-VOICE_EN = "en-US-Chirp3-HD-Kore"
+#: before the picker has provider-specific names for it.
+ELEVENLABS_PERSONA_VOICES: dict[str, dict[str, str]] = {
+    "lucia": {
+        "es": "eZxqQzb5CuYo3Kl6EXfZ",
+        "en": "eZxqQzb5CuYo3Kl6EXfZ",
+        "ca": "eZxqQzb5CuYo3Kl6EXfZ",
+        "gl": "eZxqQzb5CuYo3Kl6EXfZ",
+        "eu": "eZxqQzb5CuYo3Kl6EXfZ",
+    },
+    "mateo": {
+        "es": "JngPf0lmRkKhY3qSJz0f",
+        "en": "JngPf0lmRkKhY3qSJz0f",
+        "ca": "JngPf0lmRkKhY3qSJz0f",
+        "gl": "JngPf0lmRkKhY3qSJz0f",
+        "eu": "JngPf0lmRkKhY3qSJz0f",
+    },
+    "carla": {
+        "es": "eZxqQzb5CuYo3Kl6EXfZ",
+        "en": "eZxqQzb5CuYo3Kl6EXfZ",
+        "ca": "eZxqQzb5CuYo3Kl6EXfZ",
+        "gl": "eZxqQzb5CuYo3Kl6EXfZ",
+        "eu": "eZxqQzb5CuYo3Kl6EXfZ",
+    },
+}
 
-PERSONA_VOICES: dict[str, dict[str, str]] = {
+GOOGLE_PERSONA_VOICES: dict[str, dict[str, str]] = {
     "lucia": {
         "es": "es-ES-Chirp3-HD-Kore",
         "en": "en-US-Chirp3-HD-Kore",
@@ -79,6 +100,9 @@ PERSONA_VOICES: dict[str, dict[str, str]] = {
         "eu": "es-ES-Chirp3-HD-Leda",
     },
 }
+
+VOICE_ES = ELEVENLABS_PERSONA_VOICES["lucia"]["es"]
+VOICE_EN = ELEVENLABS_PERSONA_VOICES["lucia"]["en"]
 
 #: Vorty heads from ``vortex/wall/media``: the bare face plus one accessory
 #: overlay. ``none`` is the face without a hat. The picker stores the stem
@@ -211,6 +235,7 @@ _COLUMNS = (
     "tone",
     "greetings_json",
     "voices_json",
+    "elevenlabs_voices_json",
     "avatar",
     "sort_order",
     "active",
@@ -236,6 +261,7 @@ class PersonalityDraft(BaseModel):
     tone: str
     greetings: dict[str, str] = Field(default_factory=dict)
     voices: dict[str, str] = Field(default_factory=dict)
+    elevenlabs_voices: dict[str, str] = Field(default_factory=dict)
     avatar: str
     sort_order: int = 0
 
@@ -260,7 +286,7 @@ class PersonalityDraft(BaseModel):
             )
         return text
 
-    @field_validator("greetings", "voices")
+    @field_validator("greetings", "voices", "elevenlabs_voices")
     @classmethod
     def _known_languages(cls, value: dict[str, str]) -> dict[str, str]:
         unknown = sorted(set(value) - set(LANGUAGES))
@@ -308,7 +334,8 @@ SEEDS: tuple[Personality, ...] = (
         name="Lucía",
         **style_fields("warm"),
         greetings=greetings_for("Lucía"),
-        voices=PERSONA_VOICES["lucia"],
+        voices=GOOGLE_PERSONA_VOICES["lucia"],
+        elevenlabs_voices=ELEVENLABS_PERSONA_VOICES["lucia"],
         avatar="headset.svg",
         sort_order=0,
     ),
@@ -317,7 +344,8 @@ SEEDS: tuple[Personality, ...] = (
         name="Mateo",
         **style_fields("brisk"),
         greetings=greetings_for("Mateo"),
-        voices=PERSONA_VOICES["mateo"],
+        voices=GOOGLE_PERSONA_VOICES["mateo"],
+        elevenlabs_voices=ELEVENLABS_PERSONA_VOICES["mateo"],
         avatar="baseball-cap.svg",
         sort_order=1,
     ),
@@ -326,7 +354,8 @@ SEEDS: tuple[Personality, ...] = (
         name="Carla",
         **style_fields("calm"),
         greetings=greetings_for("Carla"),
-        voices=PERSONA_VOICES["carla"],
+        voices=GOOGLE_PERSONA_VOICES["carla"],
+        elevenlabs_voices=ELEVENLABS_PERSONA_VOICES["carla"],
         avatar="beanie.svg",
         sort_order=2,
     ),
@@ -357,6 +386,7 @@ def _params(person: Personality) -> dict[str, Any]:
         **{key: data[key] for key in _COLUMNS if key in data},
         "greetings_json": json.dumps(data["greetings"], ensure_ascii=False),
         "voices_json": json.dumps(data["voices"], ensure_ascii=False),
+        "elevenlabs_voices_json": json.dumps(data["elevenlabs_voices"], ensure_ascii=False),
         "active": 1 if person.active else 0,
     }
 
@@ -370,6 +400,7 @@ def _from_row(row: dict[str, Any]) -> Personality:
         tone=row["tone"],
         greetings=json.loads(row.get("greetings_json") or "{}"),
         voices=json.loads(row.get("voices_json") or "{}"),
+        elevenlabs_voices=json.loads(row.get("elevenlabs_voices_json") or "{}"),
         avatar=row["avatar"],
         sort_order=row.get("sort_order") or 0,
         active=bool(row.get("active")),
@@ -518,6 +549,7 @@ def create(settings: Any, payload: dict[str, Any] | None) -> Personality:
         **style_fields(style_id),
         greetings=greetings_for(name),
         voices={"es": VOICE_ES, "en": VOICE_EN},
+        elevenlabs_voices={"es": VOICE_ES, "en": VOICE_EN},
         avatar=normalize_look(str(incoming.get("look") or "headset")),
         sort_order=max((person.sort_order for person in people), default=-1) + 1,
         active=False,
