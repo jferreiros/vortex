@@ -9,7 +9,6 @@ the line, which is legitimate and must never be blocked, only made visible.
 
 from __future__ import annotations
 
-import json
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -50,15 +49,15 @@ def ctx(tmp_path: Path) -> ToolContext:
         now=NOW,
         from_number="+34612345678",  # the mother's line
         clinic=FakeClinicClient(),
-        log=CallLog("CA-identity", tmp_path / "calls.jsonl"),
+        log=CallLog("CA-identity"),
         submitter=DryRunSubmitClient(),
     )
 
 
 def logged(ctx: ToolContext) -> list[dict]:
-    if not ctx.log.path.exists():
-        return []
-    return [json.loads(line) for line in ctx.log.path.read_text().splitlines() if line.strip()]
+    """What this call wrote. The events live on the log itself now — there is
+    no file to read back."""
+    return list(ctx.log.events)
 
 
 # ---- dictated email / phone (problem 4; docs/research/05 §3) ---------------
@@ -218,7 +217,7 @@ async def test_an_unshared_line_finds_its_own_owner(tmp_path: Path) -> None:
         now=NOW,
         from_number="+34699000111",  # P00043's own, unshared line
         clinic=FakeClinicClient(),
-        log=CallLog("CA-identity-solo", tmp_path / "calls.jsonl"),
+        log=CallLog("CA-identity-solo"),
         submitter=DryRunSubmitClient(),
     )
     result = await find_patient(solo, FindPatientInput())
@@ -236,7 +235,7 @@ async def test_clinic_settings_can_require_a_second_identifying_field(
         now=NOW,
         from_number="+34699000111",
         clinic=FakeClinicClient(),
-        log=CallLog("CA-identity-lead", tmp_path / "calls.jsonl"),
+        log=CallLog("CA-identity-lead"),
         submitter=DryRunSubmitClient(),
     )
     by_line = await find_patient(solo, FindPatientInput())
@@ -385,7 +384,7 @@ async def test_no_caller_id_still_asks_for_the_phone(tmp_path: Path) -> None:
         now=NOW,
         from_number="",
         clinic=FakeClinicClient(),
-        log=CallLog("CA-no-caller-id", tmp_path / "calls.jsonl"),
+        log=CallLog("CA-no-caller-id"),
         submitter=DryRunSubmitClient(),
     )
     result = await build_registration(blind, a_registration())

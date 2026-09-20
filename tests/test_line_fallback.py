@@ -9,10 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
-import json
 import time
 from datetime import date, datetime
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -95,9 +93,11 @@ def sent(session: CallSession) -> list[tuple[str, dict[str, Any]]]:
 
 
 def events(settings, call_id: str, kind: str) -> list[dict[str, Any]]:
-    path = Path(settings.calls_log_path)
-    lines = [json.loads(line) for line in path.read_text().splitlines()]
-    return [x for x in lines if x["call_id"] == call_id and x["kind"] == kind]
+    """What that call recorded. ``settings`` is vestigial — the events come
+    from the store, which the test harness catches in memory."""
+    from conftest import captured_events
+
+    return [x for x in captured_events() if x["call_id"] == call_id and x["kind"] == kind]
 
 
 def a_slot() -> Slot:

@@ -262,9 +262,7 @@ class RebookingStore:
         return [_row_to_request(row) for row in rows or []]
 
     def all(self) -> list[RebookingRequest]:
-        rows = self._remote.select(
-            TABLE, {"select": "*", "order": "created_at.asc,request_id.asc"}
-        )
+        rows = self._remote.select(TABLE, {"select": "*", "order": "created_at.asc,request_id.asc"})
         return [_row_to_request(row) for row in rows or []]
 
     def mark_matched(

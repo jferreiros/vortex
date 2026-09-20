@@ -1,14 +1,11 @@
-"""The hosted call log stays off unless both keys are set, and a test tmp
-file never becomes a network read.
+"""The Postgres call-event store stays off unless both keys are set, and a
+``CallLog`` write goes through it and nowhere else.
 """
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 from vortex.observability import supabase_log
-from vortex.observability.calllog import CallLog, read_calls, read_recent
+from vortex.observability.calllog import CallLog
 from vortex.settings import reset_settings
 
 
@@ -21,38 +18,56 @@ def test_event_hash_is_order_independent() -> None:
 def test_unconfigured_without_keys(monkeypatch) -> None:
     monkeypatch.delenv("SUPABASE_URL", raising=False)
     monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    monkeypatch.delenv("SUPABASE_SECRET_KEY", raising=False)
     reset_settings()
     assert supabase_log.configured() is False
     assert supabase_log.ping()["ok"] is False
-    supabase_log.enqueue({"kind": "x", "ts": "t", "call_id": "C"})  # no-op
     reset_settings()
 
 
-def test_read_helpers_stay_on_tmp_file_even_if_keys_present(tmp_path: Path, monkeypatch) -> None:
-    path = tmp_path / "calls.jsonl"
-    log = CallLog("CA-test", path)
+def test_fetch_calls_is_always_a_pair(monkeypatch) -> None:
+    """Callers never branch on ``None``: an unreachable store is an empty
+    window, which is what keeps ``GET /calls`` answering at all."""
+    monkeypatch.setattr(supabase_log, "fetch_window", lambda **_kw: None)
+    grouped, meta = supabase_log.fetch_calls(10)
+    assert grouped == {}
+    assert meta == {"calls": 0, "events": 0, "truncated": False}
+
+
+def test_calllog_queues_every_event(_stub_call_events) -> None:
+    """The writer has no file to check any more: what it produced is what it
+    handed the store."""
+    log = CallLog("CA-test")
     log.event("call.started", from_number="+34600000000")
+    log.user_turn("hola")
     log.event("call.ended", reason="hangup")
-    monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
-    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "test-key")
-    reset_settings()
-    assert supabase_log.uses_this_log(path) is False
-    recent = read_recent(path, limit=10)
-    assert [e["kind"] for e in recent] == ["call.started", "call.ended"]
-    grouped, meta = read_calls(path, max_calls=5)
-    assert meta["calls"] == 1
-    assert "CA-test" in grouped
-    # The writer still produced JSON-safe lines locally.
-    assert json.loads(path.read_text(encoding="utf-8").splitlines()[0])["call_id"] == "CA-test"
-    reset_settings()
+
+    assert [e["kind"] for e in _stub_call_events] == [
+        "call.started",
+        "turn.user",
+        "call.ended",
+    ]
+    assert {e["call_id"] for e in _stub_call_events} == {"CA-test"}
+    # Queued rows are JSON-safe, so ``event_hash`` is stable over them.
+    for event in _stub_call_events:
+        assert supabase_log.event_hash(event)
 
 
-def test_product_db_path_defaults_to_the_repo_logs(monkeypatch, tmp_path: Path) -> None:
-    from database import remote
+def test_calllog_keeps_its_own_events_and_counters() -> None:
+    log = CallLog("CA-counters")
+    log.user_turn("quiero una cita")
+    log.assistant_turn("claro")
+    log.tool_called("find_patient", {"phone": "+34600000000"})
+    assert log.turns == 2
+    assert log.user_turns == 1
+    assert log.tool_calls == 1
+    assert log.caller_words() == "quiero una cita"
+    assert [e["kind"] for e in log.events] == ["turn.user", "turn.assistant", "tool.called"]
 
-    monkeypatch.delenv("VORTEX_PRODUCT_DB", raising=False)
-    default = remote.product_db_path()
-    assert default.name == "vortex_product.db"
-    assert default.parent.name == "logs"
-    monkeypatch.setenv("VORTEX_PRODUCT_DB", str(tmp_path / "other.db"))
-    assert remote.product_db_path() == (tmp_path / "other.db").resolve()
+
+def test_flush_is_a_noop_without_a_store(monkeypatch) -> None:
+    """A developer machine with no keys must not raise on hangup."""
+    monkeypatch.setattr(supabase_log, "configured", lambda: False)
+    log = CallLog("CA-noop")
+    log.event("call.started")
+    log.flush()  # must not raise

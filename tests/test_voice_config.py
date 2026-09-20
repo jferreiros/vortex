@@ -1,7 +1,7 @@
-"""The wall's "Voz del agente" card: sqlite store, mappings, prompt directive.
+"""The wall's "Voz del agente" card: the store, the mappings, the directive.
 
-No network — the store is a file under the same tmp dir as the test call log,
-and every mapping is a pure function over a VoiceConfig.
+No network — ``fake_store`` stands in for PostgREST, and every mapping is a
+pure function over a VoiceConfig.
 """
 
 from __future__ import annotations
@@ -9,13 +9,25 @@ from __future__ import annotations
 from vortex.line import voice_config
 
 
-def test_defaults_when_db_empty(offline_settings) -> None:
+def test_defaults_when_the_table_is_empty(offline_settings, fake_store) -> None:
     cfg = voice_config.load(offline_settings)
     assert cfg == voice_config.VoiceConfig()
-    assert voice_config.db_path(offline_settings).name == "voiceconfig.db"
 
 
-def test_round_trip_persists(offline_settings) -> None:
+def test_defaults_when_there_is_no_store(offline_settings) -> None:
+    """A call must sound the same whether or not Supabase is configured."""
+    assert voice_config.load(offline_settings) == voice_config.VoiceConfig()
+
+
+def test_saving_without_a_store_raises_for_the_503(offline_settings) -> None:
+    """The card must not report a save that went nowhere."""
+    import pytest
+
+    with pytest.raises(RuntimeError, match="no store configured"):
+        voice_config.save(offline_settings, {"voice": "male"})
+
+
+def test_round_trip_persists(offline_settings, fake_store) -> None:
     voice_config.save(offline_settings, {"voice": "male", "tone": 80, "speechRate": 20})
     cfg = voice_config.load(offline_settings)
     assert cfg.voice == "male"
@@ -25,7 +37,7 @@ def test_round_trip_persists(offline_settings) -> None:
     assert cfg.friendliness == 50
 
 
-def test_partial_save_keeps_stored_fields(offline_settings) -> None:
+def test_partial_save_keeps_stored_fields(offline_settings, fake_store) -> None:
     voice_config.save(offline_settings, {"voice": "male"})
     voice_config.save(offline_settings, {"tone": 90})
     cfg = voice_config.load(offline_settings)
@@ -33,7 +45,7 @@ def test_partial_save_keeps_stored_fields(offline_settings) -> None:
     assert cfg.tone == 90
 
 
-def test_clamps_and_rejects_garbage(offline_settings) -> None:
+def test_clamps_and_rejects_garbage(offline_settings, fake_store) -> None:
     cfg = voice_config.save(
         offline_settings,
         {"voice": "robot", "tone": 900, "friendliness": -5, "speechRate": "loud"},
@@ -44,12 +56,12 @@ def test_clamps_and_rejects_garbage(offline_settings) -> None:
     assert cfg.speech_rate == 50
 
 
-def test_wire_shape_is_camelcase(offline_settings) -> None:
+def test_wire_shape_is_camelcase(offline_settings, fake_store) -> None:
     d = voice_config.save(offline_settings, {}).to_dict()
     assert "speechRate" in d and "speech_rate" not in d
 
 
-def test_preview_merges_over_stored(offline_settings) -> None:
+def test_preview_merges_over_stored(offline_settings, fake_store) -> None:
     voice_config.save(offline_settings, {"voice": "male", "tone": 10})
     cfg = voice_config.preview_config(offline_settings, {"tone": 70})
     assert cfg.voice == "male"  # stored value survives

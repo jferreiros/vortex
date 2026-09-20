@@ -148,9 +148,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     raise HTTPException(400, f"invalid since: {since!r}") from None
                 if stamp.tzinfo is None:
                     stamp = stamp.replace(tzinfo=UTC)
-            grouped, meta = await asyncio.to_thread(
-                supabase_log.fetch_calls, calls or None, stamp
-            )
+            grouped, meta = await asyncio.to_thread(supabase_log.fetch_calls, calls or None, stamp)
             return {"calls": grouped, "meta": meta}
         events = await asyncio.to_thread(supabase_log.fetch_recent, limit)
         return {"calls": group_by_call(events or [])}

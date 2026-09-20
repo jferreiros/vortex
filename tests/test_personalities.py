@@ -1,7 +1,7 @@
 """The receptionist personas: the store, the line's routes, the board's proxy.
 
-No key, no network — the db is a sqlite file next to the test call log and the
-routes run in a TestClient.
+No key, no network — ``fake_store`` stands in for PostgREST and the routes
+run in a TestClient.
 
 The invariant the picker leans on is "exactly one persona is active". Most of
 what follows is about keeping that true across a seed, a reopen and a pick.
@@ -17,27 +17,42 @@ from pydantic import ValidationError
 from vortex.line import personalities
 from vortex.line.personalities import TONE_MAX_CHARS
 from vortex.line.server import create_app
-from vortex.observability import callfeed
 
 
 @pytest.fixture
-def client(offline_settings) -> TestClient:
+def client(offline_settings, fake_store) -> TestClient:
     return TestClient(create_app(offline_settings))
 
 
 # --- the store ---------------------------------------------------------------
 
 
-def test_a_fresh_file_seeds_three_and_puts_one_on_the_phone(offline_settings) -> None:
+def test_an_empty_table_seeds_three_and_puts_one_on_the_phone(
+    offline_settings, fake_store
+) -> None:
     people = personalities.list_all(offline_settings)
     assert [p.slug for p in people] == ["lucia", "mateo", "carla"]
     assert [p.active for p in people].count(True) == 1
     assert personalities.active(offline_settings).slug == "lucia"
-    assert personalities.db_path(offline_settings).name == "personalities.db"
-    assert personalities.db_path(offline_settings).parent == offline_settings.calls_log_path.parent
+    assert fake_store.count("personalities") == 3
 
 
-def test_reopening_the_same_file_does_not_reseed(offline_settings) -> None:
+def test_with_no_store_the_seeds_still_answer(offline_settings, fake_store) -> None:
+    """A clinic never boots without a receptionist, keys or no keys."""
+    assert [p.slug for p in personalities.list_all(offline_settings)] == [
+        "lucia",
+        "mateo",
+        "carla",
+    ]
+    assert personalities.active(offline_settings).slug == "lucia"
+
+
+def test_writing_without_a_store_raises_for_the_503(offline_settings) -> None:
+    with pytest.raises(RuntimeError, match="no store configured"):
+        personalities.activate(offline_settings, "mateo")
+
+
+def test_a_second_read_does_not_reseed(offline_settings, fake_store) -> None:
     personalities.update(offline_settings, "lucia", {"name": "Lucía R."})
     personalities.activate(offline_settings, "mateo")
 
@@ -51,7 +66,7 @@ def test_reopening_the_same_file_does_not_reseed(offline_settings) -> None:
     assert personalities.active(offline_settings).slug == "mateo"
 
 
-def test_activate_moves_the_flag_and_refuses_a_stranger(offline_settings) -> None:
+def test_activate_moves_the_flag_and_refuses_a_stranger(offline_settings, fake_store) -> None:
     chosen = personalities.activate(offline_settings, "carla")
     assert chosen.active
     assert [p.slug for p in personalities.list_all(offline_settings) if p.active] == ["carla"]
@@ -62,7 +77,9 @@ def test_activate_moves_the_flag_and_refuses_a_stranger(offline_settings) -> Non
     assert personalities.active(offline_settings).slug == "carla"
 
 
-def test_update_round_trips_the_json_columns_and_bumps_updated_at(offline_settings) -> None:
+def test_update_round_trips_the_json_columns_and_bumps_updated_at(
+    offline_settings, fake_store
+) -> None:
     before = personalities.get(offline_settings, "mateo")
     after = personalities.update(
         offline_settings,
@@ -90,12 +107,12 @@ def test_update_round_trips_the_json_columns_and_bumps_updated_at(offline_settin
     assert reopened.voices == after.voices
 
 
-def test_update_refuses_a_stranger(offline_settings) -> None:
+def test_update_refuses_a_stranger(offline_settings, fake_store) -> None:
     with pytest.raises(KeyError):
         personalities.update(offline_settings, "nope", {"name": "Nadie"})
 
 
-def test_a_tone_longer_than_the_prompt_budget_is_rejected(offline_settings) -> None:
+def test_a_tone_longer_than_the_prompt_budget_is_rejected(offline_settings, fake_store) -> None:
     with pytest.raises(ValidationError) as error:
         personalities.update(offline_settings, "lucia", {"tone": "x" * (TONE_MAX_CHARS + 1)})
     assert str(TONE_MAX_CHARS) in str(error.value)
@@ -103,13 +120,15 @@ def test_a_tone_longer_than_the_prompt_budget_is_rejected(offline_settings) -> N
     assert personalities.get(offline_settings, "lucia").tone.startswith("Warm")
 
 
-def test_an_avatar_that_can_climb_out_of_the_folder_is_rejected(offline_settings) -> None:
+def test_an_avatar_that_can_climb_out_of_the_folder_is_rejected(
+    offline_settings, fake_store
+) -> None:
     for bad in ("../wall/media/avatar2d.png", "sub/dir.svg", "..", ".hidden.svg"):
         with pytest.raises(ValidationError):
             personalities.update(offline_settings, "lucia", {"avatar": bad})
 
 
-def test_an_unknown_language_is_a_typo_not_a_language(offline_settings) -> None:
+def test_an_unknown_language_is_a_typo_not_a_language(offline_settings, fake_store) -> None:
     with pytest.raises(ValidationError):
         personalities.update(offline_settings, "lucia", {"greetings": {"fr": "Bonjour"}})
 
@@ -164,7 +183,7 @@ def test_activate_changes_who_answers(client: TestClient) -> None:
     assert client.post("/personalities/nope/activate").status_code == 404
 
 
-def test_create_from_the_simple_form(offline_settings) -> None:
+def test_create_from_the_simple_form(offline_settings, fake_store) -> None:
     person = personalities.create(
         offline_settings, {"name": "Nora", "style": "calm", "look": "halo"}
     )
@@ -174,7 +193,7 @@ def test_create_from_the_simple_form(offline_settings) -> None:
     assert personalities.get(offline_settings, "nora").name == "Nora"
 
 
-def test_create_avoids_a_taken_slug(offline_settings) -> None:
+def test_create_avoids_a_taken_slug(offline_settings, fake_store) -> None:
     extra = personalities.create(offline_settings, {"name": "Lucía"})
     assert extra.slug == "lucia-2"
 
@@ -197,10 +216,8 @@ def test_post_creates_a_persona(client: TestClient) -> None:
 async def test_the_board_falls_back_to_the_seeds_when_the_line_is_down(
     user: User, monkeypatch: pytest.MonkeyPatch, offline_settings
 ) -> None:
-    def boom(*_a: object, **_k: object) -> None:
-        raise OSError("offline")
-
-    monkeypatch.setattr(callfeed.httpx, "get", boom)
+    """No line and no store: the picker still shows three faces, because a
+    clinic with no receptionist reads as a broken page."""
     resp = await user.http_client.get("/api/wall/personalities")
     assert resp.status_code == 200
     body = resp.json()

@@ -160,7 +160,7 @@ def fetch_window(
         # makes Postgres aggregate every event in the table into a single
         # jsonb value and hit the statement timeout (57014) — the whole
         # window read then fails and the board silently drops back to its
-        # local JSONL, showing one container's calls instead of every run.
+        # empty window, showing no calls at all instead of every run.
         "p_max_calls": max_calls or WINDOW_MAX_CALLS,
         "p_since": None,
     }
@@ -207,7 +207,7 @@ def _complete_calls(
     max_calls: int | None,
     since: datetime | str | None,
 ) -> tuple[dict[str, list[dict[str, Any]]], dict[str, Any]]:
-    """Same completeness rule as ``calllog.read_calls``: keep only groups
+    """The window's completeness rule: keep only groups
     that have ``call.started``, honour ``since`` on that start, newest first."""
     from vortex.observability.calllog import _since_str
 
@@ -267,6 +267,7 @@ def _fetch_all_paginated() -> list[dict[str, Any]]:
         if len(rows) < PAGE_SIZE:
             break
     return events
+
 
 def enqueue(event: dict[str, Any]) -> None:
     """Queue one event for a background upsert. No-op when unconfigured."""

@@ -900,7 +900,7 @@ def classify_cancellation_reply(transcript: str, language: str | None = None) ->
 
 
 class CancellationRebookingJob:
-    """"Your appointment was cancelled, want another date?" — see the
+    """ "Your appointment was cancelled, want another date?" — see the
     module-level comment above for why this is its own job rather than a
     new ``motivo`` on ``AppointmentConfirmationJob``."""
 

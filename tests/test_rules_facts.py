@@ -89,7 +89,7 @@ async def test_saturday_sites_agree_with_what_find_slots_actually_books(catalogu
         now=datetime(2026, 9, 18, 9, 0, tzinfo=MADRID),
         from_number="+34612345678",
         clinic=FakeClinicClient(),
-        log=CallLog("CA-facts", tmp_path / "calls.jsonl"),
+        log=CallLog("CA-facts"),
         submitter=DryRunSubmitClient(),
     )
     answer = await find_slots(
@@ -120,7 +120,7 @@ async def test_sites_for_specialty_agree_with_what_find_slots_actually_books(cat
         now=datetime(2026, 9, 18, 9, 0, tzinfo=MADRID),
         from_number="+34612345678",
         clinic=FakeClinicClient(),
-        log=CallLog("CA-facts-2", tmp_path / "calls.jsonl"),
+        log=CallLog("CA-facts-2"),
         submitter=DryRunSubmitClient(),
     )
     answer = await find_slots(

@@ -63,7 +63,6 @@ async def main() -> None:
 
     settings = get_settings()
     caller = confirmations.SimulatedConfirmationCaller(
-        log_path=settings.calls_log_path,
         force_outcome=_parse_force(args.force),
         settings_describe=settings.describe(),
     )
