@@ -79,6 +79,20 @@
   font-weight: var(--weight-semibold);
 }
 
+.calls-filters {
+  flex-wrap: wrap;
+}
+
+.calls-chip-count {
+  margin-left: var(--space-2);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-mute);
+}
+
+.home-chip.on .calls-chip-count {
+  color: inherit;
+}
+
 .calls-history-col {
   width: 1%;
 }

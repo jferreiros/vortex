@@ -44,7 +44,7 @@ def wall_patient_timeline(patient_id: str) -> JSONResponse:
     cards = build_calls(events)
     events = merge_events(
         events_from_appointments(visits),
-        events_from_calls(cards, patient_id=patient_id),
+        events_from_calls(cards, patient_id=patient_id, visits=visits),
     )
     name = next((v.patient_name for v in visits if v.patient_name), None)
     if not name:
