@@ -490,7 +490,11 @@ function PathwayCanvas({
             <div className="pathways-timeline-bg" aria-hidden="true">
               <span className="pathways-node-index" style={{ visibility: "hidden" }}>·</span>
               <span className="pathways-shape-caption above" style={{ visibility: "hidden" }}>·</span>
-              <span className="pathways-timeline-bar" />
+              <div className="pathways-timeline-bars">
+                {pathway.nodes.map((node) => (
+                  <span key={node.id} className="pathways-timeline-bar" />
+                ))}
+              </div>
             </div>
             {pathway.nodes.map((node, i) => (
               <Fragment key={node.id}>
@@ -777,7 +781,7 @@ export default function Pathways() {
             <SaveIcon />
           </button>
           <Button variant="secondary" className="pathways-header-create-btn" onClick={handleCreate}>
-            + Create a new
+            + Create a new pathway
           </Button>
         </div>
       </div>

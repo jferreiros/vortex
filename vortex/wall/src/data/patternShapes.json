@@ -1,0 +1,98 @@
+{
+  "_comment": "Patterns-only tray catalog. The Patterns editor (vortex/wall/src/pages/clinic/patterns/Patterns.jsx) does NOT use the shared shapeTypes.json catalog — that one drives Pathways. Here the bottom-pane tray is two levels deep: pick a `view` (History events → dropped onto the match sequence canvas, or Suggestions → dropped onto the suggestion slot), then a `family` within it, then drag a `type`. A type carrying `param` needs a value once it lands on a node: `appointmentType` (id from `appointmentTypes`), `specialty` (id from `specialties`), or `gap` (a { value, unit } from `gapUnits`). That chosen value is written back onto the node's `shape` and persisted with the pattern on Save. `emoji` renders inside the shape circle. `subfamily` on a family (e.g. suggestion calls are outgoing) seeds each dropped node's direction badge.",
+  "appointmentTypes": [
+    { "id": "first_visit", "label": "First Visit" },
+    { "id": "review", "label": "Review" },
+    { "id": "paediatric_first_visit", "label": "Paediatric First Visit" },
+    { "id": "paediatric_review", "label": "Paediatric Review" },
+    { "id": "gynaecology_review", "label": "Gynaecology Review" },
+    { "id": "physiotherapy_assessment", "label": "Physiotherapy Assessment" },
+    { "id": "physiotherapy_session", "label": "Physiotherapy Session" },
+    { "id": "dermatology_first_visit", "label": "Dermatology First Visit" },
+    { "id": "dermatology_review", "label": "Dermatology Review" },
+    { "id": "orthopaedic_first_visit", "label": "Orthopaedic First Visit" },
+    { "id": "orthopaedic_review", "label": "Orthopaedic Review" }
+  ],
+  "specialties": [
+    { "id": "general practice", "label": "General practice" },
+    { "id": "paediatrics", "label": "Paediatrics" },
+    { "id": "dermatology", "label": "Dermatology" },
+    { "id": "orthopaedics", "label": "Orthopaedics" },
+    { "id": "gynaecology", "label": "Gynaecology" },
+    { "id": "physiotherapy", "label": "Physiotherapy" }
+  ],
+  "gapUnits": ["days", "weeks", "months"],
+  "views": [
+    {
+      "key": "history",
+      "label": "History events",
+      "target": "sequence",
+      "families": [
+        {
+          "key": "call",
+          "label": "Calls",
+          "types": [
+            { "type": "no-booking available", "emoji": "🚫" },
+            { "type": "scheduled visit", "emoji": "📅" },
+            { "type": "re-scheduled visit", "emoji": "🔁" },
+            { "type": "canceled visit", "emoji": "❌" }
+          ]
+        },
+        {
+          "key": "visit",
+          "label": "Visits",
+          "types": [
+            { "type": "any visit", "emoji": "🏥" },
+            { "type": "<appointment type> visit", "emoji": "🩺", "param": "appointmentType" },
+            { "type": "<specialty> visit", "emoji": "📋", "param": "specialty" },
+            { "type": "telehealth", "emoji": "💻" }
+          ]
+        },
+        {
+          "key": "condition",
+          "label": "Conditions",
+          "types": [
+            { "type": "time gap", "emoji": "⌛", "param": "gap" },
+            { "type": "no follow-up", "emoji": "🔇" },
+            { "type": "open referral", "emoji": "🧭" }
+          ]
+        }
+      ]
+    },
+    {
+      "key": "suggestion",
+      "label": "Suggestions",
+      "target": "suggestion",
+      "families": [
+        {
+          "key": "call",
+          "label": "Calls",
+          "subfamily": "outgoing",
+          "types": [
+            { "type": "<appointment type> suggestion", "emoji": "🆕", "param": "appointmentType" },
+            { "type": "rebooking offer", "emoji": "↩️" },
+            { "type": "post-visit follow-up", "emoji": "📞" },
+            { "type": "waitlist alert", "emoji": "⏳" },
+            { "type": "pre-op screening", "emoji": "🩺" },
+            { "type": "billing/insurance query", "emoji": "💳" },
+            { "type": "lab results published", "emoji": "🧪" }
+          ]
+        },
+        {
+          "key": "message",
+          "label": "Messages",
+          "types": [
+            { "type": "form", "emoji": "📝" },
+            { "type": "SMS", "emoji": "💬" },
+            { "type": "results", "emoji": "🧪" },
+            { "type": "prep instructions", "emoji": "📖" },
+            { "type": "post-visit summary", "emoji": "📄" },
+            { "type": "consent signature", "emoji": "✍️" },
+            { "type": "payment link", "emoji": "🔗" },
+            { "type": "annual recall", "emoji": "🔄" }
+          ]
+        }
+      ]
+    }
+  ]
+}
