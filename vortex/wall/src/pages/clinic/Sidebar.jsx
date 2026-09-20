@@ -89,7 +89,7 @@ export default function Sidebar() {
       <div className="clinic-sidebar-brand">
         <img className="clinic-sidebar-mark" src="/wall/vorty-face" alt="" />
         <span className="clinic-sidebar-brand-text">
-          Vortex
+          Vorti
           <small>Clínica Arenal</small>
         </span>
       </div>

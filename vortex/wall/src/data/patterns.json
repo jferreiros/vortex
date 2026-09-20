@@ -12,7 +12,27 @@
     "default": 365
   },
   "asOf": "2026-09-19",
-  "patterns": [
+  "patterns": [{
+    "id": "cancelled-without-replacement",
+    "name": "Cancelled without replacement",
+    "enabled": true,
+    "buildableToday": true,
+    "match": {
+      "perSpecialty": true,
+      "hasCall": { "type": "cancellation", "subfamily": "incoming" },
+      "noBookSince": "last_cancellation"
+    },
+    "nodes": [
+      { "id": "n1", "shape": { "family": "call", "type": "canceled visit", "emoji": "❌" }, "description": "Cancel in <specialty>" },
+      { "id": "n2", "shape": { "family": "condition", "type": "time gap", "emoji": "⌛", "param": "gap", "gap": { "value": 3, "unit": "days" } }, "description": "15 days elapsed since that cancel" },
+      { "id": "n3", "shape": { "family": "condition", "type": "no follow-up", "emoji": "🔇" }, "description": "No book in <specialty> since that cancel" }
+    ],
+    "suggestionNode": {
+      "shape": { "family": "call", "type": "rebooking offer", "subfamily": "outgoing", "emoji": "↩️" },
+      "description": "Offer to rebook the cancelled visit in <specialty>.",
+      "chainLabel": "Rebook call"
+    }
+  },
     {
       "id": "unfulfilled-referral",
       "name": "Unfulfilled referral",
@@ -35,27 +55,6 @@
       }
     },
     {
-      "id": "cancelled-without-replacement",
-      "name": "Cancelled without replacement",
-      "enabled": true,
-      "buildableToday": true,
-      "match": {
-        "perSpecialty": true,
-        "hasCall": { "type": "cancellation", "subfamily": "incoming" },
-        "noBookSince": "last_cancellation"
-      },
-      "nodes": [
-        { "id": "n1", "shape": { "family": "call", "type": "canceled visit", "emoji": "❌" }, "description": "Cancel in <specialty>" },
-        { "id": "n2", "shape": { "family": "condition", "type": "time gap", "emoji": "⌛", "param": "gap", "gap": { "value": 15, "unit": "days" } }, "description": "15 days elapsed since that cancel" },
-        { "id": "n3", "shape": { "family": "condition", "type": "no follow-up", "emoji": "🔇" }, "description": "No book in <specialty> since that cancel" }
-      ],
-      "suggestionNode": {
-        "shape": { "family": "call", "type": "rebooking offer", "subfamily": "outgoing", "emoji": "↩️" },
-        "description": "Offer to rebook the cancelled visit in <specialty>.",
-        "chainLabel": "Rebook call"
-      }
-    },
-    {
       "id": "no-availability-unrecovered",
       "name": "No-availability, unrecovered",
       "enabled": true,
@@ -67,8 +66,8 @@
         "noCallOrVisitSince": { "ref": "last_no_availability", "withinDays": 14 }
       },
       "nodes": [
-        { "id": "n1", "shape": { "family": "call", "type": "no-booking available", "emoji": "🚫" }, "description": "Call ended no_action / no_availability in <specialty>" },
-        { "id": "n2", "shape": { "family": "condition", "type": "no follow-up", "emoji": "🔇" }, "description": "No call or visit in <specialty> within 14 days since" }
+        { "id": "n1", "shape": { "family": "call", "type": "no-booking available", "emoji": "🚫" }, "description": "Call ended with no availability in <specialty>" },
+        { "id": "n2", "shape": { "family": "condition", "type": "no follow-up", "emoji": "🔇" }, "description": "No visit in <specialty> within 14 days since" }
       ],
       "suggestionNode": {
         "shape": { "family": "call", "type": "waitlist alert", "subfamily": "outgoing", "emoji": "⏳" },

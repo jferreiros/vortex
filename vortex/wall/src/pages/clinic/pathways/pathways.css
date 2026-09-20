@@ -163,7 +163,11 @@
      to each other at their top regardless of a taller neighbor (e.g. a
      proactive node with its extra fields). */
   align-items: center;
-  gap: 0;
+  /* Zero here only matters for Pathways' own single .pathways-timeline
+     child (no visible gap either way). Patterns has two more siblings
+     after it — the connector arrow and the suggestion slot — so this is
+     also the padding around that arrow. */
+  gap: var(--space-6);
   overflow-x: auto;
   overflow-y: hidden;
   padding: var(--space-3);

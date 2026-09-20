@@ -30,7 +30,6 @@ export default function PatternsPathways() {
   return (
     <div className="pp-page">
       <SectionHeader
-        eyebrow="Builder"
         title="Pathways & Patterns"
         subtitle="Two ways to route a patient"
         action={
