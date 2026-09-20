@@ -429,8 +429,8 @@
 }
 
 /* Shapes — shared between the canvas and the tray. Every family is the same
-   circular bubble holding one type emoji; the family reads from the
-   bubble's own colour instead of a second badge stacked on it. */
+   circular bubble, same dark green border, holding one type emoji — the
+   family no longer changes the bubble's colour, only its icon. */
 
 .pathways-shape {
   position: relative;
@@ -439,15 +439,14 @@
   height: 108px;
   border-radius: 50%;
   background: var(--color-primary-soft);
-  border: 2px solid var(--color-primary);
+  border: 2px solid var(--color-primary-deep);
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
 /* The glyph is now an SVG (ShapeIcon), not emoji text: sized directly
-   instead of via font-size, coloured dark green regardless of the bubble's
-   own family colour below (kept a silhouette, not tinted per family). */
+   instead of via font-size, coloured dark green to match the border. */
 .pathways-shape-main-emoji {
   width: 52px;
   height: 52px;
@@ -459,24 +458,6 @@
 .pathways-shape-entry {
   background: var(--color-entry-soft);
   border-color: var(--color-entry);
-}
-
-/* Family colour lives on the border only — every bubble keeps the same
-   green fill it always had, so the ring is what tells families apart. */
-.pathways-shape-call {
-  border-color: var(--color-urgent);
-}
-
-.pathways-shape-message {
-  border-color: var(--color-slate);
-}
-
-.pathways-shape-visit {
-  border-color: var(--color-info);
-}
-
-.pathways-shape-condition {
-  border-color: var(--color-condition);
 }
 
 .pathways-tray-shape .pathways-shape-main-emoji {
