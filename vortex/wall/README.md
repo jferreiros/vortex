@@ -52,18 +52,10 @@ transcript (fixed 2026-09-19) — the `/wall/vorty-face` line was missing.
 
 ## Patterns worth reusing
 
-- **`src/pages/landing/useCrossfadeScroll.js`** — an eased, JS-driven
-  scroll-to that fades a full-viewport veil (colour = the destination
-  section's background) in, scrolls underneath it, then fades it out.
-  Use this instead of `scrollIntoView({behavior: "smooth"})` anywhere a
-  section change should read as a deliberate transition rather than an
-  instant jump — see `Landing.jsx` for the wiring (veil element + passing
-  `scrollToId` down to the trigger).
-- **`src/pages/landing/useHeroScroll.js`** vs. `Reveal.jsx`'s spring: read
-  the comment in `useHeroScroll.js` for when to track scroll position
-  directly (1:1, e.g. shrinking something as you scroll) vs. when to use a
-  React Spring transition instead (a discrete on/off state, e.g. "has this
-  scrolled into view").
+- **`src/app/pageWipe.js` + `PageWipeOverlay.jsx`** — a full-screen wipe
+  transition fired from anywhere (`triggerPageWipe(toPath)`) that covers the
+  screen, swaps the route while covered, then reveals it. Mounted at the
+  router root and ready to reuse; nothing wires it right now.
 - `src/designs/design11/` is the Live Call detail view actually in use
   (embedded by `LiveCallDetail.jsx`). `src/designs/` also holds ten other,
   untouched historical concepts — don't "clean those up"; they're kept for
