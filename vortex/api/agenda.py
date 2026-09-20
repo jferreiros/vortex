@@ -302,6 +302,20 @@ async def wall_cancel_range_api(request: Request) -> JSONResponse:
         touched = db.cancel_appointment_rows(
             provider_id=provider_id, day_from=day_from, day_to=day_to
         )
+    except db.NotConfigured:
+        from database import local_wall
+
+        for booking in hits:
+            person = patients.get(booking.patient_id)
+            local_wall.insert(
+                provider_id=booking.provider_id,
+                site_id=booking.location_id,
+                slot_start=booking.start.astimezone(MADRID).isoformat(),
+                appointment_id=booking.appointment_id or None,
+                patient_name=person.full_name if person else None,
+                provider_name=doctor,
+            )
+        touched = []
     except RuntimeError:
         log.warning("wall range cancel could not write; nothing was cancelled")
         return JSONResponse(STORE_DOWN, status_code=503)
@@ -356,6 +370,18 @@ async def wall_cancel_visit_api(request: Request) -> JSONResponse:
             provider_id=provider_id,
             slot_start=booking.start.astimezone(MADRID).isoformat(),
         )
+    except db.NotConfigured:
+        from database import local_wall
+
+        local_wall.insert(
+            provider_id=provider_id,
+            site_id=location_id,
+            slot_start=booking.start.astimezone(MADRID).isoformat(),
+            appointment_id=booking.appointment_id or None,
+            patient_name=person.full_name if person else None,
+            provider_name=provider.name if provider else None,
+        )
+        touched = None
     except RuntimeError:
         log.warning("wall cancel could not write; the slot stays booked")
         return JSONResponse(STORE_DOWN, status_code=503)
