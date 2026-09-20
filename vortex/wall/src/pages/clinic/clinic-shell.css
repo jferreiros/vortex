@@ -144,8 +144,17 @@
   color: var(--color-ink);
 }
 
-.clinic-sidebar-foot {
+/* Takes the leftover height so its items land at the foot, just above the
+   line-status row. The status row then sits directly under them. */
+.clinic-sidebar-footnav {
   margin-top: auto;
+  padding-top: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.clinic-sidebar-foot {
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -229,6 +238,13 @@
   }
   .clinic-sidebar-nav {
     flex: 1 1 auto;
+  }
+  /* On the bottom bar there is no "foot" to sit above, so Analytics just
+     joins the row of icons. */
+  .clinic-sidebar-footnav {
+    flex-direction: row;
+    margin-top: 0;
+    padding-top: 0;
   }
   .clinic-shell-content {
     padding: var(--space-5) var(--space-4) 88px;
