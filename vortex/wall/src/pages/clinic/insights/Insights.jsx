@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import Card from "../../../components/ui/Card";
 import { MOCK_STATS } from "./insightsData";
-import { selectHeatmapView, selectServices } from "./insightsSelectors";
+import { selectHeatmapView } from "./insightsSelectors";
 import "../home/home.css";
 import "./insights.css";
 
@@ -114,132 +114,26 @@ function StatTable({ columns, rows, empty }) {
   );
 }
 
-// One box per specialty: name, occupancy % (can read over 100% — the
-// platform only offers a slot that exists, so unmatched demand is a real
-// rejection for being full), a capped mini-bar and the volume behind it.
-function ServiceTile({ service, active, onClick }) {
-  const pct = service.occupancy_pct;
-  const known = pct != null;
-  const over = known && pct > 100;
-  return (
-    <button
-      type="button"
-      className={`service-tile ${over ? "over" : ""} ${active ? "active" : ""}`}
-      aria-expanded={active}
-      onClick={onClick}
-    >
-      <div className="service-tile-top">
-        <span className="service-tile-name">{service.name}</span>
-        <span className={`service-tile-pct ${over ? "over" : ""}`}>{known ? `${pct}%` : "—"}</span>
-      </div>
-      <span className="service-tile-track">
-        <span
-          className={`service-tile-fill ${over ? "over" : ""}`}
-          style={{ width: `${known ? Math.min(pct, 100) : 0}%` }}
-        />
-      </span>
-      <span className="service-tile-meta">
-        {service.requested} pet · {service.providers} médico{service.providers === 1 ? "" : "s"}
-      </span>
-    </button>
-  );
-}
-
-// What tapping a tile answers: how many more providers of that specialty
-// would have absorbed every request this period, at today's slots-per-doctor
-// rate — the number business_insights.service_occupancy already computed.
-function ServiceDetail({ service }) {
-  const pct = service.occupancy_pct;
-  const extra = service.extra_providers_needed ?? 0;
-  if (pct == null) {
-    return (
-      <p className="service-detail-empty">
-        {service.name}: se pidió cita pero no quedó registrado ningún hueco ofrecido — no se
-        puede calcular la ocupación en este período.
-      </p>
-    );
-  }
-  if (extra <= 0) {
-    return (
-      <p className="service-detail-empty">
-        {service.name} tiene margen: {service.providers} médico{service.providers === 1 ? "" : "s"}{" "}
-        cubren la demanda pedida ({pct}%).
-      </p>
-    );
-  }
-  return (
-    <div className="service-detail">
-      <p className="service-detail-head">
-        {service.name}: {service.requested} peticiones contra {service.offered} huecos ofrecidos
-        ({pct}% de ocupación)
-        {service.declined_full > 0 ? `, ${service.declined_full} rechazadas por no quedar hueco` : ""}
-        .
-      </p>
-      <p className="service-detail-calc">
-        Con <strong>{extra} médico{extra === 1 ? "" : "s"} más</strong> de esta especialidad
-        (sobre los {service.providers} actuales) se habría podido atender a todos los que la
-        pidieron.
-      </p>
-    </div>
-  );
-}
-
-// Ocupación por servicio: pick a centre (or all of them), see every
-// specialty's demand-vs-capacity in one glance, tap a box for the hiring
-// math behind it. Data comes precomputed in the same business-insights
-// payload as the rest of the page — no calculation duplicated here.
 function ServiceOccupancy({ occupancy }) {
-  const [site, setSite] = useState("all");
-  const [openId, setOpenId] = useState(null);
-  const sites = occupancy?.sites ?? [];
-  const services = selectServices(occupancy, site);
-  const active = services.find((s) => s.id === openId) ?? null;
-
+  const services = occupancy?.all ?? [];
   return (
-    <div className="service-occupancy">
-      <div className="home-toolbar" role="tablist" aria-label="Centro">
-        <button
-          type="button"
-          className={`home-chip ${site === "all" ? "on" : ""}`}
-          onClick={() => {
-            setSite("all");
-            setOpenId(null);
-          }}
-        >
-          Todos los centros
-        </button>
-        {sites.map((s) => (
-          <button
-            key={s.id}
-            type="button"
-            className={`home-chip ${site === s.id ? "on" : ""}`}
-            onClick={() => {
-              setSite(s.id);
-              setOpenId(null);
-            }}
-          >
-            {s.name}
-          </button>
-        ))}
-      </div>
-      {services.length ? (
-        <>
-          <div className="service-grid">
-            {services.map((s) => (
-              <ServiceTile
-                key={s.id}
-                service={s}
-                active={openId === s.id}
-                onClick={() => setOpenId(openId === s.id ? null : s.id)}
-              />
-            ))}
-          </div>
-          {active && <ServiceDetail service={active} />}
-        </>
-      ) : (
-        <p className="insights-empty">Sin peticiones de especialidad en este período.</p>
-      )}
-    </div>
+    <StatTable
+      empty="Sin peticiones de especialidad en este período."
+      columns={[
+        { key: "label", label: "Servicio" },
+        { key: "pct", label: "Ocupación", num: true },
+        { key: "count", label: "Peticiones", num: true },
+      ]}
+      rows={services.map((s) => ({
+        id: s.id,
+        label: s.name,
+        pct: s.occupancy_pct != null ? `${s.occupancy_pct}%` : "—",
+        count:
+          s.extra_providers_needed > 0
+            ? `${s.requested} · +${s.extra_providers_needed} méd.`
+            : String(s.requested ?? "—"),
+      }))}
+    />
   );
 }
 
@@ -391,9 +285,7 @@ export default function Insights() {
 
         <Card padding="lg" className="insights-panel">
           <h2>Ocupación por servicio</h2>
-          <p className="insights-panel-sub">
-            Toca un servicio para ver cuantos médicos más harían falta para atender toda la demanda.
-          </p>
+          <p className="insights-panel-sub">Peticiones frente a huecos, en toda la red.</p>
           <ServiceOccupancy occupancy={data.occupancy} />
         </Card>
       </div>
