@@ -268,6 +268,20 @@ def ensure_agenda() -> None:
         cache_ttl=callfeed.INSIGHTS_CACHE_TTL_S,
     )
     AGENDA_CATALOGUE = cal.catalogue_with_log_roster(AGENDA_CATALOGUE, events)
+    # A second, independent widening from the product's own booking record —
+    # every status, not just the open ones the Agenda draws: a completed or
+    # cancelled visit still proves the doctor on it exists. This is what
+    # closes the Gynaecology gap for a call whose transcript never logged a
+    # find_slots tool under that name at all (see catalogue_with_appointment_
+    # roster), not just one the fixtures never modelled.
+    try:
+        from database import db as _db
+
+        all_appointments = _db.list_appointments(statuses=())
+    except Exception:
+        log.warning("appointments read failed; the roster keeps only the log/fixtures widening")
+        all_appointments = []
+    AGENDA_CATALOGUE = cal.catalogue_with_appointment_roster(AGENDA_CATALOGUE, all_appointments)
     records = sync_clinic((pack_client or api_client).directory())
     seen = {row.patient_id for row in records}
     for row in sync_clinic(api_client.directory()):
