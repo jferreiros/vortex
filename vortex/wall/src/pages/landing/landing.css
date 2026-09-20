@@ -1,18 +1,12 @@
 .landing-root {
   min-height: 100vh;
+  transition: opacity 260ms ease, filter 260ms ease;
 }
 
-/* Crossfade veil for the hero → explainer scroll transition, see
-   useCrossfadeScroll.js. Sits above both sections while it fades in/out.
-   The gradient runs white → grey in COLOUR, never in alpha — every stop
-   stays fully opaque so the veil actually hides the scroll jump underneath
-   at full opacity, instead of leaving a see-through band. */
-.landing-scroll-veil {
-  position: fixed;
-  inset: 0;
-  z-index: 40;
-  background: linear-gradient(to bottom, var(--color-bg-raised), var(--color-bg-empty) 85%);
+/* Short, soft blur-out fired by "Get to know me" just before navigating,
+   so the jump into the Clinic View reads as a fade rather than a hard cut. */
+.landing-root-leaving {
   opacity: 0;
+  filter: blur(12px);
   pointer-events: none;
-  transition: opacity 420ms ease;
 }

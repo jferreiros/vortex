@@ -117,6 +117,12 @@ KNOWN_MOTIVOS: tuple[str, ...] = (
 )
 DEFAULT_MOTIVO = "confirmacion"
 
+#: The job a cancellation (phone or wall) queues, always with
+#: ``motivo="call_now"`` — see ``queue_cancellation_rebooking_call`` and
+#: ``CancellationRebookingJob``. A plain string, not an enum member: every
+#: other job id on ``ConfirmationCall.job`` is one too.
+CANCELLATION_REBOOKING_JOB = "cancellation_rebooking"
+
 ConfirmationStatus = Literal[
     "pending",  # queued, call_at in the future
     "calling",  # claimed by the worker / Twilio accepted the call
@@ -408,6 +414,18 @@ _NO_SPEECH = {
 }
 
 
+def _with_whom_clause(lang: str, provider_name: str, location_name: str) -> str:
+    """The "con Dra. X en Sitio Y" (or just "con Dra. X") clause, in one
+    language — shared between the day-before ask and the cancellation
+    rebooking ask, since both name the same doctor/site fact."""
+    provider, location = _named(provider_name, location_name)
+    if provider and location:
+        return _WITH_WHOM[lang].format(provider=provider, location=location)
+    if provider and lang in ("es", "gl", "en"):
+        return {"es": " con {p}", "gl": " con {p}", "en": " with {p}"}[lang].format(p=provider)
+    return ""
+
+
 def ask_text(
     *,
     language: str,
@@ -418,15 +436,9 @@ def ask_text(
     motivo: str = DEFAULT_MOTIVO,
 ) -> str:
     lang = call_language(language)
-    provider, location = _named(provider_name, location_name)
-    with_whom = ""
-    if provider and location:
-        with_whom = _WITH_WHOM[lang].format(provider=provider, location=location)
-    elif provider and lang in ("es", "gl", "en"):
-        with_whom = {"es": " con {p}", "gl": " con {p}", "en": " with {p}"}[lang].format(p=provider)
     return _ASK[lang].format(
         clinic=clinic_name,
-        with_whom=with_whom,
+        with_whom=_with_whom_clause(lang, provider_name, location_name),
         stamp=_stamp_for(lang, when),
         motivo_clause=_motivo_clause(lang, motivo),
     )
@@ -668,6 +680,14 @@ class CallJob(Protocol):
         audio_url: str | None = None,
     ) -> str: ...
 
+    def ask_words(self, call: ConfirmationCall, *, reprompt: bool) -> str:
+        """The words behind ``ask_twiml``'s ``<Gather>`` (or its reprompt) —
+        what ``server.py`` synthesises/caches as ``audio_url`` before
+        building the TwiML. Kept separate from ``ask_twiml`` because the
+        audio has to exist *before* the TwiML that plays it, but must say
+        exactly what that TwiML's own ``<Gather>`` asks."""
+        ...
+
     def classify(self, transcript: str, language: str) -> CallOutcome: ...
 
     def ack(self, outcome: CallOutcome, language: str) -> str: ...
@@ -712,6 +732,9 @@ class AppointmentConfirmationJob:
     ) -> str:
         return twiml_ask(call, base_url, attempt=attempt, reprompt=reprompt, audio_url=audio_url)
 
+    def ask_words(self, call: ConfirmationCall, *, reprompt: bool) -> str:
+        return ask_speech(call, reprompt=reprompt)
+
     def classify(self, transcript: str, language: str) -> CallOutcome:
         return classify_reply(transcript, language)
 
@@ -726,6 +749,197 @@ class AppointmentConfirmationJob:
 
 
 register_job(AppointmentConfirmationJob())
+
+
+# --- Cancellation rebooking: "your appointment was cancelled, want another
+# date?" ----------------------------------------------------------------
+#
+# The job every cancellation (phone or wall) queues, immediately
+# (motivo="call_now" — see queue_cancellation_rebooking_call). A genuinely
+# different question from the day-before job ("was cancelled" vs. "will you
+# come tomorrow"), so KNOWN_MOTIVOS' own rule applies: this is a new job,
+# not a new entry in _MOTIVO_OPENING/_ASK.
+
+_CANCEL_REBOOK_ASK: dict[str, str] = {
+    "es": (
+        "Hola, le llamamos de {clinic}. Su cita del {stamp}{with_whom} ha sido cancelada. "
+        "¿Quiere que le busquemos otra fecha ahora mismo? Diga sí para buscar hueco, "
+        "o no si no le interesa por ahora."
+    ),
+    "ca": (
+        "Hola, li truquem de {clinic}. La seva cita del {stamp}{with_whom} ha estat cancel·lada. "
+        "Vol que li busquem una altra data ara mateix? Digui sí per buscar hora, "
+        "o no si ara no li interessa."
+    ),
+    "gl": (
+        "Ola, chamámoslle de {clinic}. A súa cita do {stamp}{with_whom} foi cancelada. "
+        "Quere que lle busquemos outra data agora mesmo? Diga si para buscar oco, "
+        "ou non se agora non lle interesa."
+    ),
+    "eu": (
+        "Kaixo, {clinic} koak gara. {stamp}{with_whom} zenuen hitzordua bertan behera geratu da. "
+        "Beste data bat bilatzea nahi al duzu orain bertan? Esan bai bilatzeko, "
+        "edo ez orain interesatzen ez bazaizu."
+    ),
+    "en": (
+        "Hello, this is {clinic}. Your appointment on {stamp}{with_whom} has been cancelled. "
+        "Would you like us to look for another date right now? Say yes to find a new slot, "
+        "or no if you'd rather not right now."
+    ),
+}
+
+_CANCEL_REBOOK_ACK: dict[str, dict[CallOutcome, str]] = {
+    "es": {
+        "reschedule_requested": (
+            "Perfecto, en un momento le proponemos una nueva fecha. Gracias, adiós."
+        ),
+        "not_coming": (
+            "De acuerdo, queda anotado. Puede llamarnos cuando quiera para buscar otra fecha. "
+            "Gracias, adiós."
+        ),
+        "unknown": (
+            "Perdone, no le he entendido. ¿Quiere que le busquemos otra fecha? Diga sí o no."
+        ),
+    },
+    "ca": {
+        "reschedule_requested": "Perfecte, en un moment li proposem una nova data. Gràcies, adéu.",
+        "not_coming": (
+            "D'acord, queda anotat. Truqui'ns quan vulgui per buscar una altra data. Gràcies, adéu."
+        ),
+        "unknown": "Perdoni, no l'he entès. Vol que li busquem una altra data? Digui sí o no.",
+    },
+    "gl": {
+        "reschedule_requested": (
+            "Perfecto, nun momento propoñémoslle unha nova data. Grazas, adeus."
+        ),
+        "not_coming": (
+            "De acordo, queda anotado. Pode chamarnos cando queira para buscar outra data. "
+            "Grazas, adeus."
+        ),
+        "unknown": "Perdone, non o entendín. Quere que lle busquemos outra data? Diga si ou non.",
+    },
+    "eu": {
+        "reschedule_requested": (
+            "Primeran, berehala beste data bat proposatuko dizugu. Eskerrik asko, agur."
+        ),
+        "not_coming": (
+            "Ondo, ohartarazita geratu da. Nahi duzunean deitu diezagukezu beste data bat "
+            "bilatzeko. Eskerrik asko, agur."
+        ),
+        "unknown": "Barkatu, ez zaitut ulertu. Beste data bat bilatzea nahi duzu? Esan bai edo ez.",
+    },
+    "en": {
+        "reschedule_requested": (
+            "Perfect, we'll propose a new date in just a moment. Thank you, goodbye."
+        ),
+        "not_coming": (
+            "Understood, that's noted. You can call us anytime to look for another date. "
+            "Thank you, goodbye."
+        ),
+        "unknown": (
+            "Sorry, I didn't catch that. Would you like us to look for another date? Say yes or no."
+        ),
+    },
+}
+
+
+def cancellation_rebooking_ask_text(
+    *,
+    language: str,
+    when: datetime,
+    provider_name: str = "",
+    location_name: str = "",
+    clinic_name: str = CLINIC_NAME,
+) -> str:
+    lang = call_language(language)
+    return _CANCEL_REBOOK_ASK[lang].format(
+        clinic=clinic_name,
+        with_whom=_with_whom_clause(lang, provider_name, location_name),
+        stamp=_stamp_for(lang, when),
+    )
+
+
+def cancellation_rebooking_ack_text(outcome: CallOutcome, language: str) -> str:
+    by_outcome = _CANCEL_REBOOK_ACK[call_language(language)]
+    return by_outcome.get(outcome, by_outcome["unknown"])
+
+
+def cancellation_rebooking_ask_speech(call: ConfirmationCall, *, reprompt: bool = False) -> str:
+    if reprompt:
+        return cancellation_rebooking_ack_text("unknown", call.language)
+    return cancellation_rebooking_ask_text(
+        language=call.language,
+        when=call.appointment_dt,
+        provider_name=call.provider_name,
+        location_name=call.location_name,
+    )
+
+
+def classify_cancellation_reply(transcript: str, language: str | None = None) -> CallOutcome:
+    """Keyword classification for the cancellation-rebooking call. There is
+    no "will you come" question here — any "yes" (or an explicit reschedule
+    word) means the patient wants another date, so both fold onto
+    ``reschedule_requested``, the same outcome the day-before job's own
+    in-call handoff already keys on (see server.py's ``/confirmation/result``).
+    A plain "no" means they don't want one right now."""
+    folded = _fold(transcript)
+    if not folded.strip():
+        return "unknown"
+    lang = call_language(language)
+    if _matches(folded, _RESCHEDULE[lang]) or _matches(folded, _YES[lang]):
+        return "reschedule_requested"
+    if _matches(folded, _NO[lang]):
+        return "not_coming"
+    return "unknown"
+
+
+class CancellationRebookingJob:
+    """"Your appointment was cancelled, want another date?" — see the
+    module-level comment above for why this is its own job rather than a
+    new ``motivo`` on ``AppointmentConfirmationJob``."""
+
+    job_id = CANCELLATION_REBOOKING_JOB
+
+    def call_at(self, *, when: datetime, lead: timedelta) -> datetime:
+        # Never actually used: every row this job places carries
+        # motivo="call_now", which bypasses this schedule entirely (see
+        # build_confirmation_call). Kept only for Protocol conformance.
+        return when - lead
+
+    def ask_twiml(
+        self,
+        call: ConfirmationCall,
+        base_url: str,
+        *,
+        attempt: int,
+        reprompt: bool,
+        audio_url: str | None = None,
+    ) -> str:
+        base = base_url.rstrip("/")
+        locale = twilio_locale(call.language)
+        say = cancellation_rebooking_ask_speech(call, reprompt=reprompt)
+        result_url = f"{base}/confirmation/result?cid={call.confirmation_id}&attempt={attempt}"
+        gather = _gather(result_url, locale, say, audio_url=audio_url)
+        noresult = f"{base}/confirmation/noresult?cid={call.confirmation_id}"
+        return twiml_response(gather + f'<Redirect method="POST">{escape(noresult)}</Redirect>')
+
+    def ask_words(self, call: ConfirmationCall, *, reprompt: bool) -> str:
+        return cancellation_rebooking_ask_speech(call, reprompt=reprompt)
+
+    def classify(self, transcript: str, language: str) -> CallOutcome:
+        return classify_cancellation_reply(transcript, language)
+
+    def ack(self, outcome: CallOutcome, language: str) -> str:
+        return cancellation_rebooking_ack_text(outcome, language)
+
+    def final_unclear(self, language: str) -> str:
+        return final_unclear_text(language)
+
+    def no_speech(self, language: str) -> str:
+        return no_speech_text(language)
+
+
+register_job(CancellationRebookingJob())
 
 
 @dataclass
@@ -1123,6 +1337,156 @@ async def cancel_confirmation_calls(
         appointment_at=appointment_at.isoformat() if appointment_at is not None else "",
         appointment_id=appointment_id,
     )
+
+
+#: DB-safe ``calls.outcome`` for each terminal status the cancellation
+#: rebooking call can resolve to. ``database/schema.py``'s CHECK on
+#: ``calls.outcome`` is the submit contract's own closed vocabulary plus
+#: confirmed/no_answer — a ``ConfirmationStatus`` with no honest match
+#: (unclear/failed/skipped/cancelled/pending/calling) leaves ``outcome``
+#: alone instead of lying; ``detail`` still records it (see
+#: ``sync_call_now_outcome_to_db``).
+_CALL_NOW_DB_OUTCOME: dict[str, str] = {
+    "confirmed": "confirmed",
+    "reschedule_requested": "reschedule",
+    "not_coming": "no_action",
+    "no_answer": "no_answer",
+}
+
+
+async def queue_cancellation_rebooking_call(
+    settings: Settings,
+    *,
+    to: str,
+    appointment_at: datetime,
+    language: str = "",
+    provider_name: str = "",
+    location_name: str = "",
+    provider_id: str = "",
+    location_id: str = "",
+    patient_id: str = "",
+    appointment_id: str = "",
+    now: datetime,
+    already_offered_reschedule: bool = False,
+    db_path: Path | str | None = None,
+) -> ConfirmationCall | None:
+    """Queue the "your appointment was cancelled, want another date?" call —
+    the one every cancellation (phone or wall) fires, immediately
+    (``motivo="call_now"``, see ``build_confirmation_call``). Mirrors the
+    queued row into the product database too (``_persist_call_now_row``),
+    not just ``logs/confirmation_calls.json``.
+
+    ``already_offered_reschedule`` is the loop guard: a cancellation reached
+    *through* this very job's own in-call handoff (``CallSession.handoff``)
+    already asked "¿otra fecha?" live, on that call, so queuing a fresh
+    call_now on top would re-dial someone who is (or just was) on the phone
+    with us. ``to`` empty or the subsystem disabled
+    (``VORTEX_CONFIRMATION_CALLS``) also return ``None`` without raising.
+    The store's own dedup (same phone + same slot + motivo="call_now")
+    covers the rest — cancelling the same visit twice must not queue two
+    calls.
+    """
+    if already_offered_reschedule or not to.strip() or not settings.confirmation_calls:
+        return None
+    store = confirmation_store_from_settings(settings)
+    call = await schedule_confirmation_call(
+        store,
+        to=to,
+        when=appointment_at,
+        job=CANCELLATION_REBOOKING_JOB,
+        language=language,
+        provider_name=provider_name,
+        location_name=location_name,
+        provider_id=provider_id,
+        location_id=location_id,
+        patient_id=patient_id,
+        appointment_id=appointment_id,
+        now=now,
+        motivo="call_now",
+    )
+    if call is not None:
+        _persist_call_now_row(
+            call, db_path=db_path if db_path is not None else settings.product_db_path
+        )
+    return call
+
+
+def _persist_call_now_row(call: ConfirmationCall, *, db_path: Path | str) -> None:
+    """Mirror the queued call_now row into the product database's ``calls``
+    table — not just ``logs/confirmation_calls.json`` — so the wall (and,
+    once Supabase is configured, the board: ``database/remote.py`` mirrors
+    every write there already) sees it. ``call.confirmation_id`` is written
+    as the row's own ``call_id``, so ``sync_call_now_outcome_to_db`` can find
+    it again once the call resolves.
+
+    The appointment link is skipped, not faked, when the cancelled
+    appointment has no row here yet — most wall-cancelled visits are the
+    read-only clinic's own seed data (see ``database/schema.py``'s
+    migration-2 comment); the outbound call itself is still recorded. Never
+    raises: a database hiccup must not stop the call from being queued.
+    """
+    try:
+        from database import db
+
+        with db.connection(db_path) as conn:
+            appointment_id = call.appointment_id or None
+            if appointment_id and db.get_appointment(conn, appointment_id) is None:
+                appointment_id = None
+            db.insert_call(
+                conn,
+                call_id=call.confirmation_id,
+                direction="outbound",
+                purpose="reschedule",
+                language=call.language,
+                from_number=call.to,
+                started_at=db.now_iso(),
+                appointment_id=appointment_id,
+                motivo=call.motivo,
+            )
+    except Exception:
+        log.exception("could not persist call_now row for confirmation %s", call.confirmation_id)
+
+
+def sync_call_now_outcome_to_db(
+    *,
+    confirmation_id: str,
+    motivo: str,
+    settings: Settings,
+    status: str = "",
+    transcript: str = "",
+    detail: str = "",
+    db_path: Path | str | None = None,
+) -> None:
+    """Mirror a call_now confirmation call's answer back into the same
+    ``calls`` row ``_persist_call_now_row`` wrote when it was queued — the
+    wall (and anything else reading the database instead of
+    ``logs/confirmation_calls.json``) needs the outcome, not just the queue
+    entry.
+
+    Scoped to ``motivo == "call_now"``: the day-before confirmation job has
+    its own, separate database story (``database/confirmations.py``) this
+    does not touch. A no-op when neither an outcome, a transcript nor a
+    detail changed. Never raises.
+    """
+    if motivo != "call_now":
+        return
+    outcome = _CALL_NOW_DB_OUTCOME.get(status)
+    if outcome is None and not transcript and not detail:
+        return
+    try:
+        from database import db
+
+        path = db_path if db_path is not None else settings.product_db_path
+        with db.connection(path) as conn:
+            db.update_call_outcome(
+                conn,
+                confirmation_id,
+                outcome=outcome,
+                transcript=transcript or None,
+                detail=detail or None,
+            )
+    except Exception:
+        log.exception("could not sync call_now outcome for confirmation %s", confirmation_id)
 
 
 class ConfirmationWorker:

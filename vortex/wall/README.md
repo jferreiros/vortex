@@ -64,3 +64,7 @@ transcript (fixed 2026-09-19) — the `/wall/vorty-face` line was missing.
   directly (1:1, e.g. shrinking something as you scroll) vs. when to use a
   React Spring transition instead (a discrete on/off state, e.g. "has this
   scrolled into view").
+- **`src/app/pageWipe.js` + `PageWipeOverlay.jsx`** — a full-screen wipe
+  transition fired from anywhere (`triggerPageWipe(toPath)`) that covers the
+  screen, swaps the route while covered, then reveals it. Mounted at the
+  router root and ready to reuse; nothing wires it right now.

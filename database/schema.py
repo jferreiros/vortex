@@ -189,8 +189,34 @@ CREATE TABLE suggestion_rejections (
 );
 """
 
+#: Migration 5: room for a *result*, not just a queue entry.
+#:
+#: ``vortex/line/confirmation_calls.py`` writes an outbound row (via
+#: ``insert_call``) the moment a call is *queued* — before anyone has
+#: answered it. What the patient actually said only shows up later, off a
+#: Twilio webhook, so it needs its own write (``update_call_outcome``), and
+#: that write needs somewhere to put a transcript and a status finer than
+#: the six-way ``outcome`` CHECK allows (e.g. ``unclear``/``no_speech``,
+#: which are honest states for a call_now row but not valid platform
+#: actions). ``rebooked_from_id`` is the other half of the same feature: the
+#: cancellation-triggered call_now offers another date, and when the patient
+#: takes it the fresh booking should point back at the appointment it
+#: replaces, not read as an unrelated visit.
+_MIGRATION_5 = """
+ALTER TABLE calls ADD COLUMN transcript TEXT;
+ALTER TABLE calls ADD COLUMN detail TEXT;
+ALTER TABLE appointments ADD COLUMN rebooked_from_id TEXT REFERENCES appointments(id);
+CREATE INDEX idx_appointments_rebooked_from ON appointments(rebooked_from_id);
+"""
+
 #: Append, never edit — see the module docstring.
-MIGRATIONS: tuple[str, ...] = (_MIGRATION_1, _MIGRATION_2, _MIGRATION_3, _MIGRATION_4)
+MIGRATIONS: tuple[str, ...] = (
+    _MIGRATION_1,
+    _MIGRATION_2,
+    _MIGRATION_3,
+    _MIGRATION_4,
+    _MIGRATION_5,
+)
 
 
 def migrate(conn: sqlite3.Connection) -> int:

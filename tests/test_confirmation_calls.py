@@ -10,7 +10,6 @@ from starlette.testclient import TestClient
 
 from vortex.contract import MADRID, BookAction
 from vortex.line.confirmation_calls import (
-    confirmation_store_from_settings,
     DEFAULT_MOTIVO,
     KNOWN_MOTIVOS,
     ConfirmationCall,
@@ -22,6 +21,7 @@ from vortex.line.confirmation_calls import (
     call_language,
     cancel_confirmation_calls,
     classify_reply,
+    confirmation_store_from_settings,
     ensure_confirmation_audio,
     handoff_from_parameters,
     handoff_ws_url,
@@ -817,6 +817,9 @@ def test_session_open_picks_up_the_handoff(tmp_path: Path, offline_settings) -> 
     assert session.handoff is not None
     assert session.handoff["appointment_id"] == "apt-1"
     assert session.language == "es"
+    # database/hooks.py's _rebooking_source reads this to link a fresh
+    # booking made on this call back to the appointment it replaces.
+    assert session.ctx.state["rebooking_from_appointment_id"] == "apt-1"
 
     plain = CallSession.open(
         StartPayload(streamSid="MZ-2", callSid="CA-plain", customParameters={}),
@@ -824,6 +827,7 @@ def test_session_open_picks_up_the_handoff(tmp_path: Path, offline_settings) -> 
         now=WHEN,
     )
     assert plain.handoff is None
+    assert "rebooking_from_appointment_id" not in plain.ctx.state
 
 
 def _booking(*, slot: datetime = WHEN) -> BookAction:
@@ -903,3 +907,394 @@ async def test_submit_action_tool_dry_run_queues_confirmation(confirmation_setti
     rows = store._read()
     assert len(rows) == 1
     assert rows[0].status == "pending"
+
+
+# ---- cancellation rebooking: "your appointment was cancelled, want another
+# date?" ----------------------------------------------------------------
+
+
+def _remember_appointment(ctx, appointment) -> None:
+    """Stash one appointment on ``ctx.state["diary_appointments"]`` — the
+    same key ``vortex/diary/tools.py``'s ``_remember`` (private) writes,
+    which ``resolve_details``/``remembered_appointment`` (vortex/line/sms.py)
+    read for a ``CancelAction``'s slot/provider/site."""
+    ctx.state.setdefault("diary_appointments", {})[appointment.appointment_id] = (
+        appointment.model_dump(mode="json")
+    )
+
+
+def test_cancellation_rebooking_ask_text_is_a_different_question() -> None:
+    from vortex.line.confirmation_calls import cancellation_rebooking_ask_text
+
+    text = cancellation_rebooking_ask_text(
+        language="es", when=WHEN, provider_name="Dra. Ortiz", location_name="Arenal Centro"
+    )
+    assert "ha sido cancelada" in text
+    assert "otra fecha" in text
+    assert "Dra. Ortiz" in text and "Arenal Centro" in text
+    # Not the day-before question at all.
+    assert "¿Va a venir?" not in text
+
+
+@pytest.mark.parametrize(
+    ("transcript", "lang", "expected"),
+    [
+        ("Sí, búsquenme otra fecha", "es", "reschedule_requested"),
+        ("Vale, cámbienla", "es", "reschedule_requested"),
+        ("No, gracias", "es", "not_coming"),
+        ("no me interesa", "es", "not_coming"),
+        ("yes please", "en", "reschedule_requested"),
+        ("no thanks", "en", "not_coming"),
+        ("marvellous weather", "es", "unknown"),
+        ("", "es", "unknown"),
+    ],
+)
+def test_classify_cancellation_reply(transcript: str, lang: str, expected: str) -> None:
+    from vortex.line.confirmation_calls import classify_cancellation_reply
+
+    assert classify_cancellation_reply(transcript, lang) == expected
+
+
+@pytest.mark.asyncio
+async def test_queue_cancellation_rebooking_call_is_immediate_and_in_db(
+    tmp_path: Path, offline_settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from vortex import settings as settings_module
+    from vortex.line.confirmation_calls import (
+        CANCELLATION_REBOOKING_JOB,
+        queue_cancellation_rebooking_call,
+    )
+
+    monkeypatch.setenv("VORTEX_CONFIRMATION_CALLS", "true")
+    monkeypatch.setenv("VORTEX_CONFIRMATION_CALLS_PATH", str(tmp_path / "calls.json"))
+    settings_module.reset_settings()
+    try:
+        settings = settings_module.get_settings()
+        call = await queue_cancellation_rebooking_call(
+            settings,
+            to="+34662046392",
+            appointment_at=WHEN,
+            provider_name="Dra. Ortiz",
+            location_name="Arenal Centro",
+            patient_id="P00042",
+            appointment_id="A0001",
+            now=NOW,
+        )
+        assert call is not None
+        assert call.job == CANCELLATION_REBOOKING_JOB
+        assert call.motivo == "call_now"
+        # No 24h gap, no lead — placed on the very next worker tick.
+        assert call.call_dt == NOW
+
+        from database import db
+
+        with db.connection(settings.product_db_path) as conn:
+            row = db.get_call_by_call_id(conn, call.confirmation_id)
+            assert row is not None
+            assert row.direction == "outbound"
+            assert row.motivo == "call_now"
+            assert row.outcome is None
+            # A0001 has no row in this fresh database yet, so the link is
+            # skipped rather than faked.
+            assert row.appointment_id is None
+    finally:
+        settings_module.reset_settings()
+
+
+@pytest.mark.asyncio
+async def test_queue_cancellation_rebooking_call_links_a_known_appointment(
+    tmp_path: Path, offline_settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from vortex import settings as settings_module
+    from vortex.line.confirmation_calls import queue_cancellation_rebooking_call
+
+    monkeypatch.setenv("VORTEX_CONFIRMATION_CALLS", "true")
+    monkeypatch.setenv("VORTEX_CONFIRMATION_CALLS_PATH", str(tmp_path / "calls.json"))
+    settings_module.reset_settings()
+    try:
+        settings = settings_module.get_settings()
+        from database import db
+
+        with db.connection(settings.product_db_path) as conn:
+            booking_call = db.insert_call(
+                conn,
+                call_id="CALL-BOOKED",
+                direction="inbound",
+                purpose="booking",
+                started_at=db.now_iso(),
+                outcome="book",
+            )
+            db.insert_appointment(
+                conn,
+                id="LCL-1",
+                booking_call_id=booking_call.id,
+                patient_id="P00042",
+                slot_start=WHEN.isoformat(),
+                slot_end=WHEN.isoformat(),
+            )
+
+        call = await queue_cancellation_rebooking_call(
+            settings,
+            to="+34662046392",
+            appointment_at=WHEN,
+            patient_id="P00042",
+            appointment_id="LCL-1",
+            now=NOW,
+        )
+        assert call is not None
+
+        with db.connection(settings.product_db_path) as conn:
+            row = db.get_call_by_call_id(conn, call.confirmation_id)
+            assert row is not None
+            assert row.appointment_id == "LCL-1"
+    finally:
+        settings_module.reset_settings()
+
+
+@pytest.mark.asyncio
+async def test_queue_cancellation_rebooking_call_skips_when_already_offered(
+    offline_settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from vortex import settings as settings_module
+    from vortex.line.confirmation_calls import queue_cancellation_rebooking_call
+
+    monkeypatch.setenv("VORTEX_CONFIRMATION_CALLS", "true")
+    settings_module.reset_settings()
+    try:
+        settings = settings_module.get_settings()
+        call = await queue_cancellation_rebooking_call(
+            settings,
+            to="+34662046392",
+            appointment_at=WHEN,
+            now=NOW,
+            already_offered_reschedule=True,
+        )
+        assert call is None
+    finally:
+        settings_module.reset_settings()
+
+
+@pytest.mark.asyncio
+async def test_queue_cancellation_rebooking_call_skips_when_disabled(offline_settings) -> None:
+    from vortex.line.confirmation_calls import queue_cancellation_rebooking_call
+
+    # offline_settings unsets VORTEX_CONFIRMATION_CALLS — the whole
+    # subsystem's own gate.
+    call = await queue_cancellation_rebooking_call(
+        offline_settings, to="+34662046392", appointment_at=WHEN, now=NOW
+    )
+    assert call is None
+
+
+@pytest.mark.asyncio
+async def test_queue_cancellation_rebooking_call_dedupes_like_any_other_row(
+    tmp_path: Path, offline_settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from vortex import settings as settings_module
+    from vortex.line.confirmation_calls import (
+        ConfirmationStore,
+        queue_cancellation_rebooking_call,
+    )
+
+    monkeypatch.setenv("VORTEX_CONFIRMATION_CALLS", "true")
+    monkeypatch.setenv("VORTEX_CONFIRMATION_CALLS_PATH", str(tmp_path / "calls.json"))
+    settings_module.reset_settings()
+    try:
+        settings = settings_module.get_settings()
+        kwargs = {"to": "+34662046392", "appointment_at": WHEN, "now": NOW}
+        first = await queue_cancellation_rebooking_call(settings, **kwargs)
+        second = await queue_cancellation_rebooking_call(settings, **kwargs)
+        assert first is not None and second is not None
+        store = ConfirmationStore(Path(settings.confirmation_calls_path))
+        rows = store._read()
+        assert len(rows) == 1
+        assert rows[0].confirmation_id == second.confirmation_id
+    finally:
+        settings_module.reset_settings()
+
+
+def test_sync_call_now_outcome_to_db_is_scoped_to_call_now(
+    tmp_path: Path, offline_settings
+) -> None:
+    from vortex.line.confirmation_calls import sync_call_now_outcome_to_db
+
+    db_path = tmp_path / "vortex_product.db"
+    from database import db
+
+    with db.connection(db_path) as conn:
+        db.insert_call(
+            conn,
+            call_id="OUT-CALLNOW",
+            direction="outbound",
+            purpose="reschedule",
+            started_at=db.now_iso(),
+            motivo="call_now",
+        )
+
+    # A different motivo (the day-before job) is out of scope for this sync.
+    sync_call_now_outcome_to_db(
+        confirmation_id="OUT-CALLNOW",
+        motivo="confirmacion",
+        settings=offline_settings,
+        status="confirmed",
+        db_path=db_path,
+    )
+    with db.connection(db_path) as conn:
+        assert db.get_call_by_call_id(conn, "OUT-CALLNOW").outcome is None
+
+    sync_call_now_outcome_to_db(
+        confirmation_id="OUT-CALLNOW",
+        motivo="call_now",
+        settings=offline_settings,
+        status="reschedule_requested",
+        transcript="Sí, búsquenme otra",
+        detail="handoff_to_voice_agent",
+        db_path=db_path,
+    )
+    with db.connection(db_path) as conn:
+        row = db.get_call_by_call_id(conn, "OUT-CALLNOW")
+        assert row.outcome == "reschedule"
+        assert row.transcript == "Sí, búsquenme otra"
+        assert row.detail == "handoff_to_voice_agent"
+
+    # not_coming and no_answer map to the CHECK-allowed no_action/no_answer.
+    sync_call_now_outcome_to_db(
+        confirmation_id="OUT-CALLNOW",
+        motivo="call_now",
+        settings=offline_settings,
+        status="not_coming",
+        db_path=db_path,
+    )
+    with db.connection(db_path) as conn:
+        assert db.get_call_by_call_id(conn, "OUT-CALLNOW").outcome == "no_action"
+
+
+@pytest.mark.asyncio
+async def test_result_endpoint_persists_the_call_now_outcome_to_the_database(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End to end: a cancellation-rebooking row queued through the same
+    orchestration function the line uses, answered through the ordinary
+    webhook, lands its outcome in the product database — not just
+    logs/confirmation_calls.json."""
+    from vortex import settings as settings_module
+    from vortex.line.confirmation_calls import (
+        confirmation_store_from_settings,
+        queue_cancellation_rebooking_call,
+    )
+
+    monkeypatch.setenv("VORTEX_VOICE_MODE", "stub")
+    monkeypatch.setenv("VORTEX_CLINIC_MODE", "fake")
+    monkeypatch.setenv("VORTEX_CALLS_LOG", str(tmp_path / "calls.jsonl"))
+    monkeypatch.setenv("VORTEX_CONFIRMATION_CALLS", "true")
+    monkeypatch.setenv("VORTEX_CONFIRMATION_CALLS_PATH", str(tmp_path / "calls.json"))
+    monkeypatch.setenv("VORTEX_PUBLIC_BASE_URL", "https://demo.example.com")
+    monkeypatch.setenv("VORTEX_PRODUCT_DB", str(tmp_path / "vortex_product.db"))
+    settings_module.reset_settings()
+    try:
+        settings = settings_module.get_settings()
+        client = TestClient(create_app(settings))
+        store = confirmation_store_from_settings(settings)
+        call = await queue_cancellation_rebooking_call(
+            settings,
+            to="+34662046392",
+            appointment_at=WHEN,
+            provider_name="Dra. Ortiz",
+            location_name="Arenal Centro",
+            patient_id="P00042",
+            appointment_id="A0001",
+            now=NOW,
+        )
+        assert call is not None
+        await store.claim_due(NOW)  # -> calling, same as _seed does for the other job
+
+        response = client.post(
+            f"/confirmation/result?cid={call.confirmation_id}&attempt=1",
+            content="SpeechResult=S%C3%AD%2C+b%C3%BAsquenme+otra",
+            headers={"content-type": "application/x-www-form-urlencoded"},
+        )
+        assert response.status_code == 200
+
+        from database import db
+
+        with db.connection(settings.product_db_path) as conn:
+            row = db.get_call_by_call_id(conn, call.confirmation_id)
+            assert row is not None
+            assert row.outcome == "reschedule"
+            assert row.transcript == "Sí, búsquenme otra"
+    finally:
+        settings_module.reset_settings()
+
+
+@pytest.mark.asyncio
+async def test_cancel_on_the_line_queues_a_call_now_rebooking_call(
+    confirmation_settings, tmp_path: Path
+) -> None:
+    """End to end through CallSession.submit: a phone cancellation queues
+    the same call_now callback the wall does, with the cancelled
+    appointment's own slot/provider/site."""
+    from vortex.contract import Appointment, CancelAction
+
+    session = _inbound_session(confirmation_settings, "CA-cancel-rebook")
+    appt = Appointment(
+        appointment_id="A0001",
+        patient_id="P00042",
+        provider_id="PR05",
+        location_id="sur",
+        appointment_type_id="review",
+        start=WHEN,
+    )
+    _remember_appointment(session.ctx, appt)
+    result = await session.submit(CancelAction(appointment_id="A0001"))
+    await session.close()
+
+    assert result.status == "dry_run"
+    store = confirmation_store_from_settings(confirmation_settings)
+    rows = store._read()
+    call_now_rows = [row for row in rows if row.motivo == "call_now"]
+    assert len(call_now_rows) == 1
+    assert call_now_rows[0].job == "cancellation_rebooking"
+    assert call_now_rows[0].appointment_id == "A0001"
+    assert call_now_rows[0].appointment_at == WHEN.isoformat()
+
+
+@pytest.mark.asyncio
+async def test_cancel_on_a_handoff_call_does_not_requeue_call_now(
+    confirmation_settings, tmp_path: Path
+) -> None:
+    """The loop guard: a cancellation reached through the confirmation
+    call's own reschedule handoff must not re-queue another call_now."""
+    from vortex.contract import Appointment, CancelAction
+    from vortex.line.session import CallSession
+    from vortex.line.twilio import StartPayload
+
+    session = CallSession.open(
+        StartPayload(
+            streamSid="MZ-handoff-cancel",
+            callSid="CA-handoff-cancel",
+            customParameters={
+                "vortex_handoff": "reschedule",
+                "appointment_id": "A0001",
+                "patient_id": "P00042",
+                "language": "es",
+                "from_number": "+34600111222",
+            },
+        ),
+        settings=confirmation_settings,
+        now=NOW,
+    )
+    appt = Appointment(
+        appointment_id="A0001",
+        patient_id="P00042",
+        provider_id="PR05",
+        location_id="sur",
+        appointment_type_id="review",
+        start=WHEN,
+    )
+    _remember_appointment(session.ctx, appt)
+    await session.submit(CancelAction(appointment_id="A0001"))
+    await session.close()
+
+    store = confirmation_store_from_settings(confirmation_settings)
+    rows = store._read()
+    assert [row for row in rows if row.motivo == "call_now"] == []

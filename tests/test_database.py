@@ -97,6 +97,80 @@ def test_calls_motivo_defaults_to_null_for_inbound(db_path: Path) -> None:
         assert call.motivo is None
 
 
+def test_update_call_outcome_patches_a_queued_row(db_path: Path) -> None:
+    """Migration 5: a scheduled outbound call (e.g. a cancellation's
+    call_now) is written once, queued, at insert_call time — its result
+    lands later, off a webhook, through update_call_outcome."""
+    with db.connection(db_path) as conn:
+        db.insert_call(
+            conn,
+            call_id="OUT-CALLNOW-1",
+            direction="outbound",
+            purpose="reschedule",
+            started_at="2026-09-19T18:00:00+00:00",
+            motivo="call_now",
+        )
+        updated = db.update_call_outcome(
+            conn,
+            "OUT-CALLNOW-1",
+            outcome="reschedule",
+            transcript="Sí, búsquenme otra",
+            detail="handoff_to_voice_agent",
+        )
+        assert updated is not None
+        assert updated.outcome == "reschedule"
+        assert updated.transcript == "Sí, búsquenme otra"
+        assert updated.detail == "handoff_to_voice_agent"
+
+        # A later webhook that only knows the transcript must not blank the
+        # outcome an earlier one already set.
+        again = db.update_call_outcome(conn, "OUT-CALLNOW-1", transcript="still there")
+        assert again is not None
+        assert again.outcome == "reschedule"
+        assert again.transcript == "still there"
+
+        # Never mints a row for an unknown call_id.
+        assert db.update_call_outcome(conn, "NO-SUCH-CALL", outcome="confirmed") is None
+
+
+def test_rebooked_from_id_links_a_fresh_booking_to_the_appointment_it_replaces(
+    db_path: Path,
+) -> None:
+    with db.connection(db_path) as conn:
+        call = db.insert_call(
+            conn,
+            call_id="CALL-REBOOK",
+            direction="inbound",
+            purpose="booking",
+            started_at="2026-09-19T18:00:00+00:00",
+            outcome="book",
+        )
+        # rebooked_from_id is a real FK to appointments(id) — the cancelled
+        # appointment has to exist first.
+        db.insert_appointment(
+            conn,
+            id="A0001",
+            booking_call_id=call.id,
+            status="cancelled",
+            patient_id="P00042",
+            slot_start="2026-09-20T10:00:00+02:00",
+            slot_end="2026-09-20T10:15:00+02:00",
+        )
+        appt = db.insert_appointment(
+            conn,
+            id="LCL-NEW",
+            booking_call_id=call.id,
+            patient_id="P00042",
+            slot_start="2026-09-25T10:00:00+02:00",
+            slot_end="2026-09-25T10:15:00+02:00",
+            rebooked_from_id="A0001",
+        )
+        assert appt.rebooked_from_id == "A0001"
+        reread = db.get_appointment(conn, "LCL-NEW")
+        assert reread is not None
+        assert reread.rebooked_from_id == "A0001"
+
+
 # ---------------------------------------------------------------------------
 # booking
 # ---------------------------------------------------------------------------
@@ -168,6 +242,56 @@ async def test_repeated_identical_booking_submit_does_not_double_insert(
         assert rows["n"] == 1
         calls = conn.execute("SELECT COUNT(*) AS n FROM calls").fetchone()
         assert calls["n"] == 1
+
+
+@pytest.mark.asyncio
+async def test_booking_on_a_handoff_call_links_back_to_the_cancelled_appointment(
+    tmp_path: Path, db_path: Path
+) -> None:
+    """CallSession.open stashes the handoff's appointment_id on
+    ctx.state["rebooking_from_appointment_id"] (see
+    tests/test_confirmation_calls.py's test_session_open_picks_up_the_handoff);
+    _record_booking reads it back so the fresh booking a call_now rebooking
+    call ends in is not an unrelated visit in the database."""
+    # rebooked_from_id is a real FK to appointments(id) — the cancelled
+    # appointment (A0001) has to already exist, the same way a cancel call
+    # would have backfilled it.
+    ctx = _ctx(tmp_path, "CALL-CANCEL-FIRST", said="Cancele mi cita")
+    CallMemory.of(ctx).identified_patient = P00042
+    await persist_submission(ctx, CancelAction(appointment_id="A0001"), db_path=db_path)
+
+    ctx = _ctx(tmp_path, "CALL-REBOOKED", said="Quiero otra fecha para mi cita")
+    remember_patient(ctx, P00042)
+    ctx.state["rebooking_from_appointment_id"] = "A0001"
+    action = BookAction(
+        patient_id="P00042",
+        provider_id="PR01",
+        location_id="centro",
+        appointment_type_id="review",
+        slot=datetime(2026, 9, 25, 10, 0, tzinfo=MADRID),
+        policy_id="sanitas",
+    )
+    await persist_submission(ctx, action, db_path=db_path)
+
+    with db.connection(db_path) as conn:
+        call = db.get_call_by_call_id(conn, "CALL-REBOOKED")
+        assert call is not None
+        appt = db.get_appointment(conn, call.appointment_id)
+        assert appt is not None
+        assert appt.rebooked_from_id == "A0001"
+
+
+@pytest.mark.asyncio
+async def test_booking_with_no_handoff_leaves_rebooked_from_id_null(
+    tmp_path: Path, db_path: Path
+) -> None:
+    await _book(tmp_path, db_path)
+
+    with db.connection(db_path) as conn:
+        call = db.get_call_by_call_id(conn, "CALL-1")
+        appt = db.get_appointment(conn, call.appointment_id)
+        assert appt is not None
+        assert appt.rebooked_from_id is None
 
 
 # ---------------------------------------------------------------------------

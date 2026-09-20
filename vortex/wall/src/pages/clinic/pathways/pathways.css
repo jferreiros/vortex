@@ -192,14 +192,14 @@
   background: var(--color-primary);
 }
 
-/* Timeline background — a flat arrow running behind every node, entry point
-   to the last one, to read as "this is a sequence moving right". Sized by
-   its own flex children (the nodes), never measured in JS: .pathways-timeline
-   wraps only the node row (not the canvas arrow / suggestion slot that may
-   follow it), so it shrinks to exactly their combined width. The two hidden
-   spacers inside .pathways-timeline-bg mirror a node's index-label and
-   description rows so the bar itself lands on the same 108px icon band as
-   every shape, without hardcoding pixel offsets. */
+/* Timeline background — one flat chevron behind each node, not a single bar
+   across the row, so the sequence reads as a flow moving right. Sized by its
+   own flex children, never measured in JS: .pathways-timeline wraps only the
+   node row (not the canvas arrow / suggestion slot that may follow it), so it
+   shrinks to exactly their combined width. The two hidden spacers inside
+   .pathways-timeline-bg mirror a node's index-label and description rows so
+   the chevrons land on the same 108px icon band as every shape, without
+   hardcoding pixel offsets. */
 .pathways-timeline {
   position: relative;
   display: flex;
@@ -217,10 +217,23 @@
   pointer-events: none;
 }
 
-.pathways-timeline-bar {
+/* One chevron per node, matching the node's 188px width and the timeline's
+   own gap so each lands under its shape with a flow gap between neighbours.
+   Reserves the full 108px icon band but centres the half-height chevrons
+   inside it. */
+.pathways-timeline-bars {
   flex: 0 0 108px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+}
+
+.pathways-timeline-bar {
+  flex: 0 0 188px;
+  height: 54px;
   background: var(--color-primary-soft);
-  clip-path: polygon(0 0, calc(100% - 28px) 0, 100% 50%, calc(100% - 28px) 100%, 0 100%);
+  /* Arrow tip on the right, its inverse notched into the left edge. */
+  clip-path: polygon(0 0, calc(100% - 28px) 0, 100% 50%, calc(100% - 28px) 100%, 0 100%, 28px 50%);
 }
 
 /* Shape nodes placed on the canvas ---------------------------------------------*/
