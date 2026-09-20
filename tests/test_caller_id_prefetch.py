@@ -87,7 +87,7 @@ def make_ctx(settings, clinic: Any, from_number: str | None = "+34612345678") ->
         now=NOW,
         from_number=from_number,
         clinic=clinic,
-        log=CallLog("CA-caller-id", settings.calls_log_path),
+        log=CallLog("CA-caller-id"),
         submitter=None,
     )
 

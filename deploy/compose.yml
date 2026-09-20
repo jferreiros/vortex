@@ -17,24 +17,15 @@ services:
     environment:
       VORTEX_ENV: production
       VORTEX_BOARD_PORT: "8080"
-      VORTEX_CALLS_LOG: /app/logs/calls.jsonl
       # The line runs as its own container on the same network. Without this
-      # the board never sees a real call: it would read its own empty log.
+      # the board cannot reach it for health and live calls.
       VORTEX_LINE_URL: http://vortex-line:7860
-      # /app/logs is the line's volume, mounted read-only below — but the
-      # wall's Horarios cancel buttons write wall_cancellations rows through
-      # database/, so the product DB lives on the board's own writable volume.
-      # It is not a copy of the line's: the appointments-status flip simply
-      # no-ops on ids only the line's file knows.
-      VORTEX_PRODUCT_DB: /app/board-data/vortex_product.db
-    volumes:
-      # Fallback only: the board reads the line's /calls API first
-      # (VORTEX_LINE_URL above). If that fetch fails, it reads this file —
-      # which must be the *line's* volume, not a private one, or the fallback
-      # reads an empty log and every screen silently shows zeros. Read-only:
-      # the board never writes call events.
-      - board-logs:/app/logs:ro
-      - board-data:/app/board-data
+      # The store: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY come through
+      # env_file above (an entry here would win over it, so they are not
+      # repeated). The board reads call events and the product tables from the
+      # same Supabase project the line writes, and the wall's Horarios cancel
+      # buttons write wall_cancellations rows straight back to it. No volume:
+      # the two containers share one database, not a mounted file.
     networks:
       - coolify
     expose:
@@ -61,17 +52,5 @@ services:
       - traefik.http.routers.vortex-sslip-https.service=vortex-board
       - traefik.http.services.vortex-board.loadbalancer.server.port=8080
 
-volumes:
-  board-logs:
-    # The line's own volume, pinned under this name in deploy/compose.yaml.
-    # External: the board borrows it, the line owns it. Deploy the line first
-    # (deploy/deploy-both.sh does) or this mount fails loudly — which is the
-    # point: no volume, no silent empty board.
-    name: vortex-line_line-logs
-    external: true
-  board-data:
-    # Writable scratch for the board's own product DB (wall_cancellations and
-    # the appointment status flips the Horarios cancel buttons write). The
-    # line's database stays on its own volume; this one is the control
-    # centre's, and losing it to a rebuild only re-frees the same slots.
-    name: vortex-board_board-data
+# No volumes. The board keeps nothing of its own: every row it reads and every
+# row the Horarios cancel buttons write lives in Supabase/Postgres.

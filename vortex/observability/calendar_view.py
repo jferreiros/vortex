@@ -2,7 +2,7 @@
 
 A day x time grid per doctor, built from the clinic catalogue and filled from
 the call log. The source is the synthetic-data pack by default; point
-``VORTEX_CALENDAR_LOG`` at ``logs/calls.jsonl`` and the same grid fills live as
+``public.call_events`` and the same grid fills live as
 calls book, move and cancel.
 
 The doctor types their name to open their own diary (no roster dump). The grid

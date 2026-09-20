@@ -18,7 +18,9 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 from typing import Any, Literal
+from xml.sax.saxutils import quoteattr
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -159,3 +161,72 @@ def split_frames(ulaw: bytes, frame_bytes: int = BYTES_PER_FRAME) -> list[bytes]
     if frames and len(frames[-1]) < frame_bytes:
         frames[-1] = frames[-1] + b"\xff" * (frame_bytes - len(frames[-1]))
     return frames
+
+
+# E.164 country codes we will search or buy. Never NANP / +1.
+_EU_DIAL_PREFIXES = (
+    "34",
+    "49",
+    "33",
+    "39",
+    "351",
+    "353",
+    "31",
+    "32",
+    "43",
+    "48",
+    "46",
+    "45",
+    "358",
+    "30",
+    "420",
+    "36",
+    "40",
+    "421",
+    "386",
+    "385",
+    "359",
+    "370",
+    "371",
+    "372",
+    "352",
+    "357",
+    "356",
+)
+
+
+def is_european_e164(phone: str) -> bool:
+    """True when the number is in the EU list. United States (+1) is always false."""
+    digits = re.sub(r"[^\d+]", "", phone or "")
+    if not digits.startswith("+"):
+        digits = "+" + digits.lstrip("0")
+    if digits.startswith("+1"):
+        return False
+    rest = digits[1:]
+    return any(rest.startswith(cc) for cc in sorted(_EU_DIAL_PREFIXES, key=len, reverse=True))
+
+
+def public_ws_url(public_base_url: str, ws_path: str = "/ws") -> str:
+    """The receptionist websocket behind a public https/http base."""
+    base = public_base_url.rstrip("/")
+    if base.startswith("https://"):
+        base = "wss://" + base[len("https://") :]
+    elif base.startswith("http://"):
+        base = "ws://" + base[len("http://") :]
+    path = ws_path if ws_path.startswith("/") else f"/{ws_path}"
+    return base + path
+
+
+def twiml_connect_stream(ws_url: str, params: dict[str, str] | None = None) -> str:
+    """Bridge a PSTN call into our Media Streams socket."""
+    rendered = "".join(
+        f"<Parameter name={quoteattr(k)} value={quoteattr(v)}/>"
+        for k, v in (params or {}).items()
+        if v
+    )
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        "<Response><Connect>"
+        f"<Stream url={quoteattr(ws_url)}>{rendered}</Stream>"
+        "</Connect></Response>"
+    )

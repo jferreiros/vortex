@@ -4,15 +4,19 @@ A personality is the face and the voice the clinic puts on the line: a name, a
 role, a blurb for the card, a short tone fragment for the system prompt, one
 greeting and one TTS voice per language, and a portrait.
 
-Stored exactly like the "Voz del agente" card (``voice_config.py``): stdlib
-``sqlite3``, one file — ``personalities.db`` — next to the calls log, so in
-production it lands on the line's log volume. The line owns the file: the board
-only mounts that volume read-only, so it reads and writes through the line's
-``/personalities`` routes and never opens the db itself.
+Stored exactly like the "Voz del agente" card (``voice_config.py``): rows in
+``public.personalities``, reached through PostgREST. The line and the board
+read the same table, so the board's proxy of ``/personalities`` and the line's
+own answer can never disagree.
+
+With no store configured, reads fall back to the three seeds — a clinic never
+boots without a receptionist — and writes raise ``RuntimeError``, which the
+routes turn into a 503.
 
 Exactly one persona is active at a time. ``activate`` is the only way to move
-that flag and it moves it inside a single transaction, so a crash halfway
-cannot leave the clinic with two receptionists or none.
+that flag: it clears every other row first and only then sets the new one, so
+the worst a half-applied write can leave behind is a clinic with no active
+persona, which ``active()`` already answers from the seeds.
 
 The call reads the active persona once per socket (``pipecat_voice``): its name,
 role and tone become the prompt's PERSONA block and its greeting opens the line.
@@ -24,13 +28,9 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
-import sqlite3
 import unicodedata
-from contextlib import closing
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
@@ -45,11 +45,12 @@ LANGUAGES: tuple[str, ...] = ("en", "es", "ca", "gl", "eu")
 #: turn, so a persona's tone has to stay a fragment, not a second prompt.
 TONE_MAX_CHARS = 400
 
-#: Same ids ``Settings.google_tts_voice_es`` / ``_en`` default to today, so
-#: that once a later change reads a persona on the line nothing about the
-#: sound moves unless somebody changed it here on purpose.
-VOICE_ES = "es-ES-Chirp3-HD-Aoede"
-VOICE_EN = "en-GB-Chirp3-HD-Aoede"
+#: A persona carries no voice id of its own: the line speaks with whatever
+#: ``Settings.elevenlabs_voice_for`` resolves, so that once a later change
+#: reads a persona on the call nothing about the sound moves unless somebody
+#: changed the ELEVENLABS_VOICE_ID_* variables on purpose.
+VOICE_ES = ""
+VOICE_EN = ""
 
 #: Vorty heads from ``vortex/wall/media``: the bare face plus one accessory
 #: overlay. ``none`` is the face without a hat. The picker stores the stem
@@ -149,6 +150,22 @@ def catalog() -> dict[str, Any]:
             {"id": key, "label": row["label"], "hint": row["hint"]} for key, row in STYLES.items()
         ],
         "looks": list(LOOKS),
+    }
+
+
+def listing(settings: Any = None) -> dict[str, Any]:
+    """The picker's whole payload: the rail, who is on the phone, the catalogue.
+
+    Both front doors answer with this exact dict — the line's
+    ``GET /personalities`` and the board's ``GET /api/wall/personalities``.
+    They read the same table, so the shape is defined once here rather than
+    written out twice and drifting.
+    """
+    people = list_all(settings)
+    return {
+        "items": [person.to_dict() for person in people],
+        "active": next((person.slug for person in people if person.active), None),
+        **catalog(),
     }
 
 
@@ -294,57 +311,19 @@ DEFAULTS: list[dict[str, Any]] = [
 ]
 
 
-# --- the file ----------------------------------------------------------------
+# --- the table ---------------------------------------------------------------
 
+TABLE = "personalities"
 
-def db_path(settings: Any) -> Path:
-    override = os.environ.get("VORTEX_PERSONALITIES_DB", "").strip()
-    if override:
-        return Path(override)
-    return settings.calls_log_path.parent / "personalities.db"
-
-
-def _connect(settings: Any) -> sqlite3.Connection:
-    """Open the db, creating and seeding it the first time."""
-    path = db_path(settings)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path)
-    conn.row_factory = sqlite3.Row
-    with conn:
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS personalities ("
-            "slug TEXT PRIMARY KEY, name TEXT NOT NULL, role TEXT NOT NULL, "
-            "description TEXT NOT NULL, tone TEXT NOT NULL, "
-            "greetings_json TEXT NOT NULL, voices_json TEXT NOT NULL, "
-            "avatar TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, "
-            "active INTEGER NOT NULL DEFAULT 0, "
-            "created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"
-        )
-        empty = conn.execute("SELECT COUNT(*) AS n FROM personalities").fetchone()["n"] == 0
-        if empty:
-            # A fresh file opens with the three seeds and the first one on the
-            # phone: a clinic never boots without a receptionist.
-            for index, person in enumerate(SEEDS):
-                conn.execute(_INSERT, _params(person.model_copy(update={"active": index == 0})))
-    return conn
-
-
-_INSERT = (
-    "INSERT INTO personalities ("
-    "slug, name, role, description, tone, greetings_json, voices_json, "
-    "avatar, sort_order, active, created_at, updated_at) VALUES ("
-    ":slug, :name, :role, :description, :tone, :greetings_json, :voices_json, "
-    ":avatar, :sort_order, :active, :created_at, :updated_at) "
-    "ON CONFLICT(slug) DO UPDATE SET "
-    "name = excluded.name, role = excluded.role, description = excluded.description, "
-    "tone = excluded.tone, greetings_json = excluded.greetings_json, "
-    "voices_json = excluded.voices_json, avatar = excluded.avatar, "
-    "sort_order = excluded.sort_order, active = excluded.active, "
-    "updated_at = excluded.updated_at"
-)
+#: Seeds are written once, the first time the table is read empty. A flag, not
+#: a lock: the write is an upsert on ``slug``, so two processes racing here
+#: land the same three rows.
+_seeded = False
 
 
 def _params(person: Personality) -> dict[str, Any]:
+    """One persona as the table stores it: the two dicts folded into json
+    columns, ``active`` as the integer the schema declares."""
     data = person.to_dict()
     return {
         **{key: data[key] for key in _COLUMNS if key in data},
@@ -354,52 +333,105 @@ def _params(person: Personality) -> dict[str, Any]:
     }
 
 
-def _from_row(row: sqlite3.Row) -> Personality:
+def _from_row(row: dict[str, Any]) -> Personality:
     return Personality(
         slug=row["slug"],
         name=row["name"],
         role=row["role"],
         description=row["description"],
         tone=row["tone"],
-        greetings=json.loads(row["greetings_json"] or "{}"),
-        voices=json.loads(row["voices_json"] or "{}"),
+        greetings=json.loads(row.get("greetings_json") or "{}"),
+        voices=json.loads(row.get("voices_json") or "{}"),
         avatar=row["avatar"],
-        sort_order=row["sort_order"],
-        active=bool(row["active"]),
+        sort_order=row.get("sort_order") or 0,
+        active=bool(row.get("active")),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
 
 
+def _seeds(active_first: bool = True) -> list[Personality]:
+    return [
+        person.model_copy(update={"active": active_first and index == 0})
+        for index, person in enumerate(SEEDS)
+    ]
+
+
+def _require_store() -> Any:
+    from database import remote
+
+    if not remote.enabled():
+        raise RuntimeError(
+            "no store configured: set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY "
+            "to edit personalities"
+        )
+    return remote
+
+
+def _rows(params: dict[str, str]) -> list[dict[str, Any]] | None:
+    from database import remote
+
+    try:
+        return remote.select(TABLE, params)
+    except Exception as exc:
+        log.warning("personalities unreadable: %s", exc)
+        return None
+
+
+def _seed_once() -> None:
+    """A clinic never boots without a receptionist, so an empty table gets the
+    three seeds with the first one on the phone."""
+    global _seeded
+    if _seeded:
+        return
+    from database import remote
+
+    if not remote.enabled():
+        return
+    try:
+        remote.upsert(TABLE, [_params(person) for person in _seeds()], "slug")
+        _seeded = True
+    except Exception:
+        log.exception("could not seed personalities")
+
+
 # --- reading ------------------------------------------------------------------
 
 
-def list_all(settings: Any) -> list[Personality]:
-    """Every persona, in the order the rail shows them."""
-    with closing(_connect(settings)) as conn:
-        rows = conn.execute("SELECT * FROM personalities ORDER BY sort_order, name").fetchall()
-    return [_from_row(row) for row in rows]
+def list_all(settings: Any = None) -> list[Personality]:
+    """Every persona, in the order the rail shows them.
+
+    An empty or unreachable table answers with the seeds rather than nothing:
+    the picker showing three faces nobody chose beats a blank rail.
+    """
+    rows = _rows({"select": "*", "order": "sort_order.asc,name.asc"})
+    if rows:
+        return [_from_row(row) for row in rows]
+    if rows is not None:
+        _seed_once()
+    return _seeds()
 
 
 def get(settings: Any, slug: str) -> Personality | None:
-    with closing(_connect(settings)) as conn:
-        row = conn.execute("SELECT * FROM personalities WHERE slug = ?", (slug,)).fetchone()
-    return _from_row(row) if row is not None else None
+    rows = _rows({"select": "*", "slug": f"eq.{slug}", "limit": "1"})
+    if rows:
+        return _from_row(rows[0])
+    if rows is None:
+        return None
+    return next((person for person in list_all(settings) if person.slug == slug), None)
 
 
-def active(settings: Any) -> Personality:
+def active(settings: Any = None) -> Personality:
     """The persona answering the phone. Falls back to the first seed rather
-    than raising: a broken db must not stop a call from being answered."""
-    try:
-        with closing(_connect(settings)) as conn:
-            row = conn.execute(
-                "SELECT * FROM personalities WHERE active = 1 ORDER BY sort_order, name LIMIT 1"
-            ).fetchone()
-        if row is not None:
-            return _from_row(row)
+    than raising: an unreachable store must not stop a call from being
+    answered."""
+    rows = _rows(
+        {"select": "*", "active": "eq.1", "order": "sort_order.asc,name.asc", "limit": "1"}
+    )
+    if rows:
+        return _from_row(rows[0])
+    if rows is not None:
         log.warning("no active personality stored, falling back to %s", SEEDS[0].slug)
-    except sqlite3.Error as exc:
-        log.warning("personalities unreadable, falling back to %s: %s", SEEDS[0].slug, exc)
     return SEEDS[0].model_copy(update={"active": True})
 
 
@@ -411,8 +443,10 @@ def update(settings: Any, slug: str, payload: dict[str, Any] | None) -> Personal
 
     Raises ``KeyError`` when the slug is unknown and ``pydantic.ValidationError``
     when the form does not hold — the route turns those into 404 and 422.
-    ``ValueError`` is a bad ``style`` or ``look`` from the simple picker.
+    ``ValueError`` is a bad ``style`` or ``look`` from the simple picker, and
+    ``RuntimeError`` is no store at all (503).
     """
+    remote = _require_store()
     current = get(settings, slug)
     if current is None:
         raise KeyError(slug)
@@ -428,13 +462,13 @@ def update(settings: Any, slug: str, payload: dict[str, Any] | None) -> Personal
     base = {key: getattr(current, key) for key in PersonalityDraft.model_fields}
     draft = PersonalityDraft(**{**base, **incoming, "name": name})
     stored = current.model_copy(update={**draft.model_dump(), "updated_at": _now()})
-    with closing(_connect(settings)) as conn, conn:
-        conn.execute(_INSERT, _params(stored))
+    remote.upsert(TABLE, [_params(stored)], "slug")
     return stored
 
 
 def create(settings: Any, payload: dict[str, Any] | None) -> Personality:
     """A new persona from the simple form: a name, how they talk, a look."""
+    remote = _require_store()
     incoming = dict(payload or {})
     name = str(incoming.get("name") or "").strip()
     if not name:
@@ -460,26 +494,33 @@ def create(settings: Any, payload: dict[str, Any] | None) -> Personality:
         sort_order=max((person.sort_order for person in people), default=-1) + 1,
         active=False,
     )
-    with closing(_connect(settings)) as conn, conn:
-        conn.execute(_INSERT, _params(person))
+    remote.upsert(TABLE, [_params(person)], "slug")
     return person
 
 
 def activate(settings: Any, slug: str) -> Personality:
     """Put one persona on the phone and take every other one off it.
 
-    One transaction: the clinic is never left with two receptionists or none.
+    Clear first, set second. PostgREST has no transaction across two
+    requests, so the order is the safety: a crash between them leaves the
+    clinic with no active persona, which ``active()`` answers from the seeds,
+    rather than with two receptionists, which nothing can resolve.
     """
+    remote = _require_store()
     now = _now()
-    with closing(_connect(settings)) as conn, conn:
-        if conn.execute("SELECT 1 FROM personalities WHERE slug = ?", (slug,)).fetchone() is None:
-            raise KeyError(slug)
-        conn.execute(
-            "UPDATE personalities SET active = 0, updated_at = ? WHERE active = 1 AND slug != ?",
-            (now, slug),
-        )
-        conn.execute(
-            "UPDATE personalities SET active = 1, updated_at = ? WHERE slug = ?", (now, slug)
-        )
-        row = conn.execute("SELECT * FROM personalities WHERE slug = ?", (slug,)).fetchone()
-    return _from_row(row)
+    people = list_all(settings)
+    target = next((person for person in people if person.slug == slug), None)
+    if target is None:
+        raise KeyError(slug)
+    remote.upsert(
+        TABLE,
+        [
+            _params(person.model_copy(update={"active": False, "updated_at": now}))
+            for person in people
+            if person.slug != slug and person.active
+        ],
+        "slug",
+    )
+    stored = target.model_copy(update={"active": True, "updated_at": now})
+    remote.upsert(TABLE, [_params(stored)], "slug")
+    return stored

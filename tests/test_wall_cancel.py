@@ -2,18 +2,27 @@
 
 ``/api/wall/agenda/cancel-preview`` counts, ``/api/wall/agenda/cancel`` frees a
 doctor's range, ``/api/wall/appointments/cancel`` frees one slot. All three
-write ``wall_cancellations`` rows in the product database (tmp_path here) and
-the next agenda read drops those slots — a cancel must never need a reload to
-show, and a second cancel of the same slot must refuse.
+write ``wall_cancellations`` rows in Postgres and the next agenda read drops
+those slots — a cancel must never need a reload to show, and a second cancel
+of the same slot must refuse.
+
+Every one of these writes, so they need a migrated Supabase project. The
+validation test below is the exception: it never reaches the store.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
+import os
 
+import pytest
 from nicegui.testing import User
 
 from database import db
+
+needs_db = pytest.mark.skipif(
+    not (os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_SERVICE_ROLE_KEY")),
+    reason="needs migrated Supabase",
+)
 
 
 async def _doctor_with_bookings(user: User) -> dict:
@@ -50,7 +59,8 @@ async def _first_visit(user: User, doctor_name: str) -> dict:
     raise AssertionError("the doctor has no visit rows — fixture drifted")
 
 
-async def test_range_preview_counts_then_confirm_cancels(user: User, offline_settings) -> None:
+@needs_db
+async def test_range_preview_counts_then_confirm_cancels(user: User) -> None:
     doctor = await _doctor_with_bookings(user)
     body = {"provider_id": doctor["id"], "from": "2020-01-01", "to": "2030-12-31"}
 
@@ -59,36 +69,30 @@ async def test_range_preview_counts_then_confirm_cancels(user: User, offline_set
     count = preview.json()["count"]
     assert count > 0
 
+    before = len(db.list_wall_cancellations())
+
     confirm = await user.http_client.post("/api/wall/agenda/cancel", json=body)
     assert confirm.status_code == 200
     result = confirm.json()
     assert result["ok"] is True
     assert result["doctor"] == doctor["name"]
     assert result["cancelled"] == count
-    assert result["appointments_updated"] == 0
     # Every cancelled visit with a patient on it is queued for the callback.
     assert result["rebookings_queued"] > 0
 
-    # The wall_cancellations rows landed in the test's product DB.
-    conn = db.connect(Path(offline_settings.product_db_path))
-    try:
-        rows = db.list_wall_cancellations(conn)
-    finally:
-        conn.close()
-    assert len(rows) == count
+    # The wall_cancellations rows landed in Postgres.
+    assert len(db.list_wall_cancellations()) == before + count
 
-    # And the reschedule-callback queue (rebooking.sqlite3 next to the
-    # product DB) holds one pending reschedule per queued visit.
+    # And the reschedule-callback queue holds one pending reschedule per
+    # queued visit.
     from vortex.diary.rebooking import RebookingStore
 
-    store = RebookingStore(Path(offline_settings.product_db_path).with_name("rebooking.sqlite3"))
-    pending = store.pending()
-    assert len(pending) == result["rebookings_queued"]
+    pending = [r for r in RebookingStore().pending() if r.call_id.startswith("WALLC-")]
+    assert len(pending) >= result["rebookings_queued"]
     assert all(
         request.intent == "reschedule"
         and request.status == "pending"
         and request.source_reason == "wall_cancel"
-        and request.call_id.startswith("WALLC-")
         for request in pending
     )
 
@@ -97,9 +101,8 @@ async def test_range_preview_counts_then_confirm_cancels(user: User, offline_set
     assert again.json()["count"] == 0
 
 
-async def test_single_cancel_frees_the_slot_and_refuses_a_repeat(
-    user: User, offline_settings
-) -> None:
+@needs_db
+async def test_single_cancel_frees_the_slot_and_refuses_a_repeat(user: User) -> None:
     doctor = await _doctor_with_bookings(user)
     visit = await _first_visit(user, doctor["name"])
     body = {
@@ -132,7 +135,39 @@ async def test_single_cancel_frees_the_slot_and_refuses_a_repeat(
     assert repeat.json()["error"] == "not_booked"
 
 
-async def test_cancel_routes_validate_the_body(user: User, offline_settings) -> None:
+@needs_db
+async def test_single_cancel_queues_a_call_now_rebooking_call(
+    user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The board's own cancel button — not a phone call — still queues the
+    same immediate call_now callback a phone cancellation does (see
+    vortex.line.confirmation_calls.queue_cancellation_rebooking_call)."""
+    from vortex import settings as settings_module
+
+    monkeypatch.setenv("VORTEX_CONFIRMATION_CALLS", "true")
+    settings_module.reset_settings()
+    try:
+        doctor = await _doctor_with_bookings(user)
+        visit = await _first_visit(user, doctor["name"])
+        body = {
+            "provider_id": visit["provider_id"],
+            "location_id": visit["location_id"],
+            "slot_start": visit["slot"],
+        }
+        resp = await user.http_client.post("/api/wall/appointments/cancel", json=body)
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert payload["ok"] is True
+        # A phone is on file for every roster patient in the offline pack,
+        # so the one visit cancelled here queues exactly one call_now.
+        assert payload["call_now_queued"] == 1
+    finally:
+        settings_module.reset_settings()
+
+
+async def test_cancel_routes_validate_the_body(user: User) -> None:
+    """Pure validation: these four refuse before the store is ever touched,
+    so they run with no Supabase project behind them."""
     bad = await user.http_client.post("/api/wall/agenda/cancel-preview", json={})
     assert bad.status_code == 400
     assert bad.json()["error"] == "missing_doctor"

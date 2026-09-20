@@ -26,4 +26,5 @@ dates are relative to when it was generated — regenerate with
 `uv run python scripts/make_cancellation_pack.py` before a demo.
 
 Never written here: the full availability calendar (`evals/corpus/world/`),
-the live call log (`logs/calls.jsonl`), or the fixtures the unit tests own.
+the live call log (`public.call_events` in Supabase), or the fixtures the unit
+tests own.

@@ -1,96 +1,96 @@
-"""Load the committed product-data seeds into the local runtime files.
+"""Load the committed product-data seeds into the hosted Postgres.
 
     uv run python database/scripts/load_seed.py
-    uv run python database/scripts/load_seed.py --replace
+    uv run python database/scripts/load_seed.py --only rebooking.sql
 
-``database/seed/*.sql`` are text dumps of the board's own stores — the
-product DB (``wall_cancellations``, plus any ``calls``/``appointments`` rows)
-and the rebooking queue (``rebooking_requests``). They exist so everyone
-starts the demo from the same cancelled slots instead of an empty store.
+``database/seed/*.sql`` are the board's own starting state — the slots the
+control centre has already cancelled and the rebooking callbacks they left
+behind — so everyone demos from the same diary instead of an empty one.
 
-Each dump loads only into a file that does not already carry its tables —
-a live store is never touched silently. ``--replace`` renames the existing
-file to ``<name>.bak-<timestamp>`` first. The real paths follow
-``VORTEX_PRODUCT_DB``; ``rebooking.sqlite3`` always sits next to it, the
-same place ``vortex/observability/live.py`` writes it.
+Data only: the tables come from ``database/supabase/migrations/``, so run
+``make supabase-migrate`` first. Every seed is written to be re-runnable
+(``on conflict do nothing`` / ``where not exists``), so loading twice is not
+destructive and a live store is never silently wiped.
+
+Goes through ``SUPABASE_DB_URL`` with psycopg rather than PostgREST: these
+are SQL files, and plain SQL is the one thing PostgREST does not take.
 """
 
 from __future__ import annotations
 
 import argparse
-import shutil
-import sqlite3
 import sys
-from datetime import UTC, datetime
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from vortex.settings import get_settings  # noqa: E402
+from database.supabase.migrate import database_url  # noqa: E402
 
 SEED_DIR = Path(__file__).resolve().parent.parent / "seed"
 
-#: seed file -> the tables it is expected to create, used to tell an
-#: already-loaded store apart from an empty file.
+#: Load order matters: a rebooking request points at the cancellation that
+#: created it, so the cancellations go in first. The rest are independent of
+#: both — the Pathways/Patterns editors' starting documents, the three
+#: receptionists the picker opens with, and the voice card's default row.
 SEEDS = (
-    ("vortex_product.sql", {"calls", "appointments", "wall_cancellations"}),
-    ("rebooking.sql", {"rebooking_requests"}),
+    "vortex_product.sql",
+    "rebooking.sql",
+    "wall_documents.sql",
+    "personalities.sql",
+    "voiceconfig.sql",
 )
 
 
-def _tables(conn: sqlite3.Connection) -> set[str]:
-    rows = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
-    )
-    return {str(row[0]) for row in rows}
-
-
-def load_one(seed: Path, target: Path, replace: bool) -> str:
-    if target.exists():
-        existing = _tables(sqlite3.connect(target))
-        if existing & _expected(seed):
-            if not replace:
-                return f"skip {target} (already has {sorted(existing & _expected(seed))})"
-            backup = target.with_name(
-                f"{target.name}.bak-{datetime.now(UTC).strftime('%Y%m%dT%H%M%S')}"
-            )
-            shutil.move(target, backup)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(target)
-    try:
-        conn.executescript(seed.read_text(encoding="utf-8"))
-        conn.commit()
-    finally:
-        conn.close()
-    return f"loaded {seed.name} -> {target}"
-
-
-def _expected(seed: Path) -> set[str]:
-    return dict(SEEDS)[seed.name]
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Load database/seed/*.sql into Supabase.")
     parser.add_argument(
-        "--replace",
-        action="store_true",
-        help="Back the existing store up and load the seed over it.",
+        "--only",
+        action="append",
+        default=[],
+        metavar="FILE",
+        help=f"Load just this seed file. Repeatable. One of: {', '.join(SEEDS)}",
     )
     args = parser.parse_args()
 
-    product_db = Path(get_settings().product_db_path)
-    targets = {
-        "vortex_product.sql": product_db,
-        "rebooking.sql": product_db.with_name("rebooking.sqlite3"),
-    }
-    for seed_name, _tables_expected in SEEDS:
-        seed = SEED_DIR / seed_name
-        if not seed.exists():
-            print(f"missing {seed} — nothing committed for this store")
-            continue
-        print(load_one(seed, targets[seed_name], args.replace))
+    names = args.only or list(SEEDS)
+    unknown = [name for name in names if name not in SEEDS]
+    if unknown:
+        print(f"unknown seed(s): {', '.join(unknown)}", file=sys.stderr)
+        return 1
+
+    try:
+        import psycopg
+    except ImportError:
+        print("psycopg is not installed — run: uv sync --all-groups", file=sys.stderr)
+        return 1
+
+    url = database_url()
+    try:
+        conn = psycopg.connect(url, autocommit=False)
+    except Exception as exc:
+        print(f"could not connect to SUPABASE_DB_URL: {exc}", file=sys.stderr)
+        return 1
+
+    try:
+        for name in names:
+            seed = SEED_DIR / name
+            if not seed.exists():
+                print(f"missing {seed} — nothing committed for this store")
+                continue
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(seed.read_text(encoding="utf-8"))
+                conn.commit()
+            except Exception as exc:
+                conn.rollback()
+                print(f"FAILED  {name}: {exc}", file=sys.stderr)
+                return 1
+            print(f"loaded  {name}")
+    finally:
+        conn.close()
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

@@ -57,6 +57,7 @@ from vortex.line.confirmation_calls import (
     cancel_confirmation_calls,
     confirmation_store_from_settings,
     handoff_from_parameters,
+    queue_cancellation_rebooking_call,
     schedule_confirmation_call,
 )
 from vortex.line.sms import (
@@ -102,6 +103,12 @@ PREPARE_TOOLS: tuple[str, ...] = ("prepare_booking", "prepare_reschedule", "prep
 # (the same action twice) is a record; everything else is not, ``dry_run``
 # included - see ``CallSession.has_accepted_submission``.
 ACCEPTED_STATUSES: tuple[str, ...] = ("accepted", "duplicate")
+
+# SMS and the day-before confirmation call fire when we would have booked, not
+# only when the platform holds the record. ``dry_run`` (no PLATFORM_API_KEY)
+# still queues them so a local inbound demo can confirm the slot; hangup and
+# ``has_accepted_submission`` stay on ``ACCEPTED_STATUSES`` alone.
+QUEUE_FOLLOWUP_STATUSES: tuple[str, ...] = (*ACCEPTED_STATUSES, "dry_run")
 
 # The tools that answer with the rule the clinic applied, named in the closed
 # vocabulary the platform scores. Their reason is the call's verdict: a refusal
@@ -425,7 +432,7 @@ class CallSession:
     submitter: SubmitApi
     media_frames_in: int = 0
     media_frames_out: int = 0
-    # What this call spent at Soniox, the LLM host and Google TTS. Filled by
+    # What this call spent at Soniox, the LLM host and ElevenLabs. Filled by
     # the pipecat observer from pipecat's own usage metrics; left at zero with
     # ``metered`` False by the lanes that do not measure. One per socket.
     usage: UsageTotals = field(default_factory=UsageTotals)
@@ -489,7 +496,7 @@ class CallSession:
         now: datetime | None = None,
     ) -> CallSession:
         settings = settings or get_settings()
-        log = CallLog(start.call_id, settings.calls_log_path)
+        log = CallLog(start.call_id)
         submitter: SubmitApi
         if settings.clinic_is_live:
             submitter = SubmitClient(settings.platform_api_base_url, settings.platform_api_key)
@@ -517,6 +524,12 @@ class CallSession:
             session.handoff = handoff
             if handoff.get("language"):
                 session.language = handoff["language"]
+            # The booking this handoff call ends in (if any) replaces the
+            # appointment that was cancelled to trigger it —
+            # database/hooks.py's _record_booking reads this to link the two
+            # rows in the product database.
+            if handoff.get("appointment_id"):
+                ctx.state["rebooking_from_appointment_id"] = handoff["appointment_id"]
             log.event(
                 "call.handoff",
                 appointment_id=handoff["appointment_id"],
@@ -582,9 +595,10 @@ class CallSession:
                 self.sent_actions.append(with_verdict_reason(self.ctx, sent))
             if result.status in ACCEPTED_STATUSES:
                 self.arm_hangup("submit_accepted")
-                if sent is not None:
-                    self._queue_sms(submitted_action(self.ctx, sent))
-                    self._queue_confirmation_call(submitted_action(self.ctx, sent))
+            if result.status in QUEUE_FOLLOWUP_STATUSES and sent is not None:
+                follow_up = submitted_action(self.ctx, sent)
+                self._queue_sms(follow_up)
+                self._queue_confirmation_call(follow_up)
         else:
             self.memory.observe(name, result)
             if self.memory.superseded_slot:
@@ -736,9 +750,10 @@ class CallSession:
         result = await submit_action(self.ctx, SubmitInput(action=action))
         self.submitted.append(result)
         self.sent_actions.append(with_verdict_reason(self.ctx, action))
-        if result.status in ACCEPTED_STATUSES:
-            self._queue_sms(submitted_action(self.ctx, action))
-            self._queue_confirmation_call(submitted_action(self.ctx, action))
+        if result.status in QUEUE_FOLLOWUP_STATUSES:
+            follow_up = submitted_action(self.ctx, action)
+            self._queue_sms(follow_up)
+            self._queue_confirmation_call(follow_up)
         return result
 
     @property
@@ -784,11 +799,16 @@ class CallSession:
         finally:
             await self._drain_sms()
             self.ctx.log.summary(reason=reason, usage=self.usage.summary_extras())
+            # Land the whole call in Postgres before the process forgets it.
+            # In a worker thread: the same loop is streaming audio for up to
+            # nineteen other sockets, and this blocks on HTTP.
+            await asyncio.to_thread(self.ctx.log.flush)
             await self.sms.aclose()
             await self.submitter.aclose()
 
     def _queue_confirmation_call(self, action: Action) -> None:
-        """Queue the day-before confirmation call off the submit path.
+        """Queue the day-before confirmation call (book) or the immediate
+        call_now rebooking call (cancel) off the submit path.
 
         Same discipline as ``_queue_sms``: never blocks the call, never raises
         into it, and a 409 duplicate does not schedule twice (the store dedupes
@@ -809,7 +829,9 @@ class CallSession:
         task.add_done_callback(self._sms_pending_done)
 
     async def _sync_confirmation_call(self, action: Action) -> None:
-        """Schedule (book) or drop (cancel) the confirmation call. Never raises."""
+        """Schedule the day-before confirmation call (book), or drop it and
+        queue an immediate call_now rebooking call instead (cancel). Never
+        raises."""
         try:
             forced = bool(self.settings.confirmation_force_to or self.settings.sms_force_to)
             to = (
@@ -869,6 +891,44 @@ class CallSession:
                     "confirmation_call.cancelled",
                     count=count,
                     appointment_id=action.appointment_id,
+                )
+                if self.handoff is not None:
+                    # This call started life as a confirmation call's own
+                    # reschedule offer (CallSession.handoff): the patient
+                    # was just asked "¿otra fecha?" live, on this very call.
+                    # Queuing another call_now on top would re-dial someone
+                    # who is (or just was) on the phone with us.
+                    self.ctx.log.event(
+                        "confirmation_call.rebooking_skipped", reason="already_offered_on_call"
+                    )
+                    return
+                if details.when is None:
+                    self.ctx.log.event("confirmation_call.rebooking_skipped", reason="no_when")
+                    return
+                patient = self.memory.patient_on_record
+                rebooking_call = await queue_cancellation_rebooking_call(
+                    self.settings,
+                    to=to,
+                    appointment_at=details.when,
+                    language=normalise_language(self.language) or "",
+                    provider_name=details.provider_name,
+                    location_name=details.location_name,
+                    provider_id=details.provider_id,
+                    location_id=details.location_id,
+                    patient_id=patient.patient_id if patient is not None else "",
+                    appointment_id=action.appointment_id,
+                    now=self.ctx.now,
+                )
+                if rebooking_call is None:
+                    self.ctx.log.event(
+                        "confirmation_call.rebooking_skipped", reason="disabled_or_no_to"
+                    )
+                    return
+                self.ctx.log.event(
+                    "confirmation_call.rebooking_queued",
+                    call_at=rebooking_call.call_at,
+                    appointment_at=rebooking_call.appointment_at,
+                    to=mask_phone(to),
                 )
         except Exception as exc:  # noqa: BLE001 - never break the call for this
             self.ctx.log.event("confirmation_call.failed", error=repr(exc))

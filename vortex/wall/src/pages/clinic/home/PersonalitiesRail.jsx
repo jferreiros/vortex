@@ -15,7 +15,7 @@ function VortyLook({ look, className = "" }) {
   );
 }
 
-function PersonalityCard({ person, on, offline, onActivate, onEdit }) {
+function PersonalityCard({ person, on, onActivate, onEdit }) {
   return (
     <article className={`persona-card ${on ? "on" : ""}`}>
       <VortyLook look={lookOf(person)} />
@@ -24,10 +24,10 @@ function PersonalityCard({ person, on, offline, onActivate, onEdit }) {
       <span className="persona-role">{person.role}</span>
       <p className="persona-blurb">{person.description}</p>
       <div className="persona-actions">
-        <Button variant={on ? "primary" : "secondary"} disabled={offline || on} onClick={() => onActivate(person.slug)}>
+        <Button variant={on ? "primary" : "secondary"} disabled={on} onClick={() => onActivate(person.slug)}>
           {on ? "Activa" : "Activar"}
         </Button>
-        <Button variant="ghost" disabled={offline} onClick={() => onEdit(person)}>
+        <Button variant="ghost" onClick={() => onEdit(person)}>
           Editar
         </Button>
       </div>
@@ -107,7 +107,7 @@ function PersonalityEditor({ person, styles, looks, onClose, onSubmit }) {
 }
 
 export default function PersonalitiesRail() {
-  const { items, active, styles, looks, offline, loading, error, activate, save, create } = usePersonalities();
+  const { items, active, styles, looks, loading, error, activate, save, create } = usePersonalities();
   const [editing, setEditing] = useState(null);
   const [flash, setFlash] = useState(null);
 
@@ -124,14 +124,11 @@ export default function PersonalitiesRail() {
   return (
     <section className="persona-block">
       <SectionHeader
-        eyebrow="IA"
+        eyebrow="Personalizar agente"
         title="Quién atiende el teléfono"
-        subtitle="Elige una cara y cómo habla. Debajo, voz, ritmo y permisos."
+        subtitle="Elige una cara y cómo habla. Debajo, voz y ritmo."
       />
 
-      {offline && (
-        <p className="persona-note warn">La línea no responde. Se muestran las voces de fábrica; los cambios no se guardan.</p>
-      )}
       {error && <p className="persona-note warn">{error}</p>}
       {flash && <p className="persona-note warn">{flash}</p>}
       {loading && !items.length && <p className="persona-note">Cargando personalidades…</p>}
@@ -142,12 +139,11 @@ export default function PersonalitiesRail() {
             key={person.slug}
             person={person}
             on={person.slug === active || person.active}
-            offline={offline}
             onActivate={onActivate}
             onEdit={setEditing}
           />
         ))}
-        <button type="button" className="persona-card persona-add" disabled={offline} onClick={() => setEditing({ name: "" })}>
+        <button type="button" className="persona-card persona-add" onClick={() => setEditing({ name: "" })}>
           <span className="persona-add-mark">+</span>
           <span className="persona-name">Nueva personalidad</span>
           <span className="persona-blurb">Ponle un nombre, elige cómo habla y una cara.</span>

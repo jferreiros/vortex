@@ -19,10 +19,8 @@ still has to build", for exactly what real implementation would need.
 from __future__ import annotations
 
 import logging
-import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
-from pathlib import Path
 from typing import Any, Literal, Protocol
 from zoneinfo import ZoneInfo
 
@@ -51,7 +49,7 @@ class ConfirmationResult:
     outcome: ConfirmationOutcome
     #: The event log's own call_id for this outbound call — a confirmation
     #: is a real product event, not a demo, so it is written to
-    #: logs/calls.jsonl like any other call and shows up in the console the
+    #: public.call_events like any other call and shows up in the console the
     #: same way (see ``SimulatedConfirmationCaller.call``).
     call_id: str
     duration_ms: int | None = None
@@ -81,11 +79,9 @@ class SimulatedConfirmationCaller:
     def __init__(
         self,
         *,
-        log_path: Path,
         force_outcome: dict[str, ConfirmationOutcome] | None = None,
         settings_describe: dict[str, Any] | None = None,
     ) -> None:
-        self._log_path = log_path
         self._force_outcome = force_outcome or {}
         self._settings_describe = settings_describe or {}
 
@@ -94,7 +90,7 @@ class SimulatedConfirmationCaller:
 
         outcome = self._force_outcome.get(appointment.id, "confirmed")
         call_id = f"confirm-{appointment.id}-{int(datetime.now(UTC).timestamp() * 1000)}"
-        writer = CallLog(call_id, self._log_path)
+        writer = CallLog(call_id)
         writer.event(
             "call.started",
             stream_sid=f"OUT-{call_id}",
@@ -114,12 +110,12 @@ class SimulatedConfirmationCaller:
             media_frames_out=0,
         )
         writer.summary(reason=outcome)
+        writer.flush()
         duration_ms = None if outcome == "no_answer" else 4000
         return ConfirmationResult(outcome=outcome, call_id=call_id, duration_ms=duration_ms)
 
 
 async def run_confirmations(
-    conn: sqlite3.Connection,
     *,
     caller: ConfirmationCaller,
     today: date | None = None,
@@ -132,17 +128,15 @@ async def run_confirmations(
     has a ``confirmation_call_id`` (this function's own previous run, any
     outcome including ``no_answer``) is not dialled again — see
     ``db.appointments_due_for_confirmation``. Retrying a no-answer later the
-    same day is a real product's next step, not built here; see
-    ``database/README.md``.
+    same day is a real product's next step, not built here.
 
-    Commits after every appointment, not once at the end: one call failing
-    must not roll back the appointments already confirmed earlier in the
-    same run. Pass a connection from ``db.connect`` (not the
-    ``db.connection`` context manager, which commits only once at the end)
-    and close it yourself when done.
+    Every appointment is written as it resolves, not in one batch at the
+    end: each ``db`` call is its own request against Postgres, so one failed
+    call can never undo the appointments already confirmed earlier in the
+    same run.
     """
     tomorrow = (today or datetime.now(MADRID).date()) + timedelta(days=1)
-    due = db.appointments_due_for_confirmation(conn, on_date=tomorrow)
+    due = db.appointments_due_for_confirmation(on_date=tomorrow)
     results: list[tuple[AppointmentRecord, ConfirmationResult]] = []
     for appt in due:
         try:
@@ -151,7 +145,6 @@ async def run_confirmations(
             log.exception("confirmation call failed for appointment %s", appt.id)
             continue
         outbound_call = db.insert_call(
-            conn,
             call_id=result.call_id,
             direction="outbound",
             purpose="confirmation",
@@ -160,13 +153,16 @@ async def run_confirmations(
             duration_ms=result.duration_ms,
             outcome=result.outcome,
             appointment_id=appt.id,
+            # This job only ever places the day-before "will you come" call;
+            # see vortex.line.confirmation_calls.KNOWN_MOTIVOS for the wider
+            # set a real outbound worker also places.
+            motivo="confirmacion",
         )
-        db.set_confirmation_call(conn, appt.id, outbound_call.id)
+        db.set_confirmation_call(appt.id, outbound_call.id)
         if result.outcome == "confirmed":
-            db.update_appointment(conn, appt.id, status="confirmed")
+            db.update_appointment(appt.id, status="confirmed")
         elif result.outcome == "cancel":
-            db.update_appointment(conn, appt.id, status="cancelled")
+            db.update_appointment(appt.id, status="cancelled")
         # no_answer: status stays 'scheduled' — rule 2's "sigue scheduled/pending".
-        conn.commit()
         results.append((appt, result))
     return results

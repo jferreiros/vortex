@@ -1,7 +1,7 @@
 """What one call actually spent at the three providers, counted per socket.
 
 The jury wall prices a call in euros, and a price needs quantities: seconds of
-audio at Soniox, tokens at the LLM host, characters at Google TTS. Pipecat
+audio at Soniox, tokens at the LLM host, characters at ElevenLabs. Pipecat
 already measures all three - it just keeps quiet about them unless
 ``PipelineParams(enable_usage_metrics=True)`` is set, which is what turns the
 ``start_*_usage_metrics`` hooks in ``FrameProcessor`` into ``MetricsFrame``s on
@@ -15,10 +15,10 @@ Three details the numbers depend on:
 
 - **STT arrives as deltas.** ``STTUsage.audio_seconds`` is the audio submitted
   *since the last report*, so the total is their sum, not the last one.
-- **TTS bills per service.** Chirp 3 HD, Standard and Gemini-TTS have three
-  different rates, so characters are bucketed by the service that spoke them
-  (``MetricsData.processor``, which is ``"GoogleHttpTTSService#0"`` - class
-  name, ``#``, instance counter) and by the model/voice it used.
+- **TTS bills per service and model.** Characters are bucketed by the service
+  that spoke them (``MetricsData.processor``, which is
+  ``"ElevenLabsTTSService#0"`` - class name, ``#``, instance counter) and by
+  the model it used, so a model change mid-run is two rows, not one average.
 - **Do not add the cache counts to ``prompt_tokens``.** OpenAI-compatible hosts
   report ``prompt_tokens`` gross of the cache, so the cache figure is carried
   alongside for information and never summed into the input bucket.
@@ -34,7 +34,7 @@ STT_PROVIDER = "soniox"
 
 
 def service_class_name(processor: str) -> str:
-    """``"GeminiTTSService#2"`` -> ``"GeminiTTSService"``.
+    """``"ElevenLabsTTSService#2"`` -> ``"ElevenLabsTTSService"``.
 
     Pipecat names every processor ``f"{class}#{count}"``, and the counter is a
     per-process instance number: it would make the same service look like a
@@ -58,8 +58,8 @@ class UsageTotals:
     """Everything one call consumed. Per socket, never module-level."""
 
     #: True once a lane has run with pipecat's usage emitters switched on. The
-    #: stub and Gemini Live lanes leave it False, which is how the dashboard
-    #: tells "this call cost nothing measured" from "this call cost nothing".
+    #: stub lane leaves it False, which is how the dashboard tells "this call
+    #: cost nothing measured" from "this call cost nothing".
     metered: bool = False
 
     stt_audio_seconds: float = 0.0
@@ -143,33 +143,24 @@ class UsageTotals:
 def tts_provider_for(service: str, settings: Any) -> str:
     """Who bills these characters, read off the pipecat service class.
 
-    ``settings.tts_provider`` names the *primary* service only, and the pair
-    can be mixed (ElevenLabs Spanish + Google ca/gl/eu), so the class that
-    actually spoke is the honest answer. Gemini-TTS is Google as well.
+    The class that actually spoke is the honest answer, even now that there is
+    only one provider configured: a frame from some other service would
+    otherwise be billed to ElevenLabs.
     """
-    if service.startswith(("Google", "Gemini")):
-        return "google"
     if service.startswith("ElevenLabs"):
         return "elevenlabs"
     return settings.tts_provider
 
 
 def tts_model_for(service: str, model: str, settings: Any) -> str:
-    """The name the dashboard prices on: ``Chirp3-HD``, ``Standard``, ``gemini-``, ``eleven_``.
+    """The name the dashboard prices on, e.g. ``eleven_flash_v2_5``.
 
-    ``GoogleHttpTTSService`` is built with no ``model`` (a Google voice *is*
-    the model), so its metrics carry an empty string and the configured voice
-    id stands in for it. Under ``GOOGLE_TTS_STANDARD_FALLBACK`` that same
-    service also speaks ca/gl/eu on Standard-* voices; the Spanish voice is
-    what it opens every call with, so that is the one recorded.
+    The frame carries the model when the service was built with one; when it
+    is empty the configured id stands in.
     """
     if model:
         return model
-    if service.startswith("Gemini"):
-        return settings.google_tts_gemini_model
-    if service.startswith("ElevenLabs"):
-        return settings.elevenlabs_model
-    return settings.google_tts_voice_es
+    return settings.elevenlabs_model
 
 
 def _tts_entry(leg: TtsLeg, settings: Any) -> dict[str, Any]:

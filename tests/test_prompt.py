@@ -54,13 +54,10 @@ NOW = datetime(2026, 9, 18, 9, 0, tzinfo=MADRID)  # Friday, the public-case anch
 # so the budget is a test the lane has to argue with, not a constant it can
 # quietly raise while editing the prompt. 1400 until issue 298: listing the
 # six specialty ids next to SITES_BRIEF cost ~25 tokens on a prompt that was
-# already at the wall. 1430 until v7-warm-person: the MANNER block, the softer
-# opening and the chit-chat clause cost ~180 tokens, and they are what stops
-# the agent answering "how are you?" with a scripted refusal - a live mic call
-# the jury hears is worth more than the tokens. The next claim on this budget
-# buys its tokens out of the existing text.
+# already at the wall. The next claim on this budget buys its tokens out of
+# the existing text.
 CHARS_PER_TOKEN = 4
-TOKEN_BUDGET = 1650
+TOKEN_BUDGET = 1430
 
 
 def test_the_prompt_builds() -> None:
@@ -143,12 +140,12 @@ def test_the_prompt_teaches_change_and_cancel() -> None:
 
 def test_env_unset_loads_the_latest_version(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("VORTEX_PROMPT_VERSION", raising=False)
-    assert active_prompt_version() == latest_prompt_version() == "v7-warm-person"
-    assert build_system_prompt(NOW) == load_prompt_template("v7-warm-person").format(
+    assert active_prompt_version() == latest_prompt_version() == "v7-language-match"
+    assert build_system_prompt(NOW) == load_prompt_template("v7-language-match").format(
         clinic_name=CLINIC_NAME,
         now_human="09:00 on Friday 18 September 2026",
         tomorrow="Saturday 19 September 2026",
-        language="Spanish",
+        language="English",
         sites_brief=SITES_BRIEF,
         specialties_brief=SPECIALTIES_BRIEF,
         caller_note=caller_note_for(None),
@@ -163,7 +160,7 @@ def test_the_env_var_names_the_version(monkeypatch: pytest.MonkeyPatch, tmp_path
     assert load_prompt_template(directory=tmp_path) == "Pinned: {language}."
     # build_system_prompt resolves the env at call time, not at import.
     monkeypatch.setattr(prompt_module, "PROMPTS_DIR", tmp_path)
-    assert build_system_prompt(NOW) == "Pinned: Spanish."
+    assert build_system_prompt(NOW) == "Pinned: English."
 
 
 def test_an_unknown_or_malformed_version_is_an_error(

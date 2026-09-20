@@ -9,20 +9,23 @@ Spanish and 1 Catalan, and problem 11's private pool draws Catalan far more
 often than its public cases — so English is one sentence away at any moment,
 but it is detected, like the other three, and never assumed.
 
-Two signals, in order of trust:
+Two signals, and a *move* needs both:
 
 1. Soniox ``stt-rt-v5`` tags every token with the language it heard when
-   ``enable_language_identification`` is on. The ``TranscriptionFrame.language``
-   attribute is that tag and wins whenever it names a language we support.
-2. A word-level marker vote over the transcript, for frames that arrive
-   untagged (and for the text-mode evals, which have no STT at all). Function
-   words decide because they are frequent and rarely shared: "the", "would"
-   and "please" are English; "quiero", "cita" and "vale" are Spanish; "vull",
-   "hora" and "si us plau" are Catalan.
+   ``enable_language_identification`` is on. ``TranscriptionFrame.language`` is
+   that tag.
+2. A word-level marker vote over the transcript, which also covers frames that
+   arrive untagged (and the text-mode evals, which have no STT at all).
+   Function words decide because they are frequent and rarely shared: "the",
+   "would" and "please" are English; "quiero", "cita" and "vale" are Spanish;
+   "vull", "hora" and "si us plau" are Catalan.
 
-When neither signal is decisive the answer is ``current`` (the language the
-call is already in) and, failing that, the default. A call in Spanish must not
-flip to English on an "ok".
+Leaving the language the call is already in takes the tag *and* the vote
+agreeing. One mis-tagged frame used to flip the voice mid-sentence, and Soniox
+mistags a short reply in a telephony band often enough for that to happen on a
+scored call. When neither signal is decisive the answer is ``current`` and,
+failing that, the default. A call in Spanish must not flip to English on an
+"ok".
 
 Language constrains a *booking* only in problem 11: pass it into
 ``find_slots(language=...)`` only when the caller asks for a doctor they can
@@ -31,6 +34,7 @@ talk to. Everywhere else any provider is fine.
 
 from __future__ import annotations
 
+from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:  # pragma: no cover - import only for the annotation
@@ -40,7 +44,7 @@ if TYPE_CHECKING:  # pragma: no cover - import only for the annotation
 
 SUPPORTED_LANGUAGES: tuple[str, ...] = ("en", "es", "ca", "gl", "eu")
 
-DEFAULT_LANGUAGE = "es"
+DEFAULT_LANGUAGE = "en"
 
 #: A language switch is a sentence, not a word. Soniox tags every token it
 #: hears, misheard fragments included, so a one-word frame used to be enough to
@@ -54,11 +58,6 @@ LANGUAGE_NAMES: dict[str, str] = {
     "gl": "Galician",
     "eu": "Basque",
 }
-
-# Google voice used for English when Settings has no ``google_tts_voice_en``
-# (the settings module predates the English default). British, Chirp 3 HD,
-# same family as the Spanish default.
-DEFAULT_GOOGLE_VOICE_EN = "en-GB-Chirp3-HD-Aoede"
 
 # Single words, lowercase, accents kept: the STT writes them accented. A word
 # that exists in several languages ("no", "hola", "doctor") is listed in each
@@ -180,19 +179,29 @@ def detect_language(transcript: str, hint: object | None = None, current: str | 
     """Return an ISO-639-1 code from ``SUPPORTED_LANGUAGES``.
 
     ``hint`` is the per-token language Soniox reports on the transcription
-    frame; when it names a supported language it wins. Otherwise the marker
-    vote decides. A transcript with no decisive marker keeps ``current`` (the
-    language the call is already in), else the default. Never raises.
+    frame. It does **not** win on its own: one mis-tagged frame used to flip
+    the whole call's voice mid-sentence, and Soniox mistags a short reply in a
+    noisy telephony band often enough to matter. So a hint that would move the
+    call needs the word vote to agree with it; a hint that matches the language
+    the call is already in is accepted as confirmation. Otherwise the marker
+    vote decides alone, and a transcript with no decisive marker keeps
+    ``current``. Never raises.
     """
-    from_hint = normalise_language(hint)
-    if from_hint:
-        return from_hint
     fallback = normalise_language(current) or DEFAULT_LANGUAGE
+    from_hint = normalise_language(hint)
+    if from_hint == fallback:
+        return fallback
     try:
         scores = language_scores(transcript)
     except Exception:
         return fallback
     best = max(scores.values(), default=0)
+    if from_hint:
+        # A move needs two signals. The vote agrees when the hinted language is
+        # among the languages the transcript scored highest.
+        if best > 0 and scores.get(from_hint, 0) == best:
+            return from_hint
+        return fallback
     if best == 0:
         return fallback
     winners = [code for code, score in scores.items() if score == best]
@@ -229,51 +238,89 @@ def language_name(code: str | None) -> str:
     )
 
 
+#: ElevenLabs takes a bare code; the regional one only earns a "not verified"
+#: warning on the way through pipecat's resolver.
+_PIPECAT_LANGUAGE_NAMES: dict[str, str] = {
+    "en": "EN",
+    "es": "ES",
+    "ca": "CA",
+    "gl": "GL",
+    "eu": "EU",
+}
+
+
+class VoicePreset(Enum):
+    """Which ElevenLabs voice speaks which language, female and male.
+
+    ElevenLabs' multilingual models speak all five languages out of one voice,
+    so this is a persona map, not a translation table: the same pair serves
+    every language until somebody has a reason to split one off. It is a fixed
+    preset in code on purpose — a voice id is a tuning decision the team makes
+    together, not a per-machine environment variable. The wall's female/male
+    switch picks the column; ``ELEVENLABS_VOICE_ID_DEFAULT`` (every language)
+    and ``ELEVENLABS_VOICE_ID_ES`` (Spanish only) override the female one.
+
+    The value is ``(female_voice_id, male_voice_id)``. Both are the team's
+    professional Spanish voices, verified on the account on 20 Sep 2026:
+    ``Sofia - Natural Conversations`` and ``Alejandro de la Mancha``. A
+    multilingual model carries the same two through the other four languages,
+    which is why every row repeats them.
+    """
+
+    EN = ("eZxqQzb5CuYo3Kl6EXfZ", "JngPf0lmRkKhY3qSJz0f")
+    ES = ("eZxqQzb5CuYo3Kl6EXfZ", "JngPf0lmRkKhY3qSJz0f")
+    CA = ("eZxqQzb5CuYo3Kl6EXfZ", "JngPf0lmRkKhY3qSJz0f")
+    GL = ("eZxqQzb5CuYo3Kl6EXfZ", "JngPf0lmRkKhY3qSJz0f")
+    EU = ("eZxqQzb5CuYo3Kl6EXfZ", "JngPf0lmRkKhY3qSJz0f")
+
+    @property
+    def female(self) -> str:
+        return self.value[0]
+
+    @property
+    def male(self) -> str:
+        return self.value[1]
+
+
+def voice_preset_for(language: str | None) -> VoicePreset:
+    """The preset row for a language. Anything outside the five gets English."""
+    code = normalise_language(language) or DEFAULT_LANGUAGE
+    return VoicePreset[code.upper()]
+
+
+def elevenlabs_voice_id(
+    language: str | None, settings: Settings | Any = None, gender: str = "female"
+) -> str:
+    """The voice id to speak ``language`` with, preset first, env override on top.
+
+    Male comes from the preset alone: it is the second column of the same row,
+    so the switch never lands on a voice nobody chose.
+    """
+    preset = voice_preset_for(language)
+    if gender == "male":
+        return preset.male
+    code = normalise_language(language) or DEFAULT_LANGUAGE
+    override = str(getattr(settings, "elevenlabs_voice_id_default", "") or "")
+    if code == "es":
+        override = str(getattr(settings, "elevenlabs_voice_id_es", "") or "") or override
+    return override or preset.female
+
+
 def tts_voice_for(
-    language: str, settings: Settings | Any, provider: str | None = None
+    language: str, settings: Settings | Any, provider: str | None = None, gender: str = "female"
 ) -> tuple[str, Language]:
-    """The voice and the pipecat ``Language`` for a detected language.
+    """The voice id and the pipecat ``Language`` for a detected language.
 
-    Per provider, because the languages are not evenly covered:
+    One provider (ElevenLabs) and one multilingual model, so a language switch
+    is a new voice id on the running service. ``provider`` is kept for callers
+    that still name the service; there is only one to name.
 
-    - google      en / es / ca / gl / eu  (Chirp 3 HD for English and Spanish;
-                  Gemini-TTS short names for ca/gl/eu, or Standard-* when
-                  ``GOOGLE_TTS_STANDARD_FALLBACK`` is on)
-    - elevenlabs  es / en (the same multilingual voice id speaks both, so a
-                  switch between the two changes the language and nothing else)
-
-    ``provider`` names the service the answer is for; it defaults to the
-    primary (``settings.tts_provider``). When a primary and an alternate are
-    both running, the caller passes the one that serves this language —
-    ``Settings.tts_provider_for(language)`` decides which that is.
-
-    Anything the named provider cannot say falls back to Spanish, the
-    clinic's default. Never raises: a failed lookup during a live call must
-    not end the call.
+    Anything outside the five falls back to English, the clinic's default.
+    Never raises: a failed lookup during a live call must not end the call.
     """
     from pipecat.transcriptions.language import Language
 
-    google = {
-        "en": (
-            getattr(settings, "google_tts_voice_en", "") or DEFAULT_GOOGLE_VOICE_EN,
-            Language.EN_GB,
-        ),
-        "es": (getattr(settings, "google_tts_voice_es", ""), Language.ES_ES),
-        "ca": (getattr(settings, "google_tts_voice_ca", ""), Language.CA_ES),
-        "gl": (getattr(settings, "google_tts_voice_gl", ""), Language.GL_ES),
-        "eu": (getattr(settings, "google_tts_voice_eu", ""), Language.EU_ES),
-    }
-    # ElevenLabs takes a bare code; the regional one only earns a "not
-    # verified" warning on the way through pipecat's resolver. Its voices are
-    # multilingual, so the Spanish id doubles as the English one.
-    elevenlabs_voice = getattr(settings, "elevenlabs_voice_id_es", "")
-    elevenlabs = {
-        "en": (getattr(settings, "elevenlabs_voice_id_en", "") or elevenlabs_voice, Language.EN),
-        "es": (elevenlabs_voice, Language.ES),
-    }
-
-    name = str(provider or getattr(settings, "tts_provider", "google") or "google").lower()
-    voices = {"google": google, "elevenlabs": elevenlabs}.get(name, google)
-
     code = normalise_language(language) or DEFAULT_LANGUAGE
-    return voices.get(code) or voices[DEFAULT_LANGUAGE]
+    voice = elevenlabs_voice_id(code, settings, gender)
+    tts_language = getattr(Language, _PIPECAT_LANGUAGE_NAMES[code], Language.EN)
+    return str(voice or ""), tts_language

@@ -56,7 +56,7 @@ def ctx(tmp_path: Path) -> ToolContext:
         now=NOW,
         from_number="+34612345678",
         clinic=FakeClinicClient(),
-        log=CallLog("CA-diary", tmp_path / "calls.jsonl"),
+        log=CallLog("CA-diary"),
         submitter=DryRunSubmitClient(),
     )
 
@@ -312,7 +312,7 @@ def _leave_ctx(tmp_path: Path) -> ToolContext:
         now=NOW,
         from_number="+34612345678",
         clinic=PlatformLeaveClinic(),
-        log=CallLog("CA-diary-leave", tmp_path / "calls.jsonl"),
+        log=CallLog("CA-diary-leave"),
         submitter=DryRunSubmitClient(),
     )
 
@@ -591,7 +591,7 @@ async def test_widen_days_keeps_the_rule_the_wider_window_names(tmp_path: Path) 
         now=NOW,
         from_number="+34612345678",
         clinic=BlockedFurtherOutClinic(date(2026, 9, 26)),
-        log=CallLog("CA-diary-widen", tmp_path / "calls.jsonl"),
+        log=CallLog("CA-diary-widen"),
         submitter=DryRunSubmitClient(),
     )
     answer = await find_slots(
