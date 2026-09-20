@@ -42,7 +42,7 @@ def test_every_combination_resolves_to_a_real_id() -> None:
                 assert voice in ACCOUNT_VOICES, (slug, language, gender)
                 assert model == "", "no persona overrides the model yet"
                 seen.add(voice)
-    assert len(seen) == 5, "the 30 combinations collapse to five distinct voices"
+    assert len(seen) == 3, "the 30 combinations collapse to three voices: two women, one man"
 
 
 def test_a_language_never_changes_the_voice() -> None:
@@ -67,7 +67,7 @@ def test_each_persona_has_its_own_voice() -> None:
     spoken = {slug: persona_voice(slug, "es", "female")[0] for slug in ("lucia", "carla")}
     assert spoken["lucia"] != spoken["carla"]
     males = {slug: persona_voice(slug, "es", "male")[0] for slug in PERSONA_VOICES}
-    assert len(set(males.values())) == 3
+    assert set(males.values()) == {ALEJANDRO}, "every male switch is Alejandro"
 
 
 def test_an_unknown_persona_falls_back_to_the_preset() -> None:
@@ -96,7 +96,7 @@ def test_the_env_override_still_wins(monkeypatch: pytest.MonkeyPatch) -> None:
         # English is untouched by the Spanish-only override.
         assert elevenlabs_voice_id("en", s, "female", "carla") == MATILDA
         # Male has never taken the override: it would land on a female voice.
-        assert elevenlabs_voice_id("es", s, "male", "carla") == GEORGE
+        assert elevenlabs_voice_id("es", s, "male", "carla") == ALEJANDRO
     finally:
         settings_module.reset_settings()
 
