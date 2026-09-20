@@ -12,9 +12,8 @@ Nothing is ever written back into ``synthetic-data/`` — this reads there and
 writes only through :class:`CallLog`. Each call gets its own log, so no state
 is shared between them (see the concurrency rule in ``CLAUDE.md``).
 
-The ``path`` arguments below are vestigial: ``CallLog`` ignores them now that
-Postgres is the only store. They stay for one release so existing callers
-keep working.
+Nothing here writes a file: ``CallLog`` is the only sink, and it goes to
+``public.call_events``.
 
 The pure helpers (``load_synthetic_calls``, ``restamp``) carry no timing and
 are what the selftest exercises; the ``replay_*`` coroutines add the sleeps.
@@ -111,7 +110,6 @@ def _new_call_id(call_id: str, *, run_tag: str | None, keep_ids: bool) -> str:
 
 
 async def replay_call(
-    path: Path,
     events: list[dict[str, Any]],
     *,
     speed: float = 1.0,
@@ -119,11 +117,11 @@ async def replay_call(
     keep_ids: bool = False,
     rng: random.Random | None = None,
 ) -> str:
-    """Write one call to ``path`` event by event, pausing between events."""
+    """Replay one call into the store, event by event, pausing between them."""
     rng = rng or random.Random()
     source_id = str(events[0].get("call_id") or "call") if events else "call"
     call_id = _new_call_id(source_id, run_tag=run_tag, keep_ids=keep_ids)
-    log = CallLog(call_id, path)
+    log = CallLog(call_id)
     scale = 1.0 / speed if speed > 0 else 0.0
     for index, event in enumerate(events):
         kind, data = restamp(event)
@@ -134,7 +132,6 @@ async def replay_call(
 
 
 async def replay_stream(
-    path: Path,
     calls: list[list[dict[str, Any]]],
     *,
     concurrency: int = 5,
@@ -143,7 +140,7 @@ async def replay_stream(
     keep_ids: bool = False,
     rng: random.Random | None = None,
 ) -> int:
-    """Drip ``calls`` into ``path`` with overlapping arrivals and jitter.
+    """Drip ``calls`` into the store with overlapping arrivals and jitter.
 
     At most ``concurrency`` calls are in flight at once. Between launching one
     call and the next there is a jittered gap. With ``loop`` the whole set
@@ -158,7 +155,6 @@ async def replay_stream(
     async def _run(events: list[dict[str, Any]], run_tag: str | None) -> None:
         async with semaphore:
             await replay_call(
-                path,
                 events,
                 speed=speed,
                 run_tag=run_tag,

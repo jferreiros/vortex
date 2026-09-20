@@ -156,11 +156,16 @@ async def test_the_wall_reads_its_cards_off_the_event_loop(
     must not, or a store that does not answer freezes every open tab."""
     threads: list[int] = []
 
-    def _offline_get(*_args: object, **_kwargs: object) -> object:
+    def _offline_fetch(*_args: object, **_kwargs: object) -> object:
         threads.append(threading.get_ident())
         raise OSError("offline")
 
-    monkeypatch.setattr("httpx.get", _offline_get)
+    # The board's one read is ``supabase_log.fetch_calls`` now, not an HTTP
+    # call to the line — but it still blocks, so it still has to run in a
+    # worker thread.
+    from vortex.observability import supabase_log
+
+    monkeypatch.setattr(supabase_log, "fetch_calls", _offline_fetch)
     await user.open("/wall/classic")
     assert threads
     assert threading.get_ident() not in threads

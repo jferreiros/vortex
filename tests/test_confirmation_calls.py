@@ -437,7 +437,6 @@ async def test_ensure_confirmation_audio_synthesises_and_caches(
         return b"fake-mp3"
 
     monkeypatch.setenv("VORTEX_CONFIRMATION_AUDIO_DIR", str(tmp_path / "audio"))
-    monkeypatch.setenv("VORTEX_CALLS_LOG", str(tmp_path / "calls.jsonl"))
     monkeypatch.setattr(voice_config, "synthesize", fake_synthesize)
     settings_module.reset_settings()
     try:
@@ -465,7 +464,6 @@ async def test_ensure_confirmation_audio_returns_none_without_tts(
         raise RuntimeError("no credentials")
 
     monkeypatch.setenv("VORTEX_CONFIRMATION_AUDIO_DIR", str(tmp_path / "audio"))
-    monkeypatch.setenv("VORTEX_CALLS_LOG", str(tmp_path / "calls.jsonl"))
     monkeypatch.setattr(voice_config, "synthesize", boom)
     settings_module.reset_settings()
     try:
@@ -481,7 +479,6 @@ def confirmation_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     monkeypatch.setenv("VORTEX_VOICE_MODE", "stub")
     monkeypatch.setenv("VORTEX_CLINIC_MODE", "fake")
-    monkeypatch.setenv("VORTEX_CALLS_LOG", str(tmp_path / "calls.jsonl"))
     monkeypatch.setenv("VORTEX_CONFIRMATION_CALLS_PATH", str(tmp_path / "calls.json"))
     monkeypatch.setenv("VORTEX_PUBLIC_BASE_URL", "https://demo.example.com")
     settings_module.reset_settings()
@@ -720,7 +717,6 @@ def test_result_endpoint_hands_off_to_the_voice_agent(
 
     monkeypatch.setenv("VORTEX_VOICE_MODE", "pipecat")
     monkeypatch.setenv("VORTEX_CLINIC_MODE", "fake")
-    monkeypatch.setenv("VORTEX_CALLS_LOG", str(tmp_path / "calls.jsonl"))
     monkeypatch.setenv("VORTEX_CONFIRMATION_CALLS_PATH", str(tmp_path / "calls.json"))
     monkeypatch.setenv("VORTEX_PUBLIC_BASE_URL", "https://demo.example.com")
     settings_module.reset_settings()
@@ -1186,11 +1182,9 @@ async def test_result_endpoint_persists_the_call_now_outcome_to_the_database(
 
     monkeypatch.setenv("VORTEX_VOICE_MODE", "stub")
     monkeypatch.setenv("VORTEX_CLINIC_MODE", "fake")
-    monkeypatch.setenv("VORTEX_CALLS_LOG", str(tmp_path / "calls.jsonl"))
     monkeypatch.setenv("VORTEX_CONFIRMATION_CALLS", "true")
     monkeypatch.setenv("VORTEX_CONFIRMATION_CALLS_PATH", str(tmp_path / "calls.json"))
     monkeypatch.setenv("VORTEX_PUBLIC_BASE_URL", "https://demo.example.com")
-    monkeypatch.setenv("VORTEX_PRODUCT_DB", str(tmp_path / "vortex_product.db"))
     settings_module.reset_settings()
     try:
         settings = settings_module.get_settings()
