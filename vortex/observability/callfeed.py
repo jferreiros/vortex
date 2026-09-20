@@ -2,25 +2,18 @@
 observability, kept in a leaf module so it can be imported without pulling in
 NiceGUI pages.
 
-Order of sources:
+There is one store: Postgres (``public.call_events``, read through PostgREST
+by ``supabase_log``). Every screen reads it, so a board container that has
+never served a call paints the same cards as the line that did. Windows are
+bounded by *calls*, never by an arbitrary event tail: a tail cut can split a
+call and drop its ``call.started``, and a card without ``started_at`` is
+dropped by the board's date filter.
 
-1. The hosted SQL log (Supabase) when ``SUPABASE_*`` is set and this is the
-   process's real call log — every board screen, not only dated windows.
-   Dual-write already lands here; the board should read the same store by
-   default so a machine that never served a call still paints real cards.
-2. ``GET {VORTEX_LINE_URL}/calls`` — the line's own API, when hosted is
-   unused or empty. Bounded by *calls* (``calls=60`` for the wall) or by
-   start date (``since=<ISO>`` for Insights), never by an arbitrary event
-   tail: a tail cut can split a call and drop its ``call.started``.
-3. The last good fetch for that scope — one slow or dropped request degrades
-   to slightly-stale real data instead of an empty board.
-4. The hosted SQL log again (if the first pass skipped it), then the local
-   JSONL at ``calls_log_path``. In production that path is the line's own
-   volume mounted into the board (see deploy/compose.yml); locally it is
-   the file ``make run`` writes.
+One degradation is kept: the last good fetch for a scope. A slow or dropped
+request then shows slightly-stale real data instead of an empty board.
 
-Every result carries a ``source`` dict (``supabase`` | ``line_api`` |
-``cache`` | ``jsonl_fallback``, plus the error that degraded it) so a
+Every result carries a ``source`` dict (``store: "supabase"``, ``kind``:
+``supabase`` | ``cache`` | ``empty``, plus the error that degraded it) so a
 screen can say "degraded" instead of silently showing zeros.
 """
 
@@ -33,79 +26,36 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import httpx
-
-from vortex.observability.calllog import read_calls
 from vortex.observability.view import flatten_grouped
 
 log = logging.getLogger("vortex.observability")
 
 LINE_URL = os.environ.get("VORTEX_LINE_URL", "http://127.0.0.1:7860").rstrip("/")
 
-#: Deliberately generous. The line server answers /health and /calls from the
-#: same event loop that streams live call audio, so under real load (a "Run
-#: All" holding ten to twenty sockets open) a fetch that used to time out at
-#: 0.35 s / 0.5 s failed constantly and silently fell back to the board's own,
-#: always-empty log — every Insights panel read as "no data" during exactly
-#: the calls that mattered. The insights timeout is longer still: a 90-day
-#: window can be a few MB of events, and a slow-but-correct answer beats an
-#: empty one. All three are configurable so a deploy can tune them without a
-#: rebuild.
-LINE_HEALTH_TIMEOUT_S = float(os.environ.get("VORTEX_LINE_HEALTH_TIMEOUT_S", "3"))
-LINE_CALLS_TIMEOUT_S = float(os.environ.get("VORTEX_LINE_CALLS_TIMEOUT_S", "6"))
-LINE_INSIGHTS_TIMEOUT_S = float(os.environ.get("VORTEX_LINE_INSIGHTS_TIMEOUT_S", "25"))
-
-#: How many complete calls the wall and the per-call pages ask the line for.
-#: Counted in calls, not events: the old ``limit=800`` tail was about ten
-#: calls on the real log and could cut the oldest one's ``call.started``.
+#: How many complete calls the wall and the per-call pages ask for. Counted
+#: in calls, not events: the old ``limit=800`` tail was about ten calls on a
+#: real log and could cut the oldest one's ``call.started``.
 WALL_CALLS = 60
 
 #: One Insights fetch per this many seconds, no matter how many tabs poll.
 #: The page itself only asks every 6 s.
 INSIGHTS_CACHE_TTL_S = 4.0
 
-#: Last events successfully fetched from the line per scope. Cleared only by
-#: a fresh success; never written to disk.
-_last_good: dict[str, tuple[list[dict[str, Any]], dict[str, Any] | None]] = {}
+#: Last events successfully fetched per scope. Cleared only by a fresh
+#: success; never written to disk.
+_last_good: dict[str, list[dict[str, Any]]] = {}
 _scope_cache: dict[str, tuple[float, list[dict[str, Any]], dict[str, Any] | None, dict]] = {}
 
 
 def _source(scope: str, kind: str, events: list[dict[str, Any]], detail: str | None) -> dict:
     return {
         "kind": kind,
+        "store": "supabase",
         "scope": scope,
         "detail": detail,
         "events": len(events),
         "calls": len({str(e.get("call_id") or "?") for e in events}),
     }
-
-
-def _from_hosted(
-    scope: str,
-    log_path: Path | None,
-    *,
-    since: datetime | None,
-    max_calls: int | None,
-) -> tuple[list[dict[str, Any]], None, dict] | None:
-    """Events from the hosted SQL log, or ``None`` when unused / empty."""
-    if log_path is None:
-        return None
-    try:
-        from vortex.observability import supabase_log
-
-        if not supabase_log.uses_this_log(log_path):
-            return None
-        remote = supabase_log.fetch_window(max_calls=max_calls, since=since)
-        if remote is None:
-            return None
-        grouped, _meta = remote
-        events = flatten_grouped(grouped)
-        if not events:
-            return None
-        return events, None, _source(scope, "supabase", events, None)
-    except Exception:
-        log.exception("hosted log fetch failed for %s", scope)
-        return None
 
 
 def load_events(
@@ -122,71 +72,41 @@ def load_events(
     the range pills) so the last-good and TTL caches never mix windows.
 
     ``max_calls`` caps a date-bounded read at the most recent N calls. The
-    whole log is far more than any aggregate needs, and asking the hosted
-    project for all of it exceeds its statement timeout — the read then
-    fails and the caller silently drops to the container's local file.
+    whole table is far more than any aggregate needs, and asking the hosted
+    project for all of it exceeds its statement timeout.
+
+    ``log_path`` is accepted and ignored: there is no file store any more. It
+    stays for one release so a caller still passing one keeps working.
+
+    The middle element of the triple used to be the line's ``/health``. There
+    is no line fetch left, so it is always ``None`` — callers already had to
+    handle that, since every degraded path returned it.
     """
     if cache_ttl:
         cached = _scope_cache.get(scope)
         if cached and time.monotonic() - cached[0] < cache_ttl:
             return cached[1], cached[2], cached[3]
 
-    params: dict[str, Any] = {"calls": WALL_CALLS}
-    timeout = LINE_CALLS_TIMEOUT_S
-    if since is not None:
-        params = {"since": since.isoformat()}
-        timeout = LINE_INSIGHTS_TIMEOUT_S
-
-    # Hosted SQL is the default store. Dated windows pass ``since`` through
-    # and may cap how many calls they need; the live wall asks for the
-    # newest ``WALL_CALLS`` complete calls.
-    hosted = _from_hosted(
-        scope,
-        log_path,
-        since=since,
-        max_calls=max_calls if since is not None else WALL_CALLS,
-    )
-    if hosted is not None:
-        if cache_ttl:
-            _scope_cache[scope] = (time.monotonic(), *hosted)
-        return hosted
-
+    bound = max_calls if since is not None else WALL_CALLS
     result: tuple[list[dict[str, Any]], dict[str, Any] | None, dict]
     try:
-        health = httpx.get(f"{LINE_URL}/health", timeout=LINE_HEALTH_TIMEOUT_S).json()
-        grouped = (
-            httpx.get(f"{LINE_URL}/calls", params=params, timeout=timeout).json().get("calls", {})
-        )
-        if not isinstance(grouped, dict):
-            raise ValueError("/calls answered with no 'calls' object")
+        from vortex.observability import supabase_log
+
+        grouped, _meta = supabase_log.fetch_calls(bound, since)
         events = flatten_grouped(grouped)
-        _last_good[scope] = (events, health)
-        result = (events, health, _source(scope, "line_api", events, None))
+        if events:
+            _last_good[scope] = events
+            result = (events, None, _source(scope, "supabase", events, None))
+        elif scope in _last_good:
+            stale = _last_good[scope]
+            result = (stale, None, _source(scope, "cache", stale, "store returned no calls"))
+        else:
+            result = (events, None, _source(scope, "empty", events, None))
     except Exception as exc:
         detail = f"{type(exc).__name__}: {exc}"[:200]
-        log.warning("line %s fetch failed (%s); degrading", scope, detail)
-        if scope in _last_good:
-            events, health = _last_good[scope]
-            result = (events, health, _source(scope, "cache", events, detail))
-        else:
-            hosted = _from_hosted(
-                scope,
-                log_path,
-                since=since,
-                max_calls=max_calls if since is not None else WALL_CALLS,
-            )
-            if hosted is not None:
-                result = hosted
-            else:
-                grouped = {}
-                if log_path is not None:
-                    grouped, _meta = (
-                        read_calls(log_path, since=since, max_calls=max_calls)
-                        if since is not None
-                        else read_calls(log_path, max_calls=WALL_CALLS)
-                    )
-                events = flatten_grouped(grouped)
-                result = (events, None, _source(scope, "jsonl_fallback", events, detail))
+        log.warning("supabase %s fetch failed (%s); degrading", scope, detail)
+        stale = _last_good.get(scope, [])
+        result = (stale, None, _source(scope, "cache" if stale else "empty", stale, detail))
 
     if cache_ttl:
         _scope_cache[scope] = (time.monotonic(), *result)

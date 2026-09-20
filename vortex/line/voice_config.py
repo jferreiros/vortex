@@ -1,9 +1,12 @@
 """The wall's "Voz del agente" card, persisted.
 
-One row in a tiny SQLite file, ``voiceconfig.db`` next to the calls log, so in
-production it lands on the line's log volume. The line owns the file: the
-board only mounts that volume read-only, so it reads and writes through the
-line's ``GET/PUT /voice-config`` and never opens the db itself.
+One row (``id = 1``) in ``public.voiceconfig``, reached through PostgREST.
+Both the line and the board talk to the same table, so the line's
+``GET/PUT /voice-config`` and the board's proxy of it can never disagree.
+
+With no store configured a read returns the defaults — a call must sound the
+same whether or not somebody set up Supabase — and a write raises
+``RuntimeError``, which the HTTP layer turns into a 503.
 
 Each field applies to *new* calls only — pipelines read the config when the
 socket builds, which is why the card can say "aplica a llamadas nuevas":
@@ -18,10 +21,7 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-import sqlite3
 from dataclasses import asdict, dataclass
-from pathlib import Path
 from typing import Any
 
 log = logging.getLogger("vortex.line.voice_config")
@@ -55,23 +55,10 @@ class VoiceConfig:
         return d
 
 
-def db_path(settings: Any) -> Path:
-    override = os.environ.get("VORTEX_VOICE_CONFIG_DB", "").strip()
-    if override:
-        return Path(override)
-    return settings.calls_log_path.parent / "voiceconfig.db"
+#: The table's one row. A settings card has nothing to key on but itself.
+ROW_ID = 1
 
-
-def _connect(path: Path) -> sqlite3.Connection:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path)
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS voiceconfig ("
-        "id INTEGER PRIMARY KEY CHECK (id = 1), "
-        "voice TEXT NOT NULL, tone INTEGER NOT NULL, "
-        "friendliness INTEGER NOT NULL, speech_rate INTEGER NOT NULL)"
-    )
-    return conn
+TABLE = "voiceconfig"
 
 
 def _clamp(value: Any, lo: int = 0, hi: int = 100) -> int:
@@ -93,49 +80,51 @@ def _clean(data: dict[str, Any]) -> VoiceConfig:
     )
 
 
-def load(settings: Any) -> VoiceConfig:
-    """The stored config, or defaults. Never raises: a broken db must not
-    change how a call sounds."""
+def load(settings: Any = None) -> VoiceConfig:
+    """The stored config, or defaults. Never raises: an unreachable store must
+    not change how a call sounds."""
+    from database import remote
+
     try:
-        with _connect(db_path(settings)) as conn:
-            row = conn.execute(
-                "SELECT voice, tone, friendliness, speech_rate FROM voiceconfig WHERE id = 1"
-            ).fetchone()
-    except sqlite3.Error as exc:
+        rows = remote.select(
+            TABLE,
+            {"select": "voice,tone,friendliness,speech_rate", "id": f"eq.{ROW_ID}", "limit": "1"},
+        )
+    except Exception as exc:
         log.warning("voiceconfig unreadable, using defaults: %s", exc)
         return VoiceConfig()
-    if not row:
+    if not rows:
         return VoiceConfig()
-    return _clean(dict(zip(("voice", "tone", "friendliness", "speech_rate"), row, strict=True)))
+    return _clean(dict(rows[0]))
 
 
 def save(settings: Any, data: dict[str, Any] | None) -> VoiceConfig:
-    cfg = _clean({**load(settings).to_dict(), **(data or {})})
-    with _connect(db_path(settings)) as conn:
-        conn.execute(
-            "INSERT OR REPLACE INTO voiceconfig "
-            "(id, voice, tone, friendliness, speech_rate) VALUES (1, ?, ?, ?, ?)",
-            (cfg.voice, cfg.tone, cfg.friendliness, cfg.speech_rate),
-        )
-    try:
-        from database.remote import mirrors_file, safe_upsert
+    """Merge ``data`` over the stored config and write it back.
 
-        if mirrors_file(db_path(settings)):
-            safe_upsert(
-                "voiceconfig",
-                [
-                    {
-                        "id": 1,
-                        "voice": cfg.voice,
-                        "tone": cfg.tone,
-                        "friendliness": cfg.friendliness,
-                        "speech_rate": cfg.speech_rate,
-                    }
-                ],
-                "id",
-            )
-    except Exception:
-        pass
+    Raises ``RuntimeError`` with no store: the card must not report a save
+    that went nowhere, so the route turns this into a 503.
+    """
+    from database import remote
+
+    if not remote.enabled():
+        raise RuntimeError(
+            "no store configured: set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY "
+            "to save the voice config"
+        )
+    cfg = _clean({**load(settings).to_dict(), **(data or {})})
+    remote.upsert(
+        TABLE,
+        [
+            {
+                "id": ROW_ID,
+                "voice": cfg.voice,
+                "tone": cfg.tone,
+                "friendliness": cfg.friendliness,
+                "speech_rate": cfg.speech_rate,
+            }
+        ],
+        "id",
+    )
     return cfg
 
 

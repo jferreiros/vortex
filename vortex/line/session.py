@@ -496,7 +496,7 @@ class CallSession:
         now: datetime | None = None,
     ) -> CallSession:
         settings = settings or get_settings()
-        log = CallLog(start.call_id, settings.calls_log_path)
+        log = CallLog(start.call_id)
         submitter: SubmitApi
         if settings.clinic_is_live:
             submitter = SubmitClient(settings.platform_api_base_url, settings.platform_api_key)
@@ -799,6 +799,10 @@ class CallSession:
         finally:
             await self._drain_sms()
             self.ctx.log.summary(reason=reason, usage=self.usage.summary_extras())
+            # Land the whole call in Postgres before the process forgets it.
+            # In a worker thread: the same loop is streaming audio for up to
+            # nineteen other sockets, and this blocks on HTTP.
+            await asyncio.to_thread(self.ctx.log.flush)
             await self.sms.aclose()
             await self.submitter.aclose()
 

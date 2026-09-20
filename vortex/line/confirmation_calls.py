@@ -79,7 +79,7 @@ from vortex.contract import MADRID
 from vortex.conversation.prompt import CLINIC_NAME
 from vortex.line import voice_config
 from vortex.line.sms import format_slot_es
-from vortex.settings import Settings
+from vortex.settings import REPO_ROOT, Settings
 
 log = logging.getLogger("vortex.line.confirmation_calls")
 
@@ -541,10 +541,16 @@ _AUDIO_NAME_RE = re.compile(r"[0-9a-f]{24}\.mp3")
 
 
 def confirmation_audio_dir(settings: Settings) -> Path:
+    """Where the pre-rendered MP3s Twilio fetches are cached.
+
+    A local scratch directory, not a store: these are regenerable files a
+    redeploy is free to lose. ``VORTEX_CONFIRMATION_AUDIO_DIR`` moves it onto
+    a volume when a deploy wants the cache to survive.
+    """
     override = os.environ.get("VORTEX_CONFIRMATION_AUDIO_DIR", "").strip()
     if override:
         return Path(override)
-    return settings.calls_log_path.parent / "confirmation_audio"
+    return REPO_ROOT / "logs" / "confirmation_audio"
 
 
 def confirmation_voice_name(cfg: voice_config.VoiceConfig, language: str | None) -> str:
@@ -975,7 +981,10 @@ class ConfirmationCall:
 
 
 def default_calls_path(settings: Settings) -> Path:
-    return settings.calls_log_path.with_name("confirmation_calls.json")
+    """The outbound-call queue file. Local scratch, overridden by
+    ``VORTEX_CONFIRMATION_CALLS_PATH``; the durable copy of every queued call
+    is the ``calls`` row ``_persist_call_now_row`` writes."""
+    return REPO_ROOT / "logs" / "confirmation_calls.json"
 
 
 #: One store per resolved path, so the asyncio.Lock is shared by the webhooks,
@@ -1368,7 +1377,6 @@ async def queue_cancellation_rebooking_call(
     appointment_id: str = "",
     now: datetime,
     already_offered_reschedule: bool = False,
-    db_path: Path | str | None = None,
 ) -> ConfirmationCall | None:
     """Queue the "your appointment was cancelled, want another date?" call —
     the one every cancellation (phone or wall) fires, immediately
@@ -1405,44 +1413,38 @@ async def queue_cancellation_rebooking_call(
         motivo="call_now",
     )
     if call is not None:
-        _persist_call_now_row(
-            call, db_path=db_path if db_path is not None else settings.product_db_path
-        )
+        _persist_call_now_row(call)
     return call
 
 
-def _persist_call_now_row(call: ConfirmationCall, *, db_path: Path | str) -> None:
-    """Mirror the queued call_now row into the product database's ``calls``
-    table — not just ``logs/confirmation_calls.json`` — so the wall (and,
-    once Supabase is configured, the board: ``database/remote.py`` mirrors
-    every write there already) sees it. ``call.confirmation_id`` is written
-    as the row's own ``call_id``, so ``sync_call_now_outcome_to_db`` can find
-    it again once the call resolves.
+def _persist_call_now_row(call: ConfirmationCall) -> None:
+    """Mirror the queued call_now row into ``public.calls`` — not just
+    ``logs/confirmation_calls.json`` — so the wall and the board see it.
+    ``call.confirmation_id`` is written as the row's own ``call_id``, so
+    ``sync_call_now_outcome_to_db`` can find it again once the call resolves.
 
     The appointment link is skipped, not faked, when the cancelled
     appointment has no row here yet — most wall-cancelled visits are the
-    read-only clinic's own seed data (see ``database/schema.py``'s
-    migration-2 comment); the outbound call itself is still recorded. Never
-    raises: a database hiccup must not stop the call from being queued.
+    read-only clinic's own seed data; the outbound call itself is still
+    recorded. Never raises: a store hiccup must not stop the call from being
+    queued.
     """
     try:
         from database import db
 
-        with db.connection(db_path) as conn:
-            appointment_id = call.appointment_id or None
-            if appointment_id and db.get_appointment(conn, appointment_id) is None:
-                appointment_id = None
-            db.insert_call(
-                conn,
-                call_id=call.confirmation_id,
-                direction="outbound",
-                purpose="reschedule",
-                language=call.language,
-                from_number=call.to,
-                started_at=db.now_iso(),
-                appointment_id=appointment_id,
-                motivo=call.motivo,
-            )
+        appointment_id = call.appointment_id or None
+        if appointment_id and db.get_appointment(appointment_id) is None:
+            appointment_id = None
+        db.insert_call(
+            call_id=call.confirmation_id,
+            direction="outbound",
+            purpose="reschedule",
+            language=call.language,
+            from_number=call.to,
+            started_at=db.now_iso(),
+            appointment_id=appointment_id,
+            motivo=call.motivo,
+        )
     except Exception:
         log.exception("could not persist call_now row for confirmation %s", call.confirmation_id)
 
@@ -1455,11 +1457,10 @@ def sync_call_now_outcome_to_db(
     status: str = "",
     transcript: str = "",
     detail: str = "",
-    db_path: Path | str | None = None,
 ) -> None:
     """Mirror a call_now confirmation call's answer back into the same
     ``calls`` row ``_persist_call_now_row`` wrote when it was queued — the
-    wall (and anything else reading the database instead of
+    wall (and anything else reading the store instead of
     ``logs/confirmation_calls.json``) needs the outcome, not just the queue
     entry.
 
@@ -1476,15 +1477,12 @@ def sync_call_now_outcome_to_db(
     try:
         from database import db
 
-        path = db_path if db_path is not None else settings.product_db_path
-        with db.connection(path) as conn:
-            db.update_call_outcome(
-                conn,
-                confirmation_id,
-                outcome=outcome,
-                transcript=transcript or None,
-                detail=detail or None,
-            )
+        db.update_call_outcome(
+            confirmation_id,
+            outcome=outcome,
+            transcript=transcript or None,
+            detail=detail or None,
+        )
     except Exception:
         log.exception("could not sync call_now outcome for confirmation %s", confirmation_id)
 

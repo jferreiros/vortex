@@ -22,7 +22,7 @@ from typing import Any, Literal
 
 from vortex.contract import MADRID
 from vortex.line.sms import SmsClient, format_slot_es, make_sms_client
-from vortex.settings import Settings
+from vortex.settings import REPO_ROOT, Settings
 
 log = logging.getLogger("vortex.line.sms_reminders")
 
@@ -76,7 +76,9 @@ def reminder_text(
 
 
 def default_reminders_path(settings: Settings) -> Path:
-    return settings.calls_log_path.with_name("sms_reminders.json")
+    """The reminder queue file. Local scratch, overridden by
+    ``VORTEX_SMS_REMINDERS_PATH``."""
+    return REPO_ROOT / "logs" / "sms_reminders.json"
 
 
 class ReminderStore:
