@@ -1,7 +1,7 @@
 .transcript-page {
   display: flex;
   flex-direction: column;
-  min-height: calc(100vh - var(--space-7) - var(--space-9));
+  height: calc(100vh - var(--space-7) - var(--space-9));
 }
 
 .transcript-page .transcript-card {

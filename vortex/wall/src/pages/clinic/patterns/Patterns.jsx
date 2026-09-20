@@ -4,8 +4,10 @@ import SectionHeader from "../../../components/ui/SectionHeader";
 import Card from "../../../components/ui/Card";
 import Button from "../../../components/ui/Button";
 import Placeholder from "../../../components/ui/Placeholder";
+import ShapeIcon from "../../../components/ui/ShapeIcon";
 import shapeTypesData from "../../../data/shapeTypes.json";
 import patternShapes from "../../../data/patternShapes.json";
+import patternsSeed from "../../../data/patterns.json";
 import "../pathways/pathways.css";
 import "./patterns.css";
 
@@ -23,7 +25,10 @@ const SHAPE_META = {
 };
 
 const FAMILY_EMOJI = { call: "☎️", visit: "🏥", message: "📥", condition: "🔍" };
-const SUBFAMILY_ARROW = { incoming: "↙️", outgoing: "↗️" };
+
+// Rendering-only labels for the tray's family selector (data/patternShapes.json
+// keeps plain text labels; this prefixes them here rather than in the file).
+const FAMILY_TRAY_EMOJI = { call: "☎️", message: "💬", visit: "🏥", condition: "🔎" };
 
 const GLYPH_BY_KEY = {};
 shapeTypesData.families.forEach((fam) => {
@@ -60,24 +65,11 @@ function resolveLabel(shape) {
   return template;
 }
 
-function ShapeGlyphs({ family, type, subfamily, emoji }) {
-  const mainEmoji = emoji || typeEmoji(family, type);
-  const familyEmoji = FAMILY_EMOJI[family];
-  const showFamilyBadge = familyEmoji && familyEmoji !== mainEmoji;
-
-  return (
-    <>
-      <span className="pathways-shape-main-emoji">{mainEmoji}</span>
-      {showFamilyBadge && (
-        <span className="pathways-shape-family-wrap">
-          <span className="pathways-shape-family-badge">{familyEmoji}</span>
-          {family === "call" && subfamily && (
-            <span className="pathways-shape-direction-badge">{SUBFAMILY_ARROW[subfamily] || ""}</span>
-          )}
-        </span>
-      )}
-    </>
-  );
+// One glyph, total — the exact type's emoji, falling back to the bare
+// family emoji when the type isn't decided yet. No family/direction badge
+// stacked on top of it; the tray's own selector carries that now.
+function ShapeGlyphs({ family, type, emoji }) {
+  return <ShapeIcon emoji={emoji || typeEmoji(family, type)} className="pathways-shape-main-emoji" />;
 }
 
 const DRAG_MIME = "application/x-pattern-shape";
@@ -101,6 +93,25 @@ function loadStoredState() {
     // corrupt or unavailable storage — wait for the server's copy
   }
   return null;
+}
+
+// The bundled seed (data/patterns.json) — read before ever hitting the
+// database, which runs slow. Only when this has nothing do we fall back to
+// the GET /api/wall/patterns round-trip below.
+function loadSeedState() {
+  if (
+    !Array.isArray(patternsSeed?.patterns) ||
+    patternsSeed.patterns.length === 0 ||
+    !patternsSeed.patterns.every(isValidPattern)
+  ) {
+    return null;
+  }
+  return {
+    patterns: patternsSeed.patterns,
+    selectedId: patternsSeed.selectedId ?? patternsSeed.patterns[0].id,
+    asOf: patternsSeed.asOf ?? null,
+    specialtyRecallDays: patternsSeed.specialtyRecallDays || {},
+  };
 }
 
 function applyPatternsDoc(json, setPatterns, setSelectedId, preferredId) {
@@ -326,13 +337,11 @@ function ShapeNode({ node, nodeNumber, onRemove, onDescriptionChange, onShapeCha
         >
           ×
         </button>
-        <span className={`pathways-shape ${hint ? "patterns-shape-parameterized" : ""}`} title={title}>
-          <ShapeGlyphs
-            family={node.shape.family}
-            type={node.shape.type}
-            subfamily={node.shape.subfamily}
-            emoji={node.shape.emoji}
-          />
+        <span
+          className={`pathways-shape pathways-shape-${node.shape.family} ${hint ? "patterns-shape-parameterized" : ""}`}
+          title={title}
+        >
+          <ShapeGlyphs family={node.shape.family} type={node.shape.type} emoji={node.shape.emoji} />
         </span>
       </div>
       <span className="patterns-node-type-label">{label}</span>
@@ -376,9 +385,12 @@ function SuggestionSlot({ suggestion, onDropShape, onDescriptionChange, onChainL
           onChange={onDescriptionChange}
         />
         <div className="pathways-shape-wrap">
-          <span className="pathways-shape patterns-suggestion-shape" title={label}>
+          <span
+            className={`pathways-shape patterns-suggestion-shape ${shape ? `pathways-shape-${shape.family}` : ""}`}
+            title={label}
+          >
             {shape ? (
-              <ShapeGlyphs family={shape.family} type={shape.type} subfamily={shape.subfamily} emoji={shape.emoji} />
+              <ShapeGlyphs family={shape.family} type={shape.type} emoji={shape.emoji} />
             ) : (
               <span className="pathways-shape-main-emoji">?</span>
             )}
@@ -557,7 +569,7 @@ function ShapeTray() {
             className={`pathways-tray-family ${familyDef.key === f.key ? "on" : ""}`}
             onClick={() => setFamilyKey(f.key)}
           >
-            {f.label}
+            {FAMILY_TRAY_EMOJI[f.key]} {f.label}
           </button>
         ))}
       </div>
@@ -584,8 +596,8 @@ function ShapeTray() {
                 e.dataTransfer.effectAllowed = "copy";
               }}
             >
-              <span className="pathways-shape">
-                <ShapeGlyphs family={familyDef.key} type={t.type} subfamily={subfamily} emoji={t.emoji} />
+              <span className={`pathways-shape pathways-shape-${familyDef.key}`}>
+                <ShapeGlyphs family={familyDef.key} type={t.type} emoji={t.emoji} />
               </span>
               <span className="pathways-tray-shape-label">{t.type}</span>
               {subfamily && <span className="pathways-tray-shape-subfamily">{subfamily}</span>}
@@ -600,7 +612,7 @@ function ShapeTray() {
 export default function Patterns() {
   const location = useLocation();
   const [initial] = useState(
-    () => loadStoredState() ?? { patterns: [], selectedId: null }
+    () => loadStoredState() ?? loadSeedState() ?? { patterns: [], selectedId: null }
   );
   const [patterns, setPatterns] = useState(initial.patterns);
   // A pattern detected on a patient's timeline wins the initial selection —
@@ -611,13 +623,25 @@ export default function Patterns() {
     detectedId && initial.patterns.some((p) => p.id === detectedId) ? detectedId : initial.selectedId;
   const [selectedId, setSelectedId] = useState(startingId ?? null);
   // asOf and specialtyRecallDays belong to the document, not to any one
-  // pattern; a Save has to put them back or the next load loses them.
-  const [docMeta, setDocMeta] = useState({ asOf: null, specialtyRecallDays: {} });
+  // pattern; a Save has to put them back or the next load loses them. The
+  // local save (STORAGE_KEY) doesn't carry them, so fall back to the seed's
+  // — same source of truth we already used for `initial.patterns` above.
+  const [docMeta, setDocMeta] = useState(() => {
+    const meta = {
+      asOf: initial.asOf ?? patternsSeed.asOf ?? null,
+      specialtyRecallDays: initial.specialtyRecallDays || patternsSeed.specialtyRecallDays || {},
+    };
+    RECALL_DAYS = meta.specialtyRecallDays;
+    return meta;
+  });
   const [renamingId, setRenamingId] = useState(null);
   const [saveStatus, setSaveStatus] = useState(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   useEffect(() => {
+    // The cache or the bundled seed already has patterns to show — skip the
+    // database round-trip entirely rather than wait on it.
+    if (initial.patterns.length > 0) return;
     let cancelled = false;
     fetch("/api/wall/patterns")
       .then((r) => (r.ok ? r.json() : Promise.reject()))
@@ -634,7 +658,7 @@ export default function Patterns() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [initial]);
 
   const selected = patterns.find((p) => p.id === selectedId) ?? patterns[0];
 
@@ -798,6 +822,17 @@ export default function Patterns() {
     }
     setTimeout(() => setSaveStatus(null), 2000);
   };
+
+  // First render, before either localStorage or the /api/wall/patterns
+  // fetch has produced a pattern to select — render a loading state instead
+  // of crashing on `selected.name` below.
+  if (!selected) {
+    return (
+      <div className="pathways-page patterns-page">
+        <Placeholder kind="diagram" label="Loading patterns…" minHeight="200px" />
+      </div>
+    );
+  }
 
   return (
     <div className="pathways-page patterns-page">

@@ -308,22 +308,6 @@
   color: var(--color-primary-deep);
 }
 
-.home-review-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: var(--space-4);
-}
-
-.home-review-half {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
-.home-review-half .feed-list {
-  max-height: 320px;
-}
-
 @media (max-width: 1100px) {
   .home-kpis {
     grid-template-columns: repeat(2, 1fr);
@@ -342,10 +326,6 @@
   .home-kpis {
     grid-template-columns: 1fr;
   }
-
-  .home-review-grid {
-    grid-template-columns: 1fr;
-  }
 }
 
 .home-call-empty {
@@ -354,40 +334,3 @@
   font-size: var(--text-sm);
 }
 
-.home-occupancy-meta {
-  margin: 0;
-  font-size: var(--text-sm);
-  color: var(--color-mute);
-}
-
-.home-occupancy-week {
-  display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  gap: var(--space-3);
-  align-items: end;
-  min-height: 120px;
-  padding: var(--space-4) 0;
-}
-
-.home-occupancy-day {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  height: 120px;
-  justify-content: flex-end;
-}
-
-.home-occupancy-bar {
-  width: 18px;
-  min-height: 8px;
-  border-radius: 4px;
-  background: var(--color-ink);
-  opacity: 0.7;
-}
-
-.home-occupancy-label,
-.home-occupancy-pct {
-  font-size: var(--text-xs);
-  color: var(--color-mute);
-}

@@ -27,16 +27,16 @@ export default function VortyDock() {
             type="button"
             className="vorty-bubble-close"
             onClick={() => setOpen(false)}
-            aria-label="Cerrar"
+            aria-label="Close"
           >
             ×
           </button>
           <p className="vorty-bubble-lead">
             {count === 0
-              ? "Ahora mismo no hay ninguna llamada en curso."
+              ? "There are no calls in progress right now."
               : count === 1
-                ? "Hay una llamada en curso."
-                : `Hay ${count} llamadas en curso.`}
+                ? "There is one call in progress."
+                : `There are ${count} calls in progress.`}
           </p>
           {count > 0 && (
             <ul className="vorty-bubble-calls">
@@ -50,10 +50,10 @@ export default function VortyDock() {
           )}
           <div className="vorty-bubble-links">
             <NavLink to="/clinic/home" onClick={() => setOpen(false)}>
-              Ver llamadas
+              View calls
             </NavLink>
             <NavLink to="/clinic/analytics" onClick={() => setOpen(false)}>
-              Ver analítica
+              View analytics
             </NavLink>
           </div>
         </div>
@@ -62,7 +62,7 @@ export default function VortyDock() {
         type="button"
         className="vorty-dock-button"
         onClick={() => setOpen((was) => !was)}
-        aria-label={open ? "Cerrar Vorty" : "Abrir Vorty"}
+        aria-label={open ? "Close Vorty" : "Open Vorty"}
         aria-expanded={open}
       >
         <img src="/wall/avatar2d-animated" alt="" className="vorty-dock-avatar" />

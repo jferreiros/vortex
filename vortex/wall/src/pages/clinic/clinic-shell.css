@@ -37,6 +37,20 @@
   color: var(--color-ink);
 }
 
+.clinic-shell-tool-labeled {
+  width: auto;
+  gap: var(--space-2);
+  padding: 0 var(--space-4) 0 var(--space-3);
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-sm);
+  background: var(--color-panel);
+  color: var(--color-ink);
+}
+
+.clinic-shell-tool-labeled:hover {
+  background: var(--color-bg);
+}
+
 /* Sidebar ------------------------------------------------------------------*/
 
 .clinic-sidebar {
@@ -85,15 +99,10 @@
   color: var(--color-mute);
 }
 
-.clinic-sidebar-nav,
-.clinic-sidebar-end {
+.clinic-sidebar-nav {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
-}
-
-.clinic-sidebar-end {
-  margin-top: auto;
 }
 
 .clinic-sidebar-group {
@@ -136,6 +145,7 @@
 }
 
 .clinic-sidebar-foot {
+  margin-top: auto;
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -211,8 +221,7 @@
   .clinic-sidebar-foot {
     display: none;
   }
-  .clinic-sidebar-nav,
-  .clinic-sidebar-end {
+  .clinic-sidebar-nav {
     flex-direction: row;
     margin-top: 0;
     width: auto;
