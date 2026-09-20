@@ -1,31 +1,31 @@
 export const STATUS_LABEL = {
-  live: "En llamada",
-  booked: "Cita reservada",
-  registered: "Paciente registrado",
-  rescheduled: "Cita movida",
-  cancelled: "Cita anulada",
-  refused: "Sin acción",
-  escalated: "Escalada",
-  ended: "Terminada",
+  live: "On call",
+  booked: "Appointment booked",
+  registered: "Patient registered",
+  rescheduled: "Appointment rescheduled",
+  cancelled: "Appointment cancelled",
+  refused: "No action",
+  escalated: "Escalated",
+  ended: "Ended",
 };
 
 export const LANGUAGE_LABEL = {
-  es: "Español",
-  ca: "Català",
-  eu: "Euskara",
-  gl: "Galego",
+  es: "Spanish",
+  ca: "Catalan",
+  eu: "Basque",
+  gl: "Galician",
   en: "English",
-  fr: "Français",
-  pt: "Português",
+  fr: "French",
+  pt: "Portuguese",
 };
 
 export const SPECIALTY_LABEL = {
-  general_practice: "Medicina general",
-  paediatrics: "Pediatría",
-  dermatology: "Dermatología",
-  orthopaedics: "Traumatología",
-  gynaecology: "Ginecología",
-  physiotherapy: "Fisioterapia",
+  general_practice: "General practice",
+  paediatrics: "Paediatrics",
+  dermatology: "Dermatology",
+  orthopaedics: "Orthopaedics",
+  gynaecology: "Gynaecology",
+  physiotherapy: "Physiotherapy",
 };
 
 export const LOCATION_LABEL = {
@@ -35,13 +35,13 @@ export const LOCATION_LABEL = {
 };
 
 export const INTENT_LABEL = {
-  book: "Agendar cita",
-  register: "Registrar paciente",
-  reschedule: "Cambiar cita",
-  cancel: "Anular cita",
-  "no-action": "Sin acción",
-  escalate: "Escalar",
-  question: "Consulta",
+  book: "Book appointment",
+  register: "Register patient",
+  reschedule: "Reschedule appointment",
+  cancel: "Cancel appointment",
+  "no-action": "No action",
+  escalate: "Escalate",
+  question: "Question",
 };
 
 // The closed, 18-value `reason` vocabulary from /api/v1/submit — see
@@ -49,24 +49,24 @@ export const INTENT_LABEL = {
 // these; the live feeds show the label so the reviewer sees which rule bit
 // without opening the call.
 export const REASON_LABEL = {
-  not_eligible_age: "Edad fuera de rango para la especialidad",
-  referral_required: "Falta la derivación necesaria",
-  provider_not_in_network: "Médico fuera de la red del seguro",
-  specialty_not_covered: "Especialidad no cubierta por el seguro",
-  location_not_covered: "Centro no cubierto por el seguro",
-  insurer_referral_required: "El seguro exige derivación previa",
-  allowance_exhausted: "Cupo anual agotado para esta cita",
-  provider_on_leave: "Médico de baja en esas fechas",
-  location_hours: "Centro cerrado a esa hora",
-  type_not_offered: "El centro no ofrece ese tipo de cita",
-  patient_history: "El historial del paciente lo descarta",
-  no_availability: "Sin huecos disponibles en la ventana pedida",
-  clinic_closed: "Clínica cerrada ese día",
-  patient_not_found: "Paciente no encontrado en el directorio",
-  provider_not_found: "Médico no encontrado",
-  caller_not_authorised: "Quien llama no está autorizado para el paciente",
-  out_of_scope: "Fuera del alcance de la línea",
-  medical_emergency: "Síntomas de urgencia médica",
+  not_eligible_age: "Age outside range for the specialty",
+  referral_required: "Missing required referral",
+  provider_not_in_network: "Provider outside the insurer's network",
+  specialty_not_covered: "Specialty not covered by insurance",
+  location_not_covered: "Site not covered by insurance",
+  insurer_referral_required: "Insurer requires a prior referral",
+  allowance_exhausted: "Annual allowance exhausted for this appointment",
+  provider_on_leave: "Provider on leave on those dates",
+  location_hours: "Site closed at that time",
+  type_not_offered: "The site doesn't offer that appointment type",
+  patient_history: "The patient's history rules it out",
+  no_availability: "No slots available in the requested window",
+  clinic_closed: "Clinic closed that day",
+  patient_not_found: "Patient not found in the directory",
+  provider_not_found: "Provider not found",
+  caller_not_authorised: "The caller is not authorised for the patient",
+  out_of_scope: "Out of scope for the line",
+  medical_emergency: "Medical emergency symptoms",
 };
 
 // The phase a live call is in. Two vocabularies reach this: the board's own
@@ -75,19 +75,19 @@ export const REASON_LABEL = {
 // shown to a Spanish-speaking clinic, so both are mapped here, and anything
 // unmapped falls through unchanged rather than becoming a blank chip.
 export const PHASE_LABEL = {
-  Listen: "Escuchando",
-  Identify: "Identificando",
-  Decide: "Decidiendo",
-  Submit: "Enviando",
-  Listening: "Escuchando",
-  Talking: "Hablando",
-  "Confirming slot": "Confirmando hueco",
-  "Waitlist offer": "Ofreciendo hueco",
-  Escalated: "Escalada",
-  Reminder: "Recordatorio",
+  Listen: "Listening",
+  Identify: "Identifying",
+  Decide: "Deciding",
+  Submit: "Submitting",
+  Listening: "Listening",
+  Talking: "Talking",
+  "Confirming slot": "Confirming slot",
+  "Waitlist offer": "Offering slot",
+  Escalated: "Escalated",
+  Reminder: "Reminder",
 };
 
 export function phaseView(call) {
   const raw = String(call?.phase || "").trim();
-  return { key: raw, label: PHASE_LABEL[raw] || raw || "En llamada" };
+  return { key: raw, label: PHASE_LABEL[raw] || raw || "On call" };
 }

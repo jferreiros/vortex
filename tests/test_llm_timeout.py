@@ -461,4 +461,4 @@ def test_the_holding_line_exists_in_every_language_we_detect() -> None:
         assert line.endswith("."), language
     assert wait_prompt_for("ca") == WAIT_LINES["ca"]
     # An unknown language falls back rather than raising mid-call.
-    assert wait_prompt_for("zz") == WAIT_LINES["en"]
+    assert wait_prompt_for("zz") == WAIT_LINES["es"]

@@ -1,0 +1,114 @@
+{
+  "_comment": "Mock per-patient history for Patient Timeline. Matching is computed by matchPattern.js against patterns.json (not hardcoded). Lucía = unfulfilled-referral (open referral to cardiology, no visits and no book → fires the referral suggestion). Antonio = healthy completed path (two recent derm visits with a booked follow-up) → no match. Rosa = cancelled-without-replacement (an incoming dermatology cancellation with no book since → fires the rebooking offer). Diego = no-availability-unrecovered (an incoming cardiology 'no availability' call with nothing after → fires the waitlist alert).",
+  "patients": [
+    {
+      "patientId": "P00042",
+      "name": "Lucía Ruiz López",
+      "referrals": ["cardiology"],
+      "events": [
+        {
+          "id": "e1",
+          "shape": { "family": "call", "subfamily": "incoming", "type": "scheduling" },
+          "description": "Phone enquiry after cardiology referral",
+          "date": "2025-01-14",
+          "specialty": "cardiology",
+          "chainLabel": "Enquiry call"
+        }
+      ]
+    },
+    {
+      "patientId": "P00107",
+      "name": "Antonio Pérez Gil",
+      "referrals": [],
+      "events": [
+        {
+          "id": "e1",
+          "shape": { "family": "call", "subfamily": "incoming", "type": "scheduling" },
+          "description": "Requests dermatology visit",
+          "date": "2026-07-02",
+          "specialty": "dermatology",
+          "chainLabel": "Scheduling call"
+        },
+        {
+          "id": "e2",
+          "shape": { "family": "visit", "type": "standard consultation" },
+          "description": "Dermatology consultation",
+          "date": "2026-07-10",
+          "specialty": "dermatology",
+          "chainLabel": "Consultation"
+        },
+        {
+          "id": "e3",
+          "shape": { "family": "message", "type": "results" },
+          "description": "Biopsy results published",
+          "date": "2026-07-20",
+          "specialty": "dermatology",
+          "chainLabel": "Results"
+        },
+        {
+          "id": "e4",
+          "shape": { "family": "call", "subfamily": "outgoing", "type": "appointment suggestion" },
+          "action": "book",
+          "description": "Booked follow-up",
+          "date": "2026-07-25",
+          "specialty": "dermatology",
+          "chainLabel": "Booked call"
+        },
+        {
+          "id": "e5",
+          "shape": { "family": "visit", "type": "standard consultation" },
+          "description": "Follow-up consultation",
+          "date": "2026-08-15",
+          "specialty": "dermatology",
+          "chainLabel": "Follow-up"
+        }
+      ]
+    },
+    {
+      "patientId": "P00210",
+      "name": "Rosa Fernández Díaz",
+      "referrals": [],
+      "events": [
+        {
+          "id": "e1",
+          "shape": { "family": "call", "subfamily": "incoming", "type": "scheduling" },
+          "description": "Books dermatology consultation",
+          "date": "2026-07-30",
+          "specialty": "dermatology",
+          "chainLabel": "Scheduling call"
+        },
+        {
+          "id": "e2",
+          "shape": { "family": "call", "subfamily": "incoming", "type": "cancellation" },
+          "description": "Cancels the dermatology visit",
+          "date": "2026-08-20",
+          "specialty": "dermatology",
+          "chainLabel": "Cancellation call"
+        }
+      ]
+    },
+    {
+      "patientId": "P00311",
+      "name": "Diego Morales Ortega",
+      "referrals": [],
+      "events": [
+        {
+          "id": "e1",
+          "shape": { "family": "call", "subfamily": "incoming", "type": "scheduling" },
+          "description": "Requests a cardiology appointment",
+          "date": "2026-09-01",
+          "specialty": "cardiology",
+          "chainLabel": "Scheduling call"
+        },
+        {
+          "id": "e2",
+          "shape": { "family": "call", "subfamily": "incoming", "type": "no availability" },
+          "description": "No cardiology slots available to offer",
+          "date": "2026-09-05",
+          "specialty": "cardiology",
+          "chainLabel": "No-availability call"
+        }
+      ]
+    }
+  ]
+}

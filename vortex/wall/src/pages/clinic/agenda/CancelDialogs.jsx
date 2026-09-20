@@ -32,10 +32,10 @@ async function post(url, body) {
 }
 
 const RANGE_ERRORS = {
-  missing_doctor: "Elige un doctor.",
-  missing_dates: "Elige las dos fechas.",
-  unknown_doctor: "No se encontró ese doctor.",
-  bad_request: "La petición no es válida.",
+  missing_doctor: "Choose a doctor.",
+  missing_dates: "Choose both dates.",
+  unknown_doctor: "That doctor wasn't found.",
+  bad_request: "The request isn't valid.",
 };
 
 export function CancelRangeDialog({ open, onClose, doctors, initialProviderId, today, onDone }) {
@@ -78,7 +78,7 @@ export function CancelRangeDialog({ open, onClose, doctors, initialProviderId, t
     });
     setBusy(false);
     if (!payload.ok) {
-      setError(RANGE_ERRORS[payload.error] || "No se pudo contar las citas.");
+      setError(RANGE_ERRORS[payload.error] || "Couldn't count the appointments.");
       return;
     }
     setPreview(payload);
@@ -95,7 +95,7 @@ export function CancelRangeDialog({ open, onClose, doctors, initialProviderId, t
     });
     setBusy(false);
     if (!payload.ok) {
-      setError(RANGE_ERRORS[payload.error] || "No se pudo cancelar.");
+      setError(RANGE_ERRORS[payload.error] || "Couldn't cancel.");
       return;
     }
     setResult(payload);
@@ -110,14 +110,14 @@ export function CancelRangeDialog({ open, onClose, doctors, initialProviderId, t
   return (
     <Modal
       open={open}
-      title="Cancelar citas"
+      title="Cancel appointments"
       onClose={onClose}
       actions={
         done ? (
-          <Button variant="primary" type="button" onClick={onClose}>Cerrar</Button>
+          <Button variant="primary" type="button" onClick={onClose}>Close</Button>
         ) : (
           <>
-            <Button variant="ghost" type="button" onClick={onClose}>Volver</Button>
+            <Button variant="ghost" type="button" onClick={onClose}>Back</Button>
             {ready ? (
               <Button
                 variant="danger"
@@ -125,7 +125,7 @@ export function CancelRangeDialog({ open, onClose, doctors, initialProviderId, t
                 disabled={busy || preview.count === 0}
                 onClick={runCancel}
               >
-                {busy ? "Cancelando…" : `Confirmar: cancelar ${preview.count} cita${preview.count === 1 ? "" : "s"}`}
+                {busy ? "Cancelling…" : `Confirm: cancel ${preview.count} appointment${preview.count === 1 ? "" : "s"}`}
               </Button>
             ) : (
               <Button
@@ -134,7 +134,7 @@ export function CancelRangeDialog({ open, onClose, doctors, initialProviderId, t
                 disabled={!valid || busy}
                 onClick={runPreview}
               >
-                {busy ? "Contando…" : "Ver citas afectadas"}
+                {busy ? "Counting…" : "View affected appointments"}
               </Button>
             )}
           </>
@@ -144,10 +144,10 @@ export function CancelRangeDialog({ open, onClose, doctors, initialProviderId, t
       {done ? (
         <p className="agenda-cancel-note">
           {result.cancelled === 0
-            ? "No había citas en ese rango."
-            : `Hecho: ${result.cancelled} cita${result.cancelled === 1 ? "" : "s"} de ${result.doctor} cancelada${result.cancelled === 1 ? "" : "s"}.`}
+            ? "There were no appointments in that range."
+            : `Done: ${result.cancelled} appointment${result.cancelled === 1 ? "" : "s"} for ${result.doctor} cancelled.`}
           {result.rebookings_queued > 0 &&
-            ` Se llamará a ${result.rebookings_queued} paciente${result.rebookings_queued === 1 ? "" : "s"} para buscar otro hueco.`}
+            ` ${result.rebookings_queued} patient${result.rebookings_queued === 1 ? "" : "s"} will be called to find another slot.`}
         </p>
       ) : (
         <div className="agenda-cancel-fields">
@@ -159,7 +159,7 @@ export function CancelRangeDialog({ open, onClose, doctors, initialProviderId, t
               value={providerId}
               onChange={(e) => { setProviderId(e.target.value); edit(); }}
             >
-              <option value="">Elige un doctor</option>
+              <option value="">Choose a doctor</option>
               {doctors.map((row) => (
                 <option key={row.id || row.name} value={row.id}>{row.name}</option>
               ))}
@@ -167,7 +167,7 @@ export function CancelRangeDialog({ open, onClose, doctors, initialProviderId, t
           </div>
           <div className="agenda-cancel-row">
             <div className="agenda-field">
-              <label htmlFor="cancel-from">Desde</label>
+              <label htmlFor="cancel-from">From</label>
               <input
                 id="cancel-from"
                 type="date"
@@ -177,7 +177,7 @@ export function CancelRangeDialog({ open, onClose, doctors, initialProviderId, t
               />
             </div>
             <div className="agenda-field">
-              <label htmlFor="cancel-to">Hasta</label>
+              <label htmlFor="cancel-to">To</label>
               <input
                 id="cancel-to"
                 type="date"
@@ -191,8 +191,8 @@ export function CancelRangeDialog({ open, onClose, doctors, initialProviderId, t
             <div className="agenda-cancel-preview">
               <p className="agenda-cancel-note">
                 {preview.count === 0
-                  ? `${preview.doctor} no tiene citas entre el ${fmtDay(from)} y el ${fmtDay(to)}.`
-                  : `Se cancelarán ${preview.count} cita${preview.count === 1 ? "" : "s"} de ${preview.doctor} entre el ${fmtDay(from)} y el ${fmtDay(to)}.`}
+                  ? `${preview.doctor} has no appointments between ${fmtDay(from)} and ${fmtDay(to)}.`
+                  : `${preview.count} appointment${preview.count === 1 ? "" : "s"} for ${preview.doctor} will be cancelled between ${fmtDay(from)} and ${fmtDay(to)}.`}
               </p>
               {preview.sample?.length > 0 && (
                 <ul className="agenda-cancel-list">
@@ -200,7 +200,7 @@ export function CancelRangeDialog({ open, onClose, doctors, initialProviderId, t
                     <li key={i}>{fmtDay(row.date)} · {row.time} — {row.full_name}</li>
                   ))}
                   {preview.count > preview.sample.length && (
-                    <li>…y {preview.count - preview.sample.length} más</li>
+                    <li>…and {preview.count - preview.sample.length} more</li>
                   )}
                 </ul>
               )}
@@ -236,8 +236,8 @@ export function CancelVisitDialog({ visit, doctorName, onClose, onDone }) {
     if (!payload.ok) {
       setError(
         payload.error === "not_booked"
-          ? "Esa cita ya no existe en la agenda."
-          : "No se pudo cancelar la cita."
+          ? "That appointment no longer exists in the schedule."
+          : "Couldn't cancel the appointment."
       );
       if (payload.error === "not_booked") onDone();
       return;
@@ -249,28 +249,28 @@ export function CancelVisitDialog({ visit, doctorName, onClose, onDone }) {
   return (
     <Modal
       open={Boolean(visit)}
-      title="Cancelar esta cita"
+      title="Cancel this appointment"
       onClose={onClose}
       actions={
         <>
-          <Button variant="ghost" type="button" onClick={onClose}>Mantener cita</Button>
+          <Button variant="ghost" type="button" onClick={onClose}>Keep appointment</Button>
           <Button variant="danger" type="button" disabled={busy} onClick={runCancel}>
-            {busy ? "Cancelando…" : "Sí, cancelar la cita"}
+            {busy ? "Cancelling…" : "Yes, cancel the appointment"}
           </Button>
         </>
       }
     >
       {visit && (
         <div className="agenda-cancel-fields">
-          <p className="agenda-cancel-note">¿Estás seguro? Se cancelará esta cita:</p>
+          <p className="agenda-cancel-note">Are you sure? This appointment will be cancelled:</p>
           <dl className="agenda-kv">
-            <div><dt>Paciente</dt><dd>{visit.full_name}</dd></div>
+            <div><dt>Patient</dt><dd>{visit.full_name}</dd></div>
             <div><dt>Doctor</dt><dd>{doctorName || visit.provider_name || "—"}</dd></div>
-            <div><dt>Cuándo</dt><dd>{visit.when}</dd></div>
-            <div><dt>Centro</dt><dd>{visit.location_name || "—"}</dd></div>
+            <div><dt>When</dt><dd>{visit.when}</dd></div>
+            <div><dt>Site</dt><dd>{visit.location_name || "—"}</dd></div>
           </dl>
           <p className="agenda-cancel-note">
-            El paciente pasará a la cola de reagendado: se le llamará para buscar otro hueco.
+            The patient will move to the reschedule queue: they will be called to find another slot.
           </p>
           {error && <p className="agenda-error">{error}</p>}
         </div>

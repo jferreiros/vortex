@@ -1,7 +1,6 @@
 import { BrowserRouter, HashRouter, Routes, Route, Navigate } from "react-router-dom";
 import ScrollToTop from "./ScrollToTop";
 import PageWipeOverlay from "./PageWipeOverlay";
-import Landing from "../pages/landing/Landing";
 import ClinicShell from "../pages/clinic/ClinicShell";
 import Home from "../pages/clinic/home/Home";
 import Settings from "../pages/clinic/settings/Settings";
@@ -33,7 +32,7 @@ export default function AppRouter() {
       <ScrollToTop />
       <PageWipeOverlay />
       <Routes>
-        <Route path="/" element={<Landing />} />
+        <Route path="/" element={<Navigate to="/clinic/home" replace />} />
 
         <Route path="/clinic" element={<ClinicShell />}>
           <Route index element={<Navigate to="home" replace />} />
@@ -57,7 +56,7 @@ export default function AppRouter() {
           <Route path="patterns" element={<Patterns />} />
         </Route>
 
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="*" element={<Navigate to="/clinic/home" replace />} />
       </Routes>
     </Router>
   );

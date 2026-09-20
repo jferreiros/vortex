@@ -6,7 +6,7 @@ import { CancelRangeDialog, CancelVisitDialog } from "./CancelDialogs";
 import "./agenda.css";
 
 const STORAGE_KEY = "vortex.clinic.doctorName";
-const DOW = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
+const DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 function addDays(iso, days) {
   const [year, month, day] = iso.split("-").map(Number);
@@ -94,8 +94,8 @@ export default function Agenda() {
     if (!payload.ok) {
       setData(null);
       setError(payload.error === "ambiguous"
-        ? "Hay varias coincidencias. Elige el nombre completo."
-        : "No hay ningún horario con ese nombre.");
+        ? "There are several matches. Choose the full name."
+        : "No schedule found for that name.");
       return;
     }
     setError("");
@@ -172,14 +172,14 @@ export default function Agenda() {
     <div className="agenda-page">
       <SectionHeader
         eyebrow="Agenda"
-        title={data?.doctor?.name || "Horarios"}
+        title={data?.doctor?.name || "Schedule"}
         subtitle={
           data?.doctor?.specialty
-            || "Elige especialidad o doctor. El calendario enseña las citas del pack."
+            || "Choose a specialty or doctor. The calendar shows the pack's appointments."
         }
         action={
           <Button variant="secondary" type="button" onClick={() => setRangeOpen(true)}>
-            Cancelar
+            Cancel
           </Button>
         }
       />
@@ -191,12 +191,12 @@ export default function Agenda() {
           value={name}
           onChange={(event) => pickDoctor(event.target.value)}
         >
-          <option value="">Cualquiera</option>
+          <option value="">Any</option>
           {doctors.map((row) => (
             <option key={row.name} value={row.name}>{row.name}</option>
           ))}
         </select>
-        <label className="agenda-label" htmlFor="agenda-specialty">Especialidad</label>
+        <label className="agenda-label" htmlFor="agenda-specialty">Specialty</label>
         <select
           id="agenda-specialty"
           className="ui-select agenda-filter"
@@ -213,12 +213,12 @@ export default function Agenda() {
             }
           }}
         >
-          <option value="">Todas</option>
+          <option value="">All</option>
           {options.specialties.map((row) => (
             <option key={row.id} value={row.id}>{row.name}</option>
           ))}
         </select>
-        <label className="agenda-label" htmlFor="agenda-site">Sede</label>
+        <label className="agenda-label" htmlFor="agenda-site">Site</label>
         <select
           id="agenda-site"
           className="ui-select agenda-filter"
@@ -228,12 +228,12 @@ export default function Agenda() {
             setSelected(null);
           }}
         >
-          <option value="">Todas</option>
+          <option value="">All</option>
           {options.sites.map((row) => (
             <option key={row.id} value={row.id}>{row.name}</option>
           ))}
         </select>
-        <label className="agenda-label" htmlFor="agenda-type">Tipo de cita</label>
+        <label className="agenda-label" htmlFor="agenda-type">Appointment type</label>
         <select
           id="agenda-type"
           className="ui-select agenda-filter"
@@ -243,7 +243,7 @@ export default function Agenda() {
             setSelected(null);
           }}
         >
-          <option value="">Todos</option>
+          <option value="">All</option>
           {options.types.map((row) => (
             <option key={row.id} value={row.id}>{row.name}</option>
           ))}
@@ -254,26 +254,26 @@ export default function Agenda() {
       {loading && !data ? (
         <Card padding="lg">
           <div className="agenda-empty">
-            <p>Cargando agenda…</p>
+            <p>Loading schedule…</p>
           </div>
         </Card>
       ) : !data ? (
         <Card padding="lg">
           <div className="agenda-empty">
-            <p>No hay horarios para esos filtros.</p>
+            <p>No schedules for these filters.</p>
           </div>
         </Card>
       ) : selected ? (
         <div className="agenda-day-stack">
           <Button variant="secondary" type="button" className="agenda-back" onClick={backToWeek}>
-            ‹ Volver al calendario
+            ‹ Back to calendar
           </Button>
           <div className="agenda-consult">
           <Card padding="lg" className="agenda-day-pane">
             <SectionHeader
-              eyebrow={focused?.today ? "Hoy" : lookingLabel}
+              eyebrow={focused?.today ? "Today" : lookingLabel}
               title={lookingLabel}
-              subtitle={dayVisits.length === 1 ? "1 cita" : `${dayVisits.length} citas`}
+              subtitle={dayVisits.length === 1 ? "1 appointment" : `${dayVisits.length} appointments`}
             />
             <DayList
               visits={dayVisits}
@@ -287,13 +287,13 @@ export default function Agenda() {
       ) : calView === "day" ? (
         <div className="agenda-day-stack">
           <Button variant="secondary" type="button" className="agenda-back" onClick={backToWeek}>
-            ‹ Volver al calendario
+            ‹ Back to calendar
           </Button>
         <Card padding="lg" className="agenda-day-pane">
           <SectionHeader
-            eyebrow={focused?.today ? "Hoy" : lookingLabel}
+            eyebrow={focused?.today ? "Today" : lookingLabel}
             title={lookingLabel}
-            subtitle={dayVisits.length === 1 ? "1 cita" : `${dayVisits.length} citas`}
+            subtitle={dayVisits.length === 1 ? "1 appointment" : `${dayVisits.length} appointments`}
           />
           <DayList
             visits={dayVisits}
@@ -348,11 +348,11 @@ export default function Agenda() {
               </div>
               {calView === "week" ? (
                 <Button variant="ghost" type="button" onClick={() => setCalView("month")}>
-                  Mes
+                  Month
                 </Button>
               ) : (
                 <Button variant="ghost" type="button" onClick={() => setCalView("week")}>
-                  Semana
+                  Week
                 </Button>
               )}
             </div>
@@ -484,7 +484,7 @@ function DayList({ visits, selectedKey, onPick }) {
   if (visits.length === 0) {
     return (
       <div className="agenda-empty">
-        <p>No hay citas este día.</p>
+        <p>No appointments this day.</p>
       </div>
     );
   }
@@ -512,33 +512,33 @@ function VisitDetail({ visit, onCancel }) {
       <div className="agenda-visit-head">
         <h3>{visit.time} · {visit.full_name}</h3>
         <span>
-          {visit.appointment_type || "Cita"} · {visit.duration_minutes || 15} min
+          {visit.appointment_type || "Appointment"} · {visit.duration_minutes || 15} min
         </span>
       </div>
       {visit.note ? (
         <div className="agenda-symptom">
-          <span>Para el trato</span>
+          <span>Treatment note</span>
           <p>{visit.note}</p>
         </div>
       ) : null}
       <div className="agenda-pills">
-        <span>{visit.has_visited_before ? "Ya vino" : "Paciente nuevo"}</span>
+        <span>{visit.has_visited_before ? "Returning patient" : "New patient"}</span>
         {visit.sex ? <span>{visit.sex}</span> : null}
         {visit.age ? <span>{visit.age}</span> : null}
       </div>
       <dl className="agenda-kv">
-        <div><dt>Paciente</dt><dd>{visit.full_name}</dd></div>
+        <div><dt>Patient</dt><dd>{visit.full_name}</dd></div>
         {visit.provider_name ? <div><dt>Doctor</dt><dd>{visit.provider_name}</dd></div> : null}
-        <div><dt>Cuándo</dt><dd>{visit.when}</dd></div>
-        <div><dt>Duración</dt><dd>{visit.duration_minutes || 15} min</dd></div>
-        <div><dt>Centro</dt><dd>{visit.location_name || "—"}</dd></div>
-        <div><dt>Seguro</dt><dd>{visit.insurer || "—"}</dd></div>
-        <div><dt>Teléfono</dt><dd>{visit.phone || "—"}</dd></div>
+        <div><dt>When</dt><dd>{visit.when}</dd></div>
+        <div><dt>Duration</dt><dd>{visit.duration_minutes || 15} min</dd></div>
+        <div><dt>Site</dt><dd>{visit.location_name || "—"}</dd></div>
+        <div><dt>Insurance</dt><dd>{visit.insurer || "—"}</dd></div>
+        <div><dt>Phone</dt><dd>{visit.phone || "—"}</dd></div>
       </dl>
       {visit.provider_id && visit.slot ? (
         <div className="agenda-visit-actions">
           <Button variant="secondary" type="button" onClick={onCancel}>
-            Cancelar esta cita
+            Cancel this appointment
           </Button>
         </div>
       ) : null}

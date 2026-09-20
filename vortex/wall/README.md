@@ -1,8 +1,8 @@
 # vortex/wall — the React app
 
-The SPA behind `/call/{call_id}/zoom`: Landing page, the per-call "zoom" view
-(voice orb, live tool demo, extracted info), and the Clinic View (Home,
-Settings, Insights, Live Calls). Not to be confused with `make board`'s own
+The SPA behind `/call/{call_id}/zoom`: the per-call "zoom" view (voice orb,
+live tool demo, extracted info), and the Clinic View (Home, Settings,
+Insights, Live Calls) — the app's entry point. Not to be confused with `make board`'s own
 `/wall` route — that's the NiceGUI jury projector page, served straight from
 `vortex/observability/live.py`. This app is a separate stack living
 alongside it: React 18 + Vite + `react-router-dom` (`HashRouter`, so the
@@ -75,18 +75,6 @@ transcript (fixed 2026-09-19) — the `/wall/vorty-face` line was missing.
 
 ## Patterns worth reusing
 
-- **`src/pages/landing/useCrossfadeScroll.js`** — an eased, JS-driven
-  scroll-to that fades a full-viewport veil (colour = the destination
-  section's background) in, scrolls underneath it, then fades it out.
-  Use this instead of `scrollIntoView({behavior: "smooth"})` anywhere a
-  section change should read as a deliberate transition rather than an
-  instant jump — see `Landing.jsx` for the wiring (veil element + passing
-  `scrollToId` down to the trigger).
-- **`src/pages/landing/useHeroScroll.js`** vs. `Reveal.jsx`'s spring: read
-  the comment in `useHeroScroll.js` for when to track scroll position
-  directly (1:1, e.g. shrinking something as you scroll) vs. when to use a
-  React Spring transition instead (a discrete on/off state, e.g. "has this
-  scrolled into view").
 - **`src/app/pageWipe.js` + `PageWipeOverlay.jsx`** — a full-screen wipe
   transition fired from anywhere (`triggerPageWipe(toPath)`) that covers the
   screen, swaps the route while covered, then reveals it. Mounted at the

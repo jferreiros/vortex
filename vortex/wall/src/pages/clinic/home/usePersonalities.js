@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 
 const FALLBACK_STYLES = [
-  { id: "warm", label: "Cálida", hint: "Saluda, usa el nombre y confirma la cita sin prisa." },
-  { id: "brisk", label: "Directa", hint: "Va al grano y ofrece dos huecos, no diez." },
-  { id: "calm", label: "Tranquila", hint: "Repite lo que ha oído y no tiene prisa." },
+  { id: "warm", label: "Warm", hint: "Greets, uses the name, and confirms the appointment without rushing." },
+  { id: "brisk", label: "Brisk", hint: "Gets straight to the point and offers two slots, not ten." },
+  { id: "calm", label: "Calm", hint: "Repeats back what it heard and isn't in a hurry." },
 ];
 const FALLBACK_LOOKS = ["none", "headset", "beanie", "baseball-cap", "sunglasses", "halo"];
 
@@ -31,7 +31,7 @@ export function usePersonalities() {
       if (json.looks?.length) setLooks(json.looks);
       setError(null);
     } catch (e) {
-      setError(e.message || "no se pudo cargar");
+      setError(e.message || "couldn't load");
     }
     setLoading(false);
   }, []);
@@ -66,7 +66,7 @@ export function usePersonalities() {
         body: JSON.stringify(draft),
       });
       const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body.error || `guardar: ${res.status}`);
+      if (!res.ok) throw new Error(body.error || `save: ${res.status}`);
       setItems((list) => list.map((p) => (p.slug === slug ? body : p)));
       return { ok: true };
     } catch (e) {
@@ -82,7 +82,7 @@ export function usePersonalities() {
         body: JSON.stringify(draft),
       });
       const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body.error || `crear: ${res.status}`);
+      if (!res.ok) throw new Error(body.error || `create: ${res.status}`);
       setItems((list) => [...list, body]);
       return { ok: true };
     } catch (e) {

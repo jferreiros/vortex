@@ -80,6 +80,20 @@ function buildSummary(turns, name) {
   return lastAgent || asked;
 }
 
+function groupTurns(turns) {
+  const groups = [];
+  for (const turn of turns) {
+    const last = groups[groups.length - 1];
+    if (last && last.role === turn.role) {
+      last.turns.push(turn);
+      last.text = `${last.text} ${turn.text}`.trim();
+    } else {
+      groups.push({ id: turn.id, role: turn.role, text: turn.text, turns: [turn] });
+    }
+  }
+  return groups;
+}
+
 function preview(value) {
   if (value == null || value === "") return null;
   const leaf = (v) => {
@@ -150,6 +164,7 @@ export default function LiveCallDetail() {
   const streamedTurns = items.filter((it) => it.type === "turn");
   const streamedTools = items.filter((it) => it.type === "tool");
   const turns = streamedTurns.length ? streamedTurns : listed?.turns || [];
+  const turnGroups = useMemo(() => groupTurns(turns), [turns]);
   const tools = streamedTools.length ? streamedTools : listed?.tools || [];
   const file = patientFile(items);
   const name = callerName(items, listed, call);
@@ -176,7 +191,7 @@ export default function LiveCallDetail() {
   const summary = useMemo(() => buildSummary(turns, name), [turns, name]);
   const final = deriveFinalAction(call);
   const finalLabel =
-    final.label === "—" ? (listed?.status === "escalated" ? "Escalada" : "En curso…") : final.label;
+    final.label === "—" ? (listed?.status === "escalated" ? "Escalated" : "In progress…") : final.label;
 
   function go(delta) {
     if (!hasPager) return;
@@ -223,13 +238,13 @@ export default function LiveCallDetail() {
 
         <div className="tx-body">
           <div className="tx-stream" ref={streamRef}>
-            {turns.length === 0 ? (
+            {turnGroups.length === 0 ? (
               <p className="tx-empty">Waiting for the first turn…</p>
             ) : (
-              turns.map((item, i) => {
-                const agent = item.role !== "user";
+              turnGroups.map((group, i) => {
+                const agent = group.role !== "user";
                 return (
-                  <article key={item.id} className="tx-row">
+                  <article key={group.id} className="tx-row">
                     <span className={`tx-avatar ${agent ? "agent" : ""}`}>
                       {agent ? (
                         <span className="tx-vorty" style={{ animationDelay: `${(i % 5) * 0.35}s` }}>
@@ -241,8 +256,8 @@ export default function LiveCallDetail() {
                     </span>
                     <div className="tx-msg">
                       <span className="tx-who">{agent ? "Vortex" : name}</span>
-                      <p>{item.text}</p>
-                      <time>{turnClock(item, i, call?.started_at)}</time>
+                      <p>{group.text}</p>
+                      <time>{turnClock(group.turns[0], i, call?.started_at)}</time>
                     </div>
                   </article>
                 );
@@ -261,7 +276,7 @@ export default function LiveCallDetail() {
                   {language ? ` · ${language}` : ""}
                 </p>
                 <span className={`tx-status ${listed?.status === "escalated" ? "warn" : ""}`}>
-                  {STATUS_LABEL[statusKey] || (listed ? phaseView(listed).label : "En llamada")}
+                  {STATUS_LABEL[statusKey] || (listed ? phaseView(listed).label : "On call")}
                 </span>
               </div>
             </div>

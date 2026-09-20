@@ -54,7 +54,8 @@ from vortex.conversation.language import (
     tts_voice_for,
 )
 from vortex.conversation.prompt import (
-    GREETING,
+    FillerPicker,
+    greeting_for,
     handoff_greeting_for,
     idle_submit_line_for,
     initial_messages,
@@ -69,8 +70,10 @@ from vortex.conversation.turns import (
     is_refusal_acceptance,
     user_turn_strategies,
 )
-from vortex.line import personalities, voice_config
+from vortex.line import voice_config
 from vortex.line.aic_filter import build_audio_in_filter
+from vortex.line.ambience import OFFICE_SOUND, TYPING_SOUND, _make_ambience_mixer
+from vortex.line.elevenlabs_voice import ElevenLabsVoicePreset
 from vortex.line.llm_timeout import first_token_guard
 from vortex.line.session import CallSession
 from vortex.line.soniox_stall import make_stall_guarded_soniox_stt
@@ -95,29 +98,9 @@ SONIOX_ENDPOINT_SENSITIVITY = 0.0
 SONIOX_ENDPOINT_LATENCY_ADJUSTMENT_LEVEL = 0
 
 # The tool filler masks LLM latency, but a tool chain runs several completions
-# in a row and each one started a batch: the same call spoke "Un momento."
-# six times in seven seconds (CA-voicetest-1789811447), which masks nothing
-# and floods the line. One filler per interaction: the guard speaks the first
-# batch after the caller said something, and after that only once per cooldown.
+# in a row and each one started a batch. Speak once per caller turn; after that
+# only the keyboard. A 4 s cooldown used to re-speak mid-lookup (CA-mic-1789862225014).
 FILLER_REPEAT_COOLDOWN_SECS = 4.0
-
-# Spoken the instant a tool call starts, so the caller hears something while
-# the LLM waits on the clinic API (~1.3 s p50). Keep each line under ~1 s of
-# audio. Pipecat treats TTSSpeakFrame as bot speech, so the word gate and the
-# idle timer stay quiet for the duration. See docs/research/03-turn-detection.md.
-TOOL_FILLERS: dict[str, str] = {
-    "en": "One moment.",
-    "es": "Un momento.",
-    "ca": "Un moment.",
-    "gl": "Un momento.",
-    "eu": "Momentu bat.",
-}
-
-
-def tool_filler_for(language: str | None = None) -> str:
-    """Short filler for the call's current language. Falls back to English."""
-    code = normalise_language(language) or DEFAULT_LANGUAGE
-    return TOOL_FILLERS.get(code, TOOL_FILLERS[DEFAULT_LANGUAGE])
 
 
 def _language_hints(codes: tuple[str, ...]) -> list[Any]:
@@ -240,14 +223,19 @@ async def run_pipecat_call(
             model=settings.aic_model_id,
             enabled=True,
         )
+    ambience_mixer = _make_ambience_mixer()
+    if ambience_mixer is not None:
+        ctx.log.event("voice.ambience", sound="office")
     transport = FastAPIWebsocketTransport(
         websocket=ws,
         params=FastAPIWebsocketParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
+            audio_out_sample_rate=LINE_SAMPLE_RATE,
             add_wav_header=False,
             serializer=serializer,
             audio_in_filter=audio_in_filter,
+            audio_out_mixer=ambience_mixer,
         ),
     )
 
@@ -296,18 +284,21 @@ async def run_pipecat_call(
         timeout_log_event=ctx.log.event,
     )
 
-    # The wall's "Voz del agente" card and the receptionist on the phone, both
-    # read per socket: a change lands on the next call, never mid-flight, and
-    # nothing about the sound is shared between two concurrent calls.
+    # The wall's two cards, read once per socket: a change lands on the next
+    # call, never mid-flight, and nothing about the sound is shared between two
+    # concurrent calls. "Voz del agente" carries the delivery; the
+    # Personalities page carries who is answering — their name and tone go into
+    # the prompt below, their slug picks the ElevenLabs voice and model here.
     voice_cfg = voice_config.load(settings)
-    persona = personalities.active(settings)
-    tts = _make_tts_stage(settings, language_state, voice_cfg, persona.slug)
+    persona = _active_personality(settings)
+    persona_slug = getattr(persona, "slug", "") if persona else ""
+    tts = _make_tts_stage(settings, language_state, voice_cfg, persona_slug)
     ctx.log.event(
-        "voice.persona",
-        persona=persona.slug,
-        name=persona.name,
-        voice=elevenlabs_voice_id(language_state.language, settings, voice_cfg.voice, persona.slug),
-        model=elevenlabs_model_for(persona.slug, settings),
+        "voice.personality",
+        slug=persona_slug,
+        name=getattr(persona, "name", "") if persona else "",
+        voice=elevenlabs_voice_id(language_state.language, settings, voice_cfg.voice, persona_slug),
+        model=elevenlabs_model_for(persona_slug, settings),
         gender=voice_cfg.voice,
     )
 
@@ -337,6 +328,10 @@ async def run_pipecat_call(
     messages = initial_messages(
         ctx.now, language=language_state.language, caller=caller, handoff=session.handoff
     )
+    # Who is on the phone, before how they say it: the persona gives the model a
+    # name to answer to, the sliders only colour the delivery.
+    if block := _persona_directive(persona):
+        messages[0]["content"] += f"\n{block}"
     # Tono/Amabilidad are not TTS fields: they arrive as one extra line on the
     # system prompt. Empty at neutral, so an untouched card changes nothing.
     if directive := voice_config.style_directive(voice_cfg):
@@ -354,9 +349,9 @@ async def run_pipecat_call(
     hangup = _make_hangup_watcher(session)
     aggregators.user().add_event_handler("on_user_turn_idle", hangup.on_user_idle)
 
-    # One filler guard per call, shared by the speaker and the observer: the
-    # observer marks caller turns, the speaker spends the filler slot.
+    # One filler guard and picker per call, shared by the speaker and the observer.
     filler_guard = _ToolFillerGuard()
+    filler_picker = FillerPicker()
 
     stages: list[Any] = [transport.input(), stt]
     # Always on: one multilingual service speaks all five languages, so there
@@ -365,12 +360,13 @@ async def run_pipecat_call(
     # provider was declared Spanish-only — and that silently froze the call in
     # English *and* left ``session.language`` unset, so the day-before
     # confirmation call was dialled in the wrong language too.
-    stages.append(_LanguageWatcher(session, language_state, voice_cfg, persona.slug))
+    stages.append(_LanguageWatcher(session, language_state, voice_cfg, persona_slug))
     stages += [
         aggregators.user(),
         llm,
         _PrivacyGuard(session, language_state),
         tts,
+        _AmbienceSwitcher(session),
         transport.output(),
         aggregators.assistant(),
     ]
@@ -394,7 +390,12 @@ async def run_pipecat_call(
     session.usage.metered = True
     hangup.bind(task)
 
-    greeting = handoff_greeting_for(language_state.language) if session.handoff else GREETING
+    greeting = (
+        handoff_greeting_for(language_state.language)
+        if session.handoff
+        else _persona_greeting(persona, language_state.language)
+        or greeting_for(language_state.language)
+    )
 
     @transport.event_handler("on_client_connected")
     async def _on_connected(transport: Any, client: Any) -> None:
@@ -415,7 +416,15 @@ async def run_pipecat_call(
     )
     llm.add_event_handler(
         "on_function_calls_started",
-        _make_tool_filler_speaker(session, language_state, task, guard=filler_guard),
+        _make_tool_filler_speaker(
+            session,
+            language_state,
+            task,
+            guard=filler_guard,
+            picker=filler_picker,
+            tts=tts,
+            output=transport.output(),
+        ),
     )
 
     async def _on_user_turn_started(aggregator: Any, *args: Any) -> None:
@@ -428,6 +437,59 @@ async def run_pipecat_call(
     runner = PipelineRunner(handle_sigint=False)
     await runner.run(task)
     return "pipeline_finished"
+
+
+def _active_personality(settings: Any) -> Any | None:
+    """The receptionist the wall's Personalities page put on the phone.
+
+    One tiny sqlite read per socket. ``None`` when the store cannot be read at
+    all: a clinic whose db is missing or corrupt still answers its phone, with
+    the prompt and the greeting it had before the page existed.
+
+    ``personality.voices`` is deliberately not wired: those are Google Chirp
+    names and ElevenLabs is the primary, so the voice stays the provider's.
+    """
+    try:
+        from vortex.line import personalities
+
+        return personalities.active(settings)
+    except Exception as exc:  # a broken db must never stop a call
+        log.warning("no personality on this call: %s", exc)
+        return None
+
+
+def _persona_directive(person: Any | None) -> str:
+    """The PERSONA line appended to the system prompt, or "" when there is none.
+
+    The tone is free text a human typed on the wall, capped at
+    ``personalities.TONE_MAX_CHARS`` so it stays a fragment inside the prompt's
+    token budget rather than a second prompt.
+    """
+    if person is None:
+        return ""
+    name = str(getattr(person, "name", "") or "").strip()
+    if not name:
+        return ""
+    role = str(getattr(person, "role", "") or "").strip()
+    tone = str(getattr(person, "tone", "") or "").strip()
+    head = f"PERSONA. Your name is {name}, {role}." if role else f"PERSONA. Your name is {name}."
+    return f"{head} {tone}".strip()
+
+
+def _persona_greeting(person: Any | None, language: str) -> str:
+    """The persona's own opening line in this language, or "" to fall back.
+
+    ``greetings`` may be partial (the wall seeds Spanish and English), so a
+    call that opens in Catalan reads the clinic's own greeting instead.
+    """
+    if person is None:
+        return ""
+    try:
+        code = normalise_language(language) or DEFAULT_LANGUAGE
+        return str((getattr(person, "greetings", None) or {}).get(code, "")).strip()
+    except Exception as exc:
+        log.warning("personality greeting unusable: %s", exc)
+        return ""
 
 
 def _providers(settings: Any) -> dict[str, object]:
@@ -520,12 +582,11 @@ class _ToolFillerGuard:
 
     def wants_to_speak(self) -> bool:
         """Consume one filler slot. ``True`` means the phrase should go out."""
-        now = self._clock()
-        if self._caller_spoke or now - self._last_spoken_at >= self._cooldown:
-            self._caller_spoke = False
-            self._last_spoken_at = now
-            return True
-        return False
+        if not self._caller_spoke:
+            return False
+        self._caller_spoke = False
+        self._last_spoken_at = self._clock()
+        return True
 
 
 def _make_tts_stage(
@@ -588,6 +649,8 @@ def _make_tts(
 
     from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 
+    # The voice character is a hardcoded preset, not an env knob.
+    preset = ElevenLabsVoicePreset.RECEPTIONIST.value
     return ElevenLabsTTSService(
         api_key=settings.elevenlabs_api_key,
         # A WebSocket origin, so an AI Gateway in front of ElevenLabs goes
@@ -598,9 +661,72 @@ def _make_tts(
             voice=voice,
             model=elevenlabs_model_for(persona, settings),
             language=language,
+            stability=preset.stability,
+            similarity_boost=preset.similarity_boost,
+            style=preset.style,
+            use_speaker_boost=preset.use_speaker_boost,
             **({"speed": voice_config.elevenlabs_speed(vcfg)} if vcfg else {}),
         ),
     )
+
+
+def _AmbienceSwitcher(  # noqa: N802 - factory that returns a processor
+    session: CallSession,
+):
+    """Switch the output mixer to typing during tool lookups.
+
+    Typing starts on ``FunctionCallInProgressFrame``. It stays up through the
+    filler and the post-tool silence, then returns to office on the first
+    ``LLMFullResponseStartFrame`` after a ``FunctionCallResultFrame`` (the
+    spoken answer). If the result frame is all we get, that is the off switch
+    too. A call that never tools never switches.
+    """
+    from pipecat.frames.frames import (
+        Frame,
+        FunctionCallInProgressFrame,
+        FunctionCallResultFrame,
+        FunctionCallsStartedFrame,
+        LLMFullResponseStartFrame,
+        MixerUpdateSettingsFrame,
+    )
+    from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+
+    class AmbienceSwitcher(FrameProcessor):
+        def __init__(self) -> None:
+            super().__init__()
+            self._sound = OFFICE_SOUND
+            self._lookup = False
+            self._saw_result = False
+
+        async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+            await super().process_frame(frame, direction)
+            if direction == FrameDirection.DOWNSTREAM:
+                if isinstance(frame, (FunctionCallsStartedFrame, FunctionCallInProgressFrame)):
+                    self._lookup = True
+                    await self._switch(TYPING_SOUND)
+                elif isinstance(frame, FunctionCallResultFrame) and self._lookup:
+                    self._saw_result = True
+                elif (
+                    self._lookup
+                    and self._saw_result
+                    and isinstance(frame, LLMFullResponseStartFrame)
+                ):
+                    await self._switch(OFFICE_SOUND)
+                    self._lookup = False
+                    self._saw_result = False
+            await self.push_frame(frame, direction)
+
+        async def _switch(self, sound: str) -> None:
+            if self._sound == sound:
+                return
+            self._sound = sound
+            session.ctx.log.event("voice.ambience", sound=sound)
+            await self.push_frame(
+                MixerUpdateSettingsFrame(settings={"sound": sound}),
+                FrameDirection.DOWNSTREAM,
+            )
+
+    return AmbienceSwitcher()
 
 
 def _PrivacyGuard(  # noqa: N802 - factory that returns a processor
@@ -630,7 +756,7 @@ def _PrivacyGuard(  # noqa: N802 - factory that returns a processor
     )
     from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
-    from vortex.conversation.prompt import refusal_line_for
+    from vortex.conversation.prompt import refusal_line_for, strip_tool_wait_talk
     from vortex.line.privacy import PRIVACY_BLOCK_LINE, scrub_session_text
 
     language_state = state if state is not None else _LanguageState()
@@ -659,7 +785,11 @@ def _PrivacyGuard(  # noqa: N802 - factory that returns a processor
             if not held:
                 return
             response = held[0]
-            response.text = "".join(chunk.text or "" for chunk in held)
+            joined = "".join(chunk.text or "" for chunk in held)
+            cleaned = strip_tool_wait_talk(joined)
+            if not cleaned.strip():
+                return
+            response.text = cleaned
             await self._scrub(response)
             await self.push_frame(response, direction)
 
@@ -829,7 +959,13 @@ async def _submit_best_known_on_idle(session: CallSession) -> None:
 
 
 def _make_tool_filler_speaker(
-    session: CallSession, state: _LanguageState, task: Any, guard: _ToolFillerGuard | None = None
+    session: CallSession,
+    state: _LanguageState,
+    task: Any,
+    guard: _ToolFillerGuard | None = None,
+    picker: FillerPicker | None = None,
+    tts: Any | None = None,
+    output: Any | None = None,
 ) -> Any:
     """Speak one short filler when the LLM starts executing tool calls.
 
@@ -838,28 +974,51 @@ def _make_tool_filler_speaker(
     ``TTSSpeakFrame`` is bot speech: ``MinWordsUserTurnStartStrategy`` guards it
     and the idle timer does not run during it. The guard keeps a tool chain
     that runs batch after batch from re-speaking the phrase every second.
+
+    The speak frame is queued on the TTS processor, not the pipeline head:
+    ``task.queue_frames`` waits behind the LLM while tools run, which is the
+    exact silence this line is meant to cover.
     """
-    from pipecat.frames.frames import TTSSpeakFrame
+    from pipecat.frames.frames import MixerUpdateSettingsFrame, TTSSpeakFrame
+    from pipecat.processors.frame_processor import FrameDirection
 
     filler_guard = guard if guard is not None else _ToolFillerGuard()
+    filler_picker = picker if picker is not None else FillerPicker()
+
+    async def _start_typing() -> None:
+        if output is None:
+            return
+        await output.queue_frame(
+            MixerUpdateSettingsFrame(settings={"sound": TYPING_SOUND}),
+            FrameDirection.DOWNSTREAM,
+        )
+        session.ctx.log.event("voice.ambience", sound=TYPING_SOUND)
+
+    async def _speak(phrase: str) -> None:
+        frame = TTSSpeakFrame(phrase, append_to_context=False)
+        if tts is not None:
+            await tts.queue_frame(frame, FrameDirection.DOWNSTREAM)
+            return
+        await task.queue_frames([frame])
 
     async def _on_function_calls_started(service: Any, function_calls: Any = None) -> None:
-        phrase = tool_filler_for(state.language)
+        await _start_typing()
         if not filler_guard.wants_to_speak():
             session.ctx.log.event(
                 "voice.tool_filler",
                 language=state.language,
                 tools=len(function_calls or ()),
-                suppressed="cooldown",
+                suppressed="same_turn",
             )
             return
+        phrase = filler_picker.pick(state.language)
         session.ctx.log.event(
             "voice.tool_filler",
             language=state.language,
             tools=len(function_calls or ()),
             text=phrase,
         )
-        await task.queue_frames([TTSSpeakFrame(phrase)])
+        await _speak(phrase)
 
     return _on_function_calls_started
 
