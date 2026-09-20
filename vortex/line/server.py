@@ -30,7 +30,8 @@ from vortex.line import personalities, twilio, voice_config
 from vortex.line.confirmation_calls import ConfirmationWorker, confirmation_worker_status
 from vortex.line.session import CallSession
 from vortex.line.sms_reminders import ReminderWorker, reminder_worker_status
-from vortex.observability.calllog import group_by_call, read_calls, read_recent
+from vortex.observability import supabase_log
+from vortex.observability.calllog import group_by_call
 from vortex.observability.discord_calls import enabled as discord_calls_on
 from vortex.observability.discord_calls import notify_session
 from vortex.observability.tracing import trace_call
@@ -118,6 +119,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         call_worker = getattr(app.state, "confirmation_call_worker", None)
         return {
             "status": "ok",
+            "store": settings.store,
             **settings.describe(),
             **reminder_worker_status(worker),
             **confirmation_worker_status(call_worker),
@@ -125,7 +127,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/calls")
     async def calls(limit: int = 500, calls: int = 0, since: str = "") -> dict[str, object]:
-        """Recent call events grouped by ``call_id`` — what the board reads.
+        """Call events grouped by ``call_id``, read from ``public.call_events``.
 
         ``limit`` alone keeps the legacy behaviour: the last N *events*.
 
@@ -134,8 +136,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         ``call.started``, so a date-filtered reader never silently drops the
         call that straddled the tail. ``calls=60`` returns the newest sixty
         complete calls; ``since=<ISO-8601>`` returns every call started at or
-        after the timestamp. Both run in a worker thread — parsing the log
-        must not stall the loop that streams live call audio.
+        after the timestamp. Both run in a worker thread — a PostgREST round
+        trip must not stall the loop that streams live call audio.
         """
         if calls or since:
             stamp = None
@@ -147,14 +149,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 if stamp.tzinfo is None:
                     stamp = stamp.replace(tzinfo=UTC)
             grouped, meta = await asyncio.to_thread(
-                read_calls,
-                settings.calls_log_path,
-                max_calls=calls or None,
-                since=stamp,
+                supabase_log.fetch_calls, calls or None, stamp
             )
             return {"calls": grouped, "meta": meta}
-        events = await asyncio.to_thread(read_recent, settings.calls_log_path, limit)
-        return {"calls": group_by_call(events)}
+        events = await asyncio.to_thread(supabase_log.fetch_recent, limit)
+        return {"calls": group_by_call(events or [])}
 
     @app.get("/mic", response_class=HTMLResponse)
     async def mic() -> str:
@@ -179,7 +178,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def put_voice_config(
         payload: Annotated[dict | None, Body()] = None,
     ) -> dict[str, object]:
-        return voice_config.save(settings, payload).to_dict()
+        try:
+            return voice_config.save(settings, payload).to_dict()
+        except RuntimeError as exc:
+            # No store: the card must not report a save that went nowhere.
+            raise HTTPException(503, str(exc)) from exc
 
     @app.post("/voice-preview")
     async def voice_preview(payload: Annotated[dict | None, Body()] = None) -> Response:
@@ -195,9 +198,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # ---- the Clinic View's "Personalidades" picker --------------------------
     # Same shape as the voice card above: the board proxies these four and the
-    # personalities.db file lives on this process's log volume. Foundation
-    # only — activating a persona stores the choice; reading it on the call
-    # (prompt tone, greeting, TTS voice) is a separate change.
+    # rows live in ``public.personalities``. Foundation only — activating a
+    # persona stores the choice; reading it on the call (prompt tone,
+    # greeting, TTS voice) is a separate change.
 
     @app.get("/personalities")
     async def get_personalities() -> dict[str, object]:
@@ -214,6 +217,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> Response:
         try:
             return JSONResponse(personalities.create(settings, payload).to_dict(), status_code=201)
+        except RuntimeError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=503)
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=422)
         except ValidationError as exc:
@@ -235,6 +240,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return JSONResponse(personalities.update(settings, slug, payload).to_dict())
         except KeyError:
             return _no_such_personality(slug)
+        except RuntimeError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=503)
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=422)
         except ValidationError as exc:
@@ -247,6 +254,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return JSONResponse(personalities.activate(settings, slug).to_dict())
         except KeyError:
             return _no_such_personality(slug)
+        except RuntimeError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=503)
 
     # ---- outbound confirmation calls (Twilio fetches these) -----------------
     # Twilio posts application/x-www-form-urlencoded; parsed by hand so the app

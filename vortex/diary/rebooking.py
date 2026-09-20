@@ -10,10 +10,8 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import sqlite3
 from collections.abc import Iterable, Sequence
 from datetime import UTC, date, datetime, time, timedelta
-from pathlib import Path
 from typing import Any, Literal
 
 import httpx
@@ -194,165 +192,98 @@ def wall_cancel_request(
     )
 
 
+TABLE = "rebooking_requests"
+
+
+def _row(request: RebookingRequest) -> dict[str, Any]:
+    """One request as ``public.rebooking_requests`` stores it: the two nested
+    models folded into json columns."""
+    data = request.model_dump(mode="json")
+    return {
+        **{k: v for k, v in data.items() if k not in {"matched_slot", "draft_action"}},
+        "matched_slot_json": _json_or_none(data.get("matched_slot")),
+        "draft_action_json": _json_or_none(data.get("draft_action")),
+    }
+
+
 class RebookingStore:
-    """SQLite-backed queue, safe to recreate whenever the process starts."""
+    """The queue in ``public.rebooking_requests``, reached through PostgREST.
 
-    def __init__(self, path: Path | str):
-        self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._init()
+    Cheap to construct and safe to recreate whenever the process starts: it
+    holds no connection and no state of its own.
+    """
 
-    def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.path)
-        conn.row_factory = sqlite3.Row
-        return conn
+    def __init__(self, path: Any = None):
+        # ``path`` is accepted and ignored: the sqlite file is gone. It stays
+        # for one release so a caller still passing one keeps working.
+        self.path = path
 
-    def _init(self) -> None:
-        with self._connect() as conn:
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS rebooking_requests (
-                    request_id TEXT PRIMARY KEY,
-                    call_id TEXT NOT NULL,
-                    intent TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    patient_id TEXT NOT NULL,
-                    policy_id TEXT NOT NULL,
-                    date_from TEXT NOT NULL,
-                    date_to TEXT NOT NULL,
-                    time_from TEXT,
-                    time_to TEXT,
-                    specialty_id TEXT,
-                    provider_id TEXT,
-                    location_id TEXT,
-                    appointment_id TEXT,
-                    source_reason TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL,
-                    matched_slot_json TEXT,
-                    draft_action_json TEXT
-                )
-                """
+    @property
+    def _remote(self) -> Any:
+        from database import remote
+
+        return remote
+
+    def _require(self) -> Any:
+        remote = self._remote
+        if not remote.enabled():
+            raise RuntimeError(
+                "no store configured: set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY "
+                "to queue a rebooking request"
             )
+        return remote
 
     def add(self, request: RebookingRequest) -> RebookingRequest:
-        """Insert once and return the stored row, making log re-analysis idempotent."""
+        """Insert once and return the stored row, making re-analysis idempotent.
 
-        data = request.model_dump(mode="json")
-        with self._connect() as conn:
-            conn.execute(
-                """
-                INSERT OR IGNORE INTO rebooking_requests (
-                    request_id, call_id, intent, status, patient_id, policy_id,
-                    date_from, date_to, time_from, time_to, specialty_id, provider_id,
-                    location_id, appointment_id, source_reason, created_at, updated_at,
-                    matched_slot_json, draft_action_json
-                )
-                VALUES (
-                    :request_id, :call_id, :intent, :status, :patient_id, :policy_id,
-                    :date_from, :date_to, :time_from, :time_to, :specialty_id, :provider_id,
-                    :location_id, :appointment_id, :source_reason, :created_at, :updated_at,
-                    :matched_slot_json, :draft_action_json
-                )
-                """,
-                {
-                    **data,
-                    "matched_slot_json": _json_or_none(data.get("matched_slot")),
-                    "draft_action_json": _json_or_none(data.get("draft_action")),
-                },
-            )
-        stored = self.get(request.request_id)
-        assert stored is not None
-        try:
-            from database.remote import mirrors_file, safe_upsert
-
-            if mirrors_file(self.path):
-                dumped = stored.model_dump(mode="json")
-                safe_upsert(
-                    "rebooking_requests",
-                    [
-                        {
-                            **{k: dumped[k] for k in dumped if k not in {"matched_slot", "draft_action"}},
-                            "matched_slot_json": _json_or_none(dumped.get("matched_slot")),
-                            "draft_action_json": _json_or_none(dumped.get("draft_action")),
-                        }
-                    ],
-                    "request_id",
-                )
-        except Exception:
-            pass
-        return stored
+        ``request_id`` is a hash of what was asked for, so the same call
+        analysed twice — or the same slot cancelled twice on the wall — lands
+        one row. An existing row wins: it may already be ``matched``, and a
+        re-insert must not walk that back to ``pending``.
+        """
+        remote = self._require()
+        existing = self.get(request.request_id)
+        if existing is not None:
+            return existing
+        remote.upsert(TABLE, [_row(request)], "request_id")
+        return self.get(request.request_id) or request
 
     def get(self, request_id: str) -> RebookingRequest | None:
-        with self._connect() as conn:
-            row = conn.execute(
-                "SELECT * FROM rebooking_requests WHERE request_id = ?", (request_id,)
-            ).fetchone()
-        return _row_to_request(row) if row is not None else None
+        rows = self._remote.select(
+            TABLE, {"select": "*", "request_id": f"eq.{request_id}", "limit": "1"}
+        )
+        return _row_to_request(rows[0]) if rows else None
 
     def pending(self) -> list[RebookingRequest]:
-        with self._connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT * FROM rebooking_requests
-                WHERE status = 'pending'
-                ORDER BY created_at, request_id
-                """
-            ).fetchall()
-        return [_row_to_request(row) for row in rows]
+        rows = self._remote.select(
+            TABLE,
+            {"select": "*", "status": "eq.pending", "order": "created_at.asc,request_id.asc"},
+        )
+        return [_row_to_request(row) for row in rows or []]
 
     def all(self) -> list[RebookingRequest]:
-        with self._connect() as conn:
-            rows = conn.execute(
-                "SELECT * FROM rebooking_requests ORDER BY created_at, request_id"
-            ).fetchall()
-        return [_row_to_request(row) for row in rows]
+        rows = self._remote.select(
+            TABLE, {"select": "*", "order": "created_at.asc,request_id.asc"}
+        )
+        return [_row_to_request(row) for row in rows or []]
 
     def mark_matched(
         self, request_id: str, *, slot: Slot, draft_action: DraftAction
     ) -> RebookingRequest:
-        now = datetime.now(UTC).isoformat()
-        with self._connect() as conn:
-            conn.execute(
-                """
-                UPDATE rebooking_requests
-                SET status = 'matched',
-                    updated_at = ?,
-                    matched_slot_json = ?,
-                    draft_action_json = ?
-                WHERE request_id = ?
-                """,
-                (
-                    now,
-                    slot.model_dump_json(),
-                    draft_action.model_dump_json(),
-                    request_id,
-                ),
-            )
+        remote = self._require()
+        remote.update(
+            TABLE,
+            {"request_id": f"eq.{request_id}"},
+            {
+                "status": "matched",
+                "updated_at": datetime.now(UTC).isoformat(),
+                "matched_slot_json": slot.model_dump_json(),
+                "draft_action_json": draft_action.model_dump_json(),
+            },
+        )
         stored = self.get(request_id)
-        assert stored is not None
-        try:
-            from database.remote import mirrors_file, safe_upsert
-
-            if mirrors_file(self.path):
-                dumped = stored.model_dump(mode="json")
-                safe_upsert(
-                    "rebooking_requests",
-                    [
-                        {
-                            **{
-                                k: dumped[k]
-                                for k in dumped
-                                if k not in {"matched_slot", "draft_action"}
-                            },
-                            "matched_slot_json": _json_or_none(dumped.get("matched_slot")),
-                            "draft_action_json": _json_or_none(dumped.get("draft_action")),
-                        }
-                    ],
-                    "request_id",
-                )
-        except Exception:
-            pass
+        if stored is None:
+            raise KeyError(request_id)
         return stored
 
 
@@ -542,8 +473,8 @@ def _appointment_id_for_search(
     return None
 
 
-def _row_to_request(row: sqlite3.Row) -> RebookingRequest:
-    data = dict(row)
+def _row_to_request(row: dict[str, Any]) -> RebookingRequest:
+    data = {k: v for k, v in dict(row).items() if k != "id"}
     if data.get("matched_slot_json"):
         data["matched_slot"] = json.loads(data.pop("matched_slot_json"))
     else:

@@ -1,15 +1,20 @@
-"""Drip the ``synthetic-data/`` calls into the live call log, as if in real time.
+"""Drip the ``synthetic-data/`` calls into the live store, as if in real time.
 
 The pack under ``synthetic-data/logs/*.jsonl`` holds one CallLog-shaped call
 per published case (plus probes), every event frozen at the same instant. This
-module reads those calls and replays them into ``logs/calls.jsonl`` with a
-synthetic cadence: several calls overlapping at once, a small gap between the
-events of one call, and a jittered gap between arrivals. The live board polls
-that log twice a second, so the calls appear to land one after another.
+module reads those fixture files and replays them into ``public.call_events``
+with a synthetic cadence: several calls overlapping at once, a small gap
+between the events of one call, and a jittered gap between arrivals. The live
+board polls the table twice a second, so the calls appear to land one after
+another.
 
 Nothing is ever written back into ``synthetic-data/`` — this reads there and
-writes only to the live call log. Each call gets its own :class:`CallLog`, so
-no state is shared between them (see the concurrency rule in ``CLAUDE.md``).
+writes only through :class:`CallLog`. Each call gets its own log, so no state
+is shared between them (see the concurrency rule in ``CLAUDE.md``).
+
+The ``path`` arguments below are vestigial: ``CallLog`` ignores them now that
+Postgres is the only store. They stay for one release so existing callers
+keep working.
 
 The pure helpers (``load_synthetic_calls``, ``restamp``) carry no timing and
 are what the selftest exercises; the ``replay_*`` coroutines add the sleeps.

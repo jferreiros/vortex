@@ -349,25 +349,19 @@ class Settings:
     aic_sdk_license: str = field(default_factory=lambda: _env("AIC_SDK_LICENSE"))
     aic_model_id: str = field(default_factory=lambda: _env("VORTEX_AIC_MODEL", "quail-ms-l-8khz"))
 
-    # Observability
-    calls_log_path: Path = field(
-        default_factory=lambda: Path(_env("VORTEX_CALLS_LOG", str(REPO_ROOT / "logs/calls.jsonl")))
-    )
-    # The product's own database (database/): appointments and the calls
-    # that touched them, separate from the calls.jsonl event log above. On
-    # the same volume as calls_log_path by default so it survives a redeploy
-    # the same way voiceconfig.db already does (vortex/line/voice_config.py).
-    product_db_path: Path = field(
-        default_factory=lambda: Path(
-            _env("VORTEX_PRODUCT_DB", str(REPO_ROOT / "logs" / "vortex_product.db"))
-        )
-    )
-    # Hosted call log (vortex/observability/supabase_log.py). Empty = JSONL
-    # only. The service-role key is server-side; never ship it to the browser.
+    # Observability and the product's own data both live in one store:
+    # Supabase/Postgres, reached through PostgREST. There is no file log and
+    # no local database. Empty keys = no store at all: reads come back empty
+    # and writes raise, which is a developer machine, never a deploy.
+    # The service-role key is server-side; never ship it to the browser.
     supabase_url: str = field(default_factory=lambda: _env("SUPABASE_URL"))
     supabase_service_role_key: str = field(
         default_factory=lambda: _env("SUPABASE_SERVICE_ROLE_KEY") or _env("SUPABASE_SECRET_KEY")
     )
+    # Direct Postgres connection string. Only the migrator uses it
+    # (``database/supabase/migrations``); nothing on the call path opens a
+    # socket to Postgres, so this stays optional everywhere else.
+    supabase_db_url: str = field(default_factory=lambda: _env("SUPABASE_DB_URL"))
     langfuse_public_key: str = field(default_factory=lambda: _env("LANGFUSE_PUBLIC_KEY"))
     langfuse_secret_key: str = field(default_factory=lambda: _env("LANGFUSE_SECRET_KEY"))
     langfuse_base_url: str = field(
@@ -626,6 +620,37 @@ class Settings:
             return "pipecat"
         return "stub"
 
+    @property
+    def store(self) -> str:
+        """Which persistent store is live: ``supabase`` or ``none``.
+
+        ``none`` is a developer machine with no keys: reads come back empty
+        and writes raise. It is never a deploy — see ``__post_init__``.
+        """
+        return "supabase" if self.supabase_url and self.supabase_service_role_key else "none"
+
+    @property
+    def is_production(self) -> bool:
+        return _env("VORTEX_ENV").lower() in {"production", "prod"}
+
+    def __post_init__(self) -> None:
+        """A production boot without a store is a silent data loss, so it is a
+        crash instead.
+
+        Every call event, every appointment and every console setting goes to
+        ``public.call_events`` and its sibling tables. With no keys the line
+        still answers the phone and still submits, but nothing is recorded —
+        and the board shows an empty wall that reads exactly like "no calls
+        came in". Fail at boot, where somebody is watching.
+        """
+        if self.is_production and self.store != "supabase":
+            raise RuntimeError(
+                "VORTEX_ENV=production but the store is not configured: set "
+                "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY. Postgres is the "
+                "only store — there is no file log and no local database to "
+                "fall back to, so a deploy without these records nothing."
+            )
+
     def describe(self) -> dict[str, object]:
         """A safe summary for logs and /health. Never includes key values."""
         return {
@@ -672,9 +697,8 @@ class Settings:
             "has_aic_license": bool(self.aic_sdk_license),
             "user_idle_secs": self.user_idle_secs,
             "ws_path": self.ws_path,
-            "calls_log_path": str(self.calls_log_path),
-            "product_db_path": str(self.product_db_path),
-            "has_supabase": bool(self.supabase_url and self.supabase_service_role_key),
+            "store": self.store,
+            "has_supabase": self.store == "supabase",
             "has_langfuse_keys": bool(self.langfuse_public_key and self.langfuse_secret_key),
             "has_hf_token": bool(self.hf_token),
             "langfuse_base_url": self.langfuse_base_url,
