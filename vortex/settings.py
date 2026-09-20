@@ -523,7 +523,13 @@ class Settings:
         if self.voice_mode == "stub":
             return False
         return bool(
-            self.soniox_api_key and self.llm_api_key and self.llm_base_url and self.has_tts_key
+            self.soniox_api_key
+            and self.llm_api_key
+            and self.llm_base_url
+            # The Google-TTS shim is a speaking voice too: without it a keyless
+            # demo line falls back to stub and the reschedule handoff has no
+            # colleague to bridge to.
+            and (self.has_tts_key or self.tts_http_base_url)
         )
 
     @property
