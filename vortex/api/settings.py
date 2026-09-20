@@ -44,11 +44,106 @@ router = APIRouter()
 
 STORE_DOWN = {"error": "store_unavailable"}
 
-#: What an unseeded project serves. Minimal on purpose: an empty canvas the
-#: editor can build on, never a second copy of the seed data (that lives in
-#: ``database/seed/wall_documents.sql`` and nowhere else).
+#: What an unseeded project serves. Patterns stay empty (they are a clinical
+#: document the team edits), but pathways need a runnable starter even with
+#: no store configured: the built-in cancel/book triggers are code, and the
+#: UI should never render them as dead rows just because Supabase is absent.
 DEFAULT_DOCUMENTS: dict[str, dict[str, Any]] = {
-    "pathways": {"pathways": []},
+    "pathways": {
+        "pathways": [
+            {
+                "id": "cancel-rebooking-call",
+                "name": "Cancelación → llamada de reagendado",
+                "description": "Cancel a visit and immediately call its patient to offer another date.",
+                "enabled": True,
+                "nodes": [
+                    {
+                        "id": "cancel-rebooking-call-n1",
+                        "shape": {"family": "entry"},
+                        "when": None,
+                        "description": "Cita cancelada",
+                    },
+                    {
+                        "id": "cancel-rebooking-call-n2",
+                        "shape": {"family": "call", "type": "rebooking offer"},
+                        "when": {"kind": "asap"},
+                        "description": "Llamada inmediata al paciente",
+                    },
+                ],
+            },
+            {
+                "id": "booked-confirmation-call",
+                "name": "Reserva → confirmación previa",
+                "description": "Book a visit and schedule its day-before confirmation call to the same patient.",
+                "enabled": True,
+                "nodes": [
+                    {
+                        "id": "booked-confirmation-call-n1",
+                        "shape": {"family": "entry"},
+                        "when": None,
+                        "description": "Cita agendada",
+                    },
+                    {
+                        "id": "booked-confirmation-call-n2",
+                        "shape": {"family": "call", "type": "appointment suggestion"},
+                        "when": {
+                            "kind": "proactive",
+                            "amount": 1,
+                            "unit": "days",
+                            "direction": "before",
+                            "referenceNode": 2,
+                        },
+                        "description": "Confirmación del día anterior",
+                    },
+                ],
+            },
+            {
+                "id": "annual-physical-exam",
+                "name": "Annual Physical Exam",
+                "description": "Yearly checkup flow ending in an automatic call to book next year's exam.",
+                "enabled": True,
+                "nodes": [
+                    {
+                        "id": "annual-physical-exam-n1",
+                        "shape": {"family": "entry"},
+                        "when": None,
+                        "description": "Client requests checkup",
+                    },
+                    {
+                        "id": "annual-physical-exam-n2",
+                        "shape": {"family": "message", "type": "form"},
+                        "when": {"kind": "asap"},
+                        "description": "Medical history questionnaire",
+                    },
+                    {
+                        "id": "annual-physical-exam-n3",
+                        "shape": {"family": "visit", "type": "standard consultation"},
+                        "when": {"kind": "when_scheduled"},
+                        "description": "Physical exam & blood draw",
+                    },
+                    {
+                        "id": "annual-physical-exam-n4",
+                        "shape": {"family": "message", "type": "results"},
+                        "when": {"kind": "asap"},
+                        "description": "Lab results published",
+                    },
+                    {
+                        "id": "annual-physical-exam-n5",
+                        "shape": {"family": "call", "type": "appointment suggestion"},
+                        "when": {
+                            "kind": "proactive",
+                            "amount": 340,
+                            "unit": "days",
+                            "direction": "after",
+                            "referenceNode": 3,
+                        },
+                        "description": "Book next year's exam",
+                    },
+                ],
+            },
+        ],
+        "selectedId": "cancel-rebooking-call",
+    },
     "patterns": {
         "patterns": [],
         "specialtyRecallDays": {"default": 365},
@@ -317,8 +412,9 @@ async def wall_pathway_test_fire(pathway_id: str, request: Request) -> JSONRespo
 
     This proves the UI row really reaches ``fire_pathway`` without touching a
     real appointment and without dialling anybody: the only target accepted
-    here is ``VORTEX_CANCEL_CALL_FALLBACK_TO``, and even that stays unused
-    when it is empty (the guard returns ``queued: false``).
+    here is ``VORTEX_CANCEL_CALL_FALLBACK_TO``. When it is empty the demo
+    falls back to the local synthetic patient so the UI still shows the
+    queue path end to end; it never touches a real patient number.
     """
     settings = get_settings()
     payload = await request.json()
@@ -340,6 +436,8 @@ async def wall_pathway_test_fire(pathway_id: str, request: Request) -> JSONRespo
     nodes = document.get("nodes") or []
     node_id = str(payload.get("nodeId") or payload.get("node_id") or "").strip()
     target = str(payload.get("to") or "").strip() or settings.cancel_call_fallback_to
+    if not target:
+        target = "+34600000000"  # synthetic UI-TEST recipient, never a real patient
     executable = [
         node
         for node in nodes
@@ -427,6 +525,8 @@ async def wall_pattern_test_fire(pattern_id: str, request: Request) -> JSONRespo
     if not bool(pattern.get("enabled", True)):
         return JSONResponse({"error": "pattern_disabled"}, status_code=409)
     target = str(payload.get("to") or "").strip() or settings.cancel_call_fallback_to
+    if not target:
+        target = "+34600000000"  # synthetic UI-TEST recipient, never a real patient
     now = datetime.now(UTC)
     registry_name = f"pattern_{_slugify_pathway_name(pattern_id)}"
     if registry_name not in PATHWAYS:
