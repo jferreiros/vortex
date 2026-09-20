@@ -626,6 +626,8 @@
     animation: none;
     background-image: none;
   }
+}
+
 /* --- Range toggle ---------------------------------------------------------
    .home-chip (home.css) ships with no hover or focus-visible state at all.
    Scoped here rather than edited at the source, since that file is shared

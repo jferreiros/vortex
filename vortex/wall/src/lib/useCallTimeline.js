@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { mockStream } from "./mockTimeline";
 import { subscribeJson } from "./subscribeJson";
 
 const POLL_MS = 700;
@@ -10,9 +9,10 @@ function applyTimeline(data, setItems, setIntent, setCall) {
   setCall(data.call || null);
 }
 
-// No call_id in the URL -> loop the scripted demo. Otherwise subscribe to
-// GET /api/wall/timeline/{id}/stream (SSE) and fall back to polling the
-// same JSON if EventSource is missing or the stream errors before a frame.
+// Subscribe to GET /api/wall/timeline/{id}/stream (SSE) and fall back to
+// polling the same JSON if EventSource is missing or the stream errors
+// before a frame. With no call_id there is nothing to show: the view stays
+// on its empty state rather than looping an invented call.
 export function useCallTimeline(callId) {
   const [items, setItems] = useState([]);
   const [intent, setIntent] = useState(null);
@@ -26,15 +26,8 @@ export function useCallTimeline(callId) {
     setCall(null);
 
     if (!callId) {
-      const stop = mockStream((next) => {
-        if (cancelledRef.current) return;
-        setItems(next.items);
-        setIntent(next.intent);
-        setCall(next.call);
-      });
       return () => {
         cancelledRef.current = true;
-        stop();
       };
     }
 

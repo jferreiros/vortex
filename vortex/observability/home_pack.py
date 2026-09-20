@@ -248,10 +248,8 @@ def _busy_from_database() -> dict[tuple[str, str, str], int]:
     """
     try:
         from database import db
-        from vortex.settings import get_settings
 
-        with db.connection(get_settings().product_db_path) as conn:
-            rows = db.list_appointments(conn)
+        rows = db.list_appointments()
     except Exception:
         return {}
 
