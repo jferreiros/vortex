@@ -102,12 +102,12 @@ whichever of the two can say it.
 
 Both set to the same provider (the default, `google`/`google`) means one
 service and the plain voice-swap path; `VORTEX_TTS_PROVIDER=elevenlabs` with
-the default alternate gives ElevenLabs Spanish and Google ca/gl/eu.
+the default alternate gives ElevenLabs Spanish and English, and Google ca/gl/eu.
 
 | `VORTEX_TTS_PROVIDER` | Languages | Env vars |
 | --- | --- | --- |
 | `google` (default) | es / ca / gl / eu — the only one that covers all four. Chirp 3 HD for Spanish, Standard voices for ca/gl/eu | `GOOGLE_APPLICATION_CREDENTIALS` *or* `GOOGLE_TTS_CREDENTIALS_JSON`, `GOOGLE_TTS_VOICE_ES`, `GOOGLE_TTS_VOICE_CA`, `GOOGLE_TTS_VOICE_GL`, `GOOGLE_TTS_VOICE_EU` |
-| `elevenlabs` | es | `ELEVENLABS_API_KEY`, `ELEVENLABS_MODEL`, `ELEVENLABS_VOICE_ID_ES` (no default — set it), `ELEVENLABS_BASE_URL` (optional gateway origin) |
+| `elevenlabs` | es / en — one multilingual voice id says both, so an English sentence mid-call does not change the voice | `ELEVENLABS_API_KEY`, `ELEVENLABS_MODEL`, `ELEVENLABS_VOICE_ID_ES` (no default — set it), `ELEVENLABS_BASE_URL` (optional gateway origin) |
 
 STT is Soniox `stt-rt-v5` throughout: language identification on, clinic
 vocabulary boosted, `SONIOX_API_KEY` and `SONIOX_STT_MODEL`.

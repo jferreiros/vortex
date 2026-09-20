@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
 from datetime import datetime
 
 import pytest
@@ -195,19 +196,17 @@ def test_language_switch_picks_the_catalan_voice(voice_settings) -> None:
     settings = voice_settings()  # google on both sides
     assert detect_language("bon dia, voldria una hora", hint=Language.CA) == "ca"
     assert detect_language("buenos días", hint=Language.ES_ES) == "es"
-    # No hint: the marker vote carries it. Nothing to vote on: English, the default.
+    # No hint: the marker vote carries it. Nothing to vote on: Spanish, the default.
     assert detect_language("bon dia, si us plau") == "ca"
-    assert detect_language("") == "en"
+    assert detect_language("") == "es"
 
     voice, language = tts_voice_for("ca", settings)
     assert voice == settings.google_tts_voice_ca
     assert language == Language.CA_ES
-    # Unsupported falls back to English, the clinic's default.
-    from vortex.conversation.language import DEFAULT_GOOGLE_VOICE_EN
-
+    # Unsupported falls back to Spanish, the clinic's default.
     voice, language = tts_voice_for("de", settings)
-    assert voice == DEFAULT_GOOGLE_VOICE_EN
-    assert language == Language.EN_GB
+    assert voice == settings.google_tts_voice_es
+    assert language == Language.ES_ES
 
 
 def test_stt_terms_boost_the_clinic_vocabulary() -> None:
@@ -290,11 +289,16 @@ async def test_language_watcher_pushes_a_tts_settings_frame(voice_settings) -> N
     def transcript(text: str, language: Language) -> TranscriptionFrame:
         return TranscriptionFrame(text=text, user_id="u", timestamp="t", language=language)
 
-    await watcher._maybe_switch(transcript("bon dia", Language.CA))
-    await watcher._maybe_switch(transcript("vull una hora", Language.CA))  # no second switch
-    await watcher._maybe_switch(transcript("buenos días", Language.ES_ES))
+    # Three words at least: one misheard fragment must not move the line.
+    await watcher._maybe_switch(transcript("bon dia, voldria hora", Language.CA))
+    await watcher._maybe_switch(
+        transcript("vull una hora", Language.CA)  # no second switch
+    )
+    await watcher._maybe_switch(transcript("buenos días, quería cita", Language.ES_ES))
 
     assert [kind for kind, _ in events] == ["voice.language_switch"] * 2
+    # Both switches change the voice: Google speaks each language with its own.
+    assert [kwargs["voice_changed"] for _, kwargs in events] == [True, True]
     assert len(pushed) == 2
     assert all(isinstance(frame, TTSUpdateSettingsFrame) for frame in pushed)
     assert pushed[0].delta.voice == settings.google_tts_voice_ca
@@ -328,10 +332,10 @@ async def test_language_watcher_reaches_galician_and_basque_on_google(voice_sett
     def transcript(text: str, language: Language) -> TranscriptionFrame:
         return TranscriptionFrame(text=text, user_id="u", timestamp="t", language=language)
 
-    await watcher._maybe_switch(transcript("bon dia", Language.CA))
-    await watcher._maybe_switch(transcript("bos días", Language.GL))
-    await watcher._maybe_switch(transcript("egun on", Language.EU))
-    await watcher._maybe_switch(transcript("buenos días", Language.ES_ES))
+    await watcher._maybe_switch(transcript("bon dia, voldria hora", Language.CA))
+    await watcher._maybe_switch(transcript("bos días, quero cita", Language.GL))
+    await watcher._maybe_switch(transcript("egun on, hitzordua nahi", Language.EU))
+    await watcher._maybe_switch(transcript("buenos días, quería cita", Language.ES_ES))
 
     assert [(f.delta.voice, f.delta.language) for f in pushed] == [
         (settings.google_tts_voice_ca, Language.CA_ES),
@@ -396,16 +400,14 @@ def test_make_tts_builds_the_google_chirp_gemini_pair(voice_settings) -> None:
     assert settings.google_tts_uses_gemini is True
     tts = _make_tts(settings, state=_LanguageState())
 
-    from vortex.conversation.language import DEFAULT_GOOGLE_VOICE_EN
-
     assert isinstance(tts, ParallelPipeline)
     (gemini_filter, gemini), (chirp_filter, chirp) = _router_branches(tts)
     assert isinstance(gemini, google_tts.GeminiTTSService)
     assert isinstance(chirp, google_tts.GoogleHttpTTSService)
     assert chirp._init_sample_rate == 8000
-    # Call opens in English on Chirp; Gemini waits for ca/gl/eu.
-    assert chirp._settings.voice == DEFAULT_GOOGLE_VOICE_EN
-    assert chirp._settings.language == "en-GB"
+    # Call opens in Spanish on Chirp; Gemini waits for ca/gl/eu.
+    assert chirp._settings.voice == settings.google_tts_voice_es
+    assert chirp._settings.language == "es-ES"
     assert gemini._settings.voice == DEFAULT_GEMINI_TTS_VOICE
     assert gemini._settings.model == DEFAULT_GEMINI_TTS_MODEL
     assert gemini._settings.language == "ca-ES"
@@ -427,12 +429,10 @@ def test_make_tts_standard_fallback_is_a_single_http_service(voice_settings) -> 
     assert settings.google_tts_uses_gemini is False
     tts = _make_tts(settings)
 
-    from vortex.conversation.language import DEFAULT_GOOGLE_VOICE_EN
-
     assert isinstance(tts, google_tts.GoogleHttpTTSService)
     assert tts._init_sample_rate == 8000
-    assert tts._settings.voice == DEFAULT_GOOGLE_VOICE_EN
-    assert tts._settings.language == "en-GB"
+    assert tts._settings.voice == settings.google_tts_voice_es
+    assert tts._settings.language == "es-ES"
     assert settings.google_tts_voice_ca == "ca-ES-Standard-B"
 
 
@@ -491,10 +491,38 @@ def test_make_tts_builds_the_elevenlabs_service(voice_settings) -> None:
     assert tts._settings.voice == "voice-1"
     assert tts._settings.model == "eleven_flash_v2_5"
     # A bare code: the regional one only earns a "not verified" warning.
-    # English first; the one multilingual voice id speaks both.
-    assert tts._settings.language == "en"
+    # Spanish first; the one multilingual voice id speaks Spanish and English.
+    assert tts._settings.language == "es"
     # No override -> the service's own origin.
     assert tts._url == "wss://api.elevenlabs.io"
+
+
+def test_make_tts_carries_the_receptionist_voice_settings(voice_settings) -> None:
+    """The hardcoded preset reaches the service's ``voice_settings`` block."""
+    pytest.importorskip("pipecat")
+    pytest.importorskip("pipecat.services.elevenlabs.tts")
+
+    from vortex.line.elevenlabs_voice import ElevenLabsVoicePreset
+    from vortex.line.pipecat_voice import _make_tts
+
+    settings = voice_settings(
+        VORTEX_TTS_PROVIDER="elevenlabs",
+        ELEVENLABS_API_KEY="el-x",
+        ELEVENLABS_VOICE_ID_ES="voice-1",
+    )
+    built = _make_tts(settings)._settings
+
+    assert built.stability == 0.5
+    assert built.similarity_boost == 0.75
+    assert built.style == 0.0
+    assert built.use_speaker_boost is True
+    # And they are the preset's, not four numbers typed twice.
+    preset = ElevenLabsVoicePreset.RECEPTIONIST.value
+    assert (built.stability, built.similarity_boost, built.style) == (
+        preset.stability,
+        preset.similarity_boost,
+        preset.style,
+    )
 
 
 def test_elevenlabs_base_url_override_is_passed_through(voice_settings) -> None:
@@ -585,10 +613,8 @@ def test_a_mixed_pair_builds_a_router(voice_settings) -> None:
     (_g_filter, gemini), (_c_filter, chirp) = _router_branches(alternate)
     assert isinstance(gemini, google_tts.GeminiTTSService)
     assert isinstance(chirp, google_tts.GoogleHttpTTSService)
-    from vortex.conversation.language import DEFAULT_GOOGLE_VOICE_EN
-
     assert primary._settings.voice == "voice-1"
-    assert chirp._settings.voice == DEFAULT_GOOGLE_VOICE_EN
+    assert chirp._settings.voice == settings.google_tts_voice_es
 
 
 async def test_the_router_sends_each_language_to_one_branch(voice_settings) -> None:
@@ -608,7 +634,7 @@ async def test_the_router_sends_each_language_to_one_branch(voice_settings) -> N
         GOOGLE_TTS_CREDENTIALS_JSON=fake_service_account_json(),
     )
     state = _LanguageState()
-    assert state.language == "en"
+    assert state.language == "es"
 
     (primary_filter, _), (alt_filter, _) = _router_branches(_make_tts_stage(settings, state))
 
@@ -623,12 +649,19 @@ async def test_the_router_sends_each_language_to_one_branch(voice_settings) -> N
     primary_filter.push_frame = capture("primary")  # type: ignore[method-assign]
     alt_filter.push_frame = capture("alt")  # type: ignore[method-assign]
 
-    for language, text in (("es", "hola"), ("ca", "bon dia"), ("gl", "bos días"), ("es", "adiós")):
+    for language, text in (
+        ("es", "hola"),
+        ("en", "hello"),
+        ("ca", "bon dia"),
+        ("gl", "bos días"),
+        ("es", "adiós"),
+    ):
         state.language = language
         for gate in (primary_filter, alt_filter):
             await gate.process_frame(TextFrame(text), FrameDirection.DOWNSTREAM)
 
-    assert seen["primary"] == ["hola", "adiós"]  # ElevenLabs: Spanish only
+    # ElevenLabs: Spanish and English, so an English sentence keeps the voice.
+    assert seen["primary"] == ["hola", "hello", "adiós"]
     assert seen["alt"] == ["bon dia", "bos días"]  # Google: everything else
 
 
@@ -662,9 +695,9 @@ async def test_the_watcher_moves_the_state_before_the_voice_update(voice_setting
     def transcript(text: str, language: Language) -> TranscriptionFrame:
         return TranscriptionFrame(text=text, user_id="u", timestamp="t", language=language)
 
-    await watcher._maybe_switch(transcript("bon dia", Language.CA))
-    await watcher._maybe_switch(transcript("bos días", Language.GL))
-    await watcher._maybe_switch(transcript("buenos días", Language.ES_ES))
+    await watcher._maybe_switch(transcript("bon dia, voldria hora", Language.CA))
+    await watcher._maybe_switch(transcript("bos días, quero cita", Language.GL))
+    await watcher._maybe_switch(transcript("buenos días, quería cita", Language.ES_ES))
 
     assert languages == ["ca", "gl", "es"]
     # The voice on each update belongs to the provider that serves it.
@@ -704,17 +737,195 @@ async def test_a_short_ambiguous_turn_keeps_the_call_language(voice_settings) ->
         # No ``language``: an untagged token, so the STT hint is absent.
         return TranscriptionFrame(text=text, user_id="u", timestamp="t")
 
-    # "ok" votes for nothing: the call stays in Spanish, and nothing is pushed.
+    # One word is never a switch, whatever it votes for.
     await watcher._maybe_switch(transcript("ok"))
+    # Three words, none of them a marker: the call stays in Spanish.
+    await watcher._maybe_switch(transcript("ok ok ok"))
     assert state.language == "es"
     assert events == []
     assert pushed == []
 
     # A real marker still switches: ``current`` is a fallback, not a lock.
-    await watcher._maybe_switch(transcript("bon dia"))
+    await watcher._maybe_switch(transcript("bon dia, si us plau"))
     assert state.language == "ca"
     assert [kind for kind, _ in events] == ["voice.language_switch"]
     assert pushed[0].delta.voice == settings.google_tts_voice_ca
+
+
+async def test_a_misheard_fragment_does_not_move_the_line(voice_settings) -> None:
+    """Soniox tags "It" and "Apple" as English; one word must not flip the call.
+
+    The 2026-09-19 mic call spent its Spanish half hopping to an English voice
+    on single misheard tokens. The watcher now needs a sentence
+    (``MIN_WORDS_FOR_LANGUAGE_SWITCH``) before it will change anything.
+    """
+    pytest.importorskip("pipecat")
+    from pipecat.frames.frames import TranscriptionFrame
+    from pipecat.processors.frame_processor import FrameDirection
+    from pipecat.transcriptions.language import Language
+
+    from vortex.line.pipecat_voice import _LanguageState, _LanguageWatcher
+
+    settings = voice_settings()
+    events: list[tuple[str, dict]] = []
+    pushed: list[object] = []
+    state = _LanguageState("es")
+    watcher = _LanguageWatcher(_session(settings, events), state)
+
+    async def capture(frame: object, direction: object = FrameDirection.DOWNSTREAM) -> None:
+        pushed.append(frame)
+
+    watcher.push_frame = capture  # type: ignore[method-assign]
+
+    def transcript(text: str, language: Language) -> TranscriptionFrame:
+        return TranscriptionFrame(text=text, user_id="u", timestamp="t", language=language)
+
+    for fragment in ("It", "Apple", "Halo"):
+        await watcher._maybe_switch(transcript(fragment, Language.EN))
+    assert state.language == "es"
+    assert events == []
+    assert pushed == []
+
+    # The same word inside a sentence is a switch, hint and all.
+    await watcher._maybe_switch(transcript("It is for an appointment", Language.EN))
+    assert state.language == "en"
+    assert [kind for kind, _ in events] == ["voice.language_switch"]
+    assert len(pushed) == 1
+
+
+async def test_elevenlabs_says_english_without_changing_the_voice(voice_settings) -> None:
+    """es -> en on one multilingual voice id: the line moves, the sound does not.
+
+    Pushing a settings frame here would restart the ElevenLabs socket to apply
+    the voice it is already speaking with, so the switch is recorded and
+    nothing is pushed. The state still moves: the router, the canned lines and
+    the confirmation call all read it.
+    """
+    pytest.importorskip("pipecat")
+    from pipecat.frames.frames import TranscriptionFrame
+    from pipecat.processors.frame_processor import FrameDirection
+    from pipecat.transcriptions.language import Language
+
+    from vortex.line.pipecat_voice import _LanguageState, _LanguageWatcher
+
+    settings = voice_settings(
+        VORTEX_TTS_PROVIDER="elevenlabs",
+        VORTEX_TTS_PROVIDER_ALT="elevenlabs",
+        ELEVENLABS_API_KEY="el-x",
+        ELEVENLABS_VOICE_ID_ES="voice-1",
+    )
+    events: list[tuple[str, dict]] = []
+    pushed: list[object] = []
+    state = _LanguageState("es")
+    watcher = _LanguageWatcher(_session(settings, events), state)
+
+    async def capture(frame: object, direction: object = FrameDirection.DOWNSTREAM) -> None:
+        pushed.append(frame)
+
+    watcher.push_frame = capture  # type: ignore[method-assign]
+
+    def transcript(text: str, language: Language) -> TranscriptionFrame:
+        return TranscriptionFrame(text=text, user_id="u", timestamp="t", language=language)
+
+    await watcher._maybe_switch(
+        transcript("Sorry, in English please, I need an appointment", Language.EN)
+    )
+
+    assert state.language == "en"
+    assert [kind for kind, _ in events] == ["voice.language_switch"]
+    assert events[0][1]["voice_changed"] is False
+    assert events[0][1]["provider"] == "elevenlabs"
+    assert pushed == []
+
+
+async def test_a_catalan_to_galician_switch_still_updates_the_voice(voice_settings) -> None:
+    """Gemini says ca, gl and eu with the same voice name: the locale is the voice."""
+    pytest.importorskip("pipecat")
+    from pipecat.frames.frames import TranscriptionFrame
+    from pipecat.processors.frame_processor import FrameDirection
+    from pipecat.transcriptions.language import Language
+
+    from vortex.line.pipecat_voice import _LanguageState, _LanguageWatcher
+
+    settings = voice_settings()
+    assert settings.google_tts_voice_ca == settings.google_tts_voice_gl  # "Aoede"
+
+    events: list[tuple[str, dict]] = []
+    pushed: list[object] = []
+    watcher = _LanguageWatcher(_session(settings, events), _LanguageState("ca"))
+
+    async def capture(frame: object, direction: object = FrameDirection.DOWNSTREAM) -> None:
+        pushed.append(frame)
+
+    watcher.push_frame = capture  # type: ignore[method-assign]
+
+    await watcher._maybe_switch(
+        TranscriptionFrame(
+            text="bos días, quero unha cita", user_id="u", timestamp="t", language=Language.GL
+        )
+    )
+
+    assert events[0][1]["voice_changed"] is True
+    assert [f.delta.language for f in pushed] == [Language.GL_ES]
+
+
+def test_the_active_personality_reaches_the_prompt_and_the_greeting(
+    voice_settings, monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """The wall's Personalities card is read per socket: a name, a manner, a hello."""
+    pytest.importorskip("pipecat")
+    from datetime import datetime
+
+    from vortex.contract import MADRID
+    from vortex.conversation.prompt import build_system_prompt
+    from vortex.line import personalities
+    from vortex.line.pipecat_voice import (
+        _active_personality,
+        _persona_directive,
+        _persona_greeting,
+    )
+
+    monkeypatch.setenv("VORTEX_PERSONALITIES_DB", str(tmp_path / "personalities.db"))
+    settings = voice_settings()
+
+    person = _active_personality(settings)
+    assert person is not None
+    assert person.slug == "lucia"
+
+    block = _persona_directive(person)
+    assert block.startswith("PERSONA. Your name is Lucía, ")
+    assert person.role in block
+    assert person.tone in block
+    # Appended the way the pipeline appends it, before the voice-style line.
+    prompt = build_system_prompt(datetime(2026, 9, 18, 9, 0, tzinfo=MADRID)) + f"\n{block}"
+    assert "PERSONA. Your name is Lucía" in prompt
+
+    # The greeting is hers in Spanish; a language she has no line for falls
+    # back to the clinic's own.
+    assert _persona_greeting(person, "es") == personalities.greetings_for("Lucía")["es"]
+    assert "Lucía" in _persona_greeting(person, "en")
+    assert _persona_greeting(person, "ca") == ""  # the caller hears GREETINGS["ca"]
+
+
+def test_no_personality_leaves_the_prompt_and_greeting_alone(
+    voice_settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A store that cannot be read at all: the call still opens, unchanged."""
+    pytest.importorskip("pipecat")
+    from vortex.line import personalities
+    from vortex.line.pipecat_voice import (
+        _active_personality,
+        _persona_directive,
+        _persona_greeting,
+    )
+
+    def boom(_settings: object) -> None:
+        raise RuntimeError("personalities.db is a directory")
+
+    monkeypatch.setattr(personalities, "active", boom)
+    assert _active_personality(voice_settings()) is None
+    assert _persona_directive(None) == ""
+    assert _persona_greeting(None, "es") == ""
 
 
 async def test_the_idle_handler_reprompts_once_then_submits(offline_settings) -> None:
@@ -845,22 +1056,32 @@ async def test_tool_filler_speaks_one_short_phrase_per_language(voice_settings) 
     from pipecat.frames.frames import TTSSpeakFrame
 
     from vortex.conversation.language import SUPPORTED_LANGUAGES
+    from vortex.conversation.prompt import TOOL_FILLERS, FillerPicker, tool_filler_for
     from vortex.line.pipecat_voice import (
-        TOOL_FILLERS,
         _LanguageState,
         _make_tool_filler_speaker,
         _ToolFillerGuard,
-        tool_filler_for,
     )
 
     for code in SUPPORTED_LANGUAGES:
-        phrase = tool_filler_for(code)
-        assert phrase == TOOL_FILLERS[code]
-        assert phrase.strip()
-        assert len(phrase.split()) <= 3
+        pool = TOOL_FILLERS[code]
+        assert pool
+        for phrase in pool:
+            assert phrase.strip().endswith(".")
+            assert phrase.count(".") == 1
+        assert tool_filler_for(code) in pool
 
-    assert tool_filler_for("de") == tool_filler_for("en") == TOOL_FILLERS["en"]
-    assert tool_filler_for(None) == TOOL_FILLERS["en"]
+    assert tool_filler_for("de", rng=random.Random(0)) in TOOL_FILLERS["es"]
+    assert tool_filler_for(None, rng=random.Random(1)) in TOOL_FILLERS["es"]
+    picker = FillerPicker(rng=random.Random(2))
+    first, second = picker.pick("es"), picker.pick("es")
+    assert first != second
+
+    from vortex.conversation.prompt import strip_tool_wait_talk
+
+    assert strip_tool_wait_talk("Gracias. Un momento, lo reviso.") == "Gracias."
+    assert strip_tool_wait_talk("Un segundo, lo compruebo.") == ""
+    assert strip_tool_wait_talk("¿Qué tipo de cita necesitas?") == "¿Qué tipo de cita necesitas?"
 
     settings = voice_settings()
     events: list[tuple[str, dict]] = []
@@ -878,16 +1099,16 @@ async def test_tool_filler_speaks_one_short_phrase_per_language(voice_settings) 
     assert [kind for kind, _ in events] == ["voice.tool_filler"]
     assert events[0][1]["language"] == "es"
     assert events[0][1]["tools"] == 1
-    assert events[0][1]["text"] == TOOL_FILLERS["es"]
+    assert events[0][1]["text"] in TOOL_FILLERS["es"]
     assert len(queued) == 1
     assert isinstance(queued[0], TTSSpeakFrame)
-    assert queued[0].text == TOOL_FILLERS["es"]
-    assert queued[0].append_to_context is True
+    assert queued[0].text in TOOL_FILLERS["es"]
+    assert queued[0].append_to_context is False
 
     state.language = "ca"
     guard.on_caller_turn()  # the caller answered: a new interaction may mask
     await handler(None, [{}, {}])
-    assert queued[-1].text == TOOL_FILLERS["ca"]
+    assert queued[-1].text in TOOL_FILLERS["ca"]
     assert events[-1][1]["tools"] == 2
     assert [kind for kind, _ in events] == ["voice.tool_filler"] * 2
 
@@ -897,9 +1118,8 @@ async def test_the_filler_guard_speaks_one_filler_per_interaction(voice_settings
 
     Evidence CA-voicetest-1789811447: five completions in seven seconds, each
     starting a tool batch, each re-speaking "Un momento.". The caller heard
-    the filler flood instead of an answer. The guard speaks the first batch,
-    suppresses the ones inside the cooldown, and speaks again once the caller
-    has said anything - the mark of a new interaction.
+    the filler flood instead of an answer. The guard speaks the first batch
+    and stays quiet until the caller speaks again; typing covers the rest.
     """
     pytest.importorskip("pipecat")
     from pipecat.frames.frames import TTSSpeakFrame
@@ -934,18 +1154,18 @@ async def test_the_filler_guard_speaks_one_filler_per_interaction(voice_settings
     now[0] = 2.9
     await handler(None, [{"name": "triage"}])
     assert len(queued) == 1
-    assert events[-1][1]["suppressed"] == "cooldown"
+    assert events[-1][1]["suppressed"] == "same_turn"
 
-    # Past the cooldown the chain may re-mask: the caller has heard silence.
+    # Past any old cooldown the chain still stays quiet: typing is the wait.
     now[0] = 5.0
     await handler(None, [{"name": "find_slots"}])
-    assert len(queued) == 2
+    assert len(queued) == 1
 
-    # A caller turn re-arms the slot even inside the cooldown.
+    # A caller turn re-arms the slot.
     now[0] = 5.5
     guard.on_caller_turn()
     await handler(None, [{"name": "find_patient"}])
-    assert len(queued) == 3
+    assert len(queued) == 2
     assert isinstance(queued[-1], TTSSpeakFrame)
 
 

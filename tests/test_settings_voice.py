@@ -284,8 +284,10 @@ def test_elevenlabs_gates_on_the_elevenlabs_key(clean_env) -> None:
     )
     assert s.tts_provider == "elevenlabs"
     assert s.tts_is_routed is False
-    # Spanish only, so there is nothing to switch to.
-    assert s.tts_supports_language_switch is False
+    # Spanish and English on one multilingual voice, so the call can switch
+    # between the two without a second service.
+    assert s.tts_supports_language_switch is True
+    assert sorted(s.tts_covered_languages) == ["en", "es"]
     assert s.voice_is_pipecat is False  # the Google credentials are irrelevant here
 
     s = _settings(clean_env, ELEVENLABS_API_KEY="el-x")
@@ -411,6 +413,18 @@ def test_elevenlabs_has_no_default_voice(clean_env) -> None:
     assert s.tts_voices_missing == []
 
 
+def test_the_receptionist_preset_is_the_telnyx_voice_settings() -> None:
+    """Hardcoded on purpose: no env var reaches these, so pin them here."""
+    from vortex.line.elevenlabs_voice import ElevenLabsVoicePreset
+
+    preset = ElevenLabsVoicePreset.RECEPTIONIST.value
+    assert preset.stability == 0.5
+    assert preset.similarity_boost == 0.75
+    # style 0 and speaker boost on: the low-latency pair for a phone call.
+    assert preset.style == 0.0
+    assert preset.use_speaker_boost is True
+
+
 # --- geocoder ----------------------------------------------------------------
 
 
@@ -508,12 +522,12 @@ def test_google_voice_map_covers_es_ca_gl_eu(clean_env) -> None:
     # A pipecat Language, a regional string and an unsupported one all fold.
     assert tts_voice_for(Language.CA_ES, s) == (s.google_tts_voice_ca, Language.CA_ES)
     assert tts_voice_for("gl-ES", s) == (s.google_tts_voice_gl, Language.GL_ES)
-    # English is the clinic's default: it has its own voice, and it is the
-    # fallback for anything unsupported.
+    # English has its own voice; Spanish is the clinic's default, so it is
+    # the fallback for anything unsupported.
     from vortex.conversation.language import DEFAULT_GOOGLE_VOICE_EN
 
     assert tts_voice_for("en", s) == (DEFAULT_GOOGLE_VOICE_EN, Language.EN_GB)
-    assert tts_voice_for("de", s) == (DEFAULT_GOOGLE_VOICE_EN, Language.EN_GB)
+    assert tts_voice_for("de", s) == (s.google_tts_voice_es, Language.ES_ES)
     # A configured GOOGLE_TTS_VOICE_EN wins over the language module's fallback.
     s = _settings(clean_env, GOOGLE_TTS_VOICE_EN="en-US-Chirp3-HD-Puck")
     assert tts_voice_for("en", s) == ("en-US-Chirp3-HD-Puck", Language.EN_GB)
@@ -530,9 +544,9 @@ def test_elevenlabs_says_english_and_spanish_with_one_voice(clean_env) -> None:
     # multilingual, so the one id speaks Spanish and English.
     assert tts_voice_for("es", s) == ("voice-1", Language.ES)
     assert tts_voice_for("en", s) == ("voice-1", Language.EN)
-    # What it cannot say falls back to English, the clinic's default.
+    # What it cannot say falls back to Spanish, the clinic's default.
     for code in ("ca", "gl", "eu", "de"):
-        assert tts_voice_for(code, s) == ("voice-1", Language.EN)
+        assert tts_voice_for(code, s) == ("voice-1", Language.ES)
 
 
 def test_the_provider_argument_overrides_the_primary(clean_env) -> None:
@@ -557,9 +571,9 @@ def test_tts_voice_for_never_raises(clean_env) -> None:
     pytest.importorskip("pipecat")
     from pipecat.transcriptions.language import Language
 
-    from vortex.conversation.language import DEFAULT_GOOGLE_VOICE_EN, tts_voice_for
+    from vortex.conversation.language import tts_voice_for
 
     s = _settings(clean_env)
-    assert tts_voice_for(None, s) == (DEFAULT_GOOGLE_VOICE_EN, Language.EN_GB)  # type: ignore[arg-type]
+    assert tts_voice_for(None, s) == (s.google_tts_voice_es, Language.ES_ES)  # type: ignore[arg-type]
     # A settings stand-in with nothing on it still answers.
     assert tts_voice_for("ca", object()) == ("", Language.CA_ES)

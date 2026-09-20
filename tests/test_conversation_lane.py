@@ -19,11 +19,13 @@ from vortex.contract import MADRID
 from vortex.conversation import prompt as prompt_module
 from vortex.conversation.language import (
     DEFAULT_LANGUAGE,
+    MIN_WORDS_FOR_LANGUAGE_SWITCH,
     SUPPORTED_LANGUAGES,
     detect_language,
     language_name,
     language_scores,
     normalise_language,
+    worth_a_language_switch,
 )
 from vortex.conversation.prompt import (
     GREETING,
@@ -49,11 +51,12 @@ NOW = datetime(2026, 9, 18, 9, 0, tzinfo=MADRID)  # Friday
 # ---- language ----------------------------------------------------------------
 
 
-def test_english_is_the_default() -> None:
-    assert DEFAULT_LANGUAGE == "en"
-    assert detect_language("") == "en"
-    assert detect_language("   ") == "en"
-    assert detect_language("xyzzy 123") == "en"
+def test_spanish_is_the_default() -> None:
+    """The clinic is in Madrid: nothing said yet means Spanish, not English."""
+    assert DEFAULT_LANGUAGE == "es"
+    assert detect_language("") == "es"
+    assert detect_language("   ") == "es"
+    assert detect_language("xyzzy 123") == "es"
 
 
 @pytest.mark.parametrize(
@@ -90,7 +93,7 @@ def test_the_stt_hint_wins_over_the_words() -> None:
 def test_a_call_in_spanish_does_not_flip_to_english_on_an_ok() -> None:
     # "ok" carries no vote: keep the language the call is in.
     assert detect_language("ok", current="es") == "es"
-    assert detect_language("ok") == "en"
+    assert detect_language("ok") == "es"
     assert detect_language("", current="ca") == "ca"
     # A clear switch still switches.
     assert detect_language("Perdone, mejor en español. Quiero cita.", current="en") == "es"
@@ -105,6 +108,23 @@ def test_shared_words_do_not_decide_on_their_own() -> None:
     assert scores["es"] == scores["ca"] == 1  # a tie, resolved by current/default
 
 
+def test_one_word_is_never_a_language_switch() -> None:
+    """Soniox tags misheard fragments too, and each one used to move the line."""
+    assert MIN_WORDS_FOR_LANGUAGE_SWITCH == 3
+    for fragment in ("", "   ", "It", "Apple", "Halo", "Vale", "ok ok", "-- Hi!"):
+        assert worth_a_language_switch(fragment) is False, fragment
+    for sentence in (
+        "It is an appointment",
+        "Sorry, in English please.",
+        "bon dia, si us plau",
+        "¿qué tal?  todo bien",
+    ):
+        assert worth_a_language_switch(sentence) is True, sentence
+    # Punctuation and dashes are not words: three of them is still nothing.
+    assert worth_a_language_switch("-- , ...") is False
+    assert worth_a_language_switch(None) is False  # type: ignore[arg-type]
+
+
 def test_normalise_language_folds_every_shape() -> None:
     assert normalise_language("es-ES") == "es"
     assert normalise_language("CA_es") == "ca"
@@ -113,7 +133,7 @@ def test_normalise_language_folds_every_shape() -> None:
     assert normalise_language(None) is None
     assert normalise_language("") is None
     assert language_name("ca") == "Catalan"
-    assert language_name(None) == "English"
+    assert language_name(None) == "Spanish"
     assert set(SUPPORTED_LANGUAGES) == {"en", "es", "ca", "gl", "eu"}
 
 
@@ -124,7 +144,8 @@ def test_prompt_renders_the_call_clock_not_the_machine_clock() -> None:
     text = build_system_prompt(NOW)
     assert "09:00 on Friday 18 September 2026" in text
     assert "Tomorrow is Saturday 19 September 2026" in text
-    assert "Answer in English" in text
+    assert "Answer in Spanish" in text
+    assert "Answer in English" in build_system_prompt(NOW, language="en")
     assert "Answer in Catalan" in build_system_prompt(NOW, language="ca")
     assert "TODO" not in text
 
@@ -205,7 +226,7 @@ def test_initial_messages_is_one_system_turn() -> None:
     assert messages[0]["content"] == build_system_prompt(NOW)
 
 
-def test_canned_lines_exist_in_every_language_and_fall_back_to_english() -> None:
+def test_canned_lines_exist_in_every_language_and_fall_back_to_spanish() -> None:
     for code in SUPPORTED_LANGUAGES:
         lines = (
             greeting_for,
@@ -219,9 +240,9 @@ def test_canned_lines_exist_in_every_language_and_fall_back_to_english() -> None
             assert fn(code).strip(), (fn.__name__, code)
     assert "112" in emergency_line_for("en")
     assert "112" in emergency_line_for("ca")
-    assert greeting_for("de") == greeting_for("en") == GREETING
-    assert idle_prompt_for(None) == "Are you still there?"
-    assert idle_submit_line_for(None).startswith("I'll note what we have")
+    assert greeting_for("de") == greeting_for("es") == GREETING
+    assert idle_prompt_for(None) == "¿Sigue ahí?"
+    assert idle_submit_line_for(None).startswith("Anoto lo que tenemos")
     assert prompt_module.CLINIC_NAME in GREETING
 
 

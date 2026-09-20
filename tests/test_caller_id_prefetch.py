@@ -314,7 +314,7 @@ def test_the_note_reaches_the_model() -> None:
 def test_the_prompt_with_a_note_still_fits_a_turn() -> None:
     """The note buys back far more clock than it spends, but it is not free either.
 
-    ``tests/test_prompt.py`` owns the *static* budget of 1,400 tokens. The CALLER
+    ``tests/test_prompt.py`` owns the *static* budget of 1,650 tokens. The CALLER
     block is a per-call addition on top of it, resent every turn like the rest of
     the prompt: measured against the live directory it costs 130-160 tokens, the
     bulk of it the chart note. That buys back the two-to-six opening turns the
@@ -339,7 +339,7 @@ def test_the_prompt_with_a_note_still_fits_a_turn() -> None:
     )
     text = build_system_prompt(NOW, caller=CallerLineMatch(looked_up=True, patient=loaded))
 
-    assert len(text) // 4 <= 1600
+    assert len(text) // 4 <= 1800
 
 
 def test_the_note_adds_nothing_the_record_did_not_carry() -> None:

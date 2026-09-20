@@ -126,12 +126,23 @@ def _llm_provider(var: str, default: str) -> str:
 TTS_PROVIDERS: tuple[str, ...] = ("google", "elevenlabs")
 DEFAULT_TTS_PROVIDER = "google"
 
-# Which languages each provider can actually say. Google carries English plus
-# the three co-official languages; ElevenLabs is here for Spanish.
+# Which languages each provider can actually say. Google carries all five;
+# ElevenLabs says Spanish and English with one multilingual voice, so a caller
+# who drops an English sentence into a Spanish call keeps the same voice
+# instead of being handed over to Google mid-sentence.
 TTS_LANGUAGES: dict[str, frozenset[str]] = {
     "google": frozenset({"en", "es", "ca", "gl", "eu"}),
-    "elevenlabs": frozenset({"es"}),
+    "elevenlabs": frozenset({"es", "en"}),
 }
+
+
+# Providers whose voice id is the whole voice and whose language field is only
+# a hint: the same ElevenLabs multilingual id says Spanish and English, so a
+# switch between the two changes nothing the service would apply and the
+# pipeline does not restart it for one. Google is not on this list — a Gemini
+# voice name ("Aoede") is half a voice without the locale it is spoken in, so
+# ca -> gl is a real change even though the name does not move.
+TTS_LANGUAGE_IS_A_HINT: frozenset[str] = frozenset({"elevenlabs"})
 
 
 def _tts_provider(var: str = "VORTEX_TTS_PROVIDER") -> str:
