@@ -31,6 +31,25 @@ log = logging.getLogger("vortex.observability")
 
 LINE_URL = os.environ.get("VORTEX_LINE_URL", "http://127.0.0.1:7860").rstrip("/")
 
+
+def ttl_env(name: str, default: float) -> float:
+    """A cache lifetime, overridable from the environment.
+
+    Every read behind these caches is one hop to a hosted project that has
+    spent this weekend stalling for tens of seconds at a time. The defaults
+    are generous on purpose; raise them further for a demo, or drop them to
+    0 to watch a change land immediately.
+    """
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        log.warning("%s=%r is not a number; using %s", name, raw, default)
+        return default
+
+
 #: How many complete calls the wall and the per-call pages ask for. Counted
 #: in calls, not events: the old ``limit=800`` tail was about ten calls on a
 #: real log and could cut the oldest one's ``call.started``. Sized to hold a
@@ -38,8 +57,9 @@ LINE_URL = os.environ.get("VORTEX_LINE_URL", "http://127.0.0.1:7860").rstrip("/"
 WALL_CALLS = 160
 
 #: One Insights fetch per this many seconds, no matter how many tabs poll.
-#: The page itself only asks every 6 s.
-INSIGHTS_CACHE_TTL_S = 4.0
+#: The page itself only asks every 6 s. Aggregates over a 7-to-90-day window
+#: do not move in a minute, and the read behind them is the expensive one.
+INSIGHTS_CACHE_TTL_S = ttl_env("VORTEX_INSIGHTS_TTL_S", 60.0)
 
 #: Last events successfully fetched per scope. Cleared only by a fresh
 #: success; never written to disk.

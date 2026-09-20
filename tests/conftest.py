@@ -187,8 +187,15 @@ class FakeTables:
         return True
 
     def select(
-        self, table: str, params: dict[str, str] | None = None
+        self,
+        table: str,
+        params: dict[str, str] | None = None,
+        *,
+        timeout: float | None = None,
     ) -> list[dict[str, Any]] | None:
+        # ``timeout`` is accepted and ignored: a double that does not take the
+        # real signature turns a caller on a deadline into a silent fallback,
+        # and the test then passes on the seed instead of the row it set up.
         params = params or {}
         rows = [dict(r) for r in self.tables.get(table, []) if self._match(r, params)]
         for term in reversed(str(params.get("order", "")).split(",")):
@@ -263,9 +270,14 @@ def _isolate_board_sources(monkeypatch: pytest.MonkeyPatch) -> None:
     """A local ``make run`` must not answer the board tests' fetch."""
     from vortex.observability import callfeed
 
+    from vortex.api import _shared
+
     monkeypatch.setattr(callfeed, "LINE_URL", "http://127.0.0.1:9")
     monkeypatch.setattr(callfeed, "_last_good", {})
     monkeypatch.setattr(callfeed, "_scope_cache", {})
+    # The card cache outlives a test now that its TTL is demo-sized, so one
+    # test's cards would answer the next one's read.
+    monkeypatch.setattr(_shared, "_cards_cache", None)
 
 
 @pytest.fixture(autouse=True)
