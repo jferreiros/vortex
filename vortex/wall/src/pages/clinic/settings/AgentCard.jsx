@@ -20,10 +20,14 @@ function nearestRate(n) {
   return RATES.reduce((best, opt) => (Math.abs(opt.value - n) < Math.abs(best - n) ? opt.value : best), RATES[0].value);
 }
 
+// Both Probar buttons speak in the voice of the persona the rail has on the
+// phone: the server resolves it, so the card never has to know which id that
+// is. Activate another receptionist and the next press sounds like her.
 export default function AgentCard() {
   const [cfg, setCfg] = useState(VOICE_DEFAULTS);
   const [saved, setSaved] = useState(VOICE_DEFAULTS);
   const [isTrying, setIsTrying] = useState(false);
+  const [isTesting, setIsTesting] = useState(false);
   const [toast, setToast] = useState(null);
   const audioRef = useRef(null);
   const saveTimer = useRef(null);
@@ -67,26 +71,35 @@ export default function AgentCard() {
     return () => clearTimeout(saveTimer.current);
   }, [cfg, saved]);
 
-  const preview = async () => {
-    if (isTrying) return;
-    setIsTrying(true);
-    try {
+  const speak = useCallback(
+    async (extra) => {
       const r = await fetch("/api/wall/voice-preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(cfg),
+        body: JSON.stringify({ ...cfg, ...extra }),
       });
       if (!r.ok) throw new Error(`preview failed: ${r.status}`);
       const url = URL.createObjectURL(await r.blob());
       audioRef.current?.pause();
       audioRef.current = new Audio(url);
       await audioRef.current.play();
+    },
+    [cfg],
+  );
+
+  const play = async (extra, setBusy) => {
+    setBusy(true);
+    try {
+      await speak(extra);
     } catch {
       setToast("preview");
       setTimeout(() => setToast(null), 3000);
     }
-    setIsTrying(false);
+    setBusy(false);
   };
+
+  const preview = () => (isTrying ? null : play(undefined, setIsTrying));
+  const test = () => (isTesting ? null : play({ sample: "test" }, setIsTesting));
 
   const rate = nearestRate(cfg.speechRate);
   const rateSample = RATES.find((opt) => opt.value === rate)?.sample;
@@ -116,7 +129,14 @@ export default function AgentCard() {
       </section>
 
       <section className="agent-block">
-        <h3>Ritmo</h3>
+        <div className="agent-block-head">
+          <h3>Ritmo</h3>
+          {/* Same preview, and the speed rides in the same payload: this
+              button is how you hear what the slider did. */}
+          <button type="button" className="agent-try" onClick={test} disabled={isTesting}>
+            {isTesting ? "…" : "Probar"}
+          </button>
+        </div>
         <Pills
           name="Ritmo"
           value={rate}

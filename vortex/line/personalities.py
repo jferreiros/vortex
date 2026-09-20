@@ -18,9 +18,10 @@ that flag: it clears every other row first and only then sets the new one, so
 the worst a half-applied write can leave behind is a clinic with no active
 persona, which ``active()`` already answers from the seeds.
 
-Nothing here reaches the phone call yet: this module stores, lists and edits
-personas. Reading the active one on the line — the system prompt's tone line,
-the opening greeting, the TTS voice — is a separate change.
+What reaches the phone call today is the **voice**: the pipeline reads
+``active()`` once when the socket opens and speaks with that persona's
+ElevenLabs id, from ``conversation.language.PERSONA_VOICES``. The system
+prompt's tone line and the opening greeting are still a separate change.
 """
 
 from __future__ import annotations
@@ -44,10 +45,11 @@ LANGUAGES: tuple[str, ...] = ("en", "es", "ca", "gl", "eu")
 #: turn, so a persona's tone has to stay a fragment, not a second prompt.
 TONE_MAX_CHARS = 400
 
-#: A persona carries no voice id of its own: the line speaks with whatever
-#: ``Settings.elevenlabs_voice_for`` resolves, so that once a later change
-#: reads a persona on the call nothing about the sound moves unless somebody
-#: changed the ELEVENLABS_VOICE_ID_* variables on purpose.
+#: A persona carries no voice id in the store: which ElevenLabs voice each
+#: receptionist speaks with is ``conversation.language.PERSONA_VOICES``, a
+#: fixed map in code the team tunes together, not a field a form can set to a
+#: string ElevenLabs has never heard of. These two stay empty so the stored
+#: row says "ask the map", and ``resolved_voice`` below is how you ask.
 VOICE_ES = ""
 VOICE_EN = ""
 
@@ -159,6 +161,10 @@ def listing(settings: Any = None) -> dict[str, Any]:
     ``GET /personalities`` and the board's ``GET /api/wall/personalities``.
     They read the same table, so the shape is defined once here rather than
     written out twice and drifting.
+
+    No voice id here: the rail is a picker of faces. Which ElevenLabs voice
+    the active one ends up speaking with is ``voice_config.current_voice``,
+    served at ``/voice-current``.
     """
     people = list_all(settings)
     return {

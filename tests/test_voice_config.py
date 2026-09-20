@@ -96,8 +96,52 @@ def test_preview_voice_id_follows_the_card(offline_settings) -> None:
 
     female = voice_config.VoiceConfig(voice="female")
     male = voice_config.VoiceConfig(voice="male")
+    # With no store the seed persona answers, and her pair is the preset.
     assert voice_config.preview_voice_id(offline_settings, female) == VoicePreset.ES.female
     assert voice_config.preview_voice_id(offline_settings, male) == VoicePreset.ES.male
+
+
+def test_preview_voice_id_follows_the_persona(offline_settings, fake_store) -> None:
+    """Activate another receptionist and the Try button previews her voice —
+    the same one the next call will speak with."""
+    from vortex.conversation.language import GEORGE, MATILDA
+    from vortex.line import personalities
+
+    personalities.list_all(offline_settings)  # seeds the table
+    personalities.activate(offline_settings, "carla")
+
+    female = voice_config.VoiceConfig(voice="female")
+    male = voice_config.VoiceConfig(voice="male")
+    assert voice_config.preview_voice_id(offline_settings, female) == MATILDA
+    assert voice_config.preview_voice_id(offline_settings, male) == GEORGE
+
+
+def test_current_voice_reports_who_is_on_the_phone(offline_settings) -> None:
+    """The resolved truth, not the map: persona, id, model."""
+    from vortex.conversation.language import SOFIA
+
+    now = voice_config.current_voice(offline_settings)
+    assert now["persona"] == "lucia"
+    assert now["voice_id"] == SOFIA
+    assert now["voice_label"].startswith("Sofia")
+    assert now["model"] == "eleven_flash_v2_5"
+    assert now["source"] == "persona"
+    assert now["test_text"] == voice_config.TEST_TEXT
+
+
+def test_current_voice_owns_up_to_an_env_override(monkeypatch) -> None:
+    """A machine with ELEVENLABS_VOICE_ID_ES set is not letting the picker
+    decide, and the card has to say so instead of showing a voice nobody hears."""
+    from vortex import settings as settings_module
+
+    monkeypatch.setenv("ELEVENLABS_VOICE_ID_ES", "voice-env")
+    settings_module.reset_settings()
+    try:
+        now = voice_config.current_voice(settings_module.get_settings())
+        assert now["voice_id"] == "voice-env"
+        assert now["source"] == "env_override"
+    finally:
+        settings_module.reset_settings()
 
 
 def test_synthesize_raises_without_a_key(offline_settings) -> None:
@@ -138,6 +182,37 @@ async def test_the_board_saves_the_card(user: User, fake_store) -> None:
     assert resp.status_code == 200
     assert resp.json()["speechRate"] == 20
     assert voice_config.load(None).speech_rate == 20
+
+
+async def test_the_board_serves_the_current_voice(user: User, fake_store) -> None:
+    """How the team checks which voice the next call will speak with."""
+    from vortex.conversation.language import ERIC
+    from vortex.line import personalities
+
+    personalities.list_all(None)
+    personalities.activate(None, "mateo")
+    voice_config.save(None, {"voice": "male"})
+
+    resp = await user.http_client.get("/api/wall/voice-current")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["persona"] == "mateo"
+    assert body["voice_id"] == ERIC
+    assert body["model"] == "eleven_flash_v2_5"
+    assert body["test_text"]
+
+
+async def test_previewing_does_not_change_who_is_on_the_line(user: User, fake_store) -> None:
+    """The Try button synthesises; activating a persona is a different
+    button on a different card."""
+    from vortex.line import personalities
+
+    personalities.list_all(None)
+    resp = await user.http_client.post("/api/wall/voice-preview", json={"sample": "test"})
+    # No ElevenLabs key in the tests, so the route 503s — what matters is that
+    # nothing was activated on the way.
+    assert resp.status_code == 503
+    assert personalities.active(None).slug == "lucia"
 
 
 async def test_the_board_answers_503_with_no_store(user: User, offline_settings) -> None:

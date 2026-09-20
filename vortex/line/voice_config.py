@@ -30,6 +30,12 @@ VOICES = ("female", "male")
 #: The preview speaks the Spanish greeting: same words the line opens with.
 PREVIEW_TEXT = "Clínica Arenal, buenos días. ¿En qué puedo ayudarle?"
 
+#: What the card's Ritmo button speaks. Deliberately generic and a little
+#: longer than the greeting — it names no persona and no clinic, so the same
+#: words can be compared between two receptionists and two speeds, and what
+#: changes is only how it sounds.
+TEST_TEXT = "Hola, esta es la voz que atiende el teléfono. Uno, dos, tres. ¿Me oye bien?"
+
 #: MP3 for everything pre-rendered: Twilio's <Play> and the wall's Try button.
 PREVIEW_OUTPUT_FORMAT = "mp3_44100_128"
 
@@ -168,13 +174,23 @@ def preview_config(settings: Any, payload: dict[str, Any] | None) -> VoiceConfig
 
 
 def synthesize(
-    settings: Any, cfg: VoiceConfig, text: str, *, language_code: str, voice_name: str
+    settings: Any,
+    cfg: VoiceConfig,
+    text: str,
+    *,
+    language_code: str,
+    voice_name: str,
+    model_id: str = "",
 ) -> bytes:
     """One MP3 of ``text``, straight through the ElevenLabs HTTP API — no pipeline.
 
     Blocking on purpose: both callers run it in a worker thread. Raises when
     ``ELEVENLABS_API_KEY`` is empty or the request fails, which is what keeps
     the callers' ``<Say>`` fallback and the preview route's 503 honest.
+
+    ``model_id`` is the persona's model when it has one of its own; empty
+    falls back to ``ELEVENLABS_MODEL``, which every voice in the map is built
+    for.
     """
     import httpx
 
@@ -191,7 +207,9 @@ def synthesize(
         headers={"xi-api-key": api_key},
         json={
             "text": text,
-            "model_id": getattr(settings, "elevenlabs_model", "") or "eleven_flash_v2_5",
+            "model_id": (
+                model_id or getattr(settings, "elevenlabs_model", "") or "eleven_flash_v2_5"
+            ),
             # A multilingual model needs the bare code to pick the accent.
             "language_code": (language_code or "es").replace("_", "-").split("-", 1)[0].lower(),
             "voice_settings": {"speed": elevenlabs_speed(cfg)},
@@ -202,19 +220,71 @@ def synthesize(
     return response.content
 
 
-def preview_voice_id(settings: Any, cfg: VoiceConfig) -> str:
-    """The Spanish voice id the Try button speaks with, female or male."""
+def preview_voice_id(settings: Any, cfg: VoiceConfig, persona: str | None = None) -> str:
+    """The Spanish voice id the Try button speaks with, female or male.
+
+    ``persona`` is the receptionist on the phone. None asks who that is, so
+    the button always previews the voice the next call will actually use.
+    """
     from vortex.conversation.language import elevenlabs_voice_id
 
-    return elevenlabs_voice_id("es", settings, cfg.voice)
+    return elevenlabs_voice_id("es", settings, cfg.voice, persona or active_persona(settings))
 
 
-def synthesize_preview(settings: Any, cfg: VoiceConfig) -> bytes:
-    """One MP3 of the greeting for the wall's Try button."""
+def active_persona(settings: Any = None) -> str:
+    """The slug of the receptionist on the phone. Never raises: with no store
+    it is the first seed, the same one a call would answer with."""
+    from vortex.line import personalities
+
+    return personalities.active(settings).slug
+
+
+def current_voice(settings: Any = None, cfg: VoiceConfig | None = None) -> dict[str, Any]:
+    """Which voice the next call will speak with, resolved.
+
+    The truth, not the map: who is on the phone, which ElevenLabs id that
+    comes out as, which model says it, and — when an ``ELEVENLABS_VOICE_ID_*``
+    variable is set on this machine — that the persona is not what decided it.
+    Served at ``/voice-current`` on both front doors: the one way to answer
+    "which voice is live right now?" without reading the code. Never raises.
+    """
+    from vortex.conversation.language import elevenlabs_model_for, persona_voice, voice_label
+    from vortex.line import personalities
+
+    config = cfg or load(settings)
+    person = personalities.active(settings)
+    voice = preview_voice_id(settings, config, person.slug)
+    # What the map alone would have said. A difference means a machine-level
+    # ELEVENLABS_VOICE_ID_* is in force and the picker is not deciding.
+    mapped, _ = persona_voice(person.slug, "es", config.voice)
+    return {
+        "persona": person.slug,
+        "name": person.name,
+        "gender": config.voice,
+        "voice_id": voice,
+        "voice_label": voice_label(voice),
+        "model": elevenlabs_model_for(person.slug, settings),
+        "language": "es",
+        "source": "persona" if voice == mapped else "env_override",
+        # The words the Ritmo button speaks, so nothing has to keep a second
+        # copy of a line that lives here.
+        "test_text": TEST_TEXT,
+    }
+
+
+def synthesize_preview(
+    settings: Any, cfg: VoiceConfig, persona: str | None = None, text: str | None = None
+) -> bytes:
+    """One MP3 for the wall: the greeting by default, the generic test line
+    when the card asks for it."""
+    from vortex.conversation.language import elevenlabs_model_for
+
+    slug = persona or active_persona(settings)
     return synthesize(
         settings,
         cfg,
-        PREVIEW_TEXT,
+        text or PREVIEW_TEXT,
         language_code="es",
-        voice_name=preview_voice_id(settings, cfg),
+        voice_name=preview_voice_id(settings, cfg, slug),
+        model_id=elevenlabs_model_for(slug, settings),
     )

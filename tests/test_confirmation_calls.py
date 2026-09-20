@@ -432,8 +432,8 @@ async def test_ensure_confirmation_audio_synthesises_and_caches(
 
     calls: list[str] = []
 
-    def fake_synthesize(settings, cfg, text, *, language_code, voice_name) -> bytes:
-        calls.append(f"{language_code}|{voice_name}")
+    def fake_synthesize(settings, cfg, text, *, language_code, voice_name, model_id="") -> bytes:
+        calls.append(f"{language_code}|{voice_name}|{model_id}")
         return b"fake-mp3"
 
     monkeypatch.setenv("VORTEX_CONFIRMATION_AUDIO_DIR", str(tmp_path / "audio"))
@@ -446,7 +446,8 @@ async def test_ensure_confirmation_audio_synthesises_and_caches(
         assert (tmp_path / "audio" / name).read_bytes() == b"fake-mp3"
         from vortex.conversation.language import VoicePreset
 
-        assert calls == [f"es|{VoicePreset.ES.female}"]
+        # The seed persona is on the phone, so the call back uses her voice.
+        assert calls == [f"es|{VoicePreset.ES.female}|eleven_flash_v2_5"]
         # second render of the same line reuses the file, no new synthesis
         again = await ensure_confirmation_audio(settings, "Hola, le llamamos de la clínica.", "es")
         assert again == name
@@ -462,7 +463,7 @@ async def test_ensure_confirmation_audio_returns_none_without_tts(
     from vortex import settings as settings_module
     from vortex.line import voice_config
 
-    def boom(settings, cfg, text, *, language_code, voice_name) -> bytes:
+    def boom(settings, cfg, text, *, language_code, voice_name, model_id="") -> bytes:
         raise RuntimeError("no credentials")
 
     monkeypatch.setenv("VORTEX_CONFIRMATION_AUDIO_DIR", str(tmp_path / "audio"))

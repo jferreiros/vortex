@@ -234,6 +234,10 @@ class VoicePreset(Enum):
     switch picks the column; ``ELEVENLABS_VOICE_ID_DEFAULT`` (every language)
     and ``ELEVENLABS_VOICE_ID_ES`` (Spanish only) override the female one.
 
+    This is now the *floor*, not the whole story: the receptionist on the
+    phone picks the pair in ``PERSONA_VOICES`` below, and this row answers for
+    a persona nobody has mapped yet.
+
     The value is ``(female_voice_id, male_voice_id)``. Both are the team's
     professional Spanish voices, verified on the account on 20 Sep 2026:
     ``Sofia - Natural Conversations`` and ``Alejandro de la Mancha``. A
@@ -262,26 +266,133 @@ def voice_preset_for(language: str | None) -> VoicePreset:
     return VoicePreset[code.upper()]
 
 
-def elevenlabs_voice_id(
-    language: str | None, settings: Settings | Any = None, gender: str = "female"
-) -> str:
-    """The voice id to speak ``language`` with, preset first, env override on top.
+# --- the personas' voices -----------------------------------------------------
 
-    Male comes from the preset alone: it is the second column of the same row,
-    so the switch never lands on a voice nobody chose.
+#: The five ids the clinic speaks with, read off the team's ElevenLabs account
+#: on 20 Sep 2026 (``GET /v1/voices``). Two filters picked them out of the 23
+#: the account holds: ``eleven_flash_v2_5`` in ``high_quality_base_model_ids``,
+#: which the line needs for its 75 ms budget, and ``es`` in
+#: ``verified_languages``, which is what keeps the Spanish intelligible. Sarah
+#: (``EXAVITQu4vr4xnSDxMaL``) passes the second and fails the first, so she is
+#: not here: she would sound worse on the phone than in the dashboard.
+SOFIA = "eZxqQzb5CuYo3Kl6EXfZ"  # professional, peninsular, casual — female
+ALEJANDRO = "JngPf0lmRkKhY3qSJz0f"  # professional, peninsular, confident — male
+MATILDA = "XrExE9yKIg1WjnnlVkGX"  # premade, american, professional — female
+ERIC = "cjVigY5qzO86Huf0OWal"  # premade, american, smooth — male
+GEORGE = "JBFqnCBsd6RMkjVDRZzb"  # premade, british, warm — male
+
+#: The human name behind each id, for ``/voice-current``. A voice id is
+#: opaque, and somebody checking which receptionist is live should be able to
+#: tell two of them apart without opening ElevenLabs.
+VOICE_LABELS: dict[str, str] = {
+    SOFIA: "Sofia · peninsular · mujer",
+    ALEJANDRO: "Alejandro · peninsular · hombre",
+    MATILDA: "Matilda · internacional · mujer",
+    ERIC: "Eric · internacional · hombre",
+    GEORGE: "George · británico · hombre",
+}
+
+#: Which voice each persona speaks with: ``(female, male)``, the same two
+#: columns as ``VoicePreset`` and picked by the same wall switch.
+#:
+#: One row covers all five languages. Every id here is multilingual — the
+#: account lists Sofia verified in es/en/it/de/pt and Alejandro in es/en/it/de
+#: among others — so 3 personas x 5 languages x 2 genders is 30 combinations
+#: that resolve to 5 distinct ids, which is the whole point: a voice that
+#: already speaks the language does not need a second id to speak it.
+#:
+#: ``lucia`` is the first seed and therefore the persona a fresh clinic answers
+#: with, so her pair is exactly what ``VoicePreset`` has always returned: no
+#: call changes sound until somebody activates another receptionist.
+#:
+#: ``mateo``'s female column reuses Sofia because the account holds only two
+#: female voices that are Spanish-verified *and* flash-capable, and Matilda is
+#: spent on Carla. A male-named persona with the wall switch on "Mujer" is a
+#: combination nobody asks for; it answers rather than failing.
+PERSONA_VOICES: dict[str, tuple[str, str]] = {
+    "lucia": (SOFIA, ALEJANDRO),  # cálida
+    "mateo": (SOFIA, ERIC),  # directa
+    "carla": (MATILDA, GEORGE),  # tranquila
+}
+
+#: A persona that needs its own TTS model, e.g. ``eleven_multilingual_v2`` for
+#: a voice with no flash build. Empty means ``ELEVENLABS_MODEL``, which is what
+#: all five ids above are built for; this exists so moving one persona off
+#: flash is a line here and not a change at four call sites.
+PERSONA_MODELS: dict[str, str] = {}
+
+
+def persona_voice(
+    persona: str | None, language: str | None = None, gender: str = "female"
+) -> tuple[str, str]:
+    """``(voice_id, model_id)`` for a persona, a language and the wall switch.
+
+    An if per persona, on purpose: the map is a tuning decision the team makes
+    together and reads off the screen, not a lookup to be clever about. An
+    unknown slug — a persona somebody added on the Clinic View — falls through
+    to the preset, so a new receptionist sounds like the clinic rather than
+    like nothing.
+
+    ``language`` does not pick the id today: every voice here speaks all five.
+    It stays in the signature because it is the one axis that could split a
+    row later (a native English voice for ``en``), and the caller already has
+    it. An empty ``model_id`` means "whatever ``ELEVENLABS_MODEL`` says".
     """
-    preset = voice_preset_for(language)
-    if gender == "male":
-        return preset.male
+    slug = (persona or "").strip().lower()
+    male = gender == "male"
+    if slug in PERSONA_VOICES:
+        female_id, male_id = PERSONA_VOICES[slug]
+        voice = male_id if male else female_id
+    else:
+        preset = voice_preset_for(language)
+        voice = preset.male if male else preset.female
+    return voice, PERSONA_MODELS.get(slug, "")
+
+
+def voice_label(voice_id: str) -> str:
+    """The human name for a voice id, or the id when it is not one of ours
+    (an ``ELEVENLABS_VOICE_ID_*`` override, typically)."""
+    return VOICE_LABELS.get(voice_id, voice_id)
+
+
+def elevenlabs_model_for(persona: str | None, settings: Settings | Any = None) -> str:
+    """The TTS model a persona is spoken with. Defaults to the configured one."""
+    _, model = persona_voice(persona)
+    return model or str(getattr(settings, "elevenlabs_model", "") or "eleven_flash_v2_5")
+
+
+def elevenlabs_voice_id(
+    language: str | None,
+    settings: Settings | Any = None,
+    gender: str = "female",
+    persona: str | None = None,
+) -> str:
+    """The voice id to speak ``language`` with.
+
+    Three sources, in this order: an ``ELEVENLABS_VOICE_ID_*`` variable, the
+    persona on the phone, the preset. The variable wins because a machine that
+    was told to use one voice must use it — ``/voice-current`` reports
+    ``source: env_override`` rather than pretending the persona moved the sound.
+
+    Male used to come from the preset alone. It now comes from the persona's
+    second column, which is the same pair when no persona is active.
+    """
     code = normalise_language(language) or DEFAULT_LANGUAGE
     override = str(getattr(settings, "elevenlabs_voice_id_default", "") or "")
     if code == "es":
         override = str(getattr(settings, "elevenlabs_voice_id_es", "") or "") or override
-    return override or preset.female
+    if override and gender != "male":
+        return override
+    voice, _ = persona_voice(persona, code, gender)
+    return voice
 
 
 def tts_voice_for(
-    language: str, settings: Settings | Any, provider: str | None = None, gender: str = "female"
+    language: str,
+    settings: Settings | Any,
+    provider: str | None = None,
+    gender: str = "female",
+    persona: str | None = None,
 ) -> tuple[str, Language]:
     """The voice id and the pipecat ``Language`` for a detected language.
 
@@ -289,12 +400,16 @@ def tts_voice_for(
     is a new voice id on the running service. ``provider`` is kept for callers
     that still name the service; there is only one to name.
 
+    ``persona`` is the slug of the receptionist answering this socket. The
+    caller reads it once when the pipeline builds and passes the same one on
+    every switch, so a call that changes language does not change receptionist.
+
     Anything outside the five falls back to English, the clinic's default.
     Never raises: a failed lookup during a live call must not end the call.
     """
     from pipecat.transcriptions.language import Language
 
     code = normalise_language(language) or DEFAULT_LANGUAGE
-    voice = elevenlabs_voice_id(code, settings, gender)
+    voice = elevenlabs_voice_id(code, settings, gender, persona)
     tts_language = getattr(Language, _PIPECAT_LANGUAGE_NAMES[code], Language.EN)
     return str(voice or ""), tts_language

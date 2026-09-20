@@ -67,15 +67,30 @@ async def wall_voice_config_put(request: Request) -> JSONResponse:
         return JSONResponse(STORE_DOWN, status_code=503)
 
 
+@router.get("/voice-current")
+def wall_voice_current() -> JSONResponse:
+    """Who is on the phone and which ElevenLabs voice and model that resolves
+    to — how the team checks what the next call will sound like. Never fails:
+    with no store it answers for the seed persona, which is who a call would
+    get anyway."""
+    return JSONResponse(voice_config.current_voice(get_settings()))
+
+
 @router.post("/voice-preview")
 async def wall_voice_preview(request: Request) -> Response:
-    """The Try button: one MP3 of the greeting with the card's current
-    sliders, saved or not."""
+    """The Try button: one MP3 with the card's current sliders, saved or not.
+
+    The Voz button sends the greeting; the Ritmo button sends
+    ``{"sample": "test"}`` and gets the longer generic line, where the speed
+    is audible. Either way it is the persona on the phone speaking: the card
+    previews the next call, it does not audition receptionists.
+    """
     payload = await request.json()
     settings = get_settings()
     cfg = voice_config.preview_config(settings, payload)
+    text = voice_config.TEST_TEXT if (payload or {}).get("sample") == "test" else None
     try:
-        audio = await asyncio.to_thread(voice_config.synthesize_preview, settings, cfg)
+        audio = await asyncio.to_thread(voice_config.synthesize_preview, settings, cfg, None, text)
     except Exception as exc:
         log.warning("voice preview unavailable: %s", exc)
         return JSONResponse({"error": "voice_preview_unavailable"}, status_code=503)
