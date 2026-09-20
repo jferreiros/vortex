@@ -132,9 +132,20 @@ def wall_analytics_api(days: int = 30) -> JSONResponse:
         hit = _analytics_cache.get(days)
         if hit is None:
             payload = _build_analytics(days)
+            if _is_error(payload):
+                # Answer with it so the page can say the store is down, but
+                # leave the cache empty so the next request retries.
+                return JSONResponse(payload)
             _analytics_cache[days] = (time.monotonic(), payload)
             hit = _analytics_cache[days]
     return JSONResponse(hit[1])
+
+
+def _is_error(payload: dict[str, Any]) -> bool:
+    """A build whose read failed. Worth answering with, never worth keeping:
+    caching it turns one bad read into a whole TTL of zeros."""
+    source = payload.get("source")
+    return isinstance(source, dict) and source.get("kind") == "error"
 
 
 def _start_analytics_refresh(days: int) -> None:
@@ -151,7 +162,8 @@ def _refresh_analytics_cache(days: int) -> None:
     try:
         with _analytics_locks[days]:
             payload = _build_analytics(days)
-            _analytics_cache[days] = (time.monotonic(), payload)
+            if not _is_error(payload):
+                _analytics_cache[days] = (time.monotonic(), payload)
     except Exception:
         log.exception("background analytics refresh failed for days=%s", days)
     finally:
@@ -171,7 +183,8 @@ def _warm_analytics_cache() -> None:
             with _analytics_locks[days]:
                 if days not in _analytics_cache:
                     payload = _build_analytics(days)
-                    _analytics_cache[days] = (time.monotonic(), payload)
+                    if not _is_error(payload):
+                        _analytics_cache[days] = (time.monotonic(), payload)
         except Exception:
             log.exception("analytics warm-up failed for days=%s", days)
 
