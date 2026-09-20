@@ -103,8 +103,11 @@ def _load_events(
     *,
     since: datetime | None = None,
     cache_ttl: float = 0.0,
+    max_calls: int | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any] | None, dict]:
-    return callfeed.load_events(scope, _log_path(), since=since, cache_ttl=cache_ttl)
+    return callfeed.load_events(
+        scope, _log_path(), since=since, cache_ttl=cache_ttl, max_calls=max_calls
+    )
 
 
 def _parse_ts(value: str | None) -> datetime | None:
@@ -1059,8 +1062,24 @@ def wall_business_insights_api(days: int = 30) -> JSONResponse:
 #: poll starts another full fetch and they queue. Two minutes is well inside
 #: how fast these aggregates move.
 ANALYTICS_CACHE_TTL_S = 120.0
+ANALYTICS_WINDOWS = (7, 30, 90)
+#: How many calls one build reads. Bounded on purpose: the whole log is
+#: ~32k events and 13 MB, which the hosted project cannot aggregate inside
+#: its statement timeout, so an unbounded read fails and falls back to the
+#: container's local file — every screen then shows one container's calls.
+#: 250 calls is one request, a few seconds, and far more than any
+#: percentile on this page needs. The page says the number out loud.
+ANALYTICS_MAX_CALLS = 250
 _analytics_cache: dict[int, tuple[float, dict[str, Any]]] = {}
-_analytics_lock = threading.Lock()
+#: One lock per window rather than one lock for all of them — a slow 90-day
+#: build must not stall a 7-day request. Also what a cold-path request and
+#: the start-up warm-up (below) serialize on, so the two never both pay for
+#: the same window's ~9 s read at once.
+_analytics_locks: dict[int, threading.Lock] = {days: threading.Lock() for days in ANALYTICS_WINDOWS}
+#: Windows with a background refresh already in flight, so five tabs
+#: polling a stale window kick off one rebuild, not five.
+_analytics_refreshing: set[int] = set()
+_analytics_refreshing_lock = threading.Lock()
 
 
 def wall_analytics_api(days: int = 30) -> JSONResponse:
@@ -1072,24 +1091,86 @@ def wall_analytics_api(days: int = 30) -> JSONResponse:
     Langfuse is asked separately and is allowed to be absent — it is the
     only source here we do not own, and the page drops its two panels
     rather than block on it.
+
+    Stale-while-revalidate past the cache's TTL: an old payload still
+    answers instantly while a background thread rebuilds it, so only the
+    very first request for a window (before start-up warm-up lands) ever
+    waits on the full ~9 s Supabase read.
     """
-    days = min((7, 30, 90), key=lambda d: abs(d - days))
-    # One builder at a time per window. Without the lock a page opened in
-    # three tabs starts three full log reads against the same window.
-    with _analytics_lock:
+    days = min(ANALYTICS_WINDOWS, key=lambda d: abs(d - days))
+    hit = _analytics_cache.get(days)
+    if hit and time.monotonic() - hit[0] < ANALYTICS_CACHE_TTL_S:
+        return JSONResponse(hit[1])
+    if hit:
+        _start_analytics_refresh(days)
+        return JSONResponse(hit[1])
+    # No payload at all yet for this window. The per-window lock means
+    # three tabs opened at once start one full read, not three — and a
+    # request that lands mid-warm-up just waits for that build instead of
+    # starting a second one.
+    with _analytics_locks[days]:
         hit = _analytics_cache.get(days)
-        if hit and time.monotonic() - hit[0] < ANALYTICS_CACHE_TTL_S:
-            return JSONResponse(hit[1])
-        payload = _build_analytics(days)
-        _analytics_cache[days] = (time.monotonic(), payload)
-    return JSONResponse(payload)
+        if hit is None:
+            payload = _build_analytics(days)
+            _analytics_cache[days] = (time.monotonic(), payload)
+            hit = _analytics_cache[days]
+    return JSONResponse(hit[1])
+
+
+def _start_analytics_refresh(days: int) -> None:
+    with _analytics_refreshing_lock:
+        if days in _analytics_refreshing:
+            return
+        _analytics_refreshing.add(days)
+    threading.Thread(
+        target=_refresh_analytics_cache, args=(days,), name=f"analytics-refresh-{days}", daemon=True
+    ).start()
+
+
+def _refresh_analytics_cache(days: int) -> None:
+    try:
+        with _analytics_locks[days]:
+            payload = _build_analytics(days)
+            _analytics_cache[days] = (time.monotonic(), payload)
+    except Exception:
+        log.exception("background analytics refresh failed for days=%s", days)
+    finally:
+        with _analytics_refreshing_lock:
+            _analytics_refreshing.discard(days)
+
+
+def _warm_analytics_cache() -> None:
+    """Pay the cold-cache ~9 s read once, at start-up, off the request path.
+
+    A plain thread rather than the ``_precompute_wall_cache`` subprocess
+    pattern below: this has to land in *this* process's ``_analytics_cache``,
+    which a subprocess cannot write into. Runs after ``ui.run`` starts
+    serving (registered via ``app.on_startup``), so a slow Supabase read
+    never delays start-up itself — the first visitor before it finishes
+    just pays the cold read once, same as before this existed.
+    """
+    for days in (30, 7, 90):  # 30 first: the page's default range.
+        try:
+            with _analytics_locks[days]:
+                if days not in _analytics_cache:
+                    payload = _build_analytics(days)
+                    _analytics_cache[days] = (time.monotonic(), payload)
+        except Exception:
+            log.exception("analytics warm-up failed for days=%s", days)
+
+
+def _start_analytics_warmup() -> None:
+    threading.Thread(target=_warm_analytics_cache, name="analytics-warmup", daemon=True).start()
 
 
 def _build_analytics(days: int) -> dict[str, Any]:
     now = datetime.now(UTC)
     cutoff = now - timedelta(days=days)
     events, _health, source = _load_events(
-        f"analytics:{days}", since=cutoff, cache_ttl=ANALYTICS_CACHE_TTL_S
+        f"analytics:{days}",
+        since=cutoff,
+        cache_ttl=ANALYTICS_CACHE_TTL_S,
+        max_calls=ANALYTICS_MAX_CALLS,
     )
     cards = build_calls(events)
     in_range = [c for c in cards if (started := _card_started(c)) and started >= cutoff]
@@ -1478,6 +1559,54 @@ def _enqueue_rebookings(bookings: list[cal.Booking]) -> int:
     return queued
 
 
+async def _enqueue_call_now_rebooking_calls(bookings: list[cal.Booking]) -> int:
+    """Queue an immediate call_now per cancelled visit with a phone on file
+    — an actual outbound call offering another date, not the silent
+    availability watch ``_enqueue_rebookings`` runs. See
+    ``vortex.line.confirmation_calls.queue_cancellation_rebooking_call``,
+    which also mirrors the row into the product database. A failed queue
+    must not roll back a cancel that already committed, so this logs and
+    degrades to 0 instead of propagating."""
+    from vortex.line.confirmation_calls import queue_cancellation_rebooking_call
+
+    _ensure_agenda()
+    catalogue = _AGENDA_CATALOGUE
+    patients = _AGENDA_PATIENTS or {}
+    settings = get_settings()
+    now = datetime.now(MADRID)
+    queued = 0
+    for booking in bookings:
+        person = patients.get(booking.patient_id)
+        phone = (person.phone if person else "") or ""
+        if not phone:
+            continue
+        provider = next(
+            (p for p in catalogue.providers if p.provider_id == booking.provider_id), None
+        )
+        location = next(
+            (s for s in catalogue.locations if s.location_id == booking.location_id), None
+        )
+        try:
+            call = await queue_cancellation_rebooking_call(
+                settings,
+                to=phone,
+                appointment_at=booking.start,
+                provider_name=provider.name if provider else "",
+                location_name=location.name if location else "",
+                provider_id=booking.provider_id,
+                location_id=booking.location_id,
+                patient_id=booking.patient_id,
+                appointment_id=booking.appointment_id or "",
+                now=now,
+            )
+        except Exception:
+            log.exception("call_now rebooking queue failed for slot %s", booking.start.isoformat())
+            continue
+        if call is not None:
+            queued += 1
+    return queued
+
+
 def _parse_day(raw: Any) -> date | None:
     try:
         return date.fromisoformat(str(raw or "").strip())
@@ -1587,6 +1716,7 @@ async def wall_cancel_range_api(request: Request) -> JSONResponse:
             conn, provider_id=provider_id, day_from=day_from, day_to=day_to
         )
     queued = _enqueue_rebookings(hits)
+    call_now_queued = await _enqueue_call_now_rebooking_calls(hits)
     return JSONResponse(
         {
             "ok": True,
@@ -1594,6 +1724,7 @@ async def wall_cancel_range_api(request: Request) -> JSONResponse:
             "cancelled": len(hits),
             "appointments_updated": len(touched),
             "rebookings_queued": queued,
+            "call_now_queued": call_now_queued,
         }
     )
 
@@ -1637,7 +1768,15 @@ async def wall_cancel_visit_api(request: Request) -> JSONResponse:
             slot_start=booking.start.astimezone(MADRID).isoformat(),
         )
     queued = _enqueue_rebookings([booking])
-    return JSONResponse({"ok": True, "appointment_updated": touched, "rebookings_queued": queued})
+    call_now_queued = await _enqueue_call_now_rebooking_calls([booking])
+    return JSONResponse(
+        {
+            "ok": True,
+            "appointment_updated": touched,
+            "rebookings_queued": queued,
+            "call_now_queued": call_now_queued,
+        }
+    )
 
 
 def _home_cards() -> tuple[list[CallCard], dict]:
@@ -2332,6 +2471,7 @@ def main() -> None:
     # importer of this module never start a background subprocess loop.
     _backfill_product_db()
     app.on_startup(_start_product_db_refresh)
+    app.on_startup(_start_analytics_warmup)
     ui.run(
         host="0.0.0.0",
         port=BOARD_PORT,

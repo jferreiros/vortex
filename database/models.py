@@ -43,6 +43,15 @@ class CallRecord:
     #: vortex.line.confirmation_calls.KNOWN_MOTIVOS. NULL for an inbound
     #: call and for any outbound row written before migration 3.
     motivo: str | None = None
+    #: What the patient said, best-effort — set by
+    #: ``db.update_call_outcome`` once a scheduled outbound call (e.g. a
+    #: cancellation's call_now) resolves. NULL until then and for every
+    #: inbound call, whose transcript lives in logs/calls.jsonl instead.
+    transcript: str | None = None
+    #: A status finer than ``outcome``'s closed vocabulary allows — e.g.
+    #: ``unclear``/``no_speech``/``no_answer``/``failed`` for a scheduled
+    #: outbound call. See migration 5 in schema.py.
+    detail: str | None = None
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> CallRecord:
@@ -58,6 +67,8 @@ class CallRecord:
             outcome=row["outcome"],
             appointment_id=row["appointment_id"],
             motivo=row["motivo"],
+            transcript=row["transcript"],
+            detail=row["detail"],
         )
 
 
@@ -85,6 +96,12 @@ class AppointmentRecord:
     confirmation_call_id: int | None
     created_at: str
     updated_at: str
+    #: The appointment this one replaces, when it was booked to fill a slot
+    #: a cancellation freed (the cancellation's own call_now callback, taken
+    #: up) — set by ``database/hooks.py`` off ``CallSession.handoff``. NULL
+    #: for every appointment booked cold, and for any row written before
+    #: migration 5.
+    rebooked_from_id: str | None = None
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> AppointmentRecord:
@@ -111,6 +128,7 @@ class AppointmentRecord:
             confirmation_call_id=row["confirmation_call_id"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
+            rebooked_from_id=row["rebooked_from_id"],
         )
 
 

@@ -157,6 +157,19 @@ async def _backfill_appointment(
     )
 
 
+def _rebooking_source(ctx: ToolContext, new_appointment_id: str) -> str | None:
+    """The cancelled appointment this booking replaces, when this call is a
+    confirmation call's own in-call reschedule handoff (``CallSession.open``
+    stashes it here the moment the handoff is detected, before any tool
+    runs) — links the two rows so the database (and, eventually, the wall)
+    can show a cancellation and its rebooking as one thread, not two
+    unrelated visits. ``None`` for a booking made cold, the common case."""
+    source = ctx.state.get("rebooking_from_appointment_id")
+    if not source or source == new_appointment_id:
+        return None
+    return str(source)
+
+
 async def _record_booking(ctx: ToolContext, action: BookAction, db_path: Path | str | None) -> None:
     with db.connection(db_path) as conn:
         existing = db.get_call_by_call_id(conn, ctx.call_id)
@@ -204,6 +217,7 @@ async def _record_booking(ctx: ToolContext, action: BookAction, db_path: Path | 
             appointment_type_id=action.appointment_type_id,
             appointment_type_name=appt_type.name if appt_type else None,
             reason=_reason(ctx),
+            rebooked_from_id=_rebooking_source(ctx, appointment_id),
         )
         db.link_call_to_appointment(conn, call.id, appointment_id)
 
