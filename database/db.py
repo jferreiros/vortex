@@ -140,6 +140,47 @@ def insert_call(
     return CallRecord.from_row(row)
 
 
+def update_call_outcome(
+    conn: sqlite3.Connection,
+    call_id: str,
+    *,
+    outcome: str | None = None,
+    transcript: str | None = None,
+    detail: str | None = None,
+    duration_ms: int | None = None,
+) -> CallRecord | None:
+    """Patch an already-queued outbound call with what actually happened on
+    it. ``insert_call`` writes the row the moment a scheduled call is
+    queued — before anyone has answered — so its result always needs a
+    second write once a Twilio webhook reports it
+    (``vortex/line/confirmation_calls.py``'s ``sync_call_now_outcome_to_db``
+    is today's one caller). ``None`` when no row exists yet for ``call_id``:
+    a webhook must never mint a ``calls`` row on its own, only ever update
+    one ``insert_call`` already created. Every parameter left ``None`` keeps
+    the column's current value (``COALESCE``), so a webhook that only knows
+    the transcript cannot blank out an outcome an earlier one already set.
+    """
+    row = conn.execute("SELECT * FROM calls WHERE call_id = ?", (call_id,)).fetchone()
+    if row is None:
+        return None
+    row = conn.execute(
+        """
+        UPDATE calls SET
+            outcome = COALESCE(?, outcome),
+            transcript = COALESCE(?, transcript),
+            detail = COALESCE(?, detail),
+            duration_ms = COALESCE(?, duration_ms)
+        WHERE call_id = ?
+        RETURNING *
+        """,
+        (outcome, transcript, detail, duration_ms, call_id),
+    ).fetchone()
+    from database.remote import after_write
+
+    after_write(conn, "calls", row, "call_id")
+    return CallRecord.from_row(row)
+
+
 def get_call(conn: sqlite3.Connection, call_pk: int) -> CallRecord | None:
     row = conn.execute("SELECT * FROM calls WHERE id = ?", (call_pk,)).fetchone()
     return CallRecord.from_row(row) if row else None
@@ -188,11 +229,15 @@ def insert_appointment(
     appointment_type_id: str | None = None,
     appointment_type_name: str | None = None,
     reason: str | None = None,
+    rebooked_from_id: str | None = None,
 ) -> AppointmentRecord:
     """Insert one fresh ``appointments`` row. ``booking_call_id`` must
     already exist in ``calls`` — insert that row first (see
     ``database/hooks.py`` for the three-statement order this needs, spelled
-    out in ``schema.py``'s migration-1 comment)."""
+    out in ``schema.py``'s migration-1 comment). ``rebooked_from_id`` names
+    the appointment this one replaces, when it does (see schema.py's
+    migration-5 comment) — left ``None`` for a booking with no cancellation
+    behind it, the common case."""
     ts = now_iso()
     row = conn.execute(
         """
@@ -201,8 +246,9 @@ def insert_appointment(
             provider_id, provider_name, specialty_id, specialty_name,
             site_id, site_name, slot_start, slot_end, insurer,
             appointment_type_id, appointment_type_name, reason,
-            booking_call_id, confirmation_call_id, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+            booking_call_id, confirmation_call_id, created_at, updated_at,
+            rebooked_from_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
         RETURNING *
         """,
         (
@@ -227,6 +273,7 @@ def insert_appointment(
             booking_call_id,
             ts,
             ts,
+            rebooked_from_id,
         ),
     ).fetchone()
     from database.remote import after_write

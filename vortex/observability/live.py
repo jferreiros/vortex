@@ -1446,6 +1446,54 @@ def _enqueue_rebookings(bookings: list[cal.Booking]) -> int:
     return queued
 
 
+async def _enqueue_call_now_rebooking_calls(bookings: list[cal.Booking]) -> int:
+    """Queue an immediate call_now per cancelled visit with a phone on file
+    — an actual outbound call offering another date, not the silent
+    availability watch ``_enqueue_rebookings`` runs. See
+    ``vortex.line.confirmation_calls.queue_cancellation_rebooking_call``,
+    which also mirrors the row into the product database. A failed queue
+    must not roll back a cancel that already committed, so this logs and
+    degrades to 0 instead of propagating."""
+    from vortex.line.confirmation_calls import queue_cancellation_rebooking_call
+
+    _ensure_agenda()
+    catalogue = _AGENDA_CATALOGUE
+    patients = _AGENDA_PATIENTS or {}
+    settings = get_settings()
+    now = datetime.now(MADRID)
+    queued = 0
+    for booking in bookings:
+        person = patients.get(booking.patient_id)
+        phone = (person.phone if person else "") or ""
+        if not phone:
+            continue
+        provider = next(
+            (p for p in catalogue.providers if p.provider_id == booking.provider_id), None
+        )
+        location = next(
+            (s for s in catalogue.locations if s.location_id == booking.location_id), None
+        )
+        try:
+            call = await queue_cancellation_rebooking_call(
+                settings,
+                to=phone,
+                appointment_at=booking.start,
+                provider_name=provider.name if provider else "",
+                location_name=location.name if location else "",
+                provider_id=booking.provider_id,
+                location_id=booking.location_id,
+                patient_id=booking.patient_id,
+                appointment_id=booking.appointment_id or "",
+                now=now,
+            )
+        except Exception:
+            log.exception("call_now rebooking queue failed for slot %s", booking.start.isoformat())
+            continue
+        if call is not None:
+            queued += 1
+    return queued
+
+
 def _parse_day(raw: Any) -> date | None:
     try:
         return date.fromisoformat(str(raw or "").strip())
@@ -1557,6 +1605,7 @@ async def wall_cancel_range_api(request: Request) -> JSONResponse:
             conn, provider_id=provider_id, day_from=day_from, day_to=day_to
         )
     queued = _enqueue_rebookings(hits)
+    call_now_queued = await _enqueue_call_now_rebooking_calls(hits)
     return JSONResponse(
         {
             "ok": True,
@@ -1564,6 +1613,7 @@ async def wall_cancel_range_api(request: Request) -> JSONResponse:
             "cancelled": len(hits),
             "appointments_updated": len(touched),
             "rebookings_queued": queued,
+            "call_now_queued": call_now_queued,
         }
     )
 
@@ -1608,7 +1658,15 @@ async def wall_cancel_visit_api(request: Request) -> JSONResponse:
             slot_start=booking.start.astimezone(MADRID).isoformat(),
         )
     queued = _enqueue_rebookings([booking])
-    return JSONResponse({"ok": True, "appointment_updated": touched, "rebookings_queued": queued})
+    call_now_queued = await _enqueue_call_now_rebooking_calls([booking])
+    return JSONResponse(
+        {
+            "ok": True,
+            "appointment_updated": touched,
+            "rebookings_queued": queued,
+            "call_now_queued": call_now_queued,
+        }
+    )
 
 
 def _home_cards() -> tuple[list[CallCard], dict]:
