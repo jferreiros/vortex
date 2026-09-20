@@ -56,8 +56,10 @@ NOW = datetime(2026, 9, 18, 9, 0, tzinfo=MADRID)  # Friday, the public-case anch
 # six specialty ids next to SITES_BRIEF cost ~25 tokens on a prompt that was
 # already at the wall. The next claim on this budget buys its tokens out of
 # the existing text.
+# 1430 until the transfer feature: v8 adds the handover step and its tool
+# line, ~40 tokens, and no existing rule was cheap enough to sell for them.
 CHARS_PER_TOKEN = 4
-TOKEN_BUDGET = 1430
+TOKEN_BUDGET = 1470
 
 
 def test_the_prompt_builds() -> None:
@@ -140,8 +142,8 @@ def test_the_prompt_teaches_change_and_cancel() -> None:
 
 def test_env_unset_loads_the_latest_version(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("VORTEX_PROMPT_VERSION", raising=False)
-    assert active_prompt_version() == latest_prompt_version() == "v7-language-match"
-    assert build_system_prompt(NOW) == load_prompt_template("v7-language-match").format(
+    assert active_prompt_version() == latest_prompt_version() == "v8-transfer"
+    assert build_system_prompt(NOW) == load_prompt_template("v8-transfer").format(
         clinic_name=CLINIC_NAME,
         now_human="09:00 on Friday 18 September 2026",
         tomorrow="Saturday 19 September 2026",
