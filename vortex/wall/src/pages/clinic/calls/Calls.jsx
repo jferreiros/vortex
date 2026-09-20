@@ -58,8 +58,6 @@ export default function Calls() {
               {rows.map((call) => (
                 <tr
                   key={`${call.status}-${call.id}`}
-                <tr
-                  key={`${call.status}-${call.id}`}
                   tabIndex={0}
                   onClick={() => navigate(`/clinic/live-calls/${call.id}`)}
                   onKeyDown={(e) => e.key === "Enter" && navigate(`/clinic/live-calls/${call.id}`)}
