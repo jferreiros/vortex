@@ -303,6 +303,17 @@ def wall_cancelled_keys() -> set[cal.BookingKey]:
     keys: set[cal.BookingKey] = set()
     try:
         rows = db.list_wall_cancellations()
+    except db.NotConfigured:
+        # Offline board: the cancel API fell back to the local file store.
+        from database import local_wall
+
+        for row in local_wall.list_all():
+            key = cal.cancel_key(
+                row.get("provider_id"), row.get("site_id"), row.get("slot_start")
+            )
+            if key is not None:
+                keys.add(key)
+        return keys
     except Exception:
         # An unreachable store must never blank the diary.
         log.warning("wall_cancellations read failed; agenda shows every slot")
