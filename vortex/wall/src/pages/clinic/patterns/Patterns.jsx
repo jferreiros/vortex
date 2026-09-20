@@ -74,6 +74,13 @@ function ShapeGlyphs({ family, type, emoji }) {
 
 const DRAG_MIME = "application/x-pattern-shape";
 const REORDER_MIME = "application/x-pattern-node-id";
+// A history-event shape belongs on the sequence canvas; a suggestion shape
+// belongs in the suggestion slot, never the other way round. A second,
+// view-tagged MIME type (set alongside DRAG_MIME, empty payload) lets each
+// drop target filter by view during dragover, when getData(DRAG_MIME)
+// itself isn't readable yet — the JSON payload's own `view` field is the
+// same check repeated at drop time, in case dragover was skipped.
+const VIEW_MIME = { history: "application/x-pattern-shape-history", suggestion: "application/x-pattern-shape-suggestion" };
 
 const STORAGE_KEY = "vortex.patterns.v2";
 
@@ -365,7 +372,10 @@ function SuggestionSlot({ suggestion, onDropShape, onDescriptionChange, onChainL
         className={`patterns-suggestion-slot ${over ? "over" : ""}`}
         data-suggestion-slot="true"
         onDragOver={(e) => {
-          if (!e.dataTransfer.types.includes(DRAG_MIME)) return;
+          // Only a suggestion shape (the "Suggestions" view) belongs here —
+          // a history-event shape is rejected even though it shares the
+          // same family keys.
+          if (!e.dataTransfer.types.includes(VIEW_MIME.suggestion)) return;
           e.preventDefault();
           e.dataTransfer.dropEffect = "copy";
           setOver(true);
@@ -376,14 +386,18 @@ function SuggestionSlot({ suggestion, onDropShape, onDescriptionChange, onChainL
           setOver(false);
           const raw = e.dataTransfer.getData(DRAG_MIME);
           if (!raw) return;
-          onDropShape(JSON.parse(raw));
+          const shapeData = JSON.parse(raw);
+          if (shapeData.view !== "suggestion") return;
+          onDropShape(shapeData);
         }}
       >
+        {/* A real node's index + description sit above its circle; "Suggest"
+            has no description, so this hidden filler goes above the label
+            instead of between it and the circle — the circle still lands on
+            the same row as the connector arrow and every other shape, but
+            "Suggest" stays right on top of its own circle, no gap. */}
+        <span className="pathways-shape-caption above" style={{ visibility: "hidden" }} aria-hidden="true">·</span>
         <span className="pathways-node-index">Suggest</span>
-        <DescriptionField
-          value={suggestion?.description || ""}
-          onChange={onDescriptionChange}
-        />
         <div className="pathways-shape-wrap">
           <span
             className={`pathways-shape patterns-suggestion-shape ${shape ? `pathways-shape-${shape.family}` : ""}`}
@@ -442,7 +456,10 @@ function PatternCanvas({
     // Don't steal drops meant for the suggestion slot.
     if (e.target.closest?.("[data-suggestion-slot]")) return;
     const isReorder = e.dataTransfer.types.includes(REORDER_MIME);
-    if (!isReorder && !e.dataTransfer.types.includes(DRAG_MIME)) return;
+    // Only a history-event shape belongs on this canvas — a suggestion
+    // shape (☎️/💬 under the "Suggestions" view) is rejected here even
+    // though it shares the same family keys.
+    if (!isReorder && !e.dataTransfer.types.includes(VIEW_MIME.history)) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = isReorder ? "move" : "copy";
     setOverIndex(indexForPoint(e.clientX));
@@ -458,12 +475,11 @@ function PatternCanvas({
       return;
     }
     const raw = e.dataTransfer.getData(DRAG_MIME);
-    if (!raw) {
-      setOverIndex(null);
-      return;
-    }
-    onDropShape(JSON.parse(raw), indexForPoint(e.clientX));
     setOverIndex(null);
+    if (!raw) return;
+    const shapeData = JSON.parse(raw);
+    if (shapeData.view !== "history") return;
+    onDropShape(shapeData, indexForPoint(e.clientX));
   };
 
   return (
@@ -591,8 +607,10 @@ function ShapeTray() {
                     subfamily,
                     param: t.param,
                     emoji: t.emoji,
+                    view: viewKey,
                   })
                 );
+                e.dataTransfer.setData(VIEW_MIME[viewKey], "1");
                 e.dataTransfer.effectAllowed = "copy";
               }}
             >

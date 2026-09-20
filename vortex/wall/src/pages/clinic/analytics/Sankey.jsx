@@ -39,7 +39,10 @@ function layout(nodes, links) {
       const h = Math.max((node.value / total) * usable, 2);
       placed.set(node.id, {
         ...node,
-        x: (column / lastColumn) * (WIDTH - NODE_W - 300),
+        // lastColumn is 0 when every node shares the same (only) column —
+        // `column / lastColumn` would be 0/0 = NaN, so fall back to 1 to
+        // keep that single column pinned at x=0 instead.
+        x: (column / (lastColumn || 1)) * (WIDTH - NODE_W - 300),
         y,
         h,
         // Ribbons stack from the top of each side as they are drawn.
@@ -167,7 +170,7 @@ export default function Sankey({ nodes = [], links = [], columns = [] }) {
             // Line up each caption with where that column's own node labels
             // start (node edge + LABEL_GAP), not with the invisible node
             // stub — the stub sits well left of anything a reader can see.
-            const columnX = (index / lastColumn) * (WIDTH - NODE_W - 300);
+            const columnX = (index / (lastColumn || 1)) * (WIDTH - NODE_W - 300);
             const left = ((columnX + NODE_W + LABEL_GAP) * 100) / WIDTH;
             return (
               <span key={label} className="sankey-legend-item" style={{ left: `${left}%` }}>

@@ -124,7 +124,6 @@ export default function PersonalitiesRail() {
   return (
     <section className="persona-block">
       <SectionHeader
-        eyebrow="Customize agent"
         title="Who answers the phone"
         subtitle="Choose a face and how they speak. Below, voice and pace."
       />
