@@ -1,4 +1,4 @@
-.PHONY: install run smoke test call replay try-api tunnel tail lint fmt board design-sync didactica rehearse confirmations evals evals-logic evals-conversation evals-voice evals-replay evals-report evals-accept evals-selftest evals-discord logs-discord langfuse-check supabase-ping supabase-push supabase-push-db supabase-count
+.PHONY: install run smoke test call replay try-api tunnel tail lint fmt board design-sync didactica rehearse confirmations evals evals-logic evals-conversation evals-voice evals-replay evals-report evals-accept evals-selftest evals-discord logs-discord langfuse-check supabase-ping supabase-schema supabase-push supabase-push-db supabase-count
 
 PORT ?= 7860
 BOARD_PORT ?= 8080
@@ -36,6 +36,9 @@ db-backfill:      ## build the product database's rows from the call log; ARGS=-
 
 supabase-ping:    ## check SUPABASE_URL + service-role can reach call_events
 	uv run python scripts/supabase_logs.py ping
+
+supabase-schema:  ## print how to apply database/supabase/schema.sql (no Alembic)
+	uv run python scripts/supabase_logs.py schema
 
 supabase-push:    ## upload logs/calls.jsonl to Supabase (idempotent); ARGS=--dry-run
 	uv run python scripts/supabase_logs.py push $(ARGS)

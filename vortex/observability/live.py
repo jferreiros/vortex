@@ -24,7 +24,14 @@ from zoneinfo import ZoneInfo
 
 import httpx
 from fastapi import Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+    StreamingResponse,
+)
 from nicegui import app, ui
 
 from vortex.clinic.client import FakeClinicClient
@@ -947,23 +954,61 @@ async def call_page(call_id: str) -> None:
     ui.timer(0.6, redraw)
 
 
-@app.get("/api/wall/timeline/{call_id}")
-def wall_timeline_api(call_id: str) -> JSONResponse:
-    """The chat+tool timeline the react-spring zoom page polls."""
+_SSE_HEADERS = {
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no",
+}
+
+
+def _timeline_payload(call_id: str) -> dict[str, Any]:
     events, health, _source_info = _load_events("recent")
-    items = build_timeline(events, call_id)
-    intent = latest_intent(events, call_id)
     call = call_summary(events, call_id)
     call["submit_window_secs"] = get_settings().submit_window_secs
-    return JSONResponse(
-        {
-            "call_id": call_id,
-            "items": items,
-            "intent": intent,
-            "call": call,
-            "line_up": health is not None,
-        }
-    )
+    return {
+        "call_id": call_id,
+        "items": build_timeline(events, call_id),
+        "intent": latest_intent(events, call_id),
+        "call": call,
+        "line_up": health is not None,
+    }
+
+
+def _sse_response(request: Request, build, *, once: bool = False) -> StreamingResponse:
+    """Push a JSON blob whenever ``build()`` changes; comment-ping otherwise.
+
+    ``once`` sends a single data frame and closes — used by tests so the
+    httpx client does not hang on an infinite stream.
+    """
+
+    async def gen():
+        last = ""
+        while True:
+            if await request.is_disconnected():
+                break
+            payload = json.dumps(await asyncio.to_thread(build), ensure_ascii=False)
+            if payload != last:
+                yield f"data: {payload}\n\n"
+                last = payload
+                if once:
+                    break
+            else:
+                yield ": ping\n\n"
+            await asyncio.sleep(0.4)
+
+    return StreamingResponse(gen(), media_type="text/event-stream", headers=_SSE_HEADERS)
+
+
+def wall_timeline_api(call_id: str) -> JSONResponse:
+    """The chat+tool timeline the live-call page reads."""
+    return JSONResponse(_timeline_payload(call_id))
+
+
+async def wall_timeline_stream(
+    request: Request, call_id: str, once: bool = False
+) -> StreamingResponse:
+    """Same payload as GET /timeline/{id}, pushed as Server-Sent Events."""
+    return _sse_response(request, lambda: _timeline_payload(call_id), once=once)
 
 
 def _card_started(card: CallCard) -> datetime | None:
@@ -976,7 +1021,6 @@ def _card_started(card: CallCard) -> datetime | None:
     return stamp if stamp.tzinfo else stamp.replace(tzinfo=UTC)
 
 
-@app.get("/api/wall/business-insights")
 def wall_business_insights_api(days: int = 30) -> JSONResponse:
     """Unavailability reasons, doctor ranking, the demand/supply heatmap and
     cancellation recovery for the Insights page's "7 / 30 / 90 días" pills.
@@ -1019,7 +1063,6 @@ _analytics_cache: dict[int, tuple[float, dict[str, Any]]] = {}
 _analytics_lock = threading.Lock()
 
 
-@app.get("/api/wall/analytics")
 def wall_analytics_api(days: int = 30) -> JSONResponse:
     """The Analytics page: the call funnel, latency, conversation shape,
     tool and model usage, and the call table under them.
@@ -1120,7 +1163,6 @@ _AGENDA_PATIENTS: dict[str, Any] | None = None
 _AGENDA_BOOKINGS: dict[Any, Any] | None = None
 
 
-@app.get("/api/wall/agenda-options")
 def wall_agenda_options_api() -> JSONResponse:
     """Doctors, sites, specialties and appointment types for the diary dropdowns."""
     global _AGENDA_CATALOGUE
@@ -1129,7 +1171,6 @@ def wall_agenda_options_api() -> JSONResponse:
     return JSONResponse(cal.agenda_options(_AGENDA_CATALOGUE))
 
 
-@app.get("/api/wall/doctor-suggest")
 def wall_doctor_suggest_api(q: str = "") -> JSONResponse:
     """Name typeahead. Empty query returns an empty list, never the full roster."""
     global _AGENDA_CATALOGUE
@@ -1139,7 +1180,6 @@ def wall_doctor_suggest_api(q: str = "") -> JSONResponse:
     return JSONResponse(cal.suggest_doctors(calendars, q))
 
 
-@app.get("/api/wall/doctor-agenda")
 def wall_doctor_agenda_api(
     name: str = "",
     specialty: str = "",
@@ -1243,7 +1283,6 @@ def _wall_document(kind: str, seed_file: str) -> dict[str, Any]:
         return body
 
 
-@app.get("/api/wall/clinic-settings")
 def wall_clinic_settings_get() -> JSONResponse:
     from database import db
 
@@ -1251,7 +1290,6 @@ def wall_clinic_settings_get() -> JSONResponse:
         return JSONResponse(_clinic_settings_json(db.get_clinic_settings(conn)))
 
 
-@app.put("/api/wall/clinic-settings")
 async def wall_clinic_settings_put(request: Request) -> JSONResponse:
     from database import db
     from vortex.clinic_policy import reset_cache
@@ -1281,12 +1319,10 @@ async def wall_clinic_settings_put(request: Request) -> JSONResponse:
     return JSONResponse(_clinic_settings_json(saved))
 
 
-@app.get("/api/wall/pathways")
 def wall_pathways_get() -> JSONResponse:
     return JSONResponse(_wall_document("pathways", "pathways.json"))
 
 
-@app.put("/api/wall/pathways")
 async def wall_pathways_put(request: Request) -> JSONResponse:
     from database import db
 
@@ -1298,12 +1334,10 @@ async def wall_pathways_put(request: Request) -> JSONResponse:
     return JSONResponse(payload)
 
 
-@app.get("/api/wall/patterns")
 def wall_patterns_get() -> JSONResponse:
     return JSONResponse(_wall_document("patterns", "patterns.json"))
 
 
-@app.put("/api/wall/patterns")
 async def wall_patterns_put(request: Request) -> JSONResponse:
     from database import db
 
@@ -1315,7 +1349,6 @@ async def wall_patterns_put(request: Request) -> JSONResponse:
     return JSONResponse(payload)
 
 
-@app.get("/api/wall/patient-timeline/{patient_id}")
 def wall_patient_timeline(patient_id: str) -> JSONResponse:
     from database import db
 
@@ -1346,7 +1379,6 @@ def wall_patient_timeline(patient_id: str) -> JSONResponse:
     )
 
 
-@app.post("/api/wall/patient-timeline/{patient_id}/reject")
 async def wall_patient_timeline_reject(patient_id: str, request: Request) -> JSONResponse:
     from database import db
 
@@ -1509,7 +1541,6 @@ def _cancel_sample(bookings: list[cal.Booking], limit: int = 8) -> list[dict[str
     return sample
 
 
-@app.post("/api/wall/agenda/cancel-preview")
 async def wall_cancel_preview_api(request: Request) -> JSONResponse:
     """The count (and a sample) a range cancel would free — the number the
     modal shows before its explicit confirm. Writes nothing."""
@@ -1529,7 +1560,6 @@ async def wall_cancel_preview_api(request: Request) -> JSONResponse:
     )
 
 
-@app.post("/api/wall/agenda/cancel")
 async def wall_cancel_range_api(request: Request) -> JSONResponse:
     """Batch cancel: every booked slot of one doctor inside [from, to]."""
     provider_id, day_from, day_to, err = _cancel_range_args(await request.json())
@@ -1568,7 +1598,6 @@ async def wall_cancel_range_api(request: Request) -> JSONResponse:
     )
 
 
-@app.post("/api/wall/appointments/cancel")
 async def wall_cancel_visit_api(request: Request) -> JSONResponse:
     """Single cancel from a visit's detail view. The body names the slot the
     way the diary keys it — provider + site + minute — and the server takes
@@ -1630,7 +1659,6 @@ def _home_cards() -> tuple[list[CallCard], dict]:
     return [c for c in build_calls(events) if is_real_call(c)], source
 
 
-@app.get("/api/wall/home-overview")
 def wall_home_overview_api() -> JSONResponse:
     """Today's diary activity for the Home page, off the line's own call log.
 
@@ -1662,10 +1690,20 @@ def _call_language(card: CallCard) -> str:
     return analytics_pack_module._language(card) or "es"
 
 
+def _last_spoken(card: CallCard, role: str) -> str:
+    for turn in reversed(card.turns):
+        if turn.role == role:
+            text = (turn.text or "").strip()
+            if text:
+                return text
+    return ""
+
+
 def _live_call_payload(card: CallCard) -> dict[str, Any]:
     stage_i = max(explain.stage_of(card) - 1, 0)
     stage_id, stage_label, _blurb = explain.STAGES[stage_i]
     tool = _live_tool(card)
+    last = card.turns[-1] if card.turns else None
     return {
         "id": card.call_id,
         "patient": card.patient_name or "Sin identificar",
@@ -1685,6 +1723,10 @@ def _live_call_payload(card: CallCard) -> dict[str, Any]:
         # way and are not shown on this "in progress right now" list.
         "direction": "inbound",
         "phone": card.from_number or "",
+        "lastUser": _last_spoken(card, "user"),
+        "lastAgent": _last_spoken(card, "assistant"),
+        "lastTurn": (last.text or "").strip() if last else "",
+        "lastRole": last.role if last else "",
     }
 
 
@@ -1699,7 +1741,19 @@ def _review_payload(card: CallCard) -> dict[str, Any]:
     }
 
 
-@app.get("/api/wall/live-calls")
+def _live_calls_payload() -> dict[str, Any]:
+    cards, _health = _load_cards()
+    real = [c for c in cards if is_real_call(c)]
+    live = [c for c in real if c.live]
+    refused = [c for c in real if c.status == "refused"][:12]
+    escalated = [c for c in real if c.status == "escalated"][:12]
+    return {
+        "calls": [_live_call_payload(c) for c in live],
+        "rejected": [_review_payload(c) for c in refused],
+        "escalated": [_review_payload(c) for c in escalated],
+    }
+
+
 def wall_live_calls_api() -> JSONResponse:
     """Calls in progress right now, plus today's refused / escalated tails.
 
@@ -1708,21 +1762,14 @@ def wall_live_calls_api() -> JSONResponse:
     the line's ``/calls`` if that store is empty or unset, then this
     process's local JSONL. Replaces the page's ``PLACEHOLDER_CALLS`` mock.
     """
-    cards, _health = _load_cards()
-    real = [c for c in cards if is_real_call(c)]
-    live = [c for c in real if c.live]
-    refused = [c for c in real if c.status == "refused"][:12]
-    escalated = [c for c in real if c.status == "escalated"][:12]
-    return JSONResponse(
-        {
-            "calls": [_live_call_payload(c) for c in live],
-            "rejected": [_review_payload(c) for c in refused],
-            "escalated": [_review_payload(c) for c in escalated],
-        }
-    )
+    return JSONResponse(_live_calls_payload())
 
 
-@app.get("/api/wall/occupancy")
+async def wall_live_calls_stream(request: Request, once: bool = False) -> StreamingResponse:
+    """Same payload as GET /live-calls, pushed as Server-Sent Events."""
+    return _sse_response(request, _live_calls_payload, once=once)
+
+
 def wall_occupancy_api(site: str = "", specialty: str = "") -> JSONResponse:
     """Occupancy calendar for the Home page's site/specialty filters — read
     straight off ``wall-cache/occupancy.json``, precomputed at start-up."""
@@ -1735,7 +1782,6 @@ def wall_occupancy_api(site: str = "", specialty: str = "") -> JSONResponse:
 # When the line is down the GET falls back to defaults so the page still loads.
 
 
-@app.get("/api/wall/voice-config")
 async def wall_voice_config() -> JSONResponse:
     try:
         r = httpx.get(f"{callfeed.LINE_URL}/voice-config", timeout=callfeed.LINE_HEALTH_TIMEOUT_S)
@@ -1746,7 +1792,6 @@ async def wall_voice_config() -> JSONResponse:
     return JSONResponse(voice_config.DEFAULTS)
 
 
-@app.put("/api/wall/voice-config")
 async def wall_voice_config_put(request: Request) -> JSONResponse:
     payload = await request.json()
     try:
@@ -1756,7 +1801,6 @@ async def wall_voice_config_put(request: Request) -> JSONResponse:
         return JSONResponse({"error": f"line unreachable: {exc}"}, status_code=502)
 
 
-@app.post("/api/wall/voice-preview")
 async def wall_voice_preview(request: Request) -> Response:
     """The Try button: streams back the line's MP3 of the greeting."""
     payload = await request.json()
@@ -1780,7 +1824,6 @@ async def wall_voice_preview(request: Request) -> Response:
 # and grey out the buttons instead of pretending a write will land.
 
 
-@app.get("/api/wall/personalities")
 async def wall_personalities() -> JSONResponse:
     try:
         r = httpx.get(f"{callfeed.LINE_URL}/personalities", timeout=callfeed.LINE_HEALTH_TIMEOUT_S)
@@ -1798,7 +1841,6 @@ async def wall_personalities() -> JSONResponse:
     )
 
 
-@app.post("/api/wall/personalities")
 async def wall_personality_create(request: Request) -> JSONResponse:
     payload = await request.json()
     try:
@@ -1808,7 +1850,6 @@ async def wall_personality_create(request: Request) -> JSONResponse:
         return JSONResponse({"error": f"line unreachable: {exc}"}, status_code=502)
 
 
-@app.get("/api/wall/personalities/{slug}")
 async def wall_personality(slug: str) -> JSONResponse:
     try:
         r = httpx.get(
@@ -1819,7 +1860,6 @@ async def wall_personality(slug: str) -> JSONResponse:
         return JSONResponse({"error": f"line unreachable: {exc}"}, status_code=502)
 
 
-@app.put("/api/wall/personalities/{slug}")
 async def wall_personality_put(slug: str, request: Request) -> JSONResponse:
     payload = await request.json()
     try:
@@ -1829,7 +1869,6 @@ async def wall_personality_put(slug: str, request: Request) -> JSONResponse:
         return JSONResponse({"error": f"line unreachable: {exc}"}, status_code=502)
 
 
-@app.post("/api/wall/personalities/{slug}/activate")
 async def wall_personality_activate(slug: str) -> JSONResponse:
     try:
         r = httpx.post(f"{callfeed.LINE_URL}/personalities/{slug}/activate", timeout=5)
@@ -2277,6 +2316,12 @@ def _start_product_db_refresh() -> None:
     start-up instead of running beside it.
     """
     asyncio.create_task(_refresh_product_db_forever())
+
+
+# /api/wall lives on a FastAPI router (vortex/api/wall.py), not on these pages.
+from vortex.api.wall import attach as attach_wall_api  # noqa: E402
+
+attach_wall_api(app)
 
 
 def main() -> None:

@@ -36,7 +36,9 @@ One folder per lane. Work in your lane's folder. Ask before you touch another.
 | `vortex/diary/` | La Agenda | Availability, relative dates to the exact minute in Europe/Madrid, site hours, reschedule and cancel |
 | `vortex/rules/` | Las Reglas | Age limits, referrals, insurance matrix, provider matching, triage, nearest site, decline reasons |
 | `vortex/clinic/` | shared | Read-only HTTP client for the clinic API and offline fixtures |
-| `vortex/observability/` | shared | JSONL call log and the live view for the jury |
+| `vortex/api/` | shared | FastAPI `/api/wall` router for the clinic SPA (mounted on the board, not a second process) |
+| `vortex/observability/` | shared | JSONL call log, NiceGUI jury/ops pages, board helpers the wall API uses |
+| `vortex/wall/` | shared | React clinic SPA; production is served from the board origin |
 
 Shared files. Change them only with the whole team on the call:
 
