@@ -59,11 +59,10 @@ _BLANK_KEYS = (
     "VORTEX_CONFIRMATION_FORCE_TO",
 )
 
-#: Deliberately *not* blanked at import: a developer with a project
-#: configured should have the ``requires_db`` tests actually run. They are
-#: still blanked per test by ``offline_settings``, which is what an offline
-#: test wants, and ``_stub_call_events`` keeps call events out of a real
-#: project either way.
+#: Blanked at import unless ``VORTEX_TEST_DB=1``: a plain ``make test`` with a
+#: ``.env`` next to it must never write into a real project (a first run once
+#: activated a persona and re-seeded the store). Opt in explicitly to run the
+#: ``requires_db`` tests against the migrated database in ``.env``.
 _STORE_KEYS = (
     "SUPABASE_URL",
     "SUPABASE_SERVICE_ROLE_KEY",
@@ -76,7 +75,7 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers",
         "requires_db: needs a real Supabase project; skipped without "
-        "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY",
+        "VORTEX_TEST_DB=1 plus SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY",
     )
 
 
@@ -288,6 +287,9 @@ def _unset_dotenv_keys() -> None:
     # A developer's .env must not leak into the tests.
     for key in _BLANK_KEYS:
         os.environ.pop(key, None)
+    if os.environ.get("VORTEX_TEST_DB", "").strip() != "1":
+        for key in _STORE_KEYS:
+            os.environ.pop(key, None)
 
 
 _unset_dotenv_keys()

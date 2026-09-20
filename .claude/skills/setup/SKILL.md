@@ -93,8 +93,8 @@ make lint                   # ruff
 ```
 
 If `make smoke` passes, the install is good. The suite needs no key and no
-network: the tests that want a database skip themselves when Supabase is not
-configured.
+network: the tests that want a database skip themselves unless you run
+`VORTEX_TEST_DB=1 make test` against a migrated Supabase.
 
 ## 5. Start the server
 
