@@ -1,15 +1,16 @@
-"""Typed rows for the two tables in ``database/schema.py``.
+"""Typed rows for the product tables in ``database/supabase/migrations/``.
 
 Plain dataclasses, not an ORM — the same shape ``vortex/observability/view.py``
 uses for ``CallCard``: one class per row, ``from_row`` to read it back out of
-a ``sqlite3.Row``, nothing hidden between the table and the type.
+a mapping, nothing hidden between the table and the type. The mapping is
+whatever PostgREST returned for that row, so a JSON object.
 """
 
 from __future__ import annotations
 
-import sqlite3
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 CallDirection = Literal["inbound", "outbound"]
 CallPurpose = Literal["booking", "confirmation", "cancellation", "reschedule", "info", "other"]
@@ -41,7 +42,7 @@ class CallRecord:
     #: Why an *outbound* call was placed — confirmacion / recordatorio /
     #: reprogramacion / seguimiento / call_now, mirroring
     #: vortex.line.confirmation_calls.KNOWN_MOTIVOS. NULL for an inbound
-    #: call and for any outbound row written before migration 3.
+    #: call.
     motivo: str | None = None
     #: What the patient said, best-effort — set by
     #: ``db.update_call_outcome`` once a scheduled outbound call (e.g. a
@@ -50,11 +51,11 @@ class CallRecord:
     transcript: str | None = None
     #: A status finer than ``outcome``'s closed vocabulary allows — e.g.
     #: ``unclear``/``no_speech``/``no_answer``/``failed`` for a scheduled
-    #: outbound call. See migration 5 in schema.py.
+    #: outbound call. See ``calls.detail`` in 0001_init.sql.
     detail: str | None = None
 
     @classmethod
-    def from_row(cls, row: sqlite3.Row) -> CallRecord:
+    def from_row(cls, row: Mapping[str, Any]) -> CallRecord:
         return cls(
             id=row["id"],
             call_id=row["call_id"],
@@ -66,9 +67,9 @@ class CallRecord:
             duration_ms=row["duration_ms"],
             outcome=row["outcome"],
             appointment_id=row["appointment_id"],
-            motivo=row["motivo"],
-            transcript=row["transcript"],
-            detail=row["detail"],
+            motivo=row.get("motivo"),
+            transcript=row.get("transcript"),
+            detail=row.get("detail"),
         )
 
 
@@ -99,12 +100,11 @@ class AppointmentRecord:
     #: The appointment this one replaces, when it was booked to fill a slot
     #: a cancellation freed (the cancellation's own call_now callback, taken
     #: up) — set by ``database/hooks.py`` off ``CallSession.handoff``. NULL
-    #: for every appointment booked cold, and for any row written before
-    #: migration 5.
+    #: for every appointment booked cold, and for any row written cold.
     rebooked_from_id: str | None = None
 
     @classmethod
-    def from_row(cls, row: sqlite3.Row) -> AppointmentRecord:
+    def from_row(cls, row: Mapping[str, Any]) -> AppointmentRecord:
         return cls(
             id=row["id"],
             status=row["status"],
@@ -128,7 +128,7 @@ class AppointmentRecord:
             confirmation_call_id=row["confirmation_call_id"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
-            rebooked_from_id=row["rebooked_from_id"],
+            rebooked_from_id=row.get("rebooked_from_id"),
         )
 
 
@@ -137,8 +137,8 @@ class WallCancellationRecord:
     """One slot the control centre (the board's Horarios page) freed by hand.
 
     Not a call: the join key is the diary slot (``provider_id``, ``site_id``,
-    ``slot_start``), never a ``calls`` row — see schema.py's migration-2
-    comment for why.
+    ``slot_start``), never a ``calls`` row — see ``wall_cancellations`` in
+    ``database/supabase/migrations/0001_init.sql`` for why.
     """
 
     id: int
@@ -151,7 +151,7 @@ class WallCancellationRecord:
     cancelled_at: str
 
     @classmethod
-    def from_row(cls, row: sqlite3.Row) -> WallCancellationRecord:
+    def from_row(cls, row: Mapping[str, Any]) -> WallCancellationRecord:
         return cls(
             id=row["id"],
             provider_id=row["provider_id"],

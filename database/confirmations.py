@@ -19,7 +19,6 @@ still has to build", for exactly what real implementation would need.
 from __future__ import annotations
 
 import logging
-import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -119,7 +118,6 @@ class SimulatedConfirmationCaller:
 
 
 async def run_confirmations(
-    conn: sqlite3.Connection,
     *,
     caller: ConfirmationCaller,
     today: date | None = None,
@@ -132,17 +130,15 @@ async def run_confirmations(
     has a ``confirmation_call_id`` (this function's own previous run, any
     outcome including ``no_answer``) is not dialled again — see
     ``db.appointments_due_for_confirmation``. Retrying a no-answer later the
-    same day is a real product's next step, not built here; see
-    ``database/README.md``.
+    same day is a real product's next step, not built here.
 
-    Commits after every appointment, not once at the end: one call failing
-    must not roll back the appointments already confirmed earlier in the
-    same run. Pass a connection from ``db.connect`` (not the
-    ``db.connection`` context manager, which commits only once at the end)
-    and close it yourself when done.
+    Every appointment is written as it resolves, not in one batch at the
+    end: each ``db`` call is its own request against Postgres, so one failed
+    call can never undo the appointments already confirmed earlier in the
+    same run.
     """
     tomorrow = (today or datetime.now(MADRID).date()) + timedelta(days=1)
-    due = db.appointments_due_for_confirmation(conn, on_date=tomorrow)
+    due = db.appointments_due_for_confirmation(on_date=tomorrow)
     results: list[tuple[AppointmentRecord, ConfirmationResult]] = []
     for appt in due:
         try:
@@ -151,7 +147,6 @@ async def run_confirmations(
             log.exception("confirmation call failed for appointment %s", appt.id)
             continue
         outbound_call = db.insert_call(
-            conn,
             call_id=result.call_id,
             direction="outbound",
             purpose="confirmation",
@@ -165,12 +160,11 @@ async def run_confirmations(
             # set a real outbound worker also places.
             motivo="confirmacion",
         )
-        db.set_confirmation_call(conn, appt.id, outbound_call.id)
+        db.set_confirmation_call(appt.id, outbound_call.id)
         if result.outcome == "confirmed":
-            db.update_appointment(conn, appt.id, status="confirmed")
+            db.update_appointment(appt.id, status="confirmed")
         elif result.outcome == "cancel":
-            db.update_appointment(conn, appt.id, status="cancelled")
+            db.update_appointment(appt.id, status="cancelled")
         # no_answer: status stays 'scheduled' — rule 2's "sigue scheduled/pending".
-        conn.commit()
         results.append((appt, result))
     return results

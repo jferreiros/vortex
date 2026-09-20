@@ -19,12 +19,14 @@ make call                   # dial the running server with 1 fake call
 make call N=10              # ... with 10 concurrent fake calls
 make tunnel                 # ngrok http 7860 -> wss://<host>/ws for the dashboard
 make test                   # the whole test suite
-make tail                   # follow logs/calls.jsonl
+make supabase-migrate       # apply database/supabase/migrations/*.sql (needs SUPABASE_DB_URL)
+make supabase-ping          # can the service-role key reach call_events?
 make logs-discord           # redacted digest of the call log to Discord
 make langfuse-check         # project URL + whether the live line has keys
 ```
 
-`make smoke` and `make test` need no key and no network.
+`make smoke` and `make test` need no key and no network: the tests that want a
+database skip themselves when Supabase is not configured.
 
 ## Day-before confirmation calls
 
@@ -133,6 +135,14 @@ The server always starts. Missing keys switch components to fake mode:
 | --- | --- |
 | `PLATFORM_API_KEY` | `FakeClinicClient` (fixtures in `vortex/clinic/fixtures.py`) and a dry-run submit client that logs instead of POSTing |
 | any of `SONIOX_API_KEY`, the LLM key and base URL the active `LLM_PROVIDER` resolves to, or the credentials of `VORTEX_TTS_PROVIDER` (and of `VORTEX_TTS_PROVIDER_ALT` when it differs) | the stub voice pipeline: beeps out, counts frames in, submits a typed refusal at the end |
+| `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | no store at all: calls are answered and submitted, nothing is persisted, every board screen reads zero |
+
+There is one persistent store and it is Supabase/Postgres. No SQLite file, no
+JSONL log, no dual write. Schema lives only in
+`database/supabase/migrations/NNNN_*.sql` and is applied with
+`make supabase-migrate`, which reads `SUPABASE_DB_URL` (the direct Postgres URI
+from the dashboard, not the REST URL). The line and the board never use that
+URI: they go through PostgREST with the service-role key, server-side only.
 
 `GET /health` says which mode is active. `VORTEX_VOICE_MODE` and
 `VORTEX_CLINIC_MODE` force a mode (see `.env.example`). Set
@@ -304,7 +314,9 @@ One folder per person. Touch your folder; ask before you touch another.
 | `vortex/diary/` | the agenda | availability, relative dates to the exact minute in Europe/Madrid, site hours, reschedule and cancel |
 | `vortex/rules/` | what the clinic refuses | age limits, referrals, insurance matrix, provider matching, triage, nearest site, closed reason vocabulary |
 | `vortex/clinic/` | shared | read-only HTTP client for the clinic API + offline fixtures |
-| `vortex/observability/` | shared | JSONL call log and the live view for the jury |
+| `vortex/api/` | shared | the FastAPI `/api/wall` router the clinic SPA calls |
+| `vortex/observability/` | shared | call event writer and the live view for the jury |
+| `database/supabase/migrations/` | shared | the only source of schema, `NNNN_*.sql` |
 
 Shared files, change only with the whole team on the call:
 
@@ -329,7 +341,7 @@ platform ──ws──> line/server.py ── CallSession (per socket)
                       ▼
             line/submit.py ── POST /api/v1/submit/<action> ── within 30 s of socket close
                       ▼
-            observability/ logs/calls.jsonl (one JSON line per event, tagged call_id)
+            observability/ public.call_events in Supabase (one row per event, tagged call_id)
 ```
 
 Every lane function has this shape and is `async`:
@@ -367,16 +379,17 @@ run: a Run All holds ten sockets open at once.
 
 ## Observability
 
-`logs/calls.jsonl` gets one JSON line per event, every line tagged with
+`public.call_events` in Supabase gets one row per event, every row tagged with
 `call_id`: `call.started`, `turn.user`, `turn.assistant`, `tool.called`,
 `tool.returned`, `submit.sent`, `submit.result`, `call.ended`, `call.summary`.
-`GET /calls` returns the recent events grouped by call.
+`GET /calls` returns the recent events grouped by call. With no Supabase keys
+nothing is written and that endpoint is empty — the call itself is unaffected.
 
 `make board` is the live view (NiceGUI, port 8080). `/wall` is public (jury).
 `/` ops, `/evals` and `/bench` ask for `VORTEX_OPS_PASSWORD` when that env is
 set (always in production). Play dials `scripts/fake_caller.py` against `:7860`.
-Replay writes a scripted book/refuse into the JSONL. The wall tails `GET /calls`
-when line is up, otherwise the JSONL file.
+The wall tails `GET /calls` when the line is up, and reads Supabase directly
+otherwise.
 
 Production: `https://vortex.167.233.80.47.sslip.io/wall` (público) and
 `https://vortex.167.233.80.47.sslip.io/` (equipo). That hostname is the VPS

@@ -21,6 +21,7 @@ def _live_call(path: Path, cid: str = "CA-live") -> None:
     log = CallLog(cid, path)
     log.event("call.started", from_number="+34612345678", voice="stub", clinic="fake")
     log.user_turn("Hola, quería pedir cita para mi hija")
+    log.assistant_turn("Claro, ¿me dice el nombre?")
     log.tool_called("find_patient", {"name": "Lucía Ruiz López"})
     log.tool_returned("find_patient", {"status": "found", "patient": {"patient_id": "P00001"}}, 30)
     # No call.ended: the card is still open, i.e. `card.live` is True.
@@ -47,9 +48,7 @@ def _refused_call(path: Path, cid: str = "CA-refused") -> None:
     log.summary(reason="hangup")
 
 
-async def test_live_calls_lists_only_calls_still_in_progress(
-    offline_settings, user: User
-) -> None:
+async def test_live_calls_lists_only_calls_still_in_progress(offline_settings, user: User) -> None:
     _live_call(Path(offline_settings.calls_log_path))
     _ended_call(Path(offline_settings.calls_log_path))
 
@@ -66,24 +65,44 @@ async def test_live_calls_lists_only_calls_still_in_progress(
     # past "Listen" once the call has looked the patient up.
     assert live["phase"] != ""
     assert live["phaseKey"] in {"listening", "speaking", "working"}
+    assert live["lastUser"] == "Hola, quería pedir cita para mi hija"
+    assert live["lastAgent"] == "Claro, ¿me dice el nombre?"
+    assert live["lastTurn"] == "Claro, ¿me dice el nombre?"
+    assert live["lastRole"] == "assistant"
     assert "rejected" in response.json()
     assert "escalated" in response.json()
 
 
-async def test_live_calls_is_empty_with_no_calls_in_progress(
-    offline_settings, user: User
-) -> None:
+async def test_live_calls_is_empty_with_no_calls_in_progress(offline_settings, user: User) -> None:
     _ended_call(Path(offline_settings.calls_log_path))
     response = await user.http_client.get("/api/wall/live-calls")
     assert response.json()["calls"] == []
 
 
-async def test_live_calls_lists_refused_calls_in_rejected(
-    offline_settings, user: User
-) -> None:
+async def test_live_calls_lists_refused_calls_in_rejected(offline_settings, user: User) -> None:
     _refused_call(Path(offline_settings.calls_log_path))
     response = await user.http_client.get("/api/wall/live-calls")
     body = response.json()
     assert body["calls"] == []
     assert [c["id"] for c in body["rejected"]] == ["CA-refused"]
     assert body["rejected"][0]["reason"] == "no_availability"
+
+
+async def test_timeline_includes_stored_turns(offline_settings, user: User) -> None:
+    _live_call(Path(offline_settings.calls_log_path))
+    response = await user.http_client.get("/api/wall/timeline/CA-live")
+    assert response.status_code == 200
+    items = response.json()["items"]
+    turns = [(item["role"], item["text"]) for item in items if item.get("type") == "turn"]
+    assert ("user", "Hola, quería pedir cita para mi hija") in turns
+    assert ("assistant", "Claro, ¿me dice el nombre?") in turns
+
+
+async def test_timeline_stream_pushes_a_data_frame(offline_settings, user: User) -> None:
+    _live_call(Path(offline_settings.calls_log_path))
+    response = await user.http_client.get("/api/wall/timeline/CA-live/stream?once=true")
+    assert response.status_code == 200
+    assert "text/event-stream" in response.headers.get("content-type", "")
+    body = response.text
+    assert '"call_id": "CA-live"' in body
+    assert "Hola, quería pedir cita para mi hija" in body
