@@ -23,7 +23,6 @@ import logging
 import os
 import time
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 from vortex.observability.view import flatten_grouped
@@ -60,7 +59,6 @@ def _source(scope: str, kind: str, events: list[dict[str, Any]], detail: str | N
 
 def load_events(
     scope: str = "recent",
-    log_path: Path | None = None,
     *,
     since: datetime | None = None,
     cache_ttl: float = 0.0,
@@ -74,9 +72,6 @@ def load_events(
     ``max_calls`` caps a date-bounded read at the most recent N calls. The
     whole table is far more than any aggregate needs, and asking the hosted
     project for all of it exceeds its statement timeout.
-
-    ``log_path`` is accepted and ignored: there is no file store any more. It
-    stays for one release so a caller still passing one keeps working.
 
     The middle element of the triple used to be the line's ``/health``. There
     is no line fetch left, so it is always ``None`` — callers already had to

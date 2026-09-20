@@ -27,9 +27,7 @@ def client(offline_settings, fake_store) -> TestClient:
 # --- the store ---------------------------------------------------------------
 
 
-def test_an_empty_table_seeds_three_and_puts_one_on_the_phone(
-    offline_settings, fake_store
-) -> None:
+def test_an_empty_table_seeds_three_and_puts_one_on_the_phone(offline_settings, fake_store) -> None:
     people = personalities.list_all(offline_settings)
     assert [p.slug for p in people] == ["lucia", "mateo", "carla"]
     assert [p.active for p in people].count(True) == 1

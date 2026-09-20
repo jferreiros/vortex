@@ -88,6 +88,22 @@ REFUSE_TURNS = [
 ]
 
 
+def _append_pack(path: Path | None, log: CallLog) -> None:
+    """Also write this call to a fixture file.
+
+    Every demo call goes to ``public.call_events`` through ``CallLog``. A
+    ``path`` on top of that is only ever the ``synthetic-data/`` pack being
+    regenerated (``scripts/make_cancellation_pack.py``) — never the live log,
+    which no longer exists as a file.
+    """
+    if path is None:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as fh:
+        for event in log.events:
+            fh.write(json.dumps(event, default=str, ensure_ascii=False) + "\n")
+
+
 async def write_scripted_call(
     path: Path | None = None,
     *,
@@ -95,7 +111,7 @@ async def write_scripted_call(
     delay_s: float = 0.35,
 ) -> str:
     call_id = f"demo-{scenario}-{int(time.time())}"
-    log = CallLog(call_id, path)
+    log = CallLog(call_id)
     log.event(
         "call.started",
         stream_sid=f"MZ-{call_id}",
@@ -273,7 +289,7 @@ CANCELLATION_PACK = REPO_ROOT / "synthetic-data" / "logs" / "cancellation_demo.j
 #: still ahead ("pending"). A last caller asks for the very doctor whose slots
 #: got lost and goes away empty — the implicit waiting list. Five freed slots
 #: also unlock the per-day chart.
-async def write_cancellation_pack(path: Path, *, delay_s: float = 0.0) -> list[str]:
+async def write_cancellation_pack(path: Path | None = None, *, delay_s: float = 0.0) -> list[str]:
     """Write the demo batch to ``path`` — the synthetic-data pack file."""
     now = datetime.now(MADRID)
 
@@ -401,7 +417,7 @@ async def write_cancellation_pack(path: Path, *, delay_s: float = 0.0) -> list[s
 
 
 async def _cancel_call(
-    path: Path,
+    path: Path | None,
     call_id: str,
     name: str,
     patient_id: str,
@@ -417,7 +433,7 @@ async def _cancel_call(
 ) -> str:
     """One caller cancelling one appointment — the same tool chain a real
     cancel runs: identify, list the appointments, prepare, submit."""
-    log = CallLog(call_id, path)
+    log = CallLog(call_id)
     log.event(
         "call.started",
         stream_sid=f"MZ-{call_id}",
@@ -506,11 +522,12 @@ async def _cancel_call(
     log.event("call.usage", **REFUSE_USAGE)
     log.event("call.ended", reason="hangup", media_frames_in=0, media_frames_out=0)
     log.summary(reason="hangup")
+    _append_pack(path, log)
     return call_id
 
 
 async def _book_into(
-    path: Path,
+    path: Path | None,
     call_id: str,
     name: str,
     patient_id: str,
@@ -522,7 +539,7 @@ async def _book_into(
 ) -> str:
     """One caller booking the exact (provider, minute) a cancellation freed —
     the relocation the panel counts."""
-    log = CallLog(call_id, path)
+    log = CallLog(call_id)
     log.event(
         "call.started",
         stream_sid=f"MZ-{call_id}",
@@ -634,11 +651,12 @@ async def _book_into(
     log.event("call.usage", **BOOK_USAGE)
     log.event("call.ended", reason="hangup", media_frames_in=0, media_frames_out=0)
     log.summary(reason="hangup")
+    _append_pack(path, log)
     return call_id
 
 
 async def _unmet_call(
-    path: Path,
+    path: Path | None,
     call_id: str,
     name: str,
     patient_id: str,
@@ -650,7 +668,7 @@ async def _unmet_call(
 ) -> str:
     """One caller asking for a doctor who has nothing left — the demand the
     waiting-list metric matches against the lost slots."""
-    log = CallLog(call_id, path)
+    log = CallLog(call_id)
     log.event(
         "call.started",
         stream_sid=f"MZ-{call_id}",
@@ -717,6 +735,7 @@ async def _unmet_call(
     log.event("call.usage", **REFUSE_USAGE)
     log.event("call.ended", reason="hangup", media_frames_in=0, media_frames_out=0)
     log.summary(reason="hangup")
+    _append_pack(path, log)
     return call_id
 
 
@@ -752,4 +771,4 @@ async def replay_cancellation_demo(
     Insights window and repeated clicks never collide."""
     calls = load_cancellation_pack(pack_path)
     tag = run_tag or f"r{int(time.time())}"
-    return [await replay_call(log_path, events, speed=0, run_tag=tag) for events in calls]
+    return [await replay_call(events, speed=0, run_tag=tag) for events in calls]

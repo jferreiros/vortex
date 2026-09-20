@@ -159,9 +159,7 @@ def sms_events(settings: Settings, call_id: str) -> list[dict[str, Any]]:
     from conftest import captured_events
 
     return [
-        x
-        for x in captured_events()
-        if x["call_id"] == call_id and x["kind"].startswith("sms.")
+        x for x in captured_events() if x["call_id"] == call_id and x["kind"].startswith("sms.")
     ]
 
 

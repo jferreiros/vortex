@@ -237,7 +237,6 @@ async def test_accepted_diary_writes_invalidate_availability(
     # tmp_path, never the repo's real database/.
     from vortex import settings as settings_module
 
-    monkeypatch.setenv("VORTEX_PRODUCT_DB", str(tmp_path / "vortex_product.db"))
     settings_module.reset_settings()
 
     clinic = CountingFakeClinic()
