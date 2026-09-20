@@ -467,7 +467,9 @@ def _persona_voice(person: Any | None, language: str, settings: Any) -> str:
         stored = str(
             voices.get(code) or voices.get("es") or voices.get(DEFAULT_LANGUAGE) or ""
         ).strip()
-        if getattr(settings, "tts_http_base_url", ""):
+        if getattr(settings, "tts_http_base_url", "") and not getattr(
+            settings, "elevenlabs_api_key", ""
+        ):
             return stored
         if stored and not stored.startswith(("es-", "en-", "ca-", "gl-", "eu-")):
             return stored
@@ -668,12 +670,11 @@ def _make_tts(
         # Builds fine, then fails on every utterance. Say so once, loudly.
         log.warning("TTS provider %s has no voice id configured", name)
 
-    if settings.tts_http_base_url:
-        # An HTTP REST stand-in for ElevenLabs (VORTEX_TTS_HTTP_BASE_URL) —
-        # e.g. scripts/elevenlabs_google_shim.py backed by Google Chirp3 —
-        # speaks the with-timestamps endpoint, so the pipeline swaps the
-        # websocket client for pipecat's HTTP one. Distinct from
-        # ELEVENLABS_BASE_URL, which stays a *websocket* AI-gateway origin.
+    if settings.tts_http_base_url and not settings.elevenlabs_api_key:
+        # A real ElevenLabs key always takes the stock websocket path; the
+        # HTTP REST stand-in (VORTEX_TTS_HTTP_BASE_URL, e.g. the Google Chirp
+        # shim) is only the no-key fallback. Distinct from ELEVENLABS_BASE_URL,
+        # which stays a *websocket* AI-gateway origin.
         import aiohttp
         from pipecat.services.elevenlabs.tts import ElevenLabsHttpTTSService
 

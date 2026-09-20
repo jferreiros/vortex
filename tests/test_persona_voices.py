@@ -87,3 +87,16 @@ def test_elevenlabs_keeps_its_own_voice(voice_settings, google_persona):
     tts = _make_tts(settings, state=_State(), persona=google_persona)
     assert isinstance(tts, ElevenLabsTTSService)
     assert tts._settings.voice == "eleven-lucia-es"
+
+
+def test_real_elevenlabs_key_beats_the_shim_fallback(voice_settings, google_persona):
+    pytest.importorskip("pipecat")
+    from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
+
+    settings = voice_settings(
+        ELEVENLABS_API_KEY="el-x",
+        VORTEX_TTS_HTTP_BASE_URL="http://127.0.0.1:8799",
+    )
+    tts = _make_tts(settings, state=_State(), persona=google_persona)
+    assert isinstance(tts, ElevenLabsTTSService)
+    assert tts._settings.voice == "eleven-lucia-es"
