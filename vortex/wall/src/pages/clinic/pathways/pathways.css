@@ -163,7 +163,7 @@
      to each other at their top regardless of a taller neighbor (e.g. a
      proactive node with its extra fields). */
   align-items: center;
-  gap: var(--space-6);
+  gap: 0;
   overflow-x: auto;
   overflow-y: hidden;
   padding: var(--space-3);
@@ -204,7 +204,7 @@
   position: relative;
   display: flex;
   align-items: flex-start;
-  gap: var(--space-6);
+  gap: 0;
 }
 
 .pathways-timeline-bg {
@@ -225,7 +225,7 @@
   flex: 0 0 108px;
   display: flex;
   align-items: center;
-  gap: var(--space-6);
+  gap: 0;
 }
 
 .pathways-timeline-bar {
@@ -424,10 +424,9 @@
   letter-spacing: 0.04em;
 }
 
-/* Shapes — shared between the canvas and the tray. Every family is now the
-   same circular bubble holding its family emoji (☎️/💬/🏥); calls add a
-   small direction badge (top-right) and every node gets a mid-size badge
-   (bottom-right) for its exact type. */
+/* Shapes — shared between the canvas and the tray. Every family is the same
+   circular bubble holding one type emoji; the family reads from the
+   bubble's own colour instead of a second badge stacked on it. */
 
 .pathways-shape {
   position: relative;
@@ -442,9 +441,13 @@
   justify-content: center;
 }
 
+/* The glyph is now an SVG (ShapeIcon), not emoji text: sized directly
+   instead of via font-size, coloured dark green regardless of the bubble's
+   own family colour below (kept a silhouette, not tinted per family). */
 .pathways-shape-main-emoji {
-  font-size: 52px;
-  line-height: 1;
+  width: 52px;
+  height: 52px;
+  color: var(--color-primary-deep);
 }
 
 /* Entry point — every pathway's fixed first node. Same bubble, its own
@@ -454,50 +457,27 @@
   border-color: var(--color-entry);
 }
 
-/* Family emoji (call/message/visit) — bottom-right of the shape, bare (no
-   background/border shape around it), bigger than the main emoji's badge
-   used to be. The direction arrow is pinned to this wrapper's own corner,
-   not the main bubble's. */
-.pathways-shape-family-wrap {
-  position: absolute;
-  bottom: -4px;
-  right: -10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+/* Family colour lives on the border only — every bubble keeps the same
+   green fill it always had, so the ring is what tells families apart. */
+.pathways-shape-call {
+  border-color: var(--color-urgent);
 }
 
-.pathways-shape-family-badge {
-  font-size: 34px;
-  line-height: 1;
+.pathways-shape-message {
+  border-color: var(--color-slate);
 }
 
-/* Direction badge — every call gets it now (calls are always outgoing),
-   pinned to the family emoji's own top-right corner (not the main bubble's).
-   Bare glyph, no bounding circle. */
-.pathways-shape-direction-badge {
-  position: absolute;
-  top: -6px;
-  right: -10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 16px;
-  line-height: 1;
+.pathways-shape-visit {
+  border-color: var(--color-info);
+}
+
+.pathways-shape-condition {
+  border-color: var(--color-condition);
 }
 
 .pathways-tray-shape .pathways-shape-main-emoji {
-  font-size: 28px;
-}
-
-.pathways-tray-shape .pathways-shape-family-badge {
-  font-size: 19px;
-}
-
-.pathways-tray-shape .pathways-shape-direction-badge {
-  font-size: 10px;
-  top: -2px;
-  right: -4px;
+  width: 28px;
+  height: 28px;
 }
 
 /* Tray — bottom ~1/3 of the main column -----------------------------------------*/

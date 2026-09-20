@@ -31,12 +31,12 @@ function secs(value) {
 
 // _load_events reports where the window came from, as {kind, events, calls}.
 const SOURCE_LABEL = {
-  supabase: "registro alojado en Supabase",
-  line: "la línea en directo",
-  jsonl: "el fichero local del contenedor",
+  supabase: "log hosted in Supabase",
+  line: "the live line",
+  jsonl: "the container's local file",
 };
 
-const LANGUAGE_NAMES = { es: "Español", en: "Inglés", ca: "Catalán", gl: "Gallego", eu: "Euskera" };
+const LANGUAGE_NAMES = { es: "Spanish", en: "English", ca: "Catalan", gl: "Galician", eu: "Basque" };
 
 /* Same stroke language as Sidebar.jsx's ICONS: viewBox 24, no fill, 1.7 stroke.
    One glyph per KPI key and per panel, so a reader can scan the row before
@@ -239,12 +239,12 @@ function TalkSplit({ conversation }) {
       </div>
       <div className="analytics-split-keys">
         <span>
-          <i className="dot-agent" /> Agente · {num(conversation.words_agent)} palabras en{" "}
-          {num(conversation.turns_agent)} turnos
+          <i className="dot-agent" /> Agent · {num(conversation.words_agent)} words in{" "}
+          {num(conversation.turns_agent)} turns
         </span>
         <span>
-          <i className="dot-caller" /> Paciente · {num(conversation.words_user)} palabras en{" "}
-          {num(conversation.turns_user)} turnos
+          <i className="dot-caller" /> Patient · {num(conversation.words_user)} words in{" "}
+          {num(conversation.turns_user)} turns
         </span>
       </div>
     </div>
@@ -252,23 +252,23 @@ function TalkSplit({ conversation }) {
 }
 
 function CallTable({ rows }) {
-  if (!rows.length) return <p className="analytics-empty">Sin llamadas en el periodo.</p>;
+  if (!rows.length) return <p className="analytics-empty">No calls in this period.</p>;
   return (
     <div className="analytics-scroll">
       <table className="analytics-table">
         <thead>
           <tr>
-            <th>Hora</th>
-            <th>Llamada</th>
-            <th>Desenlace</th>
-            <th>Idioma</th>
+            <th>Time</th>
+            <th>Call</th>
+            <th>Outcome</th>
+            <th>Language</th>
             <th className="num">Dur.</th>
-            <th className="num">Turnos</th>
-            <th className="num">Agente</th>
-            <th className="num">Respuesta</th>
-            <th className="num">Voz</th>
+            <th className="num">Turns</th>
+            <th className="num">Agent</th>
+            <th className="num">Reply</th>
+            <th className="num">Voice</th>
             <th className="num">Tools</th>
-            <th>Motivo</th>
+            <th>Reason</th>
           </tr>
         </thead>
         <tbody>
@@ -335,7 +335,7 @@ function AnalyticsSkeleton() {
   return (
     <div className="analytics-page" aria-busy="true">
       <span className="analytics-sr-only" role="status">
-        Leyendo el registro de llamadas…
+        Reading the call log…
       </span>
       <div className="analytics-skeleton" aria-hidden="true">
         <header className="home-hero">
@@ -402,7 +402,7 @@ export default function Analytics() {
   if (!data) {
     return (
       <div className="analytics-page">
-        <p className="analytics-empty">No se pudo leer el registro de llamadas. {error}</p>
+        <p className="analytics-empty">Could not read the call log. {error}</p>
       </div>
     );
   }
@@ -430,10 +430,10 @@ export default function Analytics() {
           </div>
         </div>
         <p className="home-lead">
-          Qué hace la línea con cada llamada, cuánto tarda y qué cuesta. {num(coverage.calls)}{" "}
-          llamadas reales leídas del registro
-          {coverage.excluded ? ` · ${num(coverage.excluded)} artefactos de evaluación excluidos` : ""}
-          {error ? " · el feed va con retraso" : ""}.
+          What the line does with each call, how long it takes, and what it costs. {num(coverage.calls)}{" "}
+          real calls read from the log
+          {coverage.excluded ? ` · ${num(coverage.excluded)} evaluation artifacts excluded` : ""}
+          {error ? " · the feed is lagging" : ""}.
         </p>
       </header>
 
@@ -441,10 +441,9 @@ export default function Analytics() {
         <div className="analytics-panel-head">
           <Icon name="funnel" size={18} />
           <div>
-            <h2>Recorrido de la llamada</h2>
+            <h2>Call journey</h2>
             <p>
-              De {num(funnel.total)} llamadas a su desenlace. Pasa el ratón por una rama para
-              seguirla.
+              From {num(funnel.total)} calls to their outcome. Hover over a branch to trace it.
             </p>
           </div>
         </div>
@@ -462,40 +461,40 @@ export default function Analytics() {
           <div className="analytics-panel-head">
             <Icon name="clock" size={18} />
             <div>
-              <h2>Tiempo de respuesta</h2>
-              <p>Del final del turno del paciente a la respuesta del agente.</p>
+              <h2>Response time</h2>
+              <p>From the end of the patient's turn to the agent's reply.</p>
             </div>
           </div>
           <div className="analytics-stats">
             <Stat
-              label="Registro · mediana"
+              label="Log · median"
               value={ms(latency.log_reply_ms.p50)}
-              sub={`p90 ${ms(latency.log_reply_ms.p90)} · ${num(latency.log_reply_ms.n)} turnos`}
+              sub={`p90 ${ms(latency.log_reply_ms.p90)} · ${num(latency.log_reply_ms.n)} turns`}
             />
             <Stat
-              label="Micrófono · mediana"
+              label="Microphone · median"
               value={secs(latency.voice_reply_s.p50)}
               sub={
                 latency.voice_reply_calls
-                  ? `p90 ${secs(latency.voice_reply_s.p90)} · ${num(latency.voice_reply_calls)} llamadas de voz`
-                  : "sin llamadas del carril de voz"
+                  ? `p90 ${secs(latency.voice_reply_s.p90)} · ${num(latency.voice_reply_calls)} voice calls`
+                  : "no calls on the voice lane"
               }
             />
             <Stat
-              label="Modelo · mediana"
+              label="Model · median"
               value={llm ? ms(llm.p50) : "—"}
               sub={
                 llm
-                  ? `p95 ${ms(llm.p90)} · ${num(llm.n)} respuestas · Langfuse`
-                  : "Langfuse no conectado"
+                  ? `p95 ${ms(llm.p90)} · ${num(llm.n)} responses · Langfuse`
+                  : "Langfuse not connected"
               }
             />
           </div>
           <Bars rows={latency.histogram} />
           <p className="analytics-note">
-            La mediana del registro se mide sobre la línea escrita en el log, así que incluye
-            nuestra propia escritura. La del micrófono la mide el detector de voz y sólo existe en
-            el carril pipecat.
+            The log median is measured against the line written to the log, so it includes our
+            own write time. The microphone one is measured by the voice detector and only exists
+            on the pipecat lane.
           </p>
         </Card>
 
@@ -503,19 +502,19 @@ export default function Analytics() {
           <div className="analytics-panel-head">
             <Icon name="talkers" size={18} />
             <div>
-              <h2>Quién lleva la conversación</h2>
-              <p>Reparto de palabras entre el agente y el paciente.</p>
+              <h2>Who leads the conversation</h2>
+              <p>Word split between agent and patient.</p>
             </div>
           </div>
           <TalkSplit conversation={conversation} />
           <div className="analytics-stats">
             <Stat
-              label="Turnos por llamada"
+              label="Turns per call"
               value={conversation.turns.p50 ?? "—"}
               sub={`p90 ${conversation.turns.p90 ?? "—"}`}
             />
             <Stat
-              label="Duración mediana"
+              label="Median duration"
               value={
                 conversation.duration_s.p50 !== null
                   ? `${Math.round(conversation.duration_s.p50)} s`
@@ -524,10 +523,10 @@ export default function Analytics() {
               sub={
                 conversation.duration_s.p90 !== null
                   ? `p90 ${Math.round(conversation.duration_s.p90)} s`
-                  : "sin muestras"
+                  : "no samples"
               }
             />
-            <Stat label="Llamadas con turnos" value={num(conversation.calls)} sub="de las leídas" />
+            <Stat label="Calls with turns" value={num(conversation.calls)} sub="of those read" />
           </div>
           <Bars rows={conversation.histogram} tone="ink" />
         </Card>
@@ -538,10 +537,10 @@ export default function Analytics() {
           <div className="analytics-panel-head">
             <Icon name="wrench" size={18} />
             <div>
-              <h2>Herramientas</h2>
+              <h2>Tools</h2>
               <p>
-                Lo que la línea consulta en la API de la clínica.
-                {langfuse ? " Las dos últimas columnas las mide Langfuse." : ""}
+                What the line queries in the clinic API.
+                {langfuse ? " The last two columns are measured by Langfuse." : ""}
               </p>
             </div>
           </div>
@@ -549,13 +548,13 @@ export default function Analytics() {
             <table className="analytics-table">
               <thead>
                 <tr>
-                  <th>Herramienta</th>
-                  <th className="num">Usos</th>
+                  <th>Tool</th>
+                  <th className="num">Uses</th>
                   <th className="num">p50</th>
                   <th className="num">p90</th>
                   {langfuse ? <th className="num">LF p50</th> : null}
                   {langfuse ? <th className="num">LF p95</th> : null}
-                  <th className="num">Fallos</th>
+                  <th className="num">Failures</th>
                 </tr>
               </thead>
               <tbody>
@@ -581,29 +580,29 @@ export default function Analytics() {
           <div className="analytics-panel-head">
             <Icon name="llm" size={18} />
             <div>
-              <h2>Modelos y coste</h2>
-              <p>Sólo las {num(models.metered_calls)} llamadas que llevan contador.</p>
+              <h2>Models and cost</h2>
+              <p>Only the {num(models.metered_calls)} calls with a meter.</p>
             </div>
           </div>
           <div className="analytics-stats">
             <Stat
-              label="Coste del periodo"
+              label="Cost for the period"
               value={`${models.total_eur.toFixed(2).replace(".", ",")} €`}
               sub={
                 models.eur_per_call
-                  ? `${models.eur_per_call.toFixed(4).replace(".", ",")} € por llamada`
-                  : "sin precio verificado"
+                  ? `${models.eur_per_call.toFixed(4).replace(".", ",")} € per call`
+                  : "no verified price"
               }
             />
             <Stat
-              label="Tokens de entrada"
+              label="Input tokens"
               value={num(models.tokens_in)}
-              sub={`${num(models.tokens_out)} de salida`}
+              sub={`${num(models.tokens_out)} output`}
             />
             <Stat
-              label="Audio transcrito"
+              label="Audio transcribed"
               value={`${num(Math.round(models.stt_seconds / 60))} min`}
-              sub={`${num(models.tts_characters)} caracteres hablados`}
+              sub={`${num(models.tts_characters)} characters spoken`}
             />
           </div>
           <dl className="analytics-models">
@@ -627,7 +626,7 @@ export default function Analytics() {
               </div>
             ))}
             <div>
-              <dt>Idiomas</dt>
+              <dt>Languages</dt>
               <dd>
                 {languages.map((item) => (
                   <span key={item.code} className="analytics-model">
@@ -645,21 +644,21 @@ export default function Analytics() {
         <div className="analytics-panel-head">
           <Icon name="table" size={18} />
           <div>
-            <h2>Llamadas</h2>
-            <p>Las {num(data.calls.length)} más recientes del periodo, una fila por llamada.</p>
+            <h2>Calls</h2>
+            <p>The {num(data.calls.length)} most recent from the period, one row per call.</p>
           </div>
         </div>
         <CallTable rows={data.calls} />
       </Card>
 
       <p className="analytics-foot">
-        {num(coverage.calls)} llamadas · {num(coverage.with_turns)} con transcripción ·{" "}
-        {num(coverage.with_log_reply)} con tiempo de respuesta · {num(coverage.with_voice_latency)}{" "}
-        con telemetría de voz · {num(coverage.metered)} con contador de coste ·{" "}
+        {num(coverage.calls)} calls · {num(coverage.with_turns)} with transcript ·{" "}
+        {num(coverage.with_log_reply)} with response time · {num(coverage.with_voice_latency)}{" "}
+        with voice telemetry · {num(coverage.metered)} with a cost meter ·{" "}
         {langfuse
-          ? `${num(langfuse.observations)} observaciones en Langfuse (${langfuse.environment})`
-          : "Langfuse no conectado"}
-        . Fuente: {SOURCE_LABEL[data.source?.kind] || data.source?.kind || "registro local"}.
+          ? `${num(langfuse.observations)} observations in Langfuse (${langfuse.environment})`
+          : "Langfuse not connected"}
+        . Source: {SOURCE_LABEL[data.source?.kind] || data.source?.kind || "local log"}.
       </p>
     </div>
   );

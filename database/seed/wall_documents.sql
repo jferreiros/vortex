@@ -24,7 +24,7 @@ insert into public.wall_documents (kind, body, updated_at) values
     {
       "id": "annual-physical-exam",
       "name": "Annual Physical Exam",
-      "description": "Yearly checkup: schedule, pre-visit intake, fasting prep, exam, results, and an automatic call to book next year's exam.",
+      "description": "Yearly checkup: schedule, pre-visit intake, exam, results, and an automatic call to book next year's exam.",
       "nodes": [
         {
           "id": "annual-physical-exam-n1",
@@ -44,21 +44,6 @@ insert into public.wall_documents (kind, body, updated_at) values
             "kind": "asap"
           },
           "description": "Medical history questionnaire"
-        },
-        {
-          "id": "annual-physical-exam-n3",
-          "shape": {
-            "family": "message",
-            "type": "SMS"
-          },
-          "when": {
-            "kind": "proactive",
-            "amount": 2,
-            "unit": "days",
-            "direction": "before",
-            "referenceNode": 4
-          },
-          "description": "Fasting instructions"
         },
         {
           "id": "annual-physical-exam-n4",
@@ -93,7 +78,7 @@ insert into public.wall_documents (kind, body, updated_at) values
             "amount": 340,
             "unit": "days",
             "direction": "after",
-            "referenceNode": 4
+            "referenceNode": 3
           },
           "description": "Book next year's exam"
         }
@@ -324,12 +309,14 @@ insert into public.wall_documents (kind, body, updated_at) values
     }
   ]
 }$doc$::jsonb, '2026-09-20T00:00:00Z'),
-    ('patterns', $doc${
+    ('patterns', $doc$
+{
+  "_comment": "Deterministic pattern rules for patient-history matching. Each pattern has: (1) `match` — the machine-checkable rule (evaluated by matchPattern.js / PatientTimeline); (2) `nodes` — visual sequence in the Patterns editor, built ONLY from the patternShapes.json tray (family + type, plus any param value merged in on save); (3) `suggestionNode` — ghosted suggestion when `match` fires. The nodes are illustrative and must be reproducible in the editor, so they can differ from the machine-checkable `match` (which reads real timeline event types). Evaluation is always per specialty. `specialtyRecallDays` is the default recall interval used when a rule says gtSpecialtyRecall. The no-availability-unrecovered pattern needs a patient-indexed call log that does not exist yet (buildableToday: false).",
   "dataSources": {
     "visits": "GET /api/v1/patients/{patient_id}/appointments?when=all — past visits; appointment_type_id → specialty via GET /api/v1/appointment-types.",
     "callOutcomes": "GET /api/v1/submissions?limit=50, filtered by patient_id — only book/reschedule/cancel carry patient_id today.",
     "referrals": "patients.json[].referrals[] — open referral specialties on the directory record.",
-    "needsCallLog": "Future patient-indexed log of every call (including no_action/escalate). Patterns no-availability-unrecovered and repeat-callers-unresolved depend on it."
+    "needsCallLog": "Future patient-indexed log of every call (including no_action/escalate). The no-availability-unrecovered pattern depends on it."
   },
   "specialtyRecallDays": {
     "cardiology": 365,
@@ -338,115 +325,6 @@ insert into public.wall_documents (kind, body, updated_at) values
   },
   "asOf": "2026-09-19",
   "patterns": [
-    {
-      "id": "first-visit-then-gap",
-      "name": "First visit, then gap",
-      "enabled": true,
-      "buildableToday": true,
-      "match": {
-        "perSpecialty": true,
-        "visitCount": {
-          "eq": 1
-        },
-        "noBookSinceLastVisit": true,
-        "daysSinceLastVisit": {
-          "gtSpecialtyRecall": true
-        }
-      },
-      "nodes": [
-        {
-          "id": "n1",
-          "shape": {
-            "family": "visit",
-            "type": "any visit"
-          },
-          "description": "Exactly one visit in <specialty>"
-        },
-        {
-          "id": "n2",
-          "shape": {
-            "family": "condition",
-            "type": "time gap"
-          },
-          "description": "Days since that visit > specialty recall interval"
-        },
-        {
-          "id": "n3",
-          "shape": {
-            "family": "condition",
-            "type": "no follow-up"
-          },
-          "description": "No book in <specialty> since that visit"
-        }
-      ],
-      "suggestionNode": {
-        "shape": {
-          "family": "call",
-          "subfamily": "outgoing",
-          "type": "appointment suggestion"
-        },
-        "description": "Offer to schedule the next visit in <specialty>.",
-        "chainLabel": "Follow-up call"
-      }
-    },
-    {
-      "id": "broken-cadence",
-      "name": "Broken cadence",
-      "enabled": true,
-      "buildableToday": true,
-      "match": {
-        "perSpecialty": true,
-        "visitCount": {
-          "min": 2
-        },
-        "visitsFormRegularCadence": true,
-        "cadenceOverdue": true,
-        "noBookSinceLastVisit": true
-      },
-      "nodes": [
-        {
-          "id": "n1",
-          "shape": {
-            "family": "visit",
-            "type": "any visit"
-          },
-          "description": "1st visit in <specialty>"
-        },
-        {
-          "id": "n2",
-          "shape": {
-            "family": "visit",
-            "type": "any visit"
-          },
-          "description": "2nd+ visit at a regular interval"
-        },
-        {
-          "id": "n3",
-          "shape": {
-            "family": "condition",
-            "type": "time gap"
-          },
-          "description": "Next visit by that cadence is overdue"
-        },
-        {
-          "id": "n4",
-          "shape": {
-            "family": "condition",
-            "type": "no follow-up"
-          },
-          "description": "No book in <specialty> since last visit"
-        }
-      ],
-      "suggestionNode": {
-        "shape": {
-          "family": "call",
-          "subfamily": "outgoing",
-          "type": "appointment suggestion"
-        },
-        "description": "Offer to keep the cadence and book the next visit in <specialty>.",
-        "chainLabel": "Cadence call"
-      }
-    },
     {
       "id": "unfulfilled-referral",
       "name": "Unfulfilled referral",
@@ -465,7 +343,8 @@ insert into public.wall_documents (kind, body, updated_at) values
           "id": "n1",
           "shape": {
             "family": "condition",
-            "type": "open referral"
+            "type": "open referral",
+            "emoji": "🧭"
           },
           "description": "Open referral to <specialty>"
         },
@@ -473,7 +352,8 @@ insert into public.wall_documents (kind, body, updated_at) values
           "id": "n2",
           "shape": {
             "family": "condition",
-            "type": "no follow-up"
+            "type": "no follow-up",
+            "emoji": "🔇"
           },
           "description": "No book and no visit in <specialty>"
         }
@@ -481,8 +361,11 @@ insert into public.wall_documents (kind, body, updated_at) values
       "suggestionNode": {
         "shape": {
           "family": "call",
+          "type": "<appointment type> suggestion",
           "subfamily": "outgoing",
-          "type": "appointment suggestion"
+          "emoji": "🆕",
+          "param": "appointmentType",
+          "appointmentType": "first_visit"
         },
         "description": "Ask whether they'd like to book the <specialty> they were referred to.",
         "chainLabel": "Referral call"
@@ -506,8 +389,8 @@ insert into public.wall_documents (kind, body, updated_at) values
           "id": "n1",
           "shape": {
             "family": "call",
-            "subfamily": "incoming",
-            "type": "cancellation"
+            "type": "canceled visit",
+            "emoji": "❌"
           },
           "description": "Cancel in <specialty>"
         },
@@ -515,7 +398,22 @@ insert into public.wall_documents (kind, body, updated_at) values
           "id": "n2",
           "shape": {
             "family": "condition",
-            "type": "no follow-up"
+            "type": "time gap",
+            "emoji": "⌛",
+            "param": "gap",
+            "gap": {
+              "value": 15,
+              "unit": "days"
+            }
+          },
+          "description": "15 days elapsed since that cancel"
+        },
+        {
+          "id": "n3",
+          "shape": {
+            "family": "condition",
+            "type": "no follow-up",
+            "emoji": "🔇"
           },
           "description": "No book in <specialty> since that cancel"
         }
@@ -523,8 +421,9 @@ insert into public.wall_documents (kind, body, updated_at) values
       "suggestionNode": {
         "shape": {
           "family": "call",
+          "type": "rebooking offer",
           "subfamily": "outgoing",
-          "type": "rebooking offer"
+          "emoji": "↩️"
         },
         "description": "Offer to rebook the cancelled visit in <specialty>.",
         "chainLabel": "Rebook call"
@@ -552,8 +451,8 @@ insert into public.wall_documents (kind, body, updated_at) values
           "id": "n1",
           "shape": {
             "family": "call",
-            "subfamily": "incoming",
-            "type": "no availability"
+            "type": "no-booking available",
+            "emoji": "🚫"
           },
           "description": "Call ended no_action / no_availability in <specialty>"
         },
@@ -561,7 +460,8 @@ insert into public.wall_documents (kind, body, updated_at) values
           "id": "n2",
           "shape": {
             "family": "condition",
-            "type": "no follow-up"
+            "type": "no follow-up",
+            "emoji": "🔇"
           },
           "description": "No call or visit in <specialty> within 14 days since"
         }
@@ -569,65 +469,15 @@ insert into public.wall_documents (kind, body, updated_at) values
       "suggestionNode": {
         "shape": {
           "family": "call",
+          "type": "waitlist alert",
           "subfamily": "outgoing",
-          "type": "waitlist alert"
+          "emoji": "⏳"
         },
         "description": "Offer the first newly-open slot in <specialty> (waitlist-style).",
         "chainLabel": "Waitlist call"
       }
-    },
-    {
-      "id": "repeat-callers-unresolved",
-      "name": "Repeat callers, unresolved",
-      "enabled": true,
-      "buildableToday": false,
-      "needsCallLog": true,
-      "match": {
-        "perSpecialty": false,
-        "incomingCallCount": {
-          "min": 2,
-          "withinDays": 14
-        },
-        "noSuccessfulBookInWindow": true
-      },
-      "nodes": [
-        {
-          "id": "n1",
-          "shape": {
-            "family": "call",
-            "subfamily": "incoming",
-            "type": "general"
-          },
-          "description": "Incoming call"
-        },
-        {
-          "id": "n2",
-          "shape": {
-            "family": "call",
-            "subfamily": "incoming",
-            "type": "general"
-          },
-          "description": "Another incoming call within 14 days"
-        },
-        {
-          "id": "n3",
-          "shape": {
-            "family": "condition",
-            "type": "no follow-up"
-          },
-          "description": "No successful book in that window"
-        }
-      ],
-      "suggestionNode": {
-        "shape": {
-          "family": "call",
-          "subfamily": "outgoing",
-          "type": "rebooking offer"
-        },
-        "description": "Offer an alternative (provider/site/time) or escalate for prioritized handling.",
-        "chainLabel": "Alternative call"
-      }
     }
   ]
-}$doc$::jsonb, '2026-09-20T00:00:00Z')
+}
+$doc$::jsonb, '2026-09-20T00:00:00Z')
 on conflict (kind) do nothing;

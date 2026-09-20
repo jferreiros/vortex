@@ -1,13 +1,14 @@
 import { useNavigate } from "react-router-dom";
 import Card from "../../../components/ui/Card";
 import { PHASE_LABEL, REASON_LABEL, STATUS_LABEL } from "../../../lib/labels";
+import { HistoryIcon } from "../../../lib/icons";
 import { useLiveCalls } from "../live-calls/useLiveCalls";
 import "../home/home.css";
 import "./calls.css";
 
 function statusLabel(call) {
   if (call.status === "live" || call.duration) {
-    return STATUS_LABEL[call.status] || call.status || "En llamada";
+    return STATUS_LABEL[call.status] || call.status || "On call";
   }
   return STATUS_LABEL[call.status] || STATUS_LABEL.refused;
 }
@@ -52,6 +53,7 @@ export default function Calls() {
                 <th>Status</th>
                 <th>Detail</th>
                 <th className="num">When</th>
+                <th className="num calls-history-col" aria-hidden="true" />
               </tr>
             </thead>
             <tbody>
@@ -73,6 +75,20 @@ export default function Calls() {
                   </td>
                   <td>{detailLabel(call)}</td>
                   <td className="num">{whenLabel(call)}</td>
+                  <td className="num calls-history-col">
+                    <button
+                      type="button"
+                      className="calls-history-btn"
+                      aria-label="View history"
+                      title="View history"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        navigate(`/clinic/live-calls/${call.id}`);
+                      }}
+                    >
+                      <HistoryIcon size={16} />
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>

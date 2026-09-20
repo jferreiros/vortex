@@ -3,7 +3,7 @@
    spacing, radius, shadow and motion from here — never a hardcoded hex or
    px value in a page's own stylesheet.
 
-   Seeded from Live Call Design 11 ("Clínico") so the whole product reads as
+   Seeded from Live Call Design 11 ("Clinical") so the whole product reads as
    one thing today. To change the product's visual direction later: edit
    the values in this file (and theme.js's mirror of the few JS-side ones)
    and every page picks it up. */
@@ -34,6 +34,12 @@
 
   --color-urgent: #8a2620;
   --color-urgent-soft: #f5e0de;
+
+  /* Pathways/Patterns shape family borders only (call reuses --color-urgent,
+     visit reuses --color-info): message and condition have no other use of
+     a plain dark grey / dark orange. */
+  --color-slate: #4b5257;
+  --color-condition: #a15c00;
 
   --color-overlay: rgba(17, 26, 22, 0.5);
 

@@ -18,10 +18,14 @@ that flag: it clears every other row first and only then sets the new one, so
 the worst a half-applied write can leave behind is a clinic with no active
 persona, which ``active()`` already answers from the seeds.
 
-What reaches the phone call today is the **voice**: the pipeline reads
-``active()`` once when the socket opens and speaks with that persona's
-ElevenLabs id, from ``conversation.language.PERSONA_VOICES``. The system
-prompt's tone line and the opening greeting are still a separate change.
+The call reads the active persona once per socket (``pipecat_voice``): its name,
+role and tone become the prompt's PERSONA block, its greeting opens the line,
+and its slug picks the ElevenLabs voice and model the line speaks with, from
+``conversation.language.PERSONA_VOICES``.
+
+``voices`` is the one stored field the call ignores — those are leftover Google
+Chirp names, and a voice id is a tuning decision that belongs in the map, not
+in a form field that can hold a string ElevenLabs has never heard of.
 """
 
 from __future__ import annotations
@@ -49,7 +53,7 @@ TONE_MAX_CHARS = 400
 #: receptionist speaks with is ``conversation.language.PERSONA_VOICES``, a
 #: fixed map in code the team tunes together, not a field a form can set to a
 #: string ElevenLabs has never heard of. These two stay empty so the stored
-#: row says "ask the map", and ``resolved_voice`` below is how you ask.
+#: row says "ask the map": ``conversation.language.persona_voice`` is the ask.
 VOICE_ES = ""
 VOICE_EN = ""
 

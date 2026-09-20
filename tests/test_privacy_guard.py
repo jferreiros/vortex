@@ -198,3 +198,8 @@ async def test_privacy_guard_scans_the_whole_llm_response() -> None:
     assert "612" not in leaked[0]
     assert events and events[0][0] == "voice.privacy_block"
     assert events[0][1]["kinds"] == ["phone"]
+
+    spoken = await respond(["Gracias. ", "Un momento, lo reviso."])
+    assert spoken == ["Gracias."]
+    silent = await respond(["Un segundo, lo compruebo."])
+    assert silent == []

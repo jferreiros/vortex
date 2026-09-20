@@ -126,6 +126,12 @@ TTS_LANGUAGES: dict[str, frozenset[str]] = {
 ELEVENLABS_HTTP_BASE_URL = "https://api.elevenlabs.io"
 
 
+# Providers whose voice id is the whole voice and whose language field is only
+# a hint: the same ElevenLabs multilingual id says every language, so a switch
+# changes nothing the service would apply and the pipeline does not restart.
+TTS_LANGUAGE_IS_A_HINT: frozenset[str] = frozenset({"elevenlabs"})
+
+
 def _tts_provider(var: str = "VORTEX_TTS_PROVIDER") -> str:
     """Fold a TTS provider variable to a known provider. Anything odd -> elevenlabs."""
     name = _env(var, DEFAULT_TTS_PROVIDER).lower()
