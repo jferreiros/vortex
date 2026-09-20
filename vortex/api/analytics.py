@@ -8,6 +8,7 @@ it keeps a stale-while-revalidate cache per window and a start-up warm-up
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 import time
@@ -25,9 +26,25 @@ from vortex.observability.home_overview import WINDOW_DAYS as HOME_WINDOW_DAYS
 from vortex.observability.home_overview import home_overview
 from vortex.observability.home_pack import occupancy
 from vortex.observability.view import CallCard, build_calls
+from vortex.settings import REPO_ROOT
 
 log = logging.getLogger("vortex.api")
 router = APIRouter()
+
+#: A hand-authored stand-in for some of business_insights()'s own keys
+#: (``cancellations``, ``occupancy``, ``heatmap``, ...), for a demo when the
+#: log does not yet hold enough real calls to look right on the wall. Never
+#: committed (see .gitignore's ``wall-cache/*.json``, the same rule
+#: home_pack.py's occupancy cache follows): its absence is the normal state,
+#: and the endpoint falls back to the live Supabase read below.
+BUSINESS_INSIGHTS_OVERRIDE_PATH = REPO_ROOT / "wall-cache" / "business_insights_override.json"
+
+
+def _business_insights_overrides() -> dict[str, Any]:
+    try:
+        return json.loads(BUSINESS_INSIGHTS_OVERRIDE_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
 
 
 @router.get("/business-insights")
@@ -54,6 +71,7 @@ def wall_business_insights_api(days: int = 30) -> JSONResponse:
     # in vortex/clinic/fixtures.py) reads as "0 médicos" while its real,
     # log-sourced demand still shows a non-zero occupancy.
     payload = business_insights(in_range, now=now, catalogue=_shared.agenda_catalogue())
+    payload.update(_business_insights_overrides())
     payload["range_days"] = days
     payload["source"] = source
     return JSONResponse(payload)

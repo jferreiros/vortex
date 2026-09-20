@@ -8,6 +8,7 @@ tails the page shows under the live list.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from fastapi import APIRouter, Request
@@ -18,8 +19,27 @@ from vortex.observability import analytics as analytics_pack_module
 from vortex.observability import explain
 from vortex.observability.business_insights import is_real_call
 from vortex.observability.view import CallCard
+from vortex.settings import REPO_ROOT
 
 router = APIRouter()
+
+#: Every socket the line handles is inbound (see _live_call_payload's own
+#: note) — there is no live queue to read for calls the line is about to
+#: place, so this is a wall-cache override only, same pattern as
+#: analytics.py's business-insights override. Never committed (see
+#: .gitignore's ``wall-cache/*.json``): its absence is the normal state, and
+#: the endpoint reports no outbound calls queued.
+SCHEDULED_OUTBOUND_CALLS_PATH = REPO_ROOT / "wall-cache" / "scheduled_outbound_calls_override.json"
+
+
+def _scheduled_outbound_calls_override() -> list[dict[str, Any]]:
+    try:
+        data = json.loads(SCHEDULED_OUTBOUND_CALLS_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    if isinstance(data, list):
+        return data
+    return data.get("calls", []) if isinstance(data, dict) else []
 
 _PHASE_KEY = {
     "listen": "listening",
@@ -114,3 +134,13 @@ def wall_live_calls_api() -> JSONResponse:
 async def wall_live_calls_stream(request: Request, once: bool = False) -> StreamingResponse:
     """Same payload as GET /live-calls, pushed as Server-Sent Events."""
     return _shared.sse_response(request, live_calls_payload, once=once)
+
+
+@router.get("/scheduled-outbound-calls")
+def wall_scheduled_outbound_calls_api() -> JSONResponse:
+    """Outbound confirmation / rebooking calls the line has queued to place.
+
+    See ``SCHEDULED_OUTBOUND_CALLS_PATH``: no live source exists for this
+    yet, so it is an override-only read.
+    """
+    return JSONResponse({"calls": _scheduled_outbound_calls_override()})

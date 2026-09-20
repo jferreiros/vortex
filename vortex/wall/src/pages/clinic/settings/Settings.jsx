@@ -126,7 +126,7 @@ export default function Settings() {
     <div className="settings-page">
       <SectionHeader
         title="Call settings"
-        subtitle="Clinic rules. Who answers and how they sound is under Customize agent."
+        subtitle="Booking limits, identification, and what the agent can do. Who answers and how they sound is on Home."
         action={
           <>
             <Button
