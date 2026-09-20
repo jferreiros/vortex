@@ -600,7 +600,6 @@ function ShapeTray() {
                 <ShapeGlyphs family={familyDef.key} type={t.type} emoji={t.emoji} />
               </span>
               <span className="pathways-tray-shape-label">{t.type}</span>
-              {subfamily && <span className="pathways-tray-shape-subfamily">{subfamily}</span>}
             </div>
           );
         })}
