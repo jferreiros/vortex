@@ -22,7 +22,7 @@ CONTAINER=vortex-line
 
 # The host Traefik routes to us on. Override for a different name:
 #     VORTEX_PUBLIC_HOST=line.vortex.jferreiros.com deploy/deploy.sh
-PUBLIC_HOST="${VORTEX_PUBLIC_HOST:-line.167.233.80.47.sslip.io}"
+PUBLIC_HOST="${VORTEX_PUBLIC_HOST:-line.2.28.66.152.sslip.io}"
 WS_PATH="${VORTEX_WS_PATH:-/ws}"
 
 # ------------------------------------------------------------------- reporting
@@ -84,7 +84,7 @@ fi
 if [[ ${CHECK_ONLY} -eq 0 ]]; then
   [[ -f "${SCRIPT_DIR}/.env" ]] || die "deploy/.env is missing. cp deploy/.env.example deploy/.env"
   docker network inspect coolify >/dev/null 2>&1 \
-    || die "the 'coolify' Docker network is not there. Traefik is what publishes us; do not create the network by hand, ask whoever runs Coolify."
+    || die "the 'coolify' Docker network is not there. It is the network the reverse proxy (Traefik on Coolify, Caddy on the Hetzner box) reaches us on: docker network create coolify, then attach the proxy to it."
 
   step "Building the image"
   "${COMPOSE[@]}" build
@@ -98,7 +98,9 @@ if [[ ${CHECK_ONLY} -eq 0 ]]; then
   # already passes through env_file.
   step "Applying database/supabase/migrations/"
   if grep -qE '^[[:space:]]*SUPABASE_DB_URL=[^[:space:]]' "${SCRIPT_DIR}/.env"; then
-    "${COMPOSE[@]}" run --rm --no-deps line \
+    # --network host: the compose bridge has no IPv6 and Supabase's direct
+    # Postgres host is IPv6-only. The host network has a route; the bridge does not.
+    docker run --rm --network host --env-file "${SCRIPT_DIR}/.env" vortex-line:local \
       python -m database.supabase.migrate \
       || die "the migration failed. The old container is still serving; fix the
       schema and run deploy/deploy.sh again. Nothing was restarted."
