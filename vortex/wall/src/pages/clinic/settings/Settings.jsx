@@ -14,7 +14,7 @@ const DEFAULTS = {
 const LEAD_OPTIONS_HOURS = [2, 3, 4, 5, 6, 7, 8, 12, 24, 48, 72, 96];
 
 function leadLabel(hours) {
-  return hours < 24 ? `${hours} h` : `${hours / 24} ${hours === 24 ? "día" : "días"}`;
+  return hours < 24 ? `${hours} h` : `${hours / 24} ${hours === 24 ? "day" : "days"}`;
 }
 
 function deepEqual(a, b) {
@@ -125,9 +125,9 @@ export default function Settings() {
   return (
     <div className="settings-page">
       <SectionHeader
-        eyebrow="Ajustes"
-        title="Llamadas"
-        subtitle="Reglas de la clínica. Quién atiende y cómo suena está en Personalizar agente."
+        eyebrow="Settings"
+        title="Calls"
+        subtitle="Clinic rules. Who answers and how they sound is under Customize agent."
         action={
           <>
             <Button
@@ -135,38 +135,38 @@ export default function Settings() {
               onClick={() => setShowDefaultConfirm(true)}
               disabled={!hasChanges && deepEqual(settings, DEFAULTS)}
             >
-              Por defecto
+              Default
             </Button>
             <Button variant="primary" onClick={handleSave} disabled={!hasChanges}>
-              {hasChanges ? "Guardar cambios" : "Sin cambios"}
+              {hasChanges ? "Save changes" : "No changes"}
             </Button>
           </>
         }
       />
 
-      {saveStatus === "saved" && <div className="settings-toast saved">Guardado</div>}
-      {saveStatus === "defaulted" && <div className="settings-toast defaulted">Valores por defecto restaurados</div>}
-      {saveStatus === "error" && <div className="settings-toast error">No se pudo guardar</div>}
+      {saveStatus === "saved" && <div className="settings-toast saved">Saved</div>}
+      {saveStatus === "defaulted" && <div className="settings-toast defaulted">Default values restored</div>}
+      {saveStatus === "error" && <div className="settings-toast error">Could not save</div>}
 
       <div className="settings-groups">
         <div className="settings-pair">
           <Card padding="lg" className="settings-group">
             <div className="settings-group-head">
-              <h3>Reserva</h3>
-              <p>Antelación y tope de la llamada.</p>
+              <h3>Booking</h3>
+              <p>Lead time and call cap.</p>
             </div>
             <div className="settings-rows">
               <div className="settings-row settings-row-stepper">
                 <div>
-                  <span className="settings-row-label">Antelación mínima</span>
-                  <span className="settings-row-desc">Tiempo mínimo entre la llamada y la cita.</span>
+                  <span className="settings-row-label">Minimum lead time</span>
+                  <span className="settings-row-desc">Minimum time between the call and the appointment.</span>
                 </div>
                 <div className="settings-stepper">
                   <button
                     className="ui-stepper-btn"
                     onClick={() => handleLeadHoursChange(-1)}
                     disabled={settings.minimumBookingLeadHours <= LEAD_OPTIONS_HOURS[0]}
-                    aria-label="Decrementar"
+                    aria-label="Decrease"
                   >
                     −
                   </button>
@@ -175,7 +175,7 @@ export default function Settings() {
                     className="ui-stepper-btn"
                     onClick={() => handleLeadHoursChange(1)}
                     disabled={settings.minimumBookingLeadHours >= LEAD_OPTIONS_HOURS[LEAD_OPTIONS_HOURS.length - 1]}
-                    aria-label="Incrementar"
+                    aria-label="Increase"
                   >
                     +
                   </button>
@@ -183,8 +183,8 @@ export default function Settings() {
               </div>
               <div className="settings-row settings-row-cap">
                 <div>
-                  <span className="settings-row-label">Duración máx.</span>
-                  <span className="settings-row-desc">Fijado por la plataforma.</span>
+                  <span className="settings-row-label">Max duration</span>
+                  <span className="settings-row-desc">Set by the platform.</span>
                 </div>
                 <div className="settings-cap-display">
                   <input type="text" value={`${settings.callTimeCapMinutes} min`} readOnly disabled className="ui-cap-input" />
@@ -195,20 +195,20 @@ export default function Settings() {
 
           <Card padding="lg" className="settings-group">
             <div className="settings-group-head">
-              <h3>Identificación</h3>
-              <p>Datos que debe confirmar un paciente existente (nombre, DNI, teléfono o fecha de nacimiento).</p>
+              <h3>Identification</h3>
+              <p>Details an existing patient must confirm (name, ID number, phone, or date of birth).</p>
             </div>
             <div className="settings-rows">
               <div className="settings-row settings-row-stepper">
                 <div>
-                  <span className="settings-row-label">Campos requeridos</span>
+                  <span className="settings-row-label">Required fields</span>
                 </div>
                 <div className="settings-stepper">
                   <button
                     className="ui-stepper-btn"
                     onClick={() => handleIdFieldsChange(settings.patientIdentificationFieldsRequired - 1)}
                     disabled={settings.patientIdentificationFieldsRequired <= 1}
-                    aria-label="Decrementar"
+                    aria-label="Decrease"
                   >
                     −
                   </button>
@@ -217,11 +217,11 @@ export default function Settings() {
                     className="ui-stepper-btn"
                     onClick={() => handleIdFieldsChange(settings.patientIdentificationFieldsRequired + 1)}
                     disabled={settings.patientIdentificationFieldsRequired >= 4}
-                    aria-label="Incrementar"
+                    aria-label="Increase"
                   >
                     +
                   </button>
-                  <span className="settings-stepper-unit">datos</span>
+                  <span className="settings-stepper-unit">fields</span>
                 </div>
               </div>
             </div>
@@ -235,25 +235,25 @@ export default function Settings() {
         <div className="ui-modal-overlay" onClick={() => setShowDefaultConfirm(false)}>
           <div className="ui-modal" onClick={(e) => e.stopPropagation()}>
             <div className="ui-modal-head">
-              <h3>Restablecer valores por defecto</h3>
+              <h3>Reset to default values</h3>
               <button className="ui-modal-close" onClick={() => setShowDefaultConfirm(false)}>
                 ✕
               </button>
             </div>
             <div className="ui-modal-body">
-              <p>Esto restablecerá los ajustes de llamada:</p>
+              <p>This will reset the call settings:</p>
               <ul>
                 <li>
-                  Antelación mínima: <strong>1 día</strong>
+                  Minimum lead time: <strong>1 day</strong>
                 </li>
                 <li>
-                  Identificación: <strong>1 dato</strong>
+                  Identification: <strong>1 field</strong>
                 </li>
               </ul>
             </div>
             <div className="ui-modal-actions">
               <Button variant="ghost" onClick={() => setShowDefaultConfirm(false)}>
-                Cancelar
+                Cancel
               </Button>
               <Button
                 variant="primary"
@@ -262,7 +262,7 @@ export default function Settings() {
                   setShowDefaultConfirm(false);
                 }}
               >
-                Restablecer
+                Reset
               </Button>
             </div>
           </div>

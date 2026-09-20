@@ -6,13 +6,13 @@
 export const MOCK_UNAVAILABILITY = {
   unmet_total: 19,
   buckets: [
-    { key: "no_slot_in_window", label: "Sin hueco en la franja pedida", count: 9, share: 1, pct: 47.4 },
-    { key: "provider_unavailable", label: "Médico concreto no disponible", count: 5, share: 0.556, pct: 26.3 },
-    { key: "policy_not_covered", label: "Póliza no cubierta", count: 3, share: 0.333, pct: 15.8 },
-    { key: "out_of_hours", label: "Fuera de horario", count: 2, share: 0.222, pct: 10.5 },
+    { key: "no_slot_in_window", label: "No slot in the requested window", count: 9, share: 1, pct: 47.4 },
+    { key: "provider_unavailable", label: "Specific provider unavailable", count: 5, share: 0.556, pct: 26.3 },
+    { key: "policy_not_covered", label: "Policy not covered", count: 3, share: 0.333, pct: 15.8 },
+    { key: "out_of_hours", label: "Outside opening hours", count: 2, share: 0.222, pct: 10.5 },
   ],
   suggested_action:
-    "El 47% de la demanda no cubierta es por falta de hueco en la franja pedida, concentrado los jueves en la tarde: ampliar agenda ese tramo capturaría la mayor parte de esos rechazos.",
+    "47% of unmet demand is due to no slot in the requested window, concentrated on Thursday afternoons: extending the schedule for that slot would capture most of these declines.",
 };
 
 export const MOCK_CANCELLATIONS = {
@@ -22,17 +22,17 @@ export const MOCK_CANCELLATIONS = {
   pending: 1,
   recovery_rate_pct: 70,
   suggested_action:
-    "De los 11 huecos liberados por cancelación, 7 se reubicaron (70%) pero 3 llegaron vacíos el día de la cita: avisar a la lista de espera en el instante de la cancelación recuperaría parte de esos huecos.",
+    "Of the 11 slots freed by cancellation, 7 were rebooked (70%) but 3 went unfilled on the appointment day: notifying the waitlist the moment a cancellation happens would recover some of those slots.",
 };
 
 // One mock row per catalogue specialty — the six Arenal services, network-wide.
 export const MOCK_SERVICES = [
-  { id: "general_practice", name: "Medicina general", requested: 21, offered: 18, booked: 15, declined_full: 3, providers: 3, occupancy_pct: 116.7, extra_providers_needed: 1 },
-  { id: "paediatrics", name: "Pediatría", requested: 9, offered: 12, booked: 8, declined_full: 0, providers: 2, occupancy_pct: 75.0, extra_providers_needed: 0 },
-  { id: "dermatology", name: "Dermatología", requested: 6, offered: 8, booked: 5, declined_full: 0, providers: 1, occupancy_pct: 75.0, extra_providers_needed: 0 },
-  { id: "orthopaedics", name: "Traumatología", requested: 5, offered: 10, booked: 4, declined_full: 0, providers: 2, occupancy_pct: 50.0, extra_providers_needed: 0 },
-  { id: "gynaecology", name: "Ginecología", requested: 3, offered: 6, booked: 3, declined_full: 0, providers: 1, occupancy_pct: 50.0, extra_providers_needed: 0 },
-  { id: "physiotherapy", name: "Fisioterapia", requested: 2, offered: 9, booked: 2, declined_full: 0, providers: 1, occupancy_pct: 22.2, extra_providers_needed: 0 },
+  { id: "general_practice", name: "General practice", requested: 21, offered: 18, booked: 15, declined_full: 3, providers: 3, occupancy_pct: 116.7, extra_providers_needed: 1 },
+  { id: "paediatrics", name: "Paediatrics", requested: 9, offered: 12, booked: 8, declined_full: 0, providers: 2, occupancy_pct: 75.0, extra_providers_needed: 0 },
+  { id: "dermatology", name: "Dermatology", requested: 6, offered: 8, booked: 5, declined_full: 0, providers: 1, occupancy_pct: 75.0, extra_providers_needed: 0 },
+  { id: "orthopaedics", name: "Orthopaedics", requested: 5, offered: 10, booked: 4, declined_full: 0, providers: 2, occupancy_pct: 50.0, extra_providers_needed: 0 },
+  { id: "gynaecology", name: "Gynaecology", requested: 3, offered: 6, booked: 3, declined_full: 0, providers: 1, occupancy_pct: 50.0, extra_providers_needed: 0 },
+  { id: "physiotherapy", name: "Physiotherapy", requested: 2, offered: 9, booked: 2, declined_full: 0, providers: 1, occupancy_pct: 22.2, extra_providers_needed: 0 },
 ];
 
 // Per-site mock rows, distinct from each other and from the network-wide
@@ -40,31 +40,31 @@ export const MOCK_SERVICES = [
 // site's own find_slots calls, so these three must actually differ or the
 // site picker looks broken even when the wiring is correct.
 export const MOCK_SERVICES_CENTRO = [
-  { id: "general_practice", name: "Medicina general", requested: 12, offered: 10, booked: 9, declined_full: 2, providers: 2, occupancy_pct: 120.0, extra_providers_needed: 1 },
-  { id: "paediatrics", name: "Pediatría", requested: 5, offered: 6, booked: 4, declined_full: 0, providers: 1, occupancy_pct: 83.3, extra_providers_needed: 0 },
-  { id: "dermatology", name: "Dermatología", requested: 4, offered: 5, booked: 3, declined_full: 0, providers: 1, occupancy_pct: 80.0, extra_providers_needed: 0 },
-  { id: "orthopaedics", name: "Traumatología", requested: 3, offered: 6, booked: 3, declined_full: 0, providers: 1, occupancy_pct: 50.0, extra_providers_needed: 0 },
-  { id: "gynaecology", name: "Ginecología", requested: 2, offered: 4, booked: 2, declined_full: 0, providers: 1, occupancy_pct: 50.0, extra_providers_needed: 0 },
-  { id: "physiotherapy", name: "Fisioterapia", requested: 1, offered: 5, booked: 1, declined_full: 0, providers: 1, occupancy_pct: 20.0, extra_providers_needed: 0 },
+  { id: "general_practice", name: "General practice", requested: 12, offered: 10, booked: 9, declined_full: 2, providers: 2, occupancy_pct: 120.0, extra_providers_needed: 1 },
+  { id: "paediatrics", name: "Paediatrics", requested: 5, offered: 6, booked: 4, declined_full: 0, providers: 1, occupancy_pct: 83.3, extra_providers_needed: 0 },
+  { id: "dermatology", name: "Dermatology", requested: 4, offered: 5, booked: 3, declined_full: 0, providers: 1, occupancy_pct: 80.0, extra_providers_needed: 0 },
+  { id: "orthopaedics", name: "Orthopaedics", requested: 3, offered: 6, booked: 3, declined_full: 0, providers: 1, occupancy_pct: 50.0, extra_providers_needed: 0 },
+  { id: "gynaecology", name: "Gynaecology", requested: 2, offered: 4, booked: 2, declined_full: 0, providers: 1, occupancy_pct: 50.0, extra_providers_needed: 0 },
+  { id: "physiotherapy", name: "Physiotherapy", requested: 1, offered: 5, booked: 1, declined_full: 0, providers: 1, occupancy_pct: 20.0, extra_providers_needed: 0 },
 ];
 export const MOCK_SERVICES_NORTE = [
-  { id: "general_practice", name: "Medicina general", requested: 6, offered: 5, booked: 4, declined_full: 1, providers: 1, occupancy_pct: 120.0, extra_providers_needed: 1 },
-  { id: "paediatrics", name: "Pediatría", requested: 3, offered: 4, booked: 3, declined_full: 0, providers: 1, occupancy_pct: 75.0, extra_providers_needed: 0 },
-  { id: "dermatology", name: "Dermatología", requested: 1, offered: 2, booked: 1, declined_full: 0, providers: 0, occupancy_pct: 50.0, extra_providers_needed: 0 },
-  { id: "orthopaedics", name: "Traumatología", requested: 1, offered: 2, booked: 1, declined_full: 0, providers: 1, occupancy_pct: 50.0, extra_providers_needed: 0 },
-  { id: "gynaecology", name: "Ginecología", requested: 1, offered: 1, booked: 1, declined_full: 0, providers: 0, occupancy_pct: 100.0, extra_providers_needed: 0 },
-  { id: "physiotherapy", name: "Fisioterapia", requested: 1, offered: 3, booked: 1, declined_full: 0, providers: 0, occupancy_pct: 33.3, extra_providers_needed: 0 },
+  { id: "general_practice", name: "General practice", requested: 6, offered: 5, booked: 4, declined_full: 1, providers: 1, occupancy_pct: 120.0, extra_providers_needed: 1 },
+  { id: "paediatrics", name: "Paediatrics", requested: 3, offered: 4, booked: 3, declined_full: 0, providers: 1, occupancy_pct: 75.0, extra_providers_needed: 0 },
+  { id: "dermatology", name: "Dermatology", requested: 1, offered: 2, booked: 1, declined_full: 0, providers: 0, occupancy_pct: 50.0, extra_providers_needed: 0 },
+  { id: "orthopaedics", name: "Orthopaedics", requested: 1, offered: 2, booked: 1, declined_full: 0, providers: 1, occupancy_pct: 50.0, extra_providers_needed: 0 },
+  { id: "gynaecology", name: "Gynaecology", requested: 1, offered: 1, booked: 1, declined_full: 0, providers: 0, occupancy_pct: 100.0, extra_providers_needed: 0 },
+  { id: "physiotherapy", name: "Physiotherapy", requested: 1, offered: 3, booked: 1, declined_full: 0, providers: 0, occupancy_pct: 33.3, extra_providers_needed: 0 },
 ];
 export const MOCK_SERVICES_SUR = [
-  { id: "general_practice", name: "Medicina general", requested: 3, offered: 3, booked: 2, declined_full: 0, providers: 1, occupancy_pct: 100.0, extra_providers_needed: 0 },
-  { id: "paediatrics", name: "Pediatría", requested: 1, offered: 2, booked: 1, declined_full: 0, providers: 0, occupancy_pct: 50.0, extra_providers_needed: 0 },
-  { id: "dermatology", name: "Dermatología", requested: 1, offered: 1, booked: 1, declined_full: 0, providers: 0, occupancy_pct: 100.0, extra_providers_needed: 0 },
-  { id: "orthopaedics", name: "Traumatología", requested: 1, offered: 2, booked: 0, declined_full: 0, providers: 0, occupancy_pct: 50.0, extra_providers_needed: 0 },
-  { id: "gynaecology", name: "Ginecología", requested: 0, offered: 1, booked: 0, declined_full: 0, providers: 0, occupancy_pct: 0.0, extra_providers_needed: 0 },
-  { id: "physiotherapy", name: "Fisioterapia", requested: 0, offered: 1, booked: 0, declined_full: 0, providers: 0, occupancy_pct: 0.0, extra_providers_needed: 0 },
+  { id: "general_practice", name: "General practice", requested: 3, offered: 3, booked: 2, declined_full: 0, providers: 1, occupancy_pct: 100.0, extra_providers_needed: 0 },
+  { id: "paediatrics", name: "Paediatrics", requested: 1, offered: 2, booked: 1, declined_full: 0, providers: 0, occupancy_pct: 50.0, extra_providers_needed: 0 },
+  { id: "dermatology", name: "Dermatology", requested: 1, offered: 1, booked: 1, declined_full: 0, providers: 0, occupancy_pct: 100.0, extra_providers_needed: 0 },
+  { id: "orthopaedics", name: "Orthopaedics", requested: 1, offered: 2, booked: 0, declined_full: 0, providers: 0, occupancy_pct: 50.0, extra_providers_needed: 0 },
+  { id: "gynaecology", name: "Gynaecology", requested: 0, offered: 1, booked: 0, declined_full: 0, providers: 0, occupancy_pct: 0.0, extra_providers_needed: 0 },
+  { id: "physiotherapy", name: "Physiotherapy", requested: 0, offered: 1, booked: 0, declined_full: 0, providers: 0, occupancy_pct: 0.0, extra_providers_needed: 0 },
 ];
 
-export const BAND_NAMES = ["Mañana", "Mediodía", "Tarde", "Tarde-noche"];
+export const BAND_NAMES = ["Morning", "Midday", "Afternoon", "Evening"];
 
 // weekday + one [demand, availability] pair per band -> a heatmap row. Kept
 // as a helper so the three per-site grids below (and the network-wide one)
@@ -80,15 +80,15 @@ export function heatRow(weekday, pairs) {
 // Per-site grids, zeroed on the bands each site's own hours_label below
 // says it is closed — demand_supply_heatmap() never mixes a site's numbers
 // into another's, so these three (and their `open` matrices) must actually
-// differ or the "Cerrado" cells and the site picker both look broken.
+// differ or the "Closed" cells and the site picker both look broken.
 export const MOCK_HEATMAP_CENTRO = [
-  heatRow("Lunes", [[5, 4], [2, 2], [7, 3], [3, 1]]),
-  heatRow("Martes", [[4, 4], [1, 2], [5, 4], [2, 0]]),
-  heatRow("Miércoles", [[3, 3], [1, 2], [4, 5], [1, 1]]),
-  heatRow("Jueves", [[4, 2], [2, 1], [9, 0], [4, 0]]),
-  heatRow("Viernes", [[5, 4], [1, 2], [5, 4], [0, 0]]),
-  heatRow("Sábado", [[0, 0], [0, 0], [0, 0], [0, 0]]),
-  heatRow("Domingo", [[0, 0], [0, 0], [0, 0], [0, 0]]),
+  heatRow("Monday", [[5, 4], [2, 2], [7, 3], [3, 1]]),
+  heatRow("Tuesday", [[4, 4], [1, 2], [5, 4], [2, 0]]),
+  heatRow("Wednesday", [[3, 3], [1, 2], [4, 5], [1, 1]]),
+  heatRow("Thursday", [[4, 2], [2, 1], [9, 0], [4, 0]]),
+  heatRow("Friday", [[5, 4], [1, 2], [5, 4], [0, 0]]),
+  heatRow("Saturday", [[0, 0], [0, 0], [0, 0], [0, 0]]),
+  heatRow("Sunday", [[0, 0], [0, 0], [0, 0], [0, 0]]),
 ];
 export const MOCK_OPEN_CENTRO = [
   [true, true, true, true],
@@ -100,13 +100,13 @@ export const MOCK_OPEN_CENTRO = [
   [false, false, false, false],
 ];
 export const MOCK_HEATMAP_NORTE = [
-  heatRow("Lunes", [[2, 1], [1, 1], [4, 2], [1, 1]]),
-  heatRow("Martes", [[1, 1], [1, 1], [3, 2], [1, 0]]),
-  heatRow("Miércoles", [[1, 1], [0, 1], [2, 2], [1, 0]]),
-  heatRow("Jueves", [[2, 1], [1, 1], [4, 0], [2, 0]]),
-  heatRow("Viernes", [[3, 2], [1, 1], [2, 1], [0, 0]]),
-  heatRow("Sábado", [[3, 2], [1, 1], [0, 0], [0, 0]]),
-  heatRow("Domingo", [[0, 0], [0, 0], [0, 0], [0, 0]]),
+  heatRow("Monday", [[2, 1], [1, 1], [4, 2], [1, 1]]),
+  heatRow("Tuesday", [[1, 1], [1, 1], [3, 2], [1, 0]]),
+  heatRow("Wednesday", [[1, 1], [0, 1], [2, 2], [1, 0]]),
+  heatRow("Thursday", [[2, 1], [1, 1], [4, 0], [2, 0]]),
+  heatRow("Friday", [[3, 2], [1, 1], [2, 1], [0, 0]]),
+  heatRow("Saturday", [[3, 2], [1, 1], [0, 0], [0, 0]]),
+  heatRow("Sunday", [[0, 0], [0, 0], [0, 0], [0, 0]]),
 ];
 export const MOCK_OPEN_NORTE = [
   [true, true, true, true],
@@ -118,13 +118,13 @@ export const MOCK_OPEN_NORTE = [
   [false, false, false, false],
 ];
 export const MOCK_HEATMAP_SUR = [
-  heatRow("Lunes", [[1, 1], [0, 1], [0, 0], [0, 0]]),
-  heatRow("Martes", [[1, 1], [0, 1], [0, 0], [0, 0]]),
-  heatRow("Miércoles", [[1, 1], [0, 0], [0, 0], [0, 0]]),
-  heatRow("Jueves", [[1, 1], [1, 0], [0, 0], [0, 0]]),
-  heatRow("Viernes", [[1, 1], [0, 0], [0, 0], [0, 0]]),
-  heatRow("Sábado", [[0, 0], [0, 0], [0, 0], [0, 0]]),
-  heatRow("Domingo", [[0, 0], [0, 0], [0, 0], [0, 0]]),
+  heatRow("Monday", [[1, 1], [0, 1], [0, 0], [0, 0]]),
+  heatRow("Tuesday", [[1, 1], [0, 1], [0, 0], [0, 0]]),
+  heatRow("Wednesday", [[1, 1], [0, 0], [0, 0], [0, 0]]),
+  heatRow("Thursday", [[1, 1], [1, 0], [0, 0], [0, 0]]),
+  heatRow("Friday", [[1, 1], [0, 0], [0, 0], [0, 0]]),
+  heatRow("Saturday", [[0, 0], [0, 0], [0, 0], [0, 0]]),
+  heatRow("Sunday", [[0, 0], [0, 0], [0, 0], [0, 0]]),
 ];
 export const MOCK_OPEN_SUR = [
   [true, true, false, false],
@@ -160,10 +160,10 @@ export const MOCK_STATS = {
     ],
   },
   // Same shape business_insights.demand_supply_heatmap serves: 7 weekday
-  // rows x the 4 bands, an `open` matrix per site for the "Cerrado" cells,
+  // rows x the 4 bands, an `open` matrix per site for the "Closed" cells,
   // and `suggested_action` naming the hottest gap.
   heatmap: {
-    bands: ["Mañana", "Mediodía", "Tarde", "Tarde-noche"],
+    bands: ["Morning", "Midday", "Afternoon", "Evening"],
     open: [
       [true, true, true, true],
       [true, true, true, true],
@@ -174,19 +174,19 @@ export const MOCK_STATS = {
       [false, false, false, false],
     ],
     rows: [
-      { weekday: "Lunes", all_day_demand: 0, cells: [{ band: "Mañana", demand: 8, availability: 6 }, { band: "Mediodía", demand: 3, availability: 4 }, { band: "Tarde", demand: 12, availability: 5 }, { band: "Tarde-noche", demand: 4, availability: 2 }] },
-      { weekday: "Martes", all_day_demand: 0, cells: [{ band: "Mañana", demand: 6, availability: 6 }, { band: "Mediodía", demand: 2, availability: 4 }, { band: "Tarde", demand: 9, availability: 7 }, { band: "Tarde-noche", demand: 3, availability: 0 }] },
-      { weekday: "Miércoles", all_day_demand: 0, cells: [{ band: "Mañana", demand: 5, availability: 5 }, { band: "Mediodía", demand: 1, availability: 3 }, { band: "Tarde", demand: 7, availability: 8 }, { band: "Tarde-noche", demand: 2, availability: 1 }] },
-      { weekday: "Jueves", all_day_demand: 0, cells: [{ band: "Mañana", demand: 7, availability: 4 }, { band: "Mediodía", demand: 4, availability: 2 }, { band: "Tarde", demand: 14, availability: 0 }, { band: "Tarde-noche", demand: 6, availability: 0 }] },
-      { weekday: "Viernes", all_day_demand: 0, cells: [{ band: "Mañana", demand: 9, availability: 7 }, { band: "Mediodía", demand: 2, availability: 3 }, { band: "Tarde", demand: 8, availability: 6 }, { band: "Tarde-noche", demand: 0, availability: 0 }] },
-      { weekday: "Sábado", all_day_demand: 0, cells: [{ band: "Mañana", demand: 4, availability: 3 }, { band: "Mediodía", demand: 1, availability: 1 }, { band: "Tarde", demand: 0, availability: 0 }, { band: "Tarde-noche", demand: 0, availability: 0 }] },
-      { weekday: "Domingo", all_day_demand: 0, cells: [{ band: "Mañana", demand: 0, availability: 0 }, { band: "Mediodía", demand: 0, availability: 0 }, { band: "Tarde", demand: 0, availability: 0 }, { band: "Tarde-noche", demand: 0, availability: 0 }] },
+      { weekday: "Monday", all_day_demand: 0, cells: [{ band: "Morning", demand: 8, availability: 6 }, { band: "Midday", demand: 3, availability: 4 }, { band: "Afternoon", demand: 12, availability: 5 }, { band: "Evening", demand: 4, availability: 2 }] },
+      { weekday: "Tuesday", all_day_demand: 0, cells: [{ band: "Morning", demand: 6, availability: 6 }, { band: "Midday", demand: 2, availability: 4 }, { band: "Afternoon", demand: 9, availability: 7 }, { band: "Evening", demand: 3, availability: 0 }] },
+      { weekday: "Wednesday", all_day_demand: 0, cells: [{ band: "Morning", demand: 5, availability: 5 }, { band: "Midday", demand: 1, availability: 3 }, { band: "Afternoon", demand: 7, availability: 8 }, { band: "Evening", demand: 2, availability: 1 }] },
+      { weekday: "Thursday", all_day_demand: 0, cells: [{ band: "Morning", demand: 7, availability: 4 }, { band: "Midday", demand: 4, availability: 2 }, { band: "Afternoon", demand: 14, availability: 0 }, { band: "Evening", demand: 6, availability: 0 }] },
+      { weekday: "Friday", all_day_demand: 0, cells: [{ band: "Morning", demand: 9, availability: 7 }, { band: "Midday", demand: 2, availability: 3 }, { band: "Afternoon", demand: 8, availability: 6 }, { band: "Evening", demand: 0, availability: 0 }] },
+      { weekday: "Saturday", all_day_demand: 0, cells: [{ band: "Morning", demand: 4, availability: 3 }, { band: "Midday", demand: 1, availability: 1 }, { band: "Afternoon", demand: 0, availability: 0 }, { band: "Evening", demand: 0, availability: 0 }] },
+      { weekday: "Sunday", all_day_demand: 0, cells: [{ band: "Morning", demand: 0, availability: 0 }, { band: "Midday", demand: 0, availability: 0 }, { band: "Afternoon", demand: 0, availability: 0 }, { band: "Evening", demand: 0, availability: 0 }] },
     ],
     sites: [
-      { id: "centro", name: "Arenal Centro", hours_label: "L–V 09:00–20:00", open: MOCK_OPEN_CENTRO, rows: MOCK_HEATMAP_CENTRO },
-      { id: "norte", name: "Arenal Norte", hours_label: "L–V 09:00–20:00 · S 09:00–14:00", open: MOCK_OPEN_NORTE, rows: MOCK_HEATMAP_NORTE },
-      { id: "sur", name: "Arenal Sur", hours_label: "L–V 10:00–14:00", open: MOCK_OPEN_SUR, rows: MOCK_HEATMAP_SUR },
+      { id: "centro", name: "Arenal Centro", hours_label: "Mon–Fri 09:00–20:00", open: MOCK_OPEN_CENTRO, rows: MOCK_HEATMAP_CENTRO },
+      { id: "norte", name: "Arenal Norte", hours_label: "Mon–Fri 09:00–20:00 · Sat 09:00–14:00", open: MOCK_OPEN_NORTE, rows: MOCK_HEATMAP_NORTE },
+      { id: "sur", name: "Arenal Sur", hours_label: "Mon–Fri 10:00–14:00", open: MOCK_OPEN_SUR, rows: MOCK_HEATMAP_SUR },
     ],
-    suggested_action: "Los jueves en la franja de tarde concentran 14 peticiones de cita con solo 0 huecos ofrecidos ese tramo: abrir agenda ahí capturaría la mayor bolsa de demanda sin horario.",
+    suggested_action: "Thursday afternoons account for 14 appointment requests with only 0 slots offered in that band: opening up the schedule there would capture the largest pool of unmet demand.",
   },
 };

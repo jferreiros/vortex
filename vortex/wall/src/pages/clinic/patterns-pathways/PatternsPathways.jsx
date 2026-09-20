@@ -13,14 +13,13 @@ const MODES = [
   {
     key: "pathways",
     label: "Pathways",
-    blurb:
-      "Puts a patient on the treatment path they need to follow from their very first call, funneling them straight to it based on what they ask for directly.",
+    blurb: "Puts a patient on a treatment path from the beginning.",
   },
   {
     key: "patterns",
     label: "Patterns",
     blurb:
-      "Automatically finds patterns in a patient's own call/visit history and suggests a next step. It runs retroactively — after the events already happened.",
+      "Automatically finds patterns in a patient's calls and visits history and suggests a next step.",
   },
 ];
 

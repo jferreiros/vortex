@@ -4,12 +4,12 @@ import Pills from "../../../components/ui/Pills";
 import "./settings.css";
 
 const PERMISSIONS = [
-  { key: "canBook", label: "Reservar citas" },
-  { key: "canReschedule", label: "Reprogramar" },
-  { key: "canCancel", label: "Cancelar" },
-  { key: "canRegister", label: "Registrar paciente" },
-  { key: "canInfo", label: "Información" },
-  { key: "canEscalate", label: "Escalar urgencias" },
+  { key: "canBook", label: "Book appointments" },
+  { key: "canReschedule", label: "Reschedule" },
+  { key: "canCancel", label: "Cancel" },
+  { key: "canRegister", label: "Register patient" },
+  { key: "canInfo", label: "Information" },
+  { key: "canEscalate", label: "Escalate emergencies" },
 ];
 
 const PERM_DEFAULTS = Object.fromEntries(PERMISSIONS.map((p) => [p.key, true]));
@@ -39,7 +39,7 @@ export default function PermissionsCard() {
   return (
     <Card padding="lg" className="agent-panel">
       <section className="agent-block">
-        <h3>Qué puede hacer</h3>
+        <h3>What it can do</h3>
         <div className="agent-perm-grid">
           {PERMISSIONS.map((p) => (
             <div className="agent-perm-item" key={p.key}>
@@ -49,7 +49,7 @@ export default function PermissionsCard() {
                 value={perms[p.key]}
                 options={[
                   { value: false, label: "No" },
-                  { value: true, label: "Sí" },
+                  { value: true, label: "Yes" },
                 ]}
                 onChange={(value) => setPerm(p.key, value)}
               />

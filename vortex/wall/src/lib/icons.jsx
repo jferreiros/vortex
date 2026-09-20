@@ -162,6 +162,18 @@ const PHASE_PATHS = {
   ),
 };
 
+// A small clock-with-back-arrow glyph used to mark "view history" affordances,
+// e.g. the trailing cell of a calls table row.
+export function HistoryIcon({ className, size = 18 }) {
+  return (
+    <svg {...base} width={size} height={size} className={className} aria-hidden="true">
+      <path d="M4.5 12a7.5 7.5 0 1 0 2.3-5.4" />
+      <path d="M4 4.5v4h4" />
+      <path d="M12 8.3V12l2.6 1.6" />
+    </svg>
+  );
+}
+
 export function PhaseIcon({ phase, className, size = 26 }) {
   return (
     <svg {...base} width={size} height={size} className={className} aria-hidden="true">
