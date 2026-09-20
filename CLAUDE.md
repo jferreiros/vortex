@@ -74,9 +74,9 @@ make lint / make fmt        # ruff
 `make test` and `make smoke` need no key and no network: the tests that need a
 database skip themselves when Supabase is not configured. Without
 `PLATFORM_API_KEY` the server runs on `FakeClinicClient` fixtures and a dry-run
-submit client. Without `DEEPGRAM_API_KEY` or `OPENAI_API_KEY` the stub voice
-pipeline runs. `GET /health` reports the active mode. See `README.md` for the
-mode table.
+submit client. Without `SONIOX_API_KEY`, `ELEVENLABS_API_KEY` or an LLM key
+(`HELMCODE_API_KEY` or `AZURE_OPENAI_API_KEY`) the stub voice pipeline runs.
+`GET /health` reports the active mode. See `README.md` for the mode table.
 
 The store is Supabase/Postgres and nothing else. There is no SQLite file and no
 `logs/calls.jsonl`. Schema changes are a new `database/supabase/migrations/NNNN_*.sql`

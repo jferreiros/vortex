@@ -553,10 +553,13 @@ def confirmation_audio_dir(settings: Settings) -> Path:
     return REPO_ROOT / "logs" / "confirmation_audio"
 
 
-def confirmation_voice_name(cfg: voice_config.VoiceConfig, language: str | None) -> str:
-    """The Chirp 3 HD persona the wall configured, in the call's locale."""
-    base = f"{twilio_locale(language)}-Chirp3-HD-{voice_config.FEMALE_PERSONA}"
-    return voice_config.apply_gender(base, cfg.voice)
+def confirmation_voice_name(
+    cfg: voice_config.VoiceConfig, language: str | None, settings: Settings | None = None
+) -> str:
+    """The ElevenLabs voice id for the call's language, female or male."""
+    from vortex.conversation.language import elevenlabs_voice_id
+
+    return elevenlabs_voice_id(call_language(language), settings, cfg.voice)
 
 
 def audio_filename(cfg: voice_config.VoiceConfig, language: str | None, text: str) -> str:
@@ -572,8 +575,8 @@ def valid_audio_name(name: str) -> bool:
 async def ensure_confirmation_audio(settings: Settings, text: str, language: str) -> str | None:
     """The cached MP3 filename for one spoken line, in the wall's own voice.
 
-    None means "keep the <Say>": no TTS credentials, a synthesis error or a
-    slow Google all land there, and the call still says its line.
+    None means "keep the <Say>": no TTS key, a synthesis error or a slow
+    ElevenLabs all land there, and the call still says its line.
     """
     cfg = voice_config.load(settings)
     name = audio_filename(cfg, language, text)
@@ -587,8 +590,8 @@ async def ensure_confirmation_audio(settings: Settings, text: str, language: str
                 settings,
                 cfg,
                 text,
-                language_code=twilio_locale(language),
-                voice_name=confirmation_voice_name(cfg, language),
+                language_code=call_language(language),
+                voice_name=confirmation_voice_name(cfg, language, settings),
             ),
             timeout=AUDIO_BUDGET_SECS,
         )

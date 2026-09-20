@@ -6,8 +6,8 @@ Routes:
 - ``WS   /ws``       one call per connection, Twilio Media Streams format
 
 Per connection: accept -> read ``connected`` and ``start`` -> open a
-``CallSession`` -> run the voice pipeline (pipecat, Gemini Live demo, or
-stub) -> close the session inside the 30-second submission window.
+``CallSession`` -> run the voice pipeline (pipecat or stub) -> close the
+session inside the 30-second submission window.
 
 Owner: the line lane.
 """
@@ -185,8 +185,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/voice-preview")
     async def voice_preview(payload: Annotated[dict | None, Body()] = None) -> Response:
         """One MP3 of the greeting with the posted (or stored) settings, for
-        the wall's Try button. Synthesised off the event loop — the Google
-        client is blocking."""
+        the wall's Try button. Synthesised off the event loop — the ElevenLabs
+        HTTP call is blocking."""
         cfg = voice_config.preview_config(settings, payload)
         try:
             audio = await asyncio.to_thread(voice_config.synthesize_preview, settings, cfg)
@@ -324,9 +324,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # Without the live voice pipeline there is no colleague to hand the
         # line to, so the stored callback promise stands.
         handoff_xml: str | None = None
-        if outcome == "reschedule_requested" and (
-            settings.voice_is_pipecat or settings.voice_is_gemini_live
-        ):
+        if outcome == "reschedule_requested" and settings.voice_is_pipecat:
             bridge = confirmations.handoff_bridge_text(call.language)
             audio_url = await _audio_url(bridge, call.language)
             handoff_xml = confirmations.twiml_handoff_to_agent(
@@ -483,11 +481,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         reason = "error"
         with trace_call(session):
             try:
-                if settings.voice_is_gemini_live:
-                    from vortex.line.gemini_live_voice import run_gemini_live_call
-
-                    reason = await run_gemini_live_call(ws, session)
-                elif settings.voice_is_pipecat:
+                if settings.voice_is_pipecat:
                     from vortex.line.pipecat_voice import run_pipecat_call
 
                     reason = await run_pipecat_call(ws, session)

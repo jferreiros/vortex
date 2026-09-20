@@ -25,9 +25,8 @@ BOOK_TURNS = [
 
 #: What the providers metered on a scripted call. The same shape the line lane
 #: writes for a real one, so every page shows a cost without a live call.
-#: The refusal leans on two Google TTS services on purpose: the Gemini voice
-#: has no published per-character price, which is what a *partial* call looks
-#: like on screen.
+#: ElevenLabs publishes no verified per-character list price, which is what a
+#: *partial* call looks like on screen.
 BOOK_USAGE: dict[str, object] = {
     "metered": True,
     "stt": {"provider": "soniox", "model": "stt-rt-v5", "audio_seconds": 47.3, "requests": 12},
@@ -42,9 +41,9 @@ BOOK_USAGE: dict[str, object] = {
     },
     "tts": [
         {
-            "provider": "google",
-            "service": "GoogleHttpTTSService",
-            "model": "es-ES-Chirp3-HD-Aoede",
+            "provider": "elevenlabs",
+            "service": "ElevenLabsTTSService",
+            "model": "eleven_flash_v2_5",
             "characters": 1180,
             "requests": 6,
         }
@@ -65,18 +64,11 @@ REFUSE_USAGE: dict[str, object] = {
     },
     "tts": [
         {
-            "provider": "google",
-            "service": "GoogleHttpTTSService",
-            "model": "es-ES-Chirp3-HD-Aoede",
-            "characters": 226,
-            "requests": 3,
-        },
-        {
-            "provider": "google",
-            "service": "GeminiTTSService",
-            "model": "gemini-2.5-flash-tts",
-            "characters": 90,
-            "requests": 1,
+            "provider": "elevenlabs",
+            "service": "ElevenLabsTTSService",
+            "model": "eleven_flash_v2_5",
+            "characters": 316,
+            "requests": 4,
         },
     ],
 }
