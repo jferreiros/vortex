@@ -7,6 +7,7 @@ pipecat releases, without a key and without a network.
 from __future__ import annotations
 
 import asyncio
+import random
 from datetime import datetime
 
 import pytest
@@ -556,22 +557,32 @@ async def test_tool_filler_speaks_one_short_phrase_per_language(voice_settings) 
     from pipecat.frames.frames import TTSSpeakFrame
 
     from vortex.conversation.language import SUPPORTED_LANGUAGES
+    from vortex.conversation.prompt import TOOL_FILLERS, FillerPicker, tool_filler_for
     from vortex.line.pipecat_voice import (
-        TOOL_FILLERS,
         _LanguageState,
         _make_tool_filler_speaker,
         _ToolFillerGuard,
-        tool_filler_for,
     )
 
     for code in SUPPORTED_LANGUAGES:
-        phrase = tool_filler_for(code)
-        assert phrase == TOOL_FILLERS[code]
-        assert phrase.strip()
-        assert len(phrase.split()) <= 3
+        pool = TOOL_FILLERS[code]
+        assert pool
+        for phrase in pool:
+            assert phrase.strip().endswith(".")
+            assert phrase.count(".") == 1
+        assert tool_filler_for(code) in pool
 
-    assert tool_filler_for("de") == tool_filler_for("en") == TOOL_FILLERS["en"]
-    assert tool_filler_for(None) == TOOL_FILLERS["en"]
+    assert tool_filler_for("de", rng=random.Random(0)) in TOOL_FILLERS["en"]
+    assert tool_filler_for(None, rng=random.Random(1)) in TOOL_FILLERS["en"]
+    picker = FillerPicker(rng=random.Random(2))
+    first, second = picker.pick("es"), picker.pick("es")
+    assert first != second
+
+    from vortex.conversation.prompt import strip_tool_wait_talk
+
+    assert strip_tool_wait_talk("Gracias. Un momento, lo reviso.") == "Gracias."
+    assert strip_tool_wait_talk("Un segundo, lo compruebo.") == ""
+    assert strip_tool_wait_talk("¿Qué tipo de cita necesitas?") == "¿Qué tipo de cita necesitas?"
 
     settings = voice_settings()
     events: list[tuple[str, dict]] = []
@@ -589,16 +600,16 @@ async def test_tool_filler_speaks_one_short_phrase_per_language(voice_settings) 
     assert [kind for kind, _ in events] == ["voice.tool_filler"]
     assert events[0][1]["language"] == "es"
     assert events[0][1]["tools"] == 1
-    assert events[0][1]["text"] == TOOL_FILLERS["es"]
+    assert events[0][1]["text"] in TOOL_FILLERS["es"]
     assert len(queued) == 1
     assert isinstance(queued[0], TTSSpeakFrame)
-    assert queued[0].text == TOOL_FILLERS["es"]
-    assert queued[0].append_to_context is True
+    assert queued[0].text in TOOL_FILLERS["es"]
+    assert queued[0].append_to_context is False
 
     state.language = "ca"
     guard.on_caller_turn()  # the caller answered: a new interaction may mask
     await handler(None, [{}, {}])
-    assert queued[-1].text == TOOL_FILLERS["ca"]
+    assert queued[-1].text in TOOL_FILLERS["ca"]
     assert events[-1][1]["tools"] == 2
     assert [kind for kind, _ in events] == ["voice.tool_filler"] * 2
 
@@ -608,9 +619,8 @@ async def test_the_filler_guard_speaks_one_filler_per_interaction(voice_settings
 
     Evidence CA-voicetest-1789811447: five completions in seven seconds, each
     starting a tool batch, each re-speaking "Un momento.". The caller heard
-    the filler flood instead of an answer. The guard speaks the first batch,
-    suppresses the ones inside the cooldown, and speaks again once the caller
-    has said anything - the mark of a new interaction.
+    the filler flood instead of an answer. The guard speaks the first batch
+    and stays quiet until the caller speaks again; typing covers the rest.
     """
     pytest.importorskip("pipecat")
     from pipecat.frames.frames import TTSSpeakFrame
@@ -645,18 +655,18 @@ async def test_the_filler_guard_speaks_one_filler_per_interaction(voice_settings
     now[0] = 2.9
     await handler(None, [{"name": "triage"}])
     assert len(queued) == 1
-    assert events[-1][1]["suppressed"] == "cooldown"
+    assert events[-1][1]["suppressed"] == "same_turn"
 
-    # Past the cooldown the chain may re-mask: the caller has heard silence.
+    # Past any old cooldown the chain still stays quiet: typing is the wait.
     now[0] = 5.0
     await handler(None, [{"name": "find_slots"}])
-    assert len(queued) == 2
+    assert len(queued) == 1
 
-    # A caller turn re-arms the slot even inside the cooldown.
+    # A caller turn re-arms the slot.
     now[0] = 5.5
     guard.on_caller_turn()
     await handler(None, [{"name": "find_patient"}])
-    assert len(queued) == 3
+    assert len(queued) == 2
     assert isinstance(queued[-1], TTSSpeakFrame)
 
 

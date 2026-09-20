@@ -322,6 +322,17 @@ def test_the_two_env_overrides_beat_the_preset(clean_env) -> None:
     assert s.elevenlabs_voice_for("ca") == "voice-all"
 
 
+def test_the_receptionist_preset_is_the_telnyx_voice_settings() -> None:
+    """Hardcoded on purpose: no env var reaches these, so pin them here."""
+    from vortex.line.elevenlabs_voice import ElevenLabsVoicePreset
+
+    preset = ElevenLabsVoicePreset.RECEPTIONIST.value
+    assert preset.stability == 0.5
+    assert preset.similarity_boost == 0.75
+    assert preset.style == 0.0
+    assert preset.use_speaker_boost is True
+
+
 def test_the_http_base_url_ignores_a_websocket_gateway(clean_env) -> None:
     """The pipeline speaks over the WebSocket API; pre-rendered MP3s do not."""
     assert _settings(clean_env).elevenlabs_http_base_url == "https://api.elevenlabs.io"

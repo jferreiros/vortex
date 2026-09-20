@@ -18,9 +18,10 @@ that flag: it clears every other row first and only then sets the new one, so
 the worst a half-applied write can leave behind is a clinic with no active
 persona, which ``active()`` already answers from the seeds.
 
-Nothing here reaches the phone call yet: this module stores, lists and edits
-personas. Reading the active one on the line — the system prompt's tone line,
-the opening greeting, the TTS voice — is a separate change.
+The call reads the active persona once per socket (``pipecat_voice``): its name,
+role and tone become the prompt's PERSONA block and its greeting opens the line.
+``voices`` is the one field the call ignores — those are Google Chirp names and
+the voice belongs to whichever TTS provider is serving that language.
 """
 
 from __future__ import annotations
