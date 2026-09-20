@@ -1569,7 +1569,7 @@ def clinic_agenda(
     return {
         "ok": True,
         "doctor": {
-            "name": specialty_name or "Toda la clínica",
+            "name": specialty_name,
             "specialty": specialty_name,
         },
         "sites": sites,

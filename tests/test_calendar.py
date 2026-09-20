@@ -603,7 +603,9 @@ def test_clinic_agenda_opens_without_a_doctor() -> None:
     )
     payload = cal.clinic_agenda(calendars, patients, today=_START, week=_START)
     assert payload["ok"] is True
-    assert payload["doctor"]["name"] == "Toda la clínica"
+    # No specialty picked: the API sends no placeholder name, the wall's
+    # own SectionHeader falls back to "Schedule".
+    assert payload["doctor"]["name"] == ""
     fifth = next(cell for week in payload["weeks"] for cell in week if cell["date"] == "2026-10-05")
     assert fifth["visits"][0]["full_name"] == "Marta Ruiz"
     assert fifth["visits"][0]["provider_name"] == "Dra. Uno"
