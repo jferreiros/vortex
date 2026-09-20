@@ -36,9 +36,9 @@ export default function Calls() {
     <div className="calls-page">
       <header className="home-hero">
         <div className="home-hero-row">
-          <h1 className="home-title">Calls</h1>
+          <h1 className="home-title">Call records</h1>
         </div>
-        <p className="home-lead">Live inbound line, then today&apos;s refusals and escalations.</p>
+        <p className="home-lead">Every call the line has handled today, live or closed.</p>
       </header>
 
       <Card padding="lg" className="calls-panel">
