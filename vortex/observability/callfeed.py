@@ -31,6 +31,25 @@ log = logging.getLogger("vortex.observability")
 
 LINE_URL = os.environ.get("VORTEX_LINE_URL", "http://127.0.0.1:7860").rstrip("/")
 
+
+def ttl_env(name: str, default: float) -> float:
+    """A cache lifetime, overridable from the environment.
+
+    Every read behind these caches is one hop to a hosted project that has
+    spent this weekend stalling for tens of seconds at a time. The defaults
+    are generous on purpose; raise them further for a demo, or drop them to
+    0 to watch a change land immediately.
+    """
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        log.warning("%s=%r is not a number; using %s", name, raw, default)
+        return default
+
+
 #: How many complete calls the wall and the per-call pages ask for. Counted
 #: in calls, not events: the old ``limit=800`` tail was about ten calls on a
 #: real log and could cut the oldest one's ``call.started``. Sized to hold a
@@ -38,8 +57,9 @@ LINE_URL = os.environ.get("VORTEX_LINE_URL", "http://127.0.0.1:7860").rstrip("/"
 WALL_CALLS = 160
 
 #: One Insights fetch per this many seconds, no matter how many tabs poll.
-#: The page itself only asks every 6 s.
-INSIGHTS_CACHE_TTL_S = 4.0
+#: The page itself only asks every 6 s. Aggregates over a 7-to-90-day window
+#: do not move in a minute, and the read behind them is the expensive one.
+INSIGHTS_CACHE_TTL_S = ttl_env("VORTEX_INSIGHTS_TTL_S", 60.0)
 
 #: Last events successfully fetched per scope. Cleared only by a fresh
 #: success; never written to disk.
@@ -88,11 +108,19 @@ def load_events(
     try:
         from vortex.observability import supabase_log
 
-        grouped, _meta = supabase_log.fetch_calls(bound, since)
+        grouped, meta = supabase_log.fetch_calls(bound, since)
         events = flatten_grouped(grouped)
+        unreachable = meta.get("unreachable")
         if events:
             _last_good[scope] = events
             result = (events, None, _source(scope, "supabase", events, None))
+        elif unreachable:
+            # The store never answered. Say so: "error" and "empty" look the
+            # same on a page of zeros, and only one of them means the clinic
+            # was quiet.
+            stale = _last_good.get(scope, [])
+            kind = "cache" if stale else "error"
+            result = (stale, None, _source(scope, kind, stale, unreachable))
         elif scope in _last_good:
             stale = _last_good[scope]
             result = (stale, None, _source(scope, "cache", stale, "store returned no calls"))
@@ -102,8 +130,12 @@ def load_events(
         detail = f"{type(exc).__name__}: {exc}"[:200]
         log.warning("supabase %s fetch failed (%s); degrading", scope, detail)
         stale = _last_good.get(scope, [])
-        result = (stale, None, _source(scope, "cache" if stale else "empty", stale, detail))
+        result = (stale, None, _source(scope, "cache" if stale else "error", stale, detail))
 
-    if cache_ttl:
+    # Never cache a read that failed. A TTL is a promise that the answer is
+    # good for that long; caching an outage makes one bad second last the
+    # whole window, and the next caller — who might have got through — is
+    # handed the failure instead of trying.
+    if cache_ttl and result[2].get("kind") != "error":
         _scope_cache[scope] = (time.monotonic(), *result)
     return result

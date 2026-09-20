@@ -84,6 +84,10 @@ async def _app_lifespan(app: FastAPI):
     own schedule even if the line takes no inbound calls at all today.
     """
     cfg: Settings = app.state.settings
+    # Fill the persona cache off the call path, so not even the first call of
+    # a fresh container waits on the store. It is a daemon thread and its
+    # failure is already the fallback, so nothing here can delay start-up.
+    personalities.warm_active()
     worker: ReminderWorker | None = None
     if cfg.sms_confirmations and cfg.sms_day_before_reminders:
         worker = ReminderWorker(cfg)

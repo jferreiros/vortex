@@ -1,7 +1,11 @@
+/* min-height, not height: on a short viewport the page grows and the shell
+   scrolls. With height:100% the two cards below shared a fixed box, the
+   canvas was handed less than its track's min-height, and — nothing here
+   clips — the nodes drew straight over the tray. */
 .pathways-page {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  min-height: 100%;
   max-width: var(--content-max-width);
 }
 
@@ -146,9 +150,11 @@
 
 /* Canvas — top ~2/3 of the main column ----------------------------------------*/
 
+/* min-content, not 0: the card keeps the 4:2 share of any spare height, but
+   never shrinks under the track it holds. */
 .pathways-canvas {
   flex: 4 1 0;
-  min-height: 0;
+  min-height: min-content;
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -468,9 +474,10 @@
 
 /* Tray — bottom ~1/3 of the main column -----------------------------------------*/
 
+/* Same reason as .pathways-canvas: never shorter than the shapes it holds. */
 .pathways-tray {
   flex: 2 1 0;
-  min-height: 0;
+  min-height: min-content;
   display: flex;
   align-items: center;
   gap: var(--space-4);
@@ -553,4 +560,60 @@
   color: var(--color-mute);
   text-align: center;
   line-height: 1.25;
+}
+
+
+.pathways-runtime-card {
+  margin-bottom: var(--space-4);
+}
+
+.pathways-runtime-head,
+.pathways-runtime-row,
+.pathways-runtime-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.pathways-runtime-head,
+.pathways-runtime-row {
+  justify-content: space-between;
+}
+
+.pathways-runtime-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.pathways-runtime-row {
+  border-top: 1px solid var(--color-border);
+  padding-top: var(--space-3);
+}
+
+.pathways-runtime-row small,
+.pathways-runtime-meta span {
+  display: block;
+  color: var(--color-text-muted);
+}
+
+.pathways-runtime-meta {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  font-size: var(--font-size-sm);
+}
+
+.pathways-runtime-meta .ok,
+.pathways-runtime-pill.ok {
+  color: var(--color-success);
+}
+
+.pathways-runtime-meta .off,
+.pathways-runtime-pill.warn,
+.pathways-runtime-error {
+  color: var(--color-danger);
+}
+
+.pathways-runtime-pill {
+  font-weight: 700;
 }

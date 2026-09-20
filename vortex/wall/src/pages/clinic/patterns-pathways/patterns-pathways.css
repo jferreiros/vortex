@@ -10,7 +10,9 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: var(--space-4);
+  /* The blurb is right-aligned and wraps to two lines, so its last word ends
+     up level with the toggle. space-4 read as a collision. */
+  gap: var(--space-6);
 }
 
 .pp-toggle {
@@ -43,9 +45,11 @@
   box-shadow: var(--shadow-sm);
 }
 
+/* Shrinkable: on a narrow viewport the sentence gives way rather than
+   pushing the toggle off the row. */
 .pp-toggle-blurb {
-  flex: 0 0 320px;
-  width: 320px;
+  flex: 0 1 320px;
+  max-width: 320px;
   font-size: var(--text-sm);
   color: var(--color-mute);
   line-height: 1.45;

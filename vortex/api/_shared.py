@@ -109,7 +109,10 @@ _cards_cache: tuple[float, list[CallCard], dict[str, Any] | None] | None = None
 _cards_task: asyncio.Task[tuple[list[CallCard], dict[str, Any] | None]] | None = None
 #: A redraw ticks about twice a second, so a load older than this is worth
 #: repeating and anything newer is what the previous tick already read.
-CARDS_TTL_S = 0.5
+#: Raise it when the store is slow or a demo is running: a card is a summary
+#: of a call already in progress, and five seconds of staleness on it costs
+#: nothing next to a screen that pauses on every tick.
+CARDS_TTL_S = callfeed.ttl_env("VORTEX_CARDS_TTL_S", 5.0)
 
 
 def _fresh_cards() -> tuple[list[CallCard], dict[str, Any] | None] | None:
@@ -325,6 +328,15 @@ def wall_cancelled_keys() -> set[cal.BookingKey]:
         key = cal.cancel_key(row.provider_id, row.site_id, row.slot_start)
         if key is not None:
             keys.add(key)
+    # Offline board: with no Supabase the cancel API writes to the local file
+    # store instead (remote reads then return empty rather than raising), so
+    # merge whichever local rows exist. Empty when Supabase serves cancels.
+    from database import local_wall
+
+    for row in local_wall.list_all():
+        key = cal.cancel_key(row.get("provider_id"), row.get("site_id"), row.get("slot_start"))
+        if key is not None:
+            keys.add(key)
     return keys
 
 
@@ -333,7 +345,7 @@ def wall_cancelled_keys() -> set[cal.BookingKey]:
 #: but the bookings are a database read, and the database gains rows while the
 #: board runs. Caching those for the process life would leave the Agenda
 #: showing whatever the diary held when the first tab opened.
-AGENDA_BOOKINGS_TTL_S = 30.0
+AGENDA_BOOKINGS_TTL_S = callfeed.ttl_env("VORTEX_AGENDA_TTL_S", 120.0)
 
 _AGENDA_BOOKINGS_AT = 0.0
 

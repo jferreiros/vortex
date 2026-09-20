@@ -8,6 +8,11 @@ import shapeTypesData from "../../../data/shapeTypes.json";
 import pathwaysSeed from "../../../data/pathways.json";
 import "./pathways.css";
 
+// The runtime card below makes the builder demoable: every row it lists is
+// the same document this page edits, joined to the executable pathway the
+// backend auto-registers for it. Its Test button queues only synthetic
+// UI-TEST work and never dials anybody.
+
 // Reached from the Sidebar via the "Pathways & Patterns" toggle page
 // (patterns-pathways/PatternsPathways.jsx); also reachable directly at
 // /clinic/pathways for testing this editor on its own. See AppRouter.jsx.
@@ -557,6 +562,92 @@ function ShapeTray() {
   );
 }
 
+function RuntimePathwaysCard({ refreshToken }) {
+  const [runtime, setRuntime] = useState(null);
+  const [error, setError] = useState(null);
+  const [busyId, setBusyId] = useState(null);
+
+  const load = () => {
+    let cancelled = false;
+    fetch("/api/wall/pathways/runtime")
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((json) => {
+        if (!cancelled) {
+          setRuntime(json);
+          setError(null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setError("Runtime status unavailable");
+      });
+    return () => {
+      cancelled = true;
+    };
+  };
+
+  useEffect(load, [refreshToken]);
+
+  const fire = async (row) => {
+    setBusyId(row.id);
+    try {
+      const response = await fetch(`/api/wall/pathways/${encodeURIComponent(row.id)}/test-fire`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hours_ahead: 2 }),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      await load()();
+    } catch {
+      setError(`Could not test ${row.name}`);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const rows = runtime?.pathways || [];
+  return (
+    <Card padding="md" className="pathways-runtime-card">
+      <div className="pathways-runtime-head">
+        <div>
+          <span className="ui-section-eyebrow">Runtime</span>
+          <h3>Executable pathways</h3>
+          <p>Each UI row below is wired to a real registered pathway. Test queues synthetic work only.</p>
+        </div>
+        <div className={`pathways-runtime-pill ${runtime?.subsystem_enabled && runtime?.twilio_ready ? "ok" : "warn"}`}>
+          {runtime
+            ? runtime.subsystem_enabled && runtime.twilio_ready
+              ? "Ready"
+              : "Degraded"
+            : "Loading"}
+        </div>
+      </div>
+      {error && <p className="pathways-runtime-error">{error}</p>}
+      <div className="pathways-runtime-list">
+        {rows.map((row) => (
+          <div key={row.id} className="pathways-runtime-row">
+            <div>
+              <strong>{row.name}</strong>
+              <small>{row.summary}</small>
+            </div>
+            <div className="pathways-runtime-meta">
+              <span>{row.trigger || "Configured event"}</span>
+              <span>{row.motivo === "call_now" ? "Immediate call" : "Scheduled call"}</span>
+              <span className={row.enabled ? "ok" : "off"}>{row.enabled ? "Enabled" : "Disabled"}</span>
+            </div>
+            <Button
+              variant="secondary"
+              disabled={!row.enabled || busyId === row.id}
+              onClick={() => fire(row)}
+            >
+              {busyId === row.id ? "Testing…" : "Test fire"}
+            </Button>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
 export default function Pathways() {
   const [initial] = useState(
     () => loadStoredState() ?? loadSeedState() ?? { pathways: [], selectedId: null }
@@ -566,6 +657,7 @@ export default function Pathways() {
   const [renamingId, setRenamingId] = useState(null);
   const [saveStatus, setSaveStatus] = useState(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [runtimeRefresh, setRuntimeRefresh] = useState(0);
 
   useEffect(() => {
     // The cache or the bundled seed already has pathways to show — skip the
@@ -710,6 +802,7 @@ export default function Pathways() {
         /* cache is optional */
       }
       setSaveStatus("saved");
+      setRuntimeRefresh((value) => value + 1);
     } catch {
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
@@ -806,6 +899,8 @@ export default function Pathways() {
         />
         <ShapeTray />
       </div>
+
+      <RuntimePathwaysCard refreshToken={runtimeRefresh} />
 
       {showDeleteConfirm && (
         <div className="ui-modal-overlay" onClick={() => setShowDeleteConfirm(false)}>

@@ -1,438 +1,457 @@
 [
-  {
-    "patient_id": "P00001",
-    "given_name": "Josefa",
-    "first_surname": "Domínguez",
-    "second_surname": "Navarro",
-    "national_id": "48064716Y",
-    "date_of_birth": null,
-    "phone": "711330529",
-    "sex": "F",
-    "has_visited_before": true,
-    "insurer": "",
-    "referrals": [],
-    "note": "Roster record. Cases: simple_booking-14a8720daa02, the_questions-e2b0ec86e919, when_exactly-7d2467212026, no_slot_free-6a77fcf1942b.",
-    "match_score": 1.0,
-    "matched_fields": [
-      "name"
-    ]
-  },
-  {
-    "patient_id": "P00003",
-    "given_name": "Lucas",
-    "first_surname": "Jones",
-    "second_surname": "Smith",
-    "national_id": "Z5361712A",
-    "date_of_birth": null,
-    "phone": "757036760",
-    "sex": "M",
-    "has_visited_before": true,
-    "insurer": "",
-    "referrals": [],
-    "note": "Roster record. Cases: languages-5fecd593ffe7, difficult_caller-8e5f87c31fd2.",
-    "match_score": 1.0,
-    "matched_fields": [
-      "name"
-    ]
-  },
-  {
-    "patient_id": "P00004",
-    "given_name": "Teresa",
-    "first_surname": "López",
-    "second_surname": "García",
-    "national_id": "60153984Z",
-    "date_of_birth": null,
-    "phone": "669394942",
-    "sex": "F",
-    "has_visited_before": true,
-    "insurer": "",
-    "referrals": [],
-    "note": "Roster record. Cases: no_slot_free-b5cbfc4acc54, triage-479038faacf6, languages-aa19667cb074, noise-bfd9b6e6fa44.",
-    "match_score": 1.0,
-    "matched_fields": [
-      "name"
-    ]
-  },
-  {
-    "patient_id": "P00005",
-    "given_name": "Ignacio",
-    "first_surname": "Vázquez",
-    "second_surname": "Moreno",
-    "national_id": "65699248R",
-    "date_of_birth": "1939-12-09",
-    "phone": "731169716",
-    "sex": "M",
-    "has_visited_before": true,
-    "insurer": "cigna",
-    "referrals": [
-      "dermatology"
-    ],
-    "note": "Roster record. Cases: simple_booking-3371b9ac9462, the_questions-1eaff9b8dea3, the_questions-0d0437e26568, when_exactly-72cdb35b9682.",
-    "match_score": 1.0,
-    "matched_fields": [
-      "name"
-    ]
-  },
-  {
-    "patient_id": "P00006",
-    "given_name": "Ignacio",
-    "first_surname": "Díaz",
-    "second_surname": "Marín",
-    "national_id": "29087618R",
-    "date_of_birth": "1973-03-08",
-    "phone": "607455484",
-    "sex": "M",
-    "has_visited_before": true,
-    "insurer": "asisa",
-    "referrals": [],
-    "note": "Roster record. Cases: second_policy-fb5f6c66b28e.",
-    "match_score": 1.0,
-    "matched_fields": [
-      "name"
-    ]
-  },
-  {
-    "patient_id": "P00008",
-    "given_name": "Mario",
-    "first_surname": "Delgado",
-    "second_surname": "Medina",
-    "national_id": "62937630Q",
-    "date_of_birth": "2021-02-06",
-    "phone": "655913877",
-    "sex": "M",
-    "has_visited_before": true,
-    "insurer": "caser",
-    "referrals": [],
-    "note": "Roster record. Cases: triage-71ffcf509c91.",
-    "match_score": 1.0,
-    "matched_fields": [
-      "name"
-    ]
-  },
-  {
-    "patient_id": "P00009",
-    "given_name": "Sonia",
-    "first_surname": "Álvarez",
-    "second_surname": "Medina",
-    "national_id": "62819257R",
-    "date_of_birth": "2017-05-12",
-    "phone": "746987792",
-    "sex": "M",
-    "has_visited_before": true,
-    "insurer": "privado",
-    "referrals": [],
-    "note": "Roster record. Cases: the_rules-8d92ce10f4a6, third_party-587279b63866, third_party-8cd89333e225.",
-    "match_score": 1.0,
-    "matched_fields": [
-      "name"
-    ]
-  },
-  {
-    "patient_id": "P00011",
-    "given_name": "Chloe",
-    "first_surname": "Roberts",
-    "second_surname": "Smith",
-    "national_id": "Z4237244M",
-    "date_of_birth": "1996-09-01",
-    "phone": "708729566",
-    "sex": "F",
-    "has_visited_before": true,
-    "insurer": "mapfre",
-    "referrals": [],
-    "note": "Roster record. Cases: simple_booking-b33e7e633856, when_exactly-b1f6c257c34c, noise-04791d2a653e.",
-    "match_score": 1.0,
-    "matched_fields": [
-      "name"
-    ]
-  },
-  {
-    "patient_id": "P00012",
-    "given_name": "Amelia",
-    "first_surname": "Hughes",
-    "second_surname": "White",
-    "national_id": "13309713G",
-    "date_of_birth": "1981-04-08",
-    "phone": "712676131",
-    "sex": "F",
-    "has_visited_before": false,
-    "insurer": "sanitas",
-    "referrals": [],
-    "note": "Roster record. Cases: simple_booking-12dc84a98cb2, when_exactly-34e8e0acadb6, triage-b2163776cec8, languages-2d08ce329464.",
-    "match_score": 1.0,
-    "matched_fields": [
-      "name"
-    ]
-  },
-  {
-    "patient_id": "P00015",
-    "given_name": "Josefa",
-    "first_surname": "Sánchez",
-    "second_surname": "Gutiérrez",
-    "national_id": "49526979K",
-    "date_of_birth": "1967-03-20",
-    "phone": "755842366",
-    "sex": "F",
-    "has_visited_before": false,
-    "insurer": "adeslas",
-    "referrals": [],
-    "note": "Roster record. Cases: difficult_caller-6af332df118e.",
-    "match_score": 1.0,
-    "matched_fields": [
-      "name"
-    ]
-  },
-  {
-    "patient_id": "P00028",
-    "given_name": "Alejandro",
-    "first_surname": "Ruiz",
-    "second_surname": "Fernández",
-    "national_id": "Y8519297L",
-    "date_of_birth": "1937-10-24",
-    "phone": "776357216",
-    "sex": "M",
-    "has_visited_before": true,
-    "insurer": "cigna",
-    "referrals": [],
-    "note": "Roster record. Cases: the_questions-af7ba7d69fe9.",
-    "match_score": 1.0,
-    "matched_fields": [
-      "name"
-    ]
-  },
-  {
-    "patient_id": "P00032",
-    "given_name": "Joaquín",
-    "first_surname": "Morales",
-    "second_surname": "Muñoz",
-    "national_id": "97541050M",
-    "date_of_birth": "2013-04-21",
-    "phone": "611875810",
-    "sex": "M",
-    "has_visited_before": true,
-    "insurer": "cigna",
-    "referrals": [],
-    "note": "Roster record. Cases: the_questions-085dbc4f6fc9.",
-    "match_score": 1.0,
-    "matched_fields": [
-      "name"
-    ]
-  },
-  {
-    "patient_id": "P00057",
-    "given_name": "Gloria",
-    "first_surname": "González",
-    "second_surname": "Blanco",
-    "national_id": "15750638P",
-    "date_of_birth": "1999-06-15",
-    "phone": "717149893",
-    "sex": "F",
-    "has_visited_before": true,
-    "insurer": "dkv",
-    "referrals": [
-      "dermatology"
-    ],
-    "note": "Roster record. Cases: the_rules-fe23fca4aeb7.",
-    "match_score": 1.0,
-    "matched_fields": [
-      "name"
-    ]
-  },
-  {
-    "patient_id": "P00067",
-    "given_name": "Alejandro",
-    "first_surname": "Ramírez",
-    "second_surname": "Pérez",
-    "national_id": "36304709Z",
-    "date_of_birth": "2008-07-04",
-    "phone": "755314042",
-    "sex": "M",
-    "has_visited_before": true,
-    "insurer": "mapfre",
-    "referrals": [],
-    "note": "Roster record. Cases: second_policy-15c3db687da3.",
-    "match_score": 1.0,
-    "matched_fields": [
-      "name"
-    ]
-  },
-  {
-    "patient_id": "P00100",
-    "given_name": "María",
-    "first_surname": "Fernández",
-    "second_surname": "Vázquez",
-    "national_id": "43595719R",
-    "date_of_birth": "1983-02-15",
-    "phone": "693990120",
-    "sex": "F",
-    "has_visited_before": true,
-    "insurer": "asisa",
-    "referrals": [],
-    "note": "Roster record. Cases: the_real_call-32c1fbeb4a22.",
-    "match_score": 1.0,
-    "matched_fields": [
-      "name"
-    ]
-  },
-  {
-    "patient_id": "P00121",
-    "given_name": "Sarah",
-    "first_surname": "Wilson",
-    "second_surname": "Collins",
-    "national_id": "Y4997270M",
-    "date_of_birth": "1968-07-26",
-    "phone": "765705143",
-    "sex": "F",
-    "has_visited_before": true,
-    "insurer": "caser",
-    "referrals": [],
-    "note": "Roster record. Cases: second_policy-badb9dd79107.",
-    "match_score": 1.0,
-    "matched_fields": [
-      "name"
-    ]
-  },
-  {
-    "patient_id": "P00330",
-    "given_name": "Guillermo",
-    "first_surname": "Muñoz",
-    "second_surname": "Torres",
-    "national_id": "73709137W",
-    "date_of_birth": "1982-12-22",
-    "phone": "714604353",
-    "sex": "M",
-    "has_visited_before": true,
-    "insurer": "adeslas",
-    "referrals": [],
-    "note": "Roster record. Cases: the_real_call-bde9bd494e55.",
-    "match_score": 1.0,
-    "matched_fields": [
-      "name"
-    ]
-  },
-  {
-    "patient_id": "P00358",
-    "given_name": "Rosario",
-    "first_surname": "Sanz",
-    "second_surname": "González",
-    "national_id": "82380806G",
-    "date_of_birth": "1983-04-21",
-    "phone": "616820852",
-    "sex": "F",
-    "has_visited_before": false,
-    "insurer": "nueva_mutua",
-    "referrals": [],
-    "note": "Roster record. Cases: second_policy-30ce6a760ab9.",
-    "match_score": 1.0,
-    "matched_fields": [
-      "name"
-    ]
-  },
-  {
-    "patient_id": "P00402",
-    "given_name": "Alicia",
-    "first_surname": "Medina",
-    "second_surname": "García",
-    "national_id": "93310759N",
-    "date_of_birth": "1932-02-25",
-    "phone": "730210583",
-    "sex": "F",
-    "has_visited_before": true,
-    "insurer": "axa",
-    "referrals": [],
-    "note": "Roster record. Cases: the_real_call-291bfe4b3a7c.",
-    "match_score": 1.0,
-    "matched_fields": [
-      "name"
-    ]
-  },
-  {
-    "patient_id": "P01842",
-    "given_name": "Joaquín",
-    "first_surname": "Ramírez",
-    "second_surname": "Delgado",
-    "national_id": "20206861G",
-    "date_of_birth": "1993-10-11",
-    "phone": "642674973",
-    "sex": "M",
-    "has_visited_before": true,
-    "insurer": "privado",
-    "referrals": [],
-    "note": "Roster record. Cases: doctor_and_site-2fe62ca2872f.",
-    "match_score": 1.0,
-    "matched_fields": [
-      "name"
-    ]
-  },
-  {
-    "patient_id": "P01843",
-    "given_name": "Andrés",
-    "first_surname": "Rubio",
-    "second_surname": "Vázquez",
-    "national_id": "63663395Q",
-    "date_of_birth": "1968-01-23",
-    "phone": "737358708",
-    "sex": "M",
-    "has_visited_before": true,
-    "insurer": "dkv",
-    "referrals": [],
-    "note": "Roster record. Cases: doctor_and_site-d5b4f04886c5.",
-    "match_score": 1.0,
-    "matched_fields": [
-      "name"
-    ]
-  },
-  {
-    "patient_id": "P01847",
-    "given_name": "Mario",
-    "first_surname": "Gómez",
-    "second_surname": "Blanco",
-    "national_id": "X2245876H",
-    "date_of_birth": "1965-02-24",
-    "phone": "763783288",
-    "sex": "M",
-    "has_visited_before": false,
-    "insurer": "asisa",
-    "referrals": [],
-    "note": "Roster record. Cases: doctor_and_site-9904a6d96cdd.",
-    "match_score": 1.0,
-    "matched_fields": [
-      "name"
-    ]
-  },
-  {
-    "patient_id": "P01850",
-    "given_name": "Emilio",
-    "first_surname": "Rubio",
-    "second_surname": "Jiménez",
-    "national_id": "50714604H",
-    "date_of_birth": "1996-06-09",
-    "phone": "781850784",
-    "sex": "M",
-    "has_visited_before": true,
-    "insurer": "mapfre",
-    "referrals": [],
-    "note": "Roster record. Cases: doctor_and_site-057078bb5b44.",
-    "match_score": 1.0,
-    "matched_fields": [
-      "name"
-    ]
-  },
-  {
-    "patient_id": "P01971",
-    "given_name": "Jessica",
-    "first_surname": "Roberts",
-    "second_surname": "Smith",
-    "national_id": "98789619L",
-    "date_of_birth": "1982-01-14",
-    "phone": "706799885",
-    "sex": "F",
-    "has_visited_before": false,
-    "insurer": "axa",
-    "referrals": [],
-    "note": "Roster record. Cases: difficult_caller-e6bc6654e51f.",
-    "match_score": 1.0,
-    "matched_fields": [
-      "name"
-    ]
-  }
+ {
+  "patient_id": "P00001",
+  "given_name": "Josefa",
+  "first_surname": "Domínguez",
+  "second_surname": "Navarro",
+  "national_id": "48064716Y",
+  "date_of_birth": null,
+  "phone": "711330529",
+  "sex": "F",
+  "has_visited_before": true,
+  "insurer": "",
+  "referrals": [],
+  "note": "Roster record. Cases: simple_booking-14a8720daa02, the_questions-e2b0ec86e919, when_exactly-7d2467212026, no_slot_free-6a77fcf1942b.",
+  "match_score": 1.0,
+  "matched_fields": [
+   "name"
+  ]
+ },
+ {
+  "patient_id": "P00003",
+  "given_name": "Lucas",
+  "first_surname": "Jones",
+  "second_surname": "Smith",
+  "national_id": "Z5361712A",
+  "date_of_birth": null,
+  "phone": "757036760",
+  "sex": "M",
+  "has_visited_before": true,
+  "insurer": "",
+  "referrals": [],
+  "note": "Roster record. Cases: languages-5fecd593ffe7, difficult_caller-8e5f87c31fd2.",
+  "match_score": 1.0,
+  "matched_fields": [
+   "name"
+  ]
+ },
+ {
+  "patient_id": "P00004",
+  "given_name": "Teresa",
+  "first_surname": "López",
+  "second_surname": "García",
+  "national_id": "60153984Z",
+  "date_of_birth": null,
+  "phone": "669394942",
+  "sex": "F",
+  "has_visited_before": true,
+  "insurer": "",
+  "referrals": [],
+  "note": "Roster record. Cases: no_slot_free-b5cbfc4acc54, triage-479038faacf6, languages-aa19667cb074, noise-bfd9b6e6fa44.",
+  "match_score": 1.0,
+  "matched_fields": [
+   "name"
+  ]
+ },
+ {
+  "patient_id": "P00005",
+  "given_name": "Ignacio",
+  "first_surname": "Vázquez",
+  "second_surname": "Moreno",
+  "national_id": "65699248R",
+  "date_of_birth": "1939-12-09",
+  "phone": "731169716",
+  "sex": "M",
+  "has_visited_before": true,
+  "insurer": "cigna",
+  "referrals": [
+   "dermatology"
+  ],
+  "note": "Roster record. Cases: simple_booking-3371b9ac9462, the_questions-1eaff9b8dea3, the_questions-0d0437e26568, when_exactly-72cdb35b9682.",
+  "match_score": 1.0,
+  "matched_fields": [
+   "name"
+  ]
+ },
+ {
+  "patient_id": "P00006",
+  "given_name": "Ignacio",
+  "first_surname": "Díaz",
+  "second_surname": "Marín",
+  "national_id": "29087618R",
+  "date_of_birth": "1973-03-08",
+  "phone": "607455484",
+  "sex": "M",
+  "has_visited_before": true,
+  "insurer": "asisa",
+  "referrals": [],
+  "note": "Roster record. Cases: second_policy-fb5f6c66b28e.",
+  "match_score": 1.0,
+  "matched_fields": [
+   "name"
+  ]
+ },
+ {
+  "patient_id": "P00008",
+  "given_name": "Mario",
+  "first_surname": "Delgado",
+  "second_surname": "Medina",
+  "national_id": "62937630Q",
+  "date_of_birth": "2021-02-06",
+  "phone": "655913877",
+  "sex": "M",
+  "has_visited_before": true,
+  "insurer": "caser",
+  "referrals": [],
+  "note": "Roster record. Cases: triage-71ffcf509c91.",
+  "match_score": 1.0,
+  "matched_fields": [
+   "name"
+  ]
+ },
+ {
+  "patient_id": "P00009",
+  "given_name": "Sonia",
+  "first_surname": "Álvarez",
+  "second_surname": "Medina",
+  "national_id": "62819257R",
+  "date_of_birth": "2017-05-12",
+  "phone": "746987792",
+  "sex": "M",
+  "has_visited_before": true,
+  "insurer": "privado",
+  "referrals": [],
+  "note": "Roster record. Cases: the_rules-8d92ce10f4a6, third_party-587279b63866, third_party-8cd89333e225.",
+  "match_score": 1.0,
+  "matched_fields": [
+   "name"
+  ]
+ },
+ {
+  "patient_id": "P00011",
+  "given_name": "Chloe",
+  "first_surname": "Roberts",
+  "second_surname": "Smith",
+  "national_id": "Z4237244M",
+  "date_of_birth": "1996-09-01",
+  "phone": "708729566",
+  "sex": "F",
+  "has_visited_before": true,
+  "insurer": "mapfre",
+  "referrals": [],
+  "note": "Roster record. Cases: simple_booking-b33e7e633856, when_exactly-b1f6c257c34c, noise-04791d2a653e.",
+  "match_score": 1.0,
+  "matched_fields": [
+   "name"
+  ]
+ },
+ {
+  "patient_id": "P00012",
+  "given_name": "Amelia",
+  "first_surname": "Hughes",
+  "second_surname": "White",
+  "national_id": "13309713G",
+  "date_of_birth": "1981-04-08",
+  "phone": "712676131",
+  "sex": "F",
+  "has_visited_before": false,
+  "insurer": "sanitas",
+  "referrals": [],
+  "note": "Roster record. Cases: simple_booking-12dc84a98cb2, when_exactly-34e8e0acadb6, triage-b2163776cec8, languages-2d08ce329464.",
+  "match_score": 1.0,
+  "matched_fields": [
+   "name"
+  ]
+ },
+ {
+  "patient_id": "P00015",
+  "given_name": "Josefa",
+  "first_surname": "Sánchez",
+  "second_surname": "Gutiérrez",
+  "national_id": "49526979K",
+  "date_of_birth": "1967-03-20",
+  "phone": "755842366",
+  "sex": "F",
+  "has_visited_before": false,
+  "insurer": "adeslas",
+  "referrals": [],
+  "note": "Roster record. Cases: difficult_caller-6af332df118e.",
+  "match_score": 1.0,
+  "matched_fields": [
+   "name"
+  ]
+ },
+ {
+  "patient_id": "P00028",
+  "given_name": "Alejandro",
+  "first_surname": "Ruiz",
+  "second_surname": "Fernández",
+  "national_id": "Y8519297L",
+  "date_of_birth": "1937-10-24",
+  "phone": "776357216",
+  "sex": "M",
+  "has_visited_before": true,
+  "insurer": "cigna",
+  "referrals": [],
+  "note": "Roster record. Cases: the_questions-af7ba7d69fe9.",
+  "match_score": 1.0,
+  "matched_fields": [
+   "name"
+  ]
+ },
+ {
+  "patient_id": "P00032",
+  "given_name": "Joaquín",
+  "first_surname": "Morales",
+  "second_surname": "Muñoz",
+  "national_id": "97541050M",
+  "date_of_birth": "2013-04-21",
+  "phone": "611875810",
+  "sex": "M",
+  "has_visited_before": true,
+  "insurer": "cigna",
+  "referrals": [],
+  "note": "Roster record. Cases: the_questions-085dbc4f6fc9.",
+  "match_score": 1.0,
+  "matched_fields": [
+   "name"
+  ]
+ },
+ {
+  "patient_id": "P00057",
+  "given_name": "Gloria",
+  "first_surname": "González",
+  "second_surname": "Blanco",
+  "national_id": "15750638P",
+  "date_of_birth": "1999-06-15",
+  "phone": "717149893",
+  "sex": "F",
+  "has_visited_before": true,
+  "insurer": "dkv",
+  "referrals": [
+   "dermatology"
+  ],
+  "note": "Roster record. Cases: the_rules-fe23fca4aeb7.",
+  "match_score": 1.0,
+  "matched_fields": [
+   "name"
+  ]
+ },
+ {
+  "patient_id": "P00067",
+  "given_name": "Alejandro",
+  "first_surname": "Ramírez",
+  "second_surname": "Pérez",
+  "national_id": "36304709Z",
+  "date_of_birth": "2008-07-04",
+  "phone": "755314042",
+  "sex": "M",
+  "has_visited_before": true,
+  "insurer": "mapfre",
+  "referrals": [],
+  "note": "Roster record. Cases: second_policy-15c3db687da3.",
+  "match_score": 1.0,
+  "matched_fields": [
+   "name"
+  ]
+ },
+ {
+  "patient_id": "P00100",
+  "given_name": "María",
+  "first_surname": "Fernández",
+  "second_surname": "Vázquez",
+  "national_id": "43595719R",
+  "date_of_birth": "1983-02-15",
+  "phone": "693990120",
+  "sex": "F",
+  "has_visited_before": true,
+  "insurer": "asisa",
+  "referrals": [],
+  "note": "Roster record. Cases: the_real_call-32c1fbeb4a22.",
+  "match_score": 1.0,
+  "matched_fields": [
+   "name"
+  ]
+ },
+ {
+  "patient_id": "P00121",
+  "given_name": "Sarah",
+  "first_surname": "Wilson",
+  "second_surname": "Collins",
+  "national_id": "Y4997270M",
+  "date_of_birth": "1968-07-26",
+  "phone": "765705143",
+  "sex": "F",
+  "has_visited_before": true,
+  "insurer": "caser",
+  "referrals": [],
+  "note": "Roster record. Cases: second_policy-badb9dd79107.",
+  "match_score": 1.0,
+  "matched_fields": [
+   "name"
+  ]
+ },
+ {
+  "patient_id": "P00330",
+  "given_name": "Guillermo",
+  "first_surname": "Muñoz",
+  "second_surname": "Torres",
+  "national_id": "73709137W",
+  "date_of_birth": "1982-12-22",
+  "phone": "714604353",
+  "sex": "M",
+  "has_visited_before": true,
+  "insurer": "adeslas",
+  "referrals": [],
+  "note": "Roster record. Cases: the_real_call-bde9bd494e55.",
+  "match_score": 1.0,
+  "matched_fields": [
+   "name"
+  ]
+ },
+ {
+  "patient_id": "P00358",
+  "given_name": "Rosario",
+  "first_surname": "Sanz",
+  "second_surname": "González",
+  "national_id": "82380806G",
+  "date_of_birth": "1983-04-21",
+  "phone": "616820852",
+  "sex": "F",
+  "has_visited_before": false,
+  "insurer": "nueva_mutua",
+  "referrals": [],
+  "note": "Roster record. Cases: second_policy-30ce6a760ab9.",
+  "match_score": 1.0,
+  "matched_fields": [
+   "name"
+  ]
+ },
+ {
+  "patient_id": "P00402",
+  "given_name": "Alicia",
+  "first_surname": "Medina",
+  "second_surname": "García",
+  "national_id": "93310759N",
+  "date_of_birth": "1932-02-25",
+  "phone": "730210583",
+  "sex": "F",
+  "has_visited_before": true,
+  "insurer": "axa",
+  "referrals": [],
+  "note": "Roster record. Cases: the_real_call-291bfe4b3a7c.",
+  "match_score": 1.0,
+  "matched_fields": [
+   "name"
+  ]
+ },
+ {
+  "patient_id": "P01842",
+  "given_name": "Joaquín",
+  "first_surname": "Ramírez",
+  "second_surname": "Delgado",
+  "national_id": "20206861G",
+  "date_of_birth": "1993-10-11",
+  "phone": "642674973",
+  "sex": "M",
+  "has_visited_before": true,
+  "insurer": "privado",
+  "referrals": [],
+  "note": "Roster record. Cases: doctor_and_site-2fe62ca2872f.",
+  "match_score": 1.0,
+  "matched_fields": [
+   "name"
+  ]
+ },
+ {
+  "patient_id": "P01843",
+  "given_name": "Andrés",
+  "first_surname": "Rubio",
+  "second_surname": "Vázquez",
+  "national_id": "63663395Q",
+  "date_of_birth": "1968-01-23",
+  "phone": "737358708",
+  "sex": "M",
+  "has_visited_before": true,
+  "insurer": "dkv",
+  "referrals": [],
+  "note": "Roster record. Cases: doctor_and_site-d5b4f04886c5.",
+  "match_score": 1.0,
+  "matched_fields": [
+   "name"
+  ]
+ },
+ {
+  "patient_id": "P01847",
+  "given_name": "Mario",
+  "first_surname": "Gómez",
+  "second_surname": "Blanco",
+  "national_id": "X2245876H",
+  "date_of_birth": "1965-02-24",
+  "phone": "763783288",
+  "sex": "M",
+  "has_visited_before": false,
+  "insurer": "asisa",
+  "referrals": [],
+  "note": "Roster record. Cases: doctor_and_site-9904a6d96cdd.",
+  "match_score": 1.0,
+  "matched_fields": [
+   "name"
+  ]
+ },
+ {
+  "patient_id": "P01850",
+  "given_name": "Emilio",
+  "first_surname": "Rubio",
+  "second_surname": "Jiménez",
+  "national_id": "50714604H",
+  "date_of_birth": "1996-06-09",
+  "phone": "781850784",
+  "sex": "M",
+  "has_visited_before": true,
+  "insurer": "mapfre",
+  "referrals": [],
+  "note": "Roster record. Cases: doctor_and_site-057078bb5b44.",
+  "match_score": 1.0,
+  "matched_fields": [
+   "name"
+  ]
+ },
+ {
+  "patient_id": "P01971",
+  "given_name": "Jessica",
+  "first_surname": "Roberts",
+  "second_surname": "Smith",
+  "national_id": "98789619L",
+  "date_of_birth": "1982-01-14",
+  "phone": "706799885",
+  "sex": "F",
+  "has_visited_before": false,
+  "insurer": "axa",
+  "referrals": [],
+  "note": "Roster record. Cases: difficult_caller-e6bc6654e51f.",
+  "match_score": 1.0,
+  "matched_fields": [
+   "name"
+  ]
+ },
+ {
+  "patient_id": "DEMO-CRISTINA",
+  "given_name": "Cristina",
+  "first_surname": "Caballero",
+  "second_surname": "",
+  "national_id": "",
+  "date_of_birth": null,
+  "phone": "662046392",
+  "sex": "F",
+  "has_visited_before": true,
+  "insurer": "",
+  "referrals": [],
+  "note": "Demo owner visit for the cancel-call flow.",
+  "match_score": 1.0,
+  "matched_fields": [
+   "name",
+   "phone"
+  ]
+ }
 ]

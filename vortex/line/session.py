@@ -57,9 +57,8 @@ from vortex.line.confirmation_calls import (
     cancel_confirmation_calls,
     confirmation_store_from_settings,
     handoff_from_parameters,
-    queue_cancellation_rebooking_call,
-    schedule_confirmation_call,
 )
+from vortex.line.pathways import PathwayEvent, fire_pathway
 from vortex.line.sms import (
     SMS_BUDGET_SECS,
     SMS_DETAILS_BUDGET_SECS,
@@ -853,19 +852,22 @@ class CallSession:
                 if when is None:
                     self.ctx.log.event("confirmation_call.skipped", reason="no_when")
                     return
-                call = await schedule_confirmation_call(
-                    store,
-                    to=to,
-                    when=when,
-                    language=normalise_language(self.language) or "",
-                    provider_name=details.provider_name,
-                    location_name=details.location_name,
-                    provider_id=details.provider_id,
-                    location_id=details.location_id,
-                    patient_id=action.patient_id,
-                    appointment_id=await self._booked_appointment_id(action),
+                call = await fire_pathway(
+                    self.settings,
+                    "appointment_booked",
+                    PathwayEvent(
+                        to=to,
+                        appointment_at=when,
+                        language=normalise_language(self.language) or "",
+                        provider_name=details.provider_name,
+                        location_name=details.location_name,
+                        provider_id=details.provider_id,
+                        location_id=details.location_id,
+                        patient_id=action.patient_id,
+                        appointment_id=await self._booked_appointment_id(action),
+                        lead=lead,
+                    ),
                     now=self.ctx.now,
-                    lead=lead,
                 )
                 if call is None:
                     self.ctx.log.event("confirmation_call.skipped", reason="within_lead_window")
@@ -906,17 +908,20 @@ class CallSession:
                     self.ctx.log.event("confirmation_call.rebooking_skipped", reason="no_when")
                     return
                 patient = self.memory.patient_on_record
-                rebooking_call = await queue_cancellation_rebooking_call(
+                rebooking_call = await fire_pathway(
                     self.settings,
-                    to=to,
-                    appointment_at=details.when,
-                    language=normalise_language(self.language) or "",
-                    provider_name=details.provider_name,
-                    location_name=details.location_name,
-                    provider_id=details.provider_id,
-                    location_id=details.location_id,
-                    patient_id=patient.patient_id if patient is not None else "",
-                    appointment_id=action.appointment_id,
+                    "appointment_cancelled",
+                    PathwayEvent(
+                        to=to,
+                        appointment_at=details.when,
+                        language=normalise_language(self.language) or "",
+                        provider_name=details.provider_name,
+                        location_name=details.location_name,
+                        provider_id=details.provider_id,
+                        location_id=details.location_id,
+                        patient_id=patient.patient_id if patient is not None else "",
+                        appointment_id=action.appointment_id,
+                    ),
                     now=self.ctx.now,
                 )
                 if rebooking_call is None:
