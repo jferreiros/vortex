@@ -30,8 +30,9 @@ from database.supabase.migrate import database_url  # noqa: E402
 SEED_DIR = Path(__file__).resolve().parent.parent / "seed"
 
 #: Load order matters: a rebooking request points at the cancellation that
-#: created it, so the cancellations go in first.
-SEEDS = ("vortex_product.sql", "rebooking.sql")
+#: created it, so the cancellations go in first. ``wall_documents.sql`` is
+#: independent of both — the Pathways/Patterns editors' starting documents.
+SEEDS = ("vortex_product.sql", "rebooking.sql", "wall_documents.sql")
 
 
 def main() -> int:

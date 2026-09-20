@@ -446,9 +446,9 @@ def catalogue_with_log_roster(catalogue: Catalogue, events: list[dict[str, Any]]
 def load_database_agenda() -> tuple[list[Any], dict[str, str]]:
     """Open appointments and their call ids, or ``([], {})`` if unavailable.
 
-    Late import and broad catch for the same reason ``live.py`` reads
-    ``wall_cancellations`` that way: a missing or unwritable store must never
-    blank the diary.
+    Late import and broad catch for the same reason the wall API reads
+    ``wall_cancellations`` that way: an unreachable store must never blank
+    the diary.
     """
     try:
         from database import db

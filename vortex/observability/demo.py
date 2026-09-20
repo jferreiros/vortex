@@ -89,7 +89,7 @@ REFUSE_TURNS = [
 
 
 async def write_scripted_call(
-    path: Path,
+    path: Path | None = None,
     *,
     scenario: str = "book",
     delay_s: float = 0.35,
@@ -742,7 +742,7 @@ def load_cancellation_pack(pack_path: Path = CANCELLATION_PACK) -> list[list[dic
 
 
 async def replay_cancellation_demo(
-    log_path: Path,
+    log_path: Path | None = None,
     *,
     pack_path: Path = CANCELLATION_PACK,
     run_tag: str | None = None,
