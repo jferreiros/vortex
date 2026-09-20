@@ -21,6 +21,7 @@ from vortex.api import (
     agenda,
     analytics,
     live_calls,
+    pathways,
     patient_timeline,
     settings,
     timeline,
@@ -36,6 +37,7 @@ MODULES = (
     settings,
     patient_timeline,
     voice,
+    pathways,
 )
 
 

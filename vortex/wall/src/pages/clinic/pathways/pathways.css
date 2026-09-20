@@ -560,3 +560,59 @@
   text-align: center;
   line-height: 1.25;
 }
+
+
+.pathways-runtime-card {
+  margin-bottom: var(--space-4);
+}
+
+.pathways-runtime-head,
+.pathways-runtime-row,
+.pathways-runtime-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.pathways-runtime-head,
+.pathways-runtime-row {
+  justify-content: space-between;
+}
+
+.pathways-runtime-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.pathways-runtime-row {
+  border-top: 1px solid var(--color-border);
+  padding-top: var(--space-3);
+}
+
+.pathways-runtime-row small,
+.pathways-runtime-meta span {
+  display: block;
+  color: var(--color-text-muted);
+}
+
+.pathways-runtime-meta {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  font-size: var(--font-size-sm);
+}
+
+.pathways-runtime-meta .ok,
+.pathways-runtime-pill.ok {
+  color: var(--color-success);
+}
+
+.pathways-runtime-meta .off,
+.pathways-runtime-pill.warn,
+.pathways-runtime-error {
+  color: var(--color-danger);
+}
+
+.pathways-runtime-pill {
+  font-weight: 700;
+}
