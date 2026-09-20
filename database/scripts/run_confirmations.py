@@ -11,8 +11,10 @@ already been confirmed, and updates each one's status from the result. See
 what "simulated" stands in for until the line can really dial out.
 
 This is the interface the line is meant to call on a schedule once it can:
-one function, ``confirmations.run_confirmations(conn, caller=...)``, given a
-connection and something that places the call. Today only a script does.
+one function, ``confirmations.run_confirmations(caller=...)``, given
+something that places the call. Today only a script does. It reads and
+writes the hosted Postgres like everything else, so ``SUPABASE_URL`` and
+``SUPABASE_SERVICE_ROLE_KEY`` have to be set.
 """
 
 from __future__ import annotations
@@ -26,7 +28,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from database import confirmations, db  # noqa: E402
+from database import confirmations, remote  # noqa: E402
 from vortex.settings import get_settings  # noqa: E402
 
 
@@ -65,11 +67,11 @@ async def main() -> None:
         force_outcome=_parse_force(args.force),
         settings_describe=settings.describe(),
     )
-    conn = db.connect(settings.product_db_path)
-    try:
-        results = await confirmations.run_confirmations(conn, caller=caller, today=args.for_date)
-    finally:
-        conn.close()
+    if not remote.enabled():
+        raise SystemExit(
+            "SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are not set — there is no store to read."
+        )
+    results = await confirmations.run_confirmations(caller=caller, today=args.for_date)
 
     if not results:
         print("No appointments due for confirmation.")

@@ -16,7 +16,12 @@ export default defineConfig(({ command }) => ({
     port: 5173,
     strictPort: true,
     proxy: {
-      "/api/wall": "http://127.0.0.1:8080",
+      "/api/wall": {
+        target: "http://127.0.0.1:8080",
+        changeOrigin: true,
+        timeout: 0,
+        proxyTimeout: 0,
+      },
       "/wall/avatar2d": "http://127.0.0.1:8080",
       "/wall/vorty-face": "http://127.0.0.1:8080",
       "/wall/vorty-face-no-headphones": "http://127.0.0.1:8080",

@@ -36,7 +36,10 @@ One folder per lane. Work in your lane's folder. Ask before you touch another.
 | `vortex/diary/` | La Agenda | Availability, relative dates to the exact minute in Europe/Madrid, site hours, reschedule and cancel |
 | `vortex/rules/` | Las Reglas | Age limits, referrals, insurance matrix, provider matching, triage, nearest site, decline reasons |
 | `vortex/clinic/` | shared | Read-only HTTP client for the clinic API and offline fixtures |
-| `vortex/observability/` | shared | JSONL call log and the live view for the jury |
+| `vortex/api/` | shared | FastAPI `/api/wall` router for the clinic SPA, handlers live here (mounted on the board, not a second process) |
+| `vortex/observability/` | shared | Call event writer, NiceGUI jury/ops pages, board helpers the wall API uses |
+| `vortex/wall/` | shared | React clinic SPA; production is served from the board origin |
+| `database/supabase/migrations/` | shared | The only source of schema. `NNNN_*.sql`, applied by `make supabase-migrate` |
 
 Shared files. Change them only with the whole team on the call:
 
@@ -63,14 +66,24 @@ make call N=10              # scripts/fake_caller.py dials the running server N 
 make try-api                # scripts/api/try_api.py: hits every read-only clinic endpoint
                              #   live, dumps each raw JSON response under api_results/
 make tunnel                 # ngrok http 7860
-make tail                   # follow logs/calls.jsonl
+make supabase-migrate       # apply database/supabase/migrations/*.sql; needs SUPABASE_DB_URL
+make supabase-ping          # can the service-role key reach call_events?
 make lint / make fmt        # ruff
 ```
 
-`make test` and `make smoke` need no key and no network. Without `PLATFORM_API_KEY`
-the server runs on `FakeClinicClient` fixtures and a dry-run submit client. Without
-`DEEPGRAM_API_KEY` or `OPENAI_API_KEY` the stub voice pipeline runs. `GET /health`
-reports the active mode. See `README.md` for the mode table.
+`make test` and `make smoke` need no key and no network: the tests that need a
+database skip themselves when Supabase is not configured. Without
+`PLATFORM_API_KEY` the server runs on `FakeClinicClient` fixtures and a dry-run
+submit client. Without `DEEPGRAM_API_KEY` or `OPENAI_API_KEY` the stub voice
+pipeline runs. `GET /health` reports the active mode. See `README.md` for the
+mode table.
+
+The store is Supabase/Postgres and nothing else. There is no SQLite file and no
+`logs/calls.jsonl`. Schema changes are a new `database/supabase/migrations/NNNN_*.sql`
+applied with `make supabase-migrate` — never a hand edit in the SQL editor, or
+the next machine gets a different database. `SUPABASE_DB_URL` is the direct
+Postgres URI (Dashboard -> Database -> URI); the line and the board use
+`SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` over PostgREST, server-side only.
 
 ## Hard rules
 
@@ -106,7 +119,9 @@ Each rule has a reason. The reason is the rule.
 - `slot` values carry an explicit offset and match the platform to the minute.
 - Nothing is booked same-day. "The earliest" starts the day after the call.
 - Every call is capped at three minutes. Get to a submission before the cap.
-- Log every event with its `call_id` to `logs/calls.jsonl`. The live view builds on it.
+- Log every event with its `call_id` to `public.call_events` in Supabase. The live
+  view builds on it. With no Supabase keys the events go nowhere and the call
+  still runs — which is what keeps `make test` key-free.
 - Write code, comments, docs and commit messages in English.
 - Every screen follows `DESIGN.md`. Load `vortex/observability/design.css` first, add
   only layout, never a colour. Run `make design-sync` after you touch the tokens.

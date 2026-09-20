@@ -340,6 +340,12 @@ export default function Home() {
                       <span className="dot">·</span>
                       {call.phone}
                     </span>
+                    {call.lastTurn ? (
+                      <span className="home-call-turn">
+                        {call.lastRole === "assistant" ? "Vorty: " : ""}
+                        {call.lastTurn}
+                      </span>
+                    ) : null}
                   </span>
                   <span className="home-call-time">{call.duration}</span>
                   <button
