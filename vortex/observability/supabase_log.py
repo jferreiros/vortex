@@ -233,17 +233,25 @@ def _complete_calls(
 
 
 def _fetch_all_paginated() -> list[dict[str, Any]]:
+    """Last-resort read of the whole table, walked by primary key.
+
+    OFFSET made Postgres sort the table and discard the rows it skipped, so
+    each page cost more than the last and the tail of a 30k-row read timed
+    out — which reads to every caller as "Supabase is empty". Keyset paging
+    hits the index and every page costs the same.
+
+    This path only runs when the windowed function is unusable. Prefer a
+    bounded window: no screen needs every event ever logged.
+    """
     events: list[dict[str, Any]] = []
-    offset = 0
+    last_id: int | None = None
     while True:
+        params = {"select": "id,event", "order": "id.asc", "limit": str(PAGE_SIZE)}
+        if last_id is not None:
+            params["id"] = f"gt.{last_id}"
         response = httpx.get(
             _rest("/rest/v1/call_events"),
-            params={
-                "select": "event",
-                "order": "ts.asc,id.asc",
-                "limit": str(PAGE_SIZE),
-                "offset": str(offset),
-            },
+            params=params,
             headers=_headers(),
             timeout=HTTP_TIMEOUT_S,
         )
@@ -251,12 +259,14 @@ def _fetch_all_paginated() -> list[dict[str, Any]]:
         rows = response.json()
         if not isinstance(rows, list) or not rows:
             break
-        events.extend(row["event"] for row in rows if isinstance(row.get("event"), dict))
+        for row in rows:
+            if isinstance(row.get("event"), dict):
+                events.append(row["event"])
+            if isinstance(row.get("id"), int):
+                last_id = row["id"]
         if len(rows) < PAGE_SIZE:
             break
-        offset += PAGE_SIZE
     return events
-
 
 def enqueue(event: dict[str, Any]) -> None:
     """Queue one event for a background upsert. No-op when unconfigured."""

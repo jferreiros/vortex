@@ -1,0 +1,80 @@
+.calls-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  max-width: var(--content-max-width);
+  padding-bottom: var(--space-8);
+}
+
+.calls-page .ui-card {
+  box-shadow: none;
+}
+
+.calls-empty {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--color-mute);
+}
+
+.calls-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.calls-table th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: var(--weight-semibold);
+  color: var(--color-faint);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0 0 var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.calls-table td {
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--color-border);
+  font-size: var(--text-sm);
+  color: var(--color-ink);
+  vertical-align: top;
+}
+
+.calls-table tr {
+  cursor: pointer;
+}
+
+.calls-table tbody tr:hover td {
+  color: var(--color-ink);
+}
+
+.calls-table tr:last-child td {
+  border-bottom: none;
+}
+
+.calls-table th + th,
+.calls-table td + td {
+  padding-left: var(--space-4);
+}
+
+.calls-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.calls-name {
+  display: block;
+  font-weight: var(--weight-semibold);
+}
+
+.calls-phone {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--text-xs);
+  color: var(--color-mute);
+}
+
+.calls-status.live {
+  font-weight: var(--weight-semibold);
+}
