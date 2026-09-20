@@ -44,7 +44,7 @@ if TYPE_CHECKING:  # pragma: no cover - import only for the annotation
 
 SUPPORTED_LANGUAGES: tuple[str, ...] = ("en", "es", "ca", "gl", "eu")
 
-DEFAULT_LANGUAGE = "en"
+DEFAULT_LANGUAGE = __import__("os").environ.get("VORTEX_DEFAULT_LANGUAGE", "en")
 
 #: A language switch is a sentence, not a word. Soniox tags every token it
 #: hears, misheard fragments included, so a one-word frame used to be enough to
