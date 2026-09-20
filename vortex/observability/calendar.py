@@ -461,14 +461,13 @@ def load_database_agenda() -> tuple[list[Any], dict[str, str]]:
 def load_agenda_bookings(catalogue: Catalogue) -> dict[BookingKey, Booking]:
     """Taken slots for the Clinic View.
 
-    The product database first: ``database/scripts/backfill_from_logs.py`` has
-    already turned every landed BOOK/CANCEL/RESCHEDULE in the call log into
-    rows there, so it holds the real clinic's own visits with the real
-    providers and sites on them.
+    ``public.appointments`` first: the line writes a row there as each
+    BOOK/CANCEL/RESCHEDULE lands, so it holds the real clinic's own visits
+    with the real providers and sites on them.
 
-    A database with no appointments — a fresh clone that has never run the
-    backfill — falls back to the synthetic pack below, so the board shows a
-    populated diary either way rather than an empty grid.
+    An empty table — a fresh clone, or no store configured at all — falls
+    back to the synthetic pack below, so the board shows a populated diary
+    either way rather than an empty grid.
     """
     rows, call_ids = load_database_agenda()
     if rows:
