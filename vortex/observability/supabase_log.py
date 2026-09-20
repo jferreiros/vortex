@@ -1,13 +1,13 @@
-"""Supabase store for the call event log.
+"""Postgres store for the call event log (``public.call_events``).
 
-The JSONL file stays the local fallback. When ``SUPABASE_URL`` and
-``SUPABASE_SERVICE_ROLE_KEY`` are set, every ``CallLog.event`` is also
-queued here, and ``read_calls`` / ``read_recent`` prefer this table so the
-board keeps working on a machine that has never served a call.
+Every ``CallLog.event`` is queued here and upserted in batches through
+PostgREST, keyed on ``event_hash`` so a retry is idempotent. Every reader —
+``/calls``, the board, the wall — reads the same table, so a machine that has
+never served a call still paints real cards.
 
-Never raises into a call: a dropped insert is a missing row, not a hung
-socket. The service-role key is server-only — it is never sent to the
-browser and never appears in ``/health``.
+Never raises into a call: a dropped insert is logged loudly and retried at the
+next flush, not a hung socket. The service-role key is server-only — it is
+never sent to the browser and never appears in ``/health``.
 """
 
 from __future__ import annotations
@@ -100,7 +100,7 @@ def ping() -> dict[str, Any]:
         return {"ok": False, "detail": f"{type(exc).__name__}: {exc}"[:200]}
 
 
-def upsert_events(events: list[dict[str, Any]]) -> int:
+def upsert_events(events: list[dict[str, Any]], *, timeout: float = HTTP_TIMEOUT_S) -> int:
     """Insert ``events``, skipping hashes already stored. Returns how many
     rows the request accepted (including ignored duplicates as 0 extra)."""
     rows = [row for event in events if (row := _row(event)) is not None]
@@ -114,7 +114,7 @@ def upsert_events(events: list[dict[str, Any]]) -> int:
             "Prefer": "resolution=ignore-duplicates,return=minimal",
         },
         json=rows,
-        timeout=HTTP_TIMEOUT_S,
+        timeout=timeout,
     )
     if response.status_code not in {200, 201, 204}:
         raise RuntimeError(f"upsert {response.status_code}: {response.text[:240]}")
@@ -160,7 +160,7 @@ def fetch_window(
         # makes Postgres aggregate every event in the table into a single
         # jsonb value and hit the statement timeout (57014) — the whole
         # window read then fails and the board silently drops back to its
-        # local JSONL, showing one container's calls instead of every run.
+        # empty window, showing no calls at all instead of every run.
         "p_max_calls": max_calls or WINDOW_MAX_CALLS,
         "p_since": None,
     }
@@ -207,7 +207,7 @@ def _complete_calls(
     max_calls: int | None,
     since: datetime | str | None,
 ) -> tuple[dict[str, list[dict[str, Any]]], dict[str, Any]]:
-    """Same completeness rule as ``calllog.read_calls``: keep only groups
+    """The window's completeness rule: keep only groups
     that have ``call.started``, honour ``since`` on that start, newest first."""
     from vortex.observability.calllog import _since_str
 
@@ -268,6 +268,7 @@ def _fetch_all_paginated() -> list[dict[str, Any]]:
             break
     return events
 
+
 def enqueue(event: dict[str, Any]) -> None:
     """Queue one event for a background upsert. No-op when unconfigured."""
     if not configured():
@@ -305,15 +306,25 @@ def _run_worker() -> None:
             batch = []
 
 
-def _flush(events: list[dict[str, Any]]) -> None:
+def _flush(events: list[dict[str, Any]], *, timeout: float = HTTP_TIMEOUT_S) -> None:
     try:
-        upsert_events(events)
+        upsert_events(events, timeout=timeout)
     except Exception:
-        log.exception("supabase flush of %s events failed", len(events))
+        calls = sorted({str(e.get("call_id") or "?") for e in events})
+        log.error(
+            "supabase upsert of %s events failed; calls=%s",
+            len(events),
+            ",".join(calls[:10]),
+            exc_info=True,
+        )
 
 
-def flush() -> None:
-    """Drain the queue. Called at process exit and by the push script."""
+def flush(timeout: float = HTTP_TIMEOUT_S) -> None:
+    """Drain the queue now. Called at hangup and at process exit.
+
+    Blocks on the POST, bounded by ``timeout`` — a hangup gives the store a
+    few seconds, not the full request budget.
+    """
     leftover: list[dict[str, Any]] = []
     while True:
         try:
@@ -321,47 +332,25 @@ def flush() -> None:
         except queue.Empty:
             break
     if leftover:
-        _flush(leftover)
+        _flush(leftover, timeout=timeout)
 
 
-def apply_schema() -> None:
-    """Apply ``database/supabase/schema.sql`` via the SQL HTTP API.
+def fetch_calls(
+    limit: int | None = None,
+    since: datetime | str | None = None,
+) -> tuple[dict[str, list[dict[str, Any]]], dict[str, Any]]:
+    """Complete calls grouped by ``call_id``, oldest call first — ``GET /calls``.
 
-    The Management SQL endpoint is not on every project; when it is missing
-    the caller prints the file path so the statement can be pasted once.
+    "Complete" means the group carries its ``call.started``: a card without
+    ``started_at`` is silently dropped by the board's date filter, so a group
+    that never started is not returned at all.
+
+    ``limit`` caps the result to the most recent N calls; ``since`` keeps only
+    calls that started at or after that timestamp. Always returns a pair, so a
+    caller never has to branch on ``None`` — an unreachable or unconfigured
+    store is an empty window, not an exception.
     """
-    sql = _schema_path().read_text(encoding="utf-8")
-    settings = _settings()
-    # PostgREST cannot run DDL. The pg endpoint on hosted Supabase:
-    # POST https://<ref>.supabase.co/pg/query is not public. We try the
-    # database REST anyway and treat anything other than 2xx as "paste it".
-    response = httpx.post(
-        f"{settings.supabase_url.rstrip('/')}/pg/query",
-        headers=_headers(),
-        json={"query": sql},
-        timeout=HTTP_TIMEOUT_S,
-    )
-    if response.status_code not in {200, 201, 204}:
-        raise RuntimeError(
-            f"cannot apply schema automatically (HTTP {response.status_code}). "
-            f"Paste database/supabase/schema.sql in the Supabase SQL editor."
-        )
-
-
-def _schema_path():
-    from vortex.settings import REPO_ROOT
-
-    return REPO_ROOT / "database" / "supabase" / "schema.sql"
-
-
-def uses_this_log(path: Any) -> bool:
-    """Whether ``path`` is the process's real call log, so a test tmp file
-    never silently starts hitting the network."""
-    if not configured():
-        return False
-    try:
-        from pathlib import Path
-
-        return Path(path).resolve() == _settings().calls_log_path.resolve()
-    except Exception:
-        return False
+    window = fetch_window(max_calls=limit, since=since)
+    if window is None:
+        return {}, {"calls": 0, "events": 0, "truncated": False}
+    return window

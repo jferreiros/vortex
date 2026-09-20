@@ -437,7 +437,6 @@ async def test_ensure_confirmation_audio_synthesises_and_caches(
         return b"fake-mp3"
 
     monkeypatch.setenv("VORTEX_CONFIRMATION_AUDIO_DIR", str(tmp_path / "audio"))
-    monkeypatch.setenv("VORTEX_CALLS_LOG", str(tmp_path / "calls.jsonl"))
     monkeypatch.setattr(voice_config, "synthesize", fake_synthesize)
     settings_module.reset_settings()
     try:
@@ -445,7 +444,9 @@ async def test_ensure_confirmation_audio_synthesises_and_caches(
         name = await ensure_confirmation_audio(settings, "Hola, le llamamos de la clínica.", "es")
         assert name is not None and valid_audio_name(name)
         assert (tmp_path / "audio" / name).read_bytes() == b"fake-mp3"
-        assert calls == ["es-ES|es-ES-Chirp3-HD-Aoede"]
+        from vortex.conversation.language import VoicePreset
+
+        assert calls == [f"es|{VoicePreset.ES.female}"]
         # second render of the same line reuses the file, no new synthesis
         again = await ensure_confirmation_audio(settings, "Hola, le llamamos de la clínica.", "es")
         assert again == name
@@ -465,7 +466,6 @@ async def test_ensure_confirmation_audio_returns_none_without_tts(
         raise RuntimeError("no credentials")
 
     monkeypatch.setenv("VORTEX_CONFIRMATION_AUDIO_DIR", str(tmp_path / "audio"))
-    monkeypatch.setenv("VORTEX_CALLS_LOG", str(tmp_path / "calls.jsonl"))
     monkeypatch.setattr(voice_config, "synthesize", boom)
     settings_module.reset_settings()
     try:
@@ -478,13 +478,21 @@ async def test_ensure_confirmation_audio_returns_none_without_tts(
 @pytest.fixture
 def confirmation_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     from vortex import settings as settings_module
+    from vortex.line import voice_config
 
     monkeypatch.setenv("VORTEX_VOICE_MODE", "stub")
     monkeypatch.setenv("VORTEX_CLINIC_MODE", "fake")
-    monkeypatch.setenv("VORTEX_CALLS_LOG", str(tmp_path / "calls.jsonl"))
     monkeypatch.setenv("VORTEX_CONFIRMATION_CALLS_PATH", str(tmp_path / "calls.json"))
     monkeypatch.setenv("VORTEX_PUBLIC_BASE_URL", "https://demo.example.com")
+    monkeypatch.setenv("VORTEX_CONFIRMATION_AUDIO_DIR", str(tmp_path / "confirmation_audio"))
     settings_module.reset_settings()
+    # No real TTS in tests: a machine with gcloud credentials would otherwise
+    # synthesise for real and turn every <Say> assertion into a <Play>.
+    monkeypatch.setattr(
+        voice_config,
+        "synthesize",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("no tts in tests")),
+    )
     settings = settings_module.get_settings()
     client = TestClient(create_app(settings))
     yield client, settings
@@ -717,12 +725,18 @@ def test_result_endpoint_hands_off_to_the_voice_agent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from vortex import settings as settings_module
+    from vortex.line import voice_config
 
     monkeypatch.setenv("VORTEX_VOICE_MODE", "pipecat")
     monkeypatch.setenv("VORTEX_CLINIC_MODE", "fake")
-    monkeypatch.setenv("VORTEX_CALLS_LOG", str(tmp_path / "calls.jsonl"))
     monkeypatch.setenv("VORTEX_CONFIRMATION_CALLS_PATH", str(tmp_path / "calls.json"))
     monkeypatch.setenv("VORTEX_PUBLIC_BASE_URL", "https://demo.example.com")
+    monkeypatch.setenv("VORTEX_CONFIRMATION_AUDIO_DIR", str(tmp_path / "confirmation_audio"))
+    monkeypatch.setattr(
+        voice_config,
+        "synthesize",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("no tts in tests")),
+    )
     settings_module.reset_settings()
     settings = settings_module.get_settings()
     try:
@@ -955,9 +969,10 @@ def test_classify_cancellation_reply(transcript: str, lang: str, expected: str) 
     assert classify_cancellation_reply(transcript, lang) == expected
 
 
+@pytest.mark.requires_db
 @pytest.mark.asyncio
 async def test_queue_cancellation_rebooking_call_is_immediate_and_in_db(
-    tmp_path: Path, offline_settings, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, offline_settings, requires_db, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from vortex import settings as settings_module
     from vortex.line.confirmation_calls import (
@@ -988,8 +1003,8 @@ async def test_queue_cancellation_rebooking_call_is_immediate_and_in_db(
 
         from database import db
 
-        with db.connection(settings.product_db_path) as conn:
-            row = db.get_call_by_call_id(conn, call.confirmation_id)
+        if True:
+            row = db.get_call_by_call_id(call.confirmation_id)
             assert row is not None
             assert row.direction == "outbound"
             assert row.motivo == "call_now"
@@ -1001,9 +1016,10 @@ async def test_queue_cancellation_rebooking_call_is_immediate_and_in_db(
         settings_module.reset_settings()
 
 
+@pytest.mark.requires_db
 @pytest.mark.asyncio
 async def test_queue_cancellation_rebooking_call_links_a_known_appointment(
-    tmp_path: Path, offline_settings, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, offline_settings, requires_db, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from vortex import settings as settings_module
     from vortex.line.confirmation_calls import queue_cancellation_rebooking_call
@@ -1015,9 +1031,8 @@ async def test_queue_cancellation_rebooking_call_links_a_known_appointment(
         settings = settings_module.get_settings()
         from database import db
 
-        with db.connection(settings.product_db_path) as conn:
+        if True:
             booking_call = db.insert_call(
-                conn,
                 call_id="CALL-BOOKED",
                 direction="inbound",
                 purpose="booking",
@@ -1025,7 +1040,6 @@ async def test_queue_cancellation_rebooking_call_links_a_known_appointment(
                 outcome="book",
             )
             db.insert_appointment(
-                conn,
                 id="LCL-1",
                 booking_call_id=booking_call.id,
                 patient_id="P00042",
@@ -1043,8 +1057,8 @@ async def test_queue_cancellation_rebooking_call_links_a_known_appointment(
         )
         assert call is not None
 
-        with db.connection(settings.product_db_path) as conn:
-            row = db.get_call_by_call_id(conn, call.confirmation_id)
+        if True:
+            row = db.get_call_by_call_id(call.confirmation_id)
             assert row is not None
             assert row.appointment_id == "LCL-1"
     finally:
@@ -1113,17 +1127,17 @@ async def test_queue_cancellation_rebooking_call_dedupes_like_any_other_row(
         settings_module.reset_settings()
 
 
+@pytest.mark.requires_db
 def test_sync_call_now_outcome_to_db_is_scoped_to_call_now(
-    tmp_path: Path, offline_settings
+    tmp_path: Path, offline_settings, requires_db
 ) -> None:
     from vortex.line.confirmation_calls import sync_call_now_outcome_to_db
 
     db_path = tmp_path / "vortex_product.db"
     from database import db
 
-    with db.connection(db_path) as conn:
+    if True:
         db.insert_call(
-            conn,
             call_id="OUT-CALLNOW",
             direction="outbound",
             purpose="reschedule",
@@ -1139,8 +1153,8 @@ def test_sync_call_now_outcome_to_db_is_scoped_to_call_now(
         status="confirmed",
         db_path=db_path,
     )
-    with db.connection(db_path) as conn:
-        assert db.get_call_by_call_id(conn, "OUT-CALLNOW").outcome is None
+    if True:
+        assert db.get_call_by_call_id("OUT-CALLNOW").outcome is None
 
     sync_call_now_outcome_to_db(
         confirmation_id="OUT-CALLNOW",
@@ -1151,8 +1165,8 @@ def test_sync_call_now_outcome_to_db_is_scoped_to_call_now(
         detail="handoff_to_voice_agent",
         db_path=db_path,
     )
-    with db.connection(db_path) as conn:
-        row = db.get_call_by_call_id(conn, "OUT-CALLNOW")
+    if True:
+        row = db.get_call_by_call_id("OUT-CALLNOW")
         assert row.outcome == "reschedule"
         assert row.transcript == "Sí, búsquenme otra"
         assert row.detail == "handoff_to_voice_agent"
@@ -1165,13 +1179,14 @@ def test_sync_call_now_outcome_to_db_is_scoped_to_call_now(
         status="not_coming",
         db_path=db_path,
     )
-    with db.connection(db_path) as conn:
-        assert db.get_call_by_call_id(conn, "OUT-CALLNOW").outcome == "no_action"
+    if True:
+        assert db.get_call_by_call_id("OUT-CALLNOW").outcome == "no_action"
 
 
+@pytest.mark.requires_db
 @pytest.mark.asyncio
 async def test_result_endpoint_persists_the_call_now_outcome_to_the_database(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, requires_db, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """End to end: a cancellation-rebooking row queued through the same
     orchestration function the line uses, answered through the ordinary
@@ -1185,11 +1200,9 @@ async def test_result_endpoint_persists_the_call_now_outcome_to_the_database(
 
     monkeypatch.setenv("VORTEX_VOICE_MODE", "stub")
     monkeypatch.setenv("VORTEX_CLINIC_MODE", "fake")
-    monkeypatch.setenv("VORTEX_CALLS_LOG", str(tmp_path / "calls.jsonl"))
     monkeypatch.setenv("VORTEX_CONFIRMATION_CALLS", "true")
     monkeypatch.setenv("VORTEX_CONFIRMATION_CALLS_PATH", str(tmp_path / "calls.json"))
     monkeypatch.setenv("VORTEX_PUBLIC_BASE_URL", "https://demo.example.com")
-    monkeypatch.setenv("VORTEX_PRODUCT_DB", str(tmp_path / "vortex_product.db"))
     settings_module.reset_settings()
     try:
         settings = settings_module.get_settings()
@@ -1217,8 +1230,8 @@ async def test_result_endpoint_persists_the_call_now_outcome_to_the_database(
 
         from database import db
 
-        with db.connection(settings.product_db_path) as conn:
-            row = db.get_call_by_call_id(conn, call.confirmation_id)
+        if True:
+            row = db.get_call_by_call_id(call.confirmation_id)
             assert row is not None
             assert row.outcome == "reschedule"
             assert row.transcript == "Sí, búsquenme otra"

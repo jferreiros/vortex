@@ -28,9 +28,9 @@ def _usage(**over: Any) -> dict[str, Any]:
         },
         "tts": [
             {
-                "provider": "google",
-                "service": "GoogleHttpTTSService",
-                "model": "es-ES-Chirp3-HD-Aoede",
+                "provider": "elevenlabs",
+                "service": "ElevenLabsTTSService",
+                "model": "eleven_flash_v2_5",
                 "characters": 1_000_000,
                 "requests": 6,
             }
@@ -86,7 +86,7 @@ def test_a_perk_model_with_no_list_price_is_still_free_but_partial() -> None:
     cost = pricing.price_call(usage)
     assert cost.llm_eur == 0.0
     assert cost.llm_list_eur == 0.0
-    assert cost.unpriced == ["LLM helmcode/qwen3.6"]
+    assert cost.unpriced == ["LLM helmcode/qwen3.6", "TTS eleven_flash_v2_5"]
     assert cost.priced is False
 
 
@@ -103,31 +103,19 @@ def test_the_perk_is_decided_by_the_provider_not_by_the_model() -> None:
     cost = pricing.price_call(usage)
     assert cost.perk is False
     assert cost.llm_eur == cost.llm_list_eur
-    assert cost.unpriced == ["LLM openai/gpt-4.1-mini"]
+    assert cost.unpriced == ["LLM openai/gpt-4.1-mini", "TTS eleven_flash_v2_5"]
 
 
-def test_tts_voices_match_by_substring_and_each_family_has_its_own_rate() -> None:
-    chirp = pricing.price_call(_usage())
-    assert chirp.tts_eur == pytest.approx(30.0 * pricing.eur_per_usd())
-    standard = pricing.price_call(
-        _usage(
-            tts=[
-                {
-                    "provider": "google",
-                    "service": "GoogleHttpTTSService",
-                    "model": "es-ES-Standard-A",
-                    "characters": 1_000_000,
-                }
-            ]
-        )
-    )
-    assert standard.tts_eur == pytest.approx(4.0 * pricing.eur_per_usd())
-    assert pricing.tts_price("es-ES-Chirp3-HD-Aoede") is pricing.TTS_PRICES[0][1]
+def test_tts_voices_match_by_substring() -> None:
+    """One row per model family, matched on a prefix of the reported model id."""
+    assert pricing.tts_price("eleven_flash_v2_5") is pricing.TTS_PRICES[0][1]
+    assert pricing.tts_price("eleven_multilingual_v2") is pricing.TTS_PRICES[0][1]
+    # A model outside the table is unpriced, not free.
     assert pricing.tts_price("es-ES-Wavenet-B") is None
 
 
-def test_gemini_and_elevenlabs_are_in_the_table_without_a_price() -> None:
-    for voice in ("gemini-2.5-flash-tts", "eleven_flash_v2_5"):
+def test_elevenlabs_is_in_the_table_without_a_price() -> None:
+    for voice in ("eleven_flash_v2_5", "eleven_multilingual_v2"):
         row = pricing.tts_price(voice)
         assert row is not None, voice
         assert row["usd"] is None, voice
@@ -135,28 +123,29 @@ def test_gemini_and_elevenlabs_are_in_the_table_without_a_price() -> None:
 
 
 def test_a_partial_call_still_sums_the_legs_it_could_price() -> None:
-    """Two Google services, one of them unpriced: the Chirp leg still counts."""
+    """The TTS leg has no verified list price; STT and the LLM still count."""
     usage = _usage(
         tts=[
             {
-                "provider": "google",
-                "service": "GoogleHttpTTSService",
-                "model": "es-ES-Chirp3-HD-Aoede",
+                "provider": "elevenlabs",
+                "service": "ElevenLabsTTSService",
+                "model": "eleven_flash_v2_5",
                 "characters": 1_000_000,
             },
             {
-                "provider": "google",
-                "service": "GeminiTTSService",
-                "model": "gemini-2.5-flash-tts",
+                "provider": "elevenlabs",
+                "service": "ElevenLabsTTSService",
+                "model": "eleven_multilingual_v2",
                 "characters": 90,
             },
         ]
     )
     cost = pricing.price_call(usage)
-    assert cost.tts_eur == pytest.approx(30.0 * pricing.eur_per_usd())
+    assert cost.tts_eur == 0.0
     assert cost.tts_characters == 1_000_090
-    assert cost.unpriced == ["TTS gemini-2.5-flash-tts"]
+    assert cost.unpriced == ["TTS eleven_flash_v2_5", "TTS eleven_multilingual_v2"]
     assert cost.priced is False
+    # Soniox and the LLM list price are both verified, so the total is not zero.
     assert cost.total_list_eur > 0
 
 

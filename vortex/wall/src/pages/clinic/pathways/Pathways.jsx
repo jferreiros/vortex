@@ -3,7 +3,6 @@ import SectionHeader from "../../../components/ui/SectionHeader";
 import Card from "../../../components/ui/Card";
 import Button from "../../../components/ui/Button";
 import Placeholder from "../../../components/ui/Placeholder";
-import pathwaysSeed from "../../../data/pathways.json";
 import shapeTypesData from "../../../data/shapeTypes.json";
 import "./pathways.css";
 
@@ -11,10 +10,11 @@ import "./pathways.css";
 // (patterns-pathways/PatternsPathways.jsx); also reachable directly at
 // /clinic/pathways for testing this editor on its own. See AppRouter.jsx.
 //
-// Seeded from src/data/pathways.json and src/data/shapeTypes.json — flat
-// JSON stand-ins for a real store for now (see those files' _comment).
-// Swapping them for a fetch to a backend endpoint later only touches the
-// two seed imports below.
+// The pathways themselves come from GET /api/wall/pathways (the
+// `wall_documents` row seeded by database/seed/wall_documents.sql) and are
+// saved back with PUT. src/data/shapeTypes.json stays in the app: it is the
+// tray's vocabulary — families, types, emoji, default `when` — not data the
+// clinic edits.
 
 const SHAPE_META = {
   call: { label: "Call" },
@@ -137,7 +137,7 @@ function loadStoredState() {
       return { ...parsed, pathways: migratePathways(parsed.pathways) };
     }
   } catch {
-    // corrupt or unavailable storage — fall back to the seed
+    // corrupt or unavailable storage — wait for the server's copy
   }
   return null;
 }
@@ -565,7 +565,7 @@ function ShapeTray() {
 
 export default function Pathways() {
   const [initial] = useState(
-    () => loadStoredState() ?? { pathways: pathwaysSeed.pathways, selectedId: pathwaysSeed.pathways[0].id }
+    () => loadStoredState() ?? { pathways: [], selectedId: null }
   );
   const [pathways, setPathways] = useState(initial.pathways);
   const [selectedId, setSelectedId] = useState(initial.selectedId);

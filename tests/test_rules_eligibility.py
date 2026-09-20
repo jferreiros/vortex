@@ -7,7 +7,6 @@ self-pay rule that stops a refusal being talked around.
 
 from __future__ import annotations
 
-import json
 from datetime import date, datetime
 
 import pytest
@@ -307,15 +306,12 @@ def make_ctx(tmp_path, clinic: FakeClinicClient, from_number: str | None) -> Too
         now=datetime(2026, 9, 18, 9, 0, tzinfo=MADRID),
         from_number=from_number,
         clinic=clinic,
-        log=CallLog("CA-rules", tmp_path / "calls.jsonl"),
+        log=CallLog("CA-rules"),
     )
 
 
 def logged(ctx: ToolContext) -> list[dict]:
-    path = ctx.log.path
-    if not path.exists():
-        return []
-    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    return list(ctx.log.events)
 
 
 @pytest.mark.asyncio

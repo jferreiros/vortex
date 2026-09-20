@@ -201,5 +201,5 @@ async def submit_action(ctx: ToolContext, args: SubmitInput) -> SubmitResult:
         # startup-time dependency.
         from database.hooks import persist_submission
 
-        await persist_submission(ctx, action, db_path=get_settings().product_db_path)
+        await persist_submission(ctx, action)
     return result

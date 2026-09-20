@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -23,7 +22,7 @@ def _session(tmp_path: Path) -> CallSession:
     )
     return CallSession.open(
         start,
-        settings=Settings(calls_log_path=tmp_path / "calls.jsonl"),
+        settings=Settings(),
         now=NOW,
     )
 
@@ -120,8 +119,7 @@ def test_notify_is_a_noop_under_pytest(tmp_path: Path) -> None:
     discord_calls.notify_session(_session(tmp_path))
 
 
-def test_cards_from_log_ignore_transcript_text(tmp_path: Path) -> None:
-    path = tmp_path / "calls.jsonl"
+def test_cards_from_events_ignore_transcript_text() -> None:
     started = {
         "ts": "2026-09-19T08:00:00Z",
         "call_id": "c1",
@@ -151,11 +149,7 @@ def test_cards_from_log_ignore_transcript_text(tmp_path: Path) -> None:
         "duration_ms": 3000,
         "reason": "socket_closed",
     }
-    path.write_text(
-        "\n".join(json.dumps(row) for row in (started, turn, submit, summary)) + "\n",
-        encoding="utf-8",
-    )
-    cards = discord_calls.cards_from_log(path)
+    cards = discord_calls.cards_from_events([started, turn, submit, summary])
     body = discord_calls.digest_body(cards, wall="https://example.test/wall")
     dumped = str(body)
     assert "Ana" not in dumped

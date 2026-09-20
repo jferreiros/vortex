@@ -6,10 +6,7 @@
    Seeded from Live Call Design 11 ("Clínico") so the whole product reads as
    one thing today. To change the product's visual direction later: edit
    the values in this file (and theme.js's mirror of the few JS-side ones)
-   and every page picks it up. The eleven Live Call concepts under
-   src/designs/ are untouched historical explorations, each self-contained —
-   swapping which one the app embeds is one import in
-   pages/clinic/live-calls/LiveCallDetail.jsx. */
+   and every page picks it up. */
 
 :root {
   /* Colour ------------------------------------------------------------- */

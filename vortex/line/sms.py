@@ -324,7 +324,7 @@ def notification_payload(action: Action, details: AppointmentDetails) -> dict[st
     """Compact log fields for sms.* events.
 
     Clinic ids and enums only. ``CallLog.event`` writes every field here to
-    ``calls.jsonl`` verbatim, and the doctor's and the site's names are free
+    ``call_events`` verbatim, and the doctor's and the site's names are free
     text about where a named patient is treated - the message the caller reads
     carries them, the log does not.
     """

@@ -2,9 +2,12 @@
 #
 # Vortex — deploy the call socket in one command.
 #
-#     deploy/deploy.sh                  fetch main, rebuild, restart, verify
+#     deploy/deploy.sh                  fetch main, rebuild, migrate, restart, verify
 #     deploy/deploy.sh --skip-pull      redeploy the working tree as it stands
 #     deploy/deploy.sh --check-only     verify what is already running
+#
+# The schema is applied before the container is restarted, never after: new
+# code against an old schema is the failure this ordering exists to prevent.
 #
 # Exit code 0 means the public endpoint answered. Anything else means do not
 # start a run yet.
@@ -47,9 +50,9 @@ for arg in "$@"; do
   esac
 done
 
-# Six steps: sources, build, restart, health, endpoint, dial. --check-only
-# runs only health and endpoint.
-TOTAL=6
+# Seven steps: sources, build, migrate, restart, health, endpoint, dial.
+# --check-only runs only health and endpoint.
+TOTAL=7
 [[ ${CHECK_ONLY} -eq 1 ]] && TOTAL=2
 [[ ${SKIP_PULL} -eq 1 ]] && TOTAL=$((TOTAL - 1))
 
@@ -86,6 +89,24 @@ if [[ ${CHECK_ONLY} -eq 0 ]]; then
   step "Building the image"
   "${COMPOSE[@]}" build
   ok "vortex-line:local"
+
+  # database/supabase/migrations/ is the only source of DDL. It is applied from
+  # the image we just built, so this needs no Python on the host, and it runs
+  # before the container is replaced: the new code never meets an old schema.
+  # The migrator reads SUPABASE_DB_URL (the direct Postgres URI from the
+  # Supabase dashboard, not the REST URL) out of deploy/.env, which compose
+  # already passes through env_file.
+  step "Applying database/supabase/migrations/"
+  if grep -qE '^[[:space:]]*SUPABASE_DB_URL=[^[:space:]]' "${SCRIPT_DIR}/.env"; then
+    "${COMPOSE[@]}" run --rm --no-deps line \
+      python -m database.supabase.migrate \
+      || die "the migration failed. The old container is still serving; fix the
+      schema and run deploy/deploy.sh again. Nothing was restarted."
+    ok "schema up to date"
+  else
+    warn "SUPABASE_DB_URL is empty in deploy/.env — skipping migrations. The line
+      will start with no store and every board screen will show zeros."
+  fi
 
   step "Restarting the container"
   "${COMPOSE[@]}" up -d --remove-orphans
@@ -140,5 +161,5 @@ fi
 
 printf '\n%s✓ Vortex is up%s  %s(%ss)%s\n' "${GREEN}${BOLD}" "${OFF}" "${DIM}" "$(($(date +%s) - START))" "${OFF}"
 printf '  Endpoint for the dashboard: %swss://%s%s%s\n' "${BOLD}" "${PUBLIC_HOST}" "${WS_PATH}" "${OFF}"
-printf '  %sLogs: docker logs -f %s   Calls: docker exec %s tail -f /app/logs/calls.jsonl%s\n' \
-  "${DIM}" "${CONTAINER}" "${CONTAINER}" "${OFF}"
+printf '  %sLogs: docker logs -f %s   Calls: curl -s https://%s/calls%s\n' \
+  "${DIM}" "${CONTAINER}" "${PUBLIC_HOST}" "${OFF}"

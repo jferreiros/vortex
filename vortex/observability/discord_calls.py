@@ -12,10 +12,8 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from pathlib import Path
 from typing import Any
 
-from vortex.observability.calllog import read_recent
 from vortex.observability.view import CallCard, build_calls
 
 log = logging.getLogger(__name__)
@@ -161,8 +159,16 @@ def card_from_view(card: CallCard) -> dict[str, Any]:
     }
 
 
-def cards_from_log(path: Path, *, limit: int = 20000) -> list[dict[str, Any]]:
-    return [card_from_view(card) for card in build_calls(read_recent(path, limit=limit))]
+def cards_from_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """PII-free cards for a list of call events, whatever read produced them."""
+    return [card_from_view(card) for card in build_calls(events)]
+
+
+def cards_from_store(*, limit: int = 20000) -> list[dict[str, Any]]:
+    """The last ``limit`` events in ``public.call_events``, as digest cards."""
+    from vortex.observability import supabase_log
+
+    return cards_from_events(supabase_log.fetch_recent(limit) or [])
 
 
 def assert_no_pii(payload: Any) -> None:
@@ -318,21 +324,10 @@ def notify_session(session: Any) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Discord digest of the call log")
-    parser.add_argument(
-        "--log",
-        type=Path,
-        default=None,
-        help="JSONL call log (default: VORTEX_CALLS_LOG or logs/calls.jsonl)",
-    )
     parser.add_argument("--json", action="store_true", help="print the webhook body")
     parser.add_argument("--limit", type=int, default=20000)
     args = parser.parse_args(argv)
-    path = args.log
-    if path is None:
-        from vortex.settings import get_settings
-
-        path = get_settings().calls_log_path
-    cards = cards_from_log(path, limit=args.limit)
+    cards = cards_from_store(limit=args.limit)
     body = digest_body(cards)
     if args.json:
         print(json.dumps(body, ensure_ascii=False))

@@ -1,6 +1,6 @@
 """Today's briefing for the Clinic Home page.
 
-A clinic manager's morning page answers four questions from ``calls.jsonl``,
+A clinic manager's morning page answers four questions from ``public.call_events``,
 not occupancy (that is the HIS) and not handle time (that is a contact centre):
 
 1. What did the inbound line do to the diary today — booked, moved, cancelled, registered.

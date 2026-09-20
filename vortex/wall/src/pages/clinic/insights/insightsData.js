@@ -1,4 +1,29 @@
-import { MOCK_OVERVIEW } from "../home/useHomeOverview.js";
+
+// Placeholder numbers for the panels whose real endpoint is not wired yet.
+// Everything the board already serves (Home, live calls, business insights)
+// reads its own API; these are the leftovers, kept together so the next
+// endpoint to land can delete its block outright.
+export const MOCK_UNAVAILABILITY = {
+  unmet_total: 19,
+  buckets: [
+    { key: "no_slot_in_window", label: "Sin hueco en la franja pedida", count: 9, share: 1, pct: 47.4 },
+    { key: "provider_unavailable", label: "Médico concreto no disponible", count: 5, share: 0.556, pct: 26.3 },
+    { key: "policy_not_covered", label: "Póliza no cubierta", count: 3, share: 0.333, pct: 15.8 },
+    { key: "out_of_hours", label: "Fuera de horario", count: 2, share: 0.222, pct: 10.5 },
+  ],
+  suggested_action:
+    "El 47% de la demanda no cubierta es por falta de hueco en la franja pedida, concentrado los jueves en la tarde: ampliar agenda ese tramo capturaría la mayor parte de esos rechazos.",
+};
+
+export const MOCK_CANCELLATIONS = {
+  freed_total: 11,
+  relocated: 7,
+  lost: 3,
+  pending: 1,
+  recovery_rate_pct: 70,
+  suggested_action:
+    "De los 11 huecos liberados por cancelación, 7 se reubicaron (70%) pero 3 llegaron vacíos el día de la cita: avisar a la lista de espera en el instante de la cancelación recuperaría parte de esos huecos.",
+};
 
 // One mock row per catalogue specialty — the six Arenal services, network-wide.
 export const MOCK_SERVICES = [
@@ -113,9 +138,9 @@ export const MOCK_OPEN_SUR = [
 
 export const MOCK_STATS = {
   calls_considered: 214,
-  unavailability: MOCK_OVERVIEW.unavailability,
+  unavailability: MOCK_UNAVAILABILITY,
   cancellations: {
-    ...MOCK_OVERVIEW.cancellations,
+    ...MOCK_CANCELLATIONS,
     daily: [
       { date: "2026-09-15", freed: 3, relocated: 2, lost: 1 },
       { date: "2026-09-16", freed: 2, relocated: 1, lost: 0 },

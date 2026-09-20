@@ -74,11 +74,25 @@ deploy/deploy-both.sh --force    # rebuild even if main did not move
 deploy/deploy.sh                 # call socket only
 ```
 
-`deploy/deploy.sh` fetches `main`, rebuilds the image, restarts the container,
-waits for it to report healthy, checks the public endpoint, and dials it with a
-fake call. It prints a green line and the endpoint when all five pass, and a red
-line naming the failed step when they do not. Exit code 0 means the endpoint is
-ready for a run.
+`deploy/deploy.sh` fetches `main`, rebuilds the image, applies the database
+migrations, restarts the container, waits for it to report healthy, checks the
+public endpoint, and dials it with a fake call. It prints a green line and the
+endpoint when all six pass, and a red line naming the failed step when they do
+not. Exit code 0 means the endpoint is ready for a run.
+
+The migration step runs **before** the container is replaced, from the image
+that was just built:
+
+```bash
+docker compose -f deploy/compose.yaml run --rm --no-deps line \
+  python -m database.supabase.migrate
+```
+
+It reads `SUPABASE_DB_URL` out of `deploy/.env` (compose passes the whole file
+through `env_file`). A failed migration aborts the deploy with the previous
+container still serving, so new code never meets an old schema.
+`deploy/deploy-both.sh` refuses outright when `SUPABASE_DB_URL` is missing and
+says so on Discord.
 
 ```bash
 deploy/deploy.sh --skip-pull     # deploy the working tree as it stands
@@ -127,17 +141,29 @@ Each finished call also posts a redacted card to Discord when
 
 ---
 
-## Logs
+## The store, and logs
+
+Supabase/Postgres is the only persistent store. Neither container mounts a
+volume and neither keeps a database file: both talk to the same Supabase
+project over PostgREST with `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` from
+`deploy/.env`. A rebuild, a `docker compose down`, or moving to another machine
+loses nothing, because nothing was ever on this disk.
+
+Schema is only ever `database/supabase/migrations/NNNN_*.sql`, applied by the
+deploy (above) or by hand from the repo with `make supabase-migrate`. Do not
+type DDL into the Supabase SQL editor: the next deploy would run migrations
+against a database nobody can reproduce.
 
 ```bash
 docker logs -f vortex-line                                 # the server
-docker exec vortex-line tail -f /app/logs/calls.jsonl      # one JSON line per call event
 curl -s https://line.203.0.113.20.sslip.io/calls | jq     # recent calls grouped by call_id
+make supabase-ping                                         # can the key reach call_events?
+make supabase-count                                        # rows per table
 docker compose -f deploy/compose.yaml ps                   # state and health
 ```
 
-The call log lives in the `vortex-line_line-logs` volume, so it survives a
-rebuild. Container logs roll at 20 MB × 5 files.
+Container logs (stdout) roll at 20 MB × 5 files and are the only thing that
+still lives on the host.
 
 ---
 
@@ -189,6 +215,17 @@ Work down this list. Each step tells you which half of the path is broken.
 9. **`clinic: fake` when you expected `live`.** The keys are read once at
    startup. Edit `deploy/.env`, then `deploy/deploy.sh --skip-pull`.
 
+10. **Calls work but every board screen is zero.** No store. Check
+    `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in `deploy/.env`, then
+    `make supabase-ping`. This is deliberately not fatal: a line that cannot
+    reach the database still answers the phone and still submits.
+
+11. **The deploy stopped on "Applying database/supabase/migrations/".** The old
+    container is still serving — nothing was restarted. Read the migrator's
+    output, fix the migration file, commit, and run the deploy again. If
+    `SUPABASE_DB_URL` is the `https://xxxx.supabase.co` REST URL, that is the
+    bug: it wants the `postgresql://` URI from Dashboard → Database.
+
 A run holds ten sockets open at once, twenty on problem 2. Everything here is
 per-socket, so concurrency is not a deployment concern — but do check
 `docker stats vortex-line` during the first big run. The container is capped at
@@ -210,17 +247,15 @@ How the board sees calls, in order:
    Insights API asks by start date (`since=<ISO>`), so a busy day can never
    push an in-range call out of the read the way the old 800-event tail did.
 2. The last good fetch, so one slow request degrades to stale data.
-3. `VORTEX_CALLS_LOG` (`/app/logs/calls.jsonl`) — which is the *line's* volume
-   (`vortex-line_line-logs`) mounted read-only into the board, not a private
-   empty one. The `external: true` declaration in `deploy/compose.yml` means
-   the board refuses to start if that volume is missing; deploy the line
-   first (deploy-both.sh already does).
+3. Supabase directly, with the same service-role key the line writes through.
+   There is no mounted volume and no file fallback: both containers read the
+   same database, so the board cannot drift from the line.
 
-Every `/api/wall/business-insights` response carries a `source` block —
-`line_api`, `cache` or `jsonl_fallback`, plus the error that degraded it — so
-an empty Insights page is distinguishable from a broken ingestion path.
-Fetch timeouts: `VORTEX_LINE_HEALTH_TIMEOUT_S` (3), `VORTEX_LINE_CALLS_TIMEOUT_S`
-(6), `VORTEX_LINE_INSIGHTS_TIMEOUT_S` (25).
+Every `/api/wall/business-insights` response carries a `source` block — which
+of those three answered, plus the error that degraded it — so an empty Insights
+page is distinguishable from a broken ingestion path. Fetch timeouts:
+`VORTEX_LINE_HEALTH_TIMEOUT_S` (3), `VORTEX_LINE_CALLS_TIMEOUT_S` (6),
+`VORTEX_LINE_INSIGHTS_TIMEOUT_S` (25).
 
 The Discord line after a successful publish needs
 `DISCORD_UPDATES_WEBHOOK_URL` in `deploy/.env` (or the repo `.env`). That
@@ -240,8 +275,8 @@ systemctl --user enable --now vortex-deploy.timer
 This host runs other services, including one in real use. This deployment stays
 in its own lane and changes nothing that was already running:
 
-- Its own compose project (`vortex-line`), container (`vortex-line`), image and
-  volume.
+- Its own compose project (`vortex-line`), container (`vortex-line`) and image.
+  No volume at all: the store is Supabase.
 - Traefik router and middleware names prefixed `vortexline-`, chosen so they do
   not collide with the `vortex-*` names the `vortex-board` deployment already
   uses.

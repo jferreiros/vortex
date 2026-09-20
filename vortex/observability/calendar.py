@@ -4,15 +4,14 @@ Builds, for each provider, a day x time grid from the clinic catalogue
 (opening hours, closure days, the bookable window) and fills the slots the call
 log says were booked, moved or cancelled.
 
-The Clinic View's filled slots come from the product database
-(``logs/vortex_product.db``), which ``database/scripts/backfill_from_logs.py``
-builds out of the call log: real visits, on the real providers and sites. A
-database with no appointments falls back to the synthetic-data pack, so a
-fresh clone still draws a populated diary.
+The Clinic View's filled slots come from ``public.appointments``, which the
+line writes as each submission lands: real visits, on the real providers and
+sites. A table with no appointments falls back to the synthetic-data pack, so
+a fresh clone still draws a populated diary.
 
 The standalone ``/calendar`` page reads the pack's own logs
-(``synthetic-data/logs/*.jsonl``); set ``VORTEX_CALENDAR_LOG`` to a single live
-call log to fill that grid from real calls as they land instead.
+(``synthetic-data/logs/*.jsonl``); set ``VORTEX_CALENDAR_LOG`` to a single
+CallLog-shaped fixture to fill that grid from it instead.
 
 The builders (``bookings_from_events``, ``bookings_from_rows``,
 ``build_calendars``, ``clinic_agenda``) are pure: they take data and return
@@ -41,7 +40,6 @@ from vortex.contract import (
     PatientRecord,
     ProviderRecord,
 )
-from vortex.observability.calllog import read_recent
 from vortex.settings import REPO_ROOT
 
 #: Hugging Face Inference summarization. Optional; the view shows the raw note
@@ -448,16 +446,14 @@ def catalogue_with_log_roster(catalogue: Catalogue, events: list[dict[str, Any]]
 def load_database_agenda() -> tuple[list[Any], dict[str, str]]:
     """Open appointments and their call ids, or ``([], {})`` if unavailable.
 
-    Late import and broad catch for the same reason ``live.py`` reads
-    ``wall_cancellations`` that way: a missing or unwritable store must never
-    blank the diary.
+    Late import and broad catch for the same reason the wall API reads
+    ``wall_cancellations`` that way: an unreachable store must never blank
+    the diary.
     """
     try:
         from database import db
-        from vortex.settings import get_settings
 
-        with db.connection(get_settings().product_db_path) as conn:
-            return db.list_appointments(conn), db.call_id_by_appointment(conn)
+        return db.list_appointments(), db.call_id_by_appointment()
     except Exception:
         return [], {}
 
@@ -465,14 +461,13 @@ def load_database_agenda() -> tuple[list[Any], dict[str, str]]:
 def load_agenda_bookings(catalogue: Catalogue) -> dict[BookingKey, Booking]:
     """Taken slots for the Clinic View.
 
-    The product database first: ``database/scripts/backfill_from_logs.py`` has
-    already turned every landed BOOK/CANCEL/RESCHEDULE in the call log into
-    rows there, so it holds the real clinic's own visits with the real
-    providers and sites on them.
+    ``public.appointments`` first: the line writes a row there as each
+    BOOK/CANCEL/RESCHEDULE lands, so it holds the real clinic's own visits
+    with the real providers and sites on them.
 
-    A database with no appointments — a fresh clone that has never run the
-    backfill — falls back to the synthetic pack below, so the board shows a
-    populated diary either way rather than an empty grid.
+    An empty table — a fresh clone, or no store configured at all — falls
+    back to the synthetic pack below, so the board shows a populated diary
+    either way rather than an empty grid.
     """
     rows, call_ids = load_database_agenda()
     if rows:
@@ -825,29 +820,37 @@ def _synthetic_log_files() -> list[Path]:
     return sorted(p for p in logs_dir.glob("*.jsonl") if p.name != "all.jsonl")
 
 
+def _read_jsonl(path: Path) -> list[dict[str, Any]]:
+    """A CallLog-shaped fixture file. Only ``synthetic-data/`` is read this
+    way — real call events live in Postgres, never on disk."""
+    events: list[dict[str, Any]] = []
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        try:
+            events.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return events
+
+
 def load_source_events(limit: int = 5000) -> list[dict[str, Any]]:
     """Log events to fill the calendar from, oldest first.
 
     Default: every per-problem log in ``synthetic-data/logs/``. Set
-    ``VORTEX_CALENDAR_LOG`` to a single JSONL file (the live ``logs/calls.jsonl``)
-    to read that instead, and the same grid fills from it as calls land.
+    ``VORTEX_CALENDAR_LOG`` to a single CallLog-shaped JSONL fixture to read
+    that instead, and the same grid fills from it.
 
     The sort is by timestamp and stable, so the events of one call keep the
     order they were written even when the whole pack shares one instant.
     """
     override = os.environ.get("VORTEX_CALENDAR_LOG")
-    if override:
-        return read_recent(Path(override), limit=limit)
+    paths = [Path(override)] if override else _synthetic_log_files()
     events: list[dict[str, Any]] = []
-    for path in _synthetic_log_files():
-        for raw in path.read_text(encoding="utf-8").splitlines():
-            line = raw.strip()
-            if not line:
-                continue
-            try:
-                events.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
+    for path in paths:
+        if path.exists():
+            events.extend(_read_jsonl(path))
     events.sort(key=lambda event: str(event.get("ts") or ""))
     return events[-limit:] if limit else events
 

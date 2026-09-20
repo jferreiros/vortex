@@ -1,14 +1,11 @@
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 from vortex.observability.calllog import CallLog
 from vortex.observability.view import build_call, build_calls
 
 
-def test_build_call_pairs_tools_and_booking(tmp_path: Path) -> None:
-    log = CallLog("CA-1", tmp_path / "calls.jsonl")
+def test_build_call_pairs_tools_and_booking() -> None:
+    log = CallLog("CA-1")
     log.event("call.started", from_number="+34600", voice="stub", clinic="fake")
     log.user_turn("Quiero una revisión")
     log.tool_called("find_patient", {"name": "Marta"})
@@ -45,10 +42,7 @@ def test_build_call_pairs_tools_and_booking(tmp_path: Path) -> None:
     log.event("call.ended", reason="hangup")
     log.summary(reason="hangup")
 
-    events = []
-    for raw in (tmp_path / "calls.jsonl").read_text(encoding="utf-8").splitlines():
-        events.append(json.loads(raw))
-    card = build_call("CA-1", events)
+    card = build_call("CA-1", log.events)
     assert card.live is False
     assert card.status == "booked"
     assert card.patient_name == "Marta Ruiz López"

@@ -37,9 +37,7 @@ async def main() -> int:
     settings = get_settings()
     base = (args.base_url or settings.public_base_url).rstrip("/")
     ws_url = public_ws_url(base or "https://example.invalid", settings.ws_path)
-    preview = twiml_connect_stream(
-        ws_url, {"call_id": "CA_preview", "from_number": args.to}
-    )
+    preview = twiml_connect_stream(ws_url, {"call_id": "CA_preview", "from_number": args.to})
 
     print("=== outbound call ===")
     print(f"to: {args.to}")
@@ -69,9 +67,7 @@ async def main() -> int:
     twiml_url = f"{base}/voice/outbound"
     status_url = f"{base}/voice/status"
     try:
-        result = await client.place(
-            to=args.to, twiml_url=twiml_url, status_callback_url=status_url
-        )
+        result = await client.place(to=args.to, twiml_url=twiml_url, status_callback_url=status_url)
         print(f"=== place: {result.status} ===")
         print(f"  detail={result.detail!r} sid={result.sid!r}")
         return 0 if result.status == "queued" else 1

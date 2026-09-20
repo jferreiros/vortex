@@ -42,7 +42,7 @@ def ctx(tmp_path: Path) -> ToolContext:
         now=NOW,
         from_number="+34677111222",  # Elena's own line
         clinic=FakeClinicClient(),
-        log=CallLog("CA-second-policy", tmp_path / "calls.jsonl"),
+        log=CallLog("CA-second-policy"),
         submitter=DryRunSubmitClient(),
     )
 
@@ -125,7 +125,7 @@ async def test_control_case_the_own_plan_already_works(ctx: ToolContext) -> None
         now=NOW,
         from_number="+34612345678",
         clinic=FakeClinicClient(),
-        log=CallLog("CA-control", ctx.log.path.parent / "control.jsonl"),
+        log=CallLog("CA-control"),
         submitter=DryRunSubmitClient(),
     )
     verdict = await check_eligibility(

@@ -71,9 +71,6 @@ if mode in ("evals", "bench"):
     payload = json.loads(subprocess.check_output(args, cwd=root))
 elif mode == "calls":
     args = ["uv", "run", "python", "-m", "vortex.observability.discord_calls", "--json"]
-    log_path = os.environ.get("TEXT") or ""
-    if log_path:
-        args.extend(["--log", log_path])
     payload = json.loads(subprocess.check_output(args, cwd=root))
 elif mode == "json":
     payload = json.loads(sys.stdin.read())

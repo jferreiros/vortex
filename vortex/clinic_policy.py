@@ -1,10 +1,9 @@
 """Clinic-console rules the line actually obeys.
 
-The wall's Call settings page writes ``clinic_settings`` in the product
-database. Identity and diary read the same row so a saved knob is not
-theatre. Defaults match today's behaviour (one identifying field, next
-calendar day) when the table is empty or unreadable — a missing store must
-not change a scored call.
+The wall's Call settings page writes ``public.clinic_settings``. Identity and
+diary read the same row so a saved knob is not theatre. Defaults match today's
+behaviour (one identifying field, next calendar day) when the table is empty
+or unreachable — a missing store must not change a scored call.
 """
 
 from __future__ import annotations
@@ -32,19 +31,18 @@ def _load() -> dict[str, Any]:
     from vortex.settings import get_settings
 
     try:
-        path = str(get_settings().product_db_path)
+        store = get_settings().store
     except Exception:
-        path = ""
-    if _cache is not None and now - _cache[0] < _CACHE_TTL_S and _cache[1] == path:
+        store = "none"
+    if _cache is not None and now - _cache[0] < _CACHE_TTL_S and _cache[1] == store:
         return _cache[2]
     try:
         from database import db
 
-        with db.connection(get_settings().product_db_path) as conn:
-            values = db.get_clinic_settings(conn)
+        values = db.get_clinic_settings()
     except Exception:
         values = dict(DEFAULTS)
-    _cache = (now, path, values)
+    _cache = (now, store, values)
     return values
 
 

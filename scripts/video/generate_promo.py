@@ -57,7 +57,7 @@ CLIPS = [
             "Small sound-wave arcs pulse beside Vorty's headset ear as "
             "animated caption text types out letter by letter beside the "
             "caller silhouette: \"Hi, this is Maria Lopez, I'd like to book "
-            "an appointment with dermatology.\" A thin folder icon flips "
+            'an appointment with dermatology." A thin folder icon flips '
             "open behind Vorty for a beat as Vorty reaches one arm forward "
             "and down in a searching gesture, with a soft page-flip visual "
             "accent. Vorty's own speech bubble then appears asking for the "

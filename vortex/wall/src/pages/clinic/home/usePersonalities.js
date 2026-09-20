@@ -7,16 +7,15 @@ const FALLBACK_STYLES = [
 ];
 const FALLBACK_LOOKS = ["none", "headset", "beanie", "baseball-cap", "sunglasses", "halo"];
 
-// The personas live on the line (personalities.db next to its calls log); the
-// board proxies them under /api/wall/personalities. When the line is down the
-// proxy answers with the seed personas and `offline: true` — the rail still
-// renders, but writes are dead, because they would not land.
+// The personas are rows in public.personalities. The board reads and writes
+// that table itself under /api/wall/personalities — no hop to the line — so a
+// save that returns 200 has landed. The fallbacks below only cover the first
+// paint, before the catalogue arrives.
 export function usePersonalities() {
   const [items, setItems] = useState([]);
   const [active, setActive] = useState(null);
   const [styles, setStyles] = useState(FALLBACK_STYLES);
   const [looks, setLooks] = useState(FALLBACK_LOOKS);
-  const [offline, setOffline] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -30,7 +29,6 @@ export function usePersonalities() {
       setActive(json.active ?? null);
       if (json.styles?.length) setStyles(json.styles);
       if (json.looks?.length) setLooks(json.looks);
-      setOffline(Boolean(json.offline));
       setError(null);
     } catch (e) {
       setError(e.message || "no se pudo cargar");
@@ -92,7 +90,7 @@ export function usePersonalities() {
     }
   }, []);
 
-  return { items, active, styles, looks, offline, loading, error, reload, activate, save, create };
+  return { items, active, styles, looks, loading, error, reload, activate, save, create };
 }
 
 export function lookOf(person) {
