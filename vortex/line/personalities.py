@@ -151,6 +151,22 @@ def catalog() -> dict[str, Any]:
     }
 
 
+def listing(settings: Any = None) -> dict[str, Any]:
+    """The picker's whole payload: the rail, who is on the phone, the catalogue.
+
+    Both front doors answer with this exact dict — the line's
+    ``GET /personalities`` and the board's ``GET /api/wall/personalities``.
+    They read the same table, so the shape is defined once here rather than
+    written out twice and drifting.
+    """
+    people = list_all(settings)
+    return {
+        "items": [person.to_dict() for person in people],
+        "active": next((person.slug for person in people if person.active), None),
+        **catalog(),
+    }
+
+
 _SLUG = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 #: A portrait is a bare filename inside ``vortex/wall/media/personalities``. No
 #: separator, no leading dot: the route that serves the art joins this to the

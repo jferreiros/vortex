@@ -6,6 +6,8 @@ pure function over a VoiceConfig.
 
 from __future__ import annotations
 
+from nicegui.testing import User
+
 from vortex.line import voice_config
 
 
@@ -95,3 +97,30 @@ def test_style_directive() -> None:
     assert "formal" in voice_config.style_directive(formal)
     warm = voice_config.VoiceConfig(friendliness=90)
     assert "warm" in voice_config.style_directive(warm)
+
+
+# --- the board's own handlers -------------------------------------------------
+# ``public.voiceconfig`` is one row both the line and the board read, so the
+# board answers the card itself rather than asking the line for it.
+
+
+async def test_the_board_serves_the_stored_card(user: User, fake_store) -> None:
+    voice_config.save(None, {"voice": "male", "tone": 70})
+
+    resp = await user.http_client.get("/api/wall/voice-config")
+    assert resp.status_code == 200
+    assert resp.json() == {"voice": "male", "tone": 70, "friendliness": 50, "speechRate": 50}
+
+
+async def test_the_board_saves_the_card(user: User, fake_store) -> None:
+    resp = await user.http_client.put("/api/wall/voice-config", json={"speechRate": 20})
+    assert resp.status_code == 200
+    assert resp.json()["speechRate"] == 20
+    assert voice_config.load(None).speech_rate == 20
+
+
+async def test_the_board_answers_503_with_no_store(user: User, offline_settings) -> None:
+    """The card must not report a save that went nowhere."""
+    resp = await user.http_client.put("/api/wall/voice-config", json={"voice": "male"})
+    assert resp.status_code == 503
+    assert resp.json() == {"error": "store_unavailable"}

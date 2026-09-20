@@ -1,4 +1,4 @@
-.PHONY: install run smoke test call try-api tunnel lint fmt board design-sync didactica rehearse confirmations evals evals-logic evals-conversation evals-voice evals-replay evals-report evals-accept evals-selftest evals-discord logs-discord langfuse-check supabase-migrate supabase-ping supabase-count
+.PHONY: install run smoke test call try-api tunnel lint fmt board design-sync didactica rehearse confirmations evals evals-logic evals-conversation evals-voice evals-replay evals-report evals-accept evals-selftest evals-discord logs-discord langfuse-check supabase-migrate supabase-ping supabase-count seed-demo
 
 PORT ?= 7860
 BOARD_PORT ?= 8080
@@ -33,6 +33,9 @@ supabase-ping:    ## check SUPABASE_URL + service-role can reach call_events
 
 supabase-count:   ## print remote row counts for every hosted table
 	uv run python scripts/supabase_logs.py count
+
+seed-demo:        ## write the scripted demo calls into call_events; ARGS=--dry-run
+	uv run python scripts/seed_demo_calls.py $(ARGS)
 
 try-api:
 	uv run python scripts/api/try_api.py

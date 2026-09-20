@@ -1,125 +1,141 @@
 """``/api/wall`` voice card and personality picker.
 
-Both of these are proxied to the line rather than read here. The line is the
-process that speaks: it owns the TTS credentials and the voice stack, and it
-is the one that has to pick a change up on its next call. The board asks it
-for the current card and hands writes straight through, so there is exactly
-one reader of that state and no second copy to disagree.
+The board reads and writes these itself. Both the voice card
+(``public.voiceconfig``) and the personas (``public.personalities``) are rows
+in the same Postgres the line uses, so there is nothing to proxy: an HTTP hop
+to ``:7860`` would only add a second way for the same table to be unreachable.
+A board that is up can always answer, and a line that is down changes nothing
+about what the clinic sees or saves.
 
-A line that does not answer must not blank the page: the GETs fall back to
-the seed defaults — personalities flagged ``offline`` so the page can say so
-and grey out its buttons instead of pretending a write will land — and the
-writes answer 502.
+Writes raise ``RuntimeError`` when Supabase is not configured — the card and
+the rail must never report a save that went nowhere — and that becomes a 503
+``store_unavailable``, the same shape ``vortex/api/settings.py`` uses.
 
-(These handlers moved here from ``vortex/observability/live.py`` unchanged;
-the wire shape is exactly what the SPA already reads.)
+The preview MP3 is synthesised here too: it is the same
+``voice_config.synthesize_preview`` the line calls, off the event loop
+because the TTS client blocks.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
-import httpx
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response
+from pydantic import ValidationError
 
 from vortex.line import personalities, voice_config
-from vortex.observability import callfeed
+from vortex.settings import get_settings
 
 log = logging.getLogger("vortex.api")
 router = APIRouter()
 
+STORE_DOWN = {"error": "store_unavailable"}
+
+
+def _first_error(exc: ValidationError) -> str:
+    """The first complaint, as a sentence: the form shows one line, and the
+    validators already say which field and why. Same wording the line's own
+    routes answer with, so the rail reads one ``error`` field either way."""
+    first = exc.errors()[0]
+    field = ".".join(str(part) for part in first["loc"]) or "payload"
+    return f"{field}: {first['msg'].removeprefix('Value error, ')}"
+
+
+def _no_such_personality(slug: str) -> JSONResponse:
+    return JSONResponse({"error": f"no personality named {slug}"}, status_code=404)
+
+
+# ---- "Voz del agente" -------------------------------------------------------
+
 
 @router.get("/voice-config")
-async def wall_voice_config() -> JSONResponse:
-    try:
-        r = httpx.get(f"{callfeed.LINE_URL}/voice-config", timeout=callfeed.LINE_HEALTH_TIMEOUT_S)
-        if r.status_code == 200:
-            return JSONResponse(r.json())
-    except Exception as exc:
-        log.warning("voice-config fetch failed: %s", exc)
-    return JSONResponse(voice_config.DEFAULTS)
+def wall_voice_config() -> JSONResponse:
+    """The stored card, or the defaults. Never fails: a call must sound the
+    same whether or not the store answered."""
+    return JSONResponse(voice_config.load(get_settings()).to_dict())
 
 
 @router.put("/voice-config")
 async def wall_voice_config_put(request: Request) -> JSONResponse:
     payload = await request.json()
     try:
-        r = httpx.put(f"{callfeed.LINE_URL}/voice-config", json=payload, timeout=5)
-        return JSONResponse(r.json(), status_code=r.status_code)
-    except Exception as exc:
-        return JSONResponse({"error": f"line unreachable: {exc}"}, status_code=502)
+        return JSONResponse(voice_config.save(get_settings(), payload).to_dict())
+    except RuntimeError:
+        log.warning("voice config not saved: no store configured")
+        return JSONResponse(STORE_DOWN, status_code=503)
 
 
 @router.post("/voice-preview")
 async def wall_voice_preview(request: Request) -> Response:
-    """The Try button: streams back the line's MP3 of the greeting."""
+    """The Try button: one MP3 of the greeting with the card's current
+    sliders, saved or not."""
     payload = await request.json()
+    settings = get_settings()
+    cfg = voice_config.preview_config(settings, payload)
     try:
-        r = httpx.post(f"{callfeed.LINE_URL}/voice-preview", json=payload, timeout=20)
+        audio = await asyncio.to_thread(voice_config.synthesize_preview, settings, cfg)
     except Exception as exc:
-        return JSONResponse({"error": f"line unreachable: {exc}"}, status_code=502)
-    if r.status_code == 200:
-        return Response(content=r.content, media_type="audio/mpeg")
-    try:
-        return JSONResponse(r.json(), status_code=r.status_code)
-    except Exception:
-        return JSONResponse({"error": r.text}, status_code=r.status_code)
+        log.warning("voice preview unavailable: %s", exc)
+        return JSONResponse({"error": "voice_preview_unavailable"}, status_code=503)
+    return Response(content=audio, media_type="audio/mpeg")
+
+
+# ---- "Personalidades" -------------------------------------------------------
 
 
 @router.get("/personalities")
-async def wall_personalities() -> JSONResponse:
-    try:
-        r = httpx.get(f"{callfeed.LINE_URL}/personalities", timeout=callfeed.LINE_HEALTH_TIMEOUT_S)
-        if r.status_code == 200:
-            return JSONResponse(r.json())
-    except Exception as exc:
-        log.warning("personalities fetch failed: %s", exc)
-    return JSONResponse(
-        {
-            "items": personalities.DEFAULTS,
-            "active": personalities.DEFAULTS[0]["slug"],
-            "offline": True,
-            **personalities.catalog(),
-        }
-    )
+def wall_personalities() -> JSONResponse:
+    """The rail: every persona, who is on the phone, and the picker's
+    catalogue. Same payload as the line's ``GET /personalities`` — one
+    builder, one table."""
+    return JSONResponse(personalities.listing(get_settings()))
 
 
 @router.post("/personalities")
 async def wall_personality_create(request: Request) -> JSONResponse:
     payload = await request.json()
     try:
-        r = httpx.post(f"{callfeed.LINE_URL}/personalities", json=payload, timeout=5)
-        return JSONResponse(r.json(), status_code=r.status_code)
-    except Exception as exc:
-        return JSONResponse({"error": f"line unreachable: {exc}"}, status_code=502)
+        return JSONResponse(
+            personalities.create(get_settings(), payload).to_dict(), status_code=201
+        )
+    except RuntimeError:
+        return JSONResponse(STORE_DOWN, status_code=503)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=422)
+    except ValidationError as exc:
+        return JSONResponse({"error": _first_error(exc)}, status_code=422)
 
 
 @router.get("/personalities/{slug}")
-async def wall_personality(slug: str) -> JSONResponse:
-    try:
-        r = httpx.get(
-            f"{callfeed.LINE_URL}/personalities/{slug}", timeout=callfeed.LINE_HEALTH_TIMEOUT_S
-        )
-        return JSONResponse(r.json(), status_code=r.status_code)
-    except Exception as exc:
-        return JSONResponse({"error": f"line unreachable: {exc}"}, status_code=502)
+def wall_personality(slug: str) -> JSONResponse:
+    person = personalities.get(get_settings(), slug)
+    if person is None:
+        return _no_such_personality(slug)
+    return JSONResponse(person.to_dict())
 
 
 @router.put("/personalities/{slug}")
 async def wall_personality_put(slug: str, request: Request) -> JSONResponse:
     payload = await request.json()
     try:
-        r = httpx.put(f"{callfeed.LINE_URL}/personalities/{slug}", json=payload, timeout=5)
-        return JSONResponse(r.json(), status_code=r.status_code)
-    except Exception as exc:
-        return JSONResponse({"error": f"line unreachable: {exc}"}, status_code=502)
+        return JSONResponse(personalities.update(get_settings(), slug, payload).to_dict())
+    except KeyError:
+        return _no_such_personality(slug)
+    except RuntimeError:
+        return JSONResponse(STORE_DOWN, status_code=503)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=422)
+    except ValidationError as exc:
+        return JSONResponse({"error": _first_error(exc)}, status_code=422)
 
 
 @router.post("/personalities/{slug}/activate")
-async def wall_personality_activate(slug: str) -> JSONResponse:
+def wall_personality_activate(slug: str) -> JSONResponse:
     try:
-        r = httpx.post(f"{callfeed.LINE_URL}/personalities/{slug}/activate", timeout=5)
-        return JSONResponse(r.json(), status_code=r.status_code)
-    except Exception as exc:
-        return JSONResponse({"error": f"line unreachable: {exc}"}, status_code=502)
+        return JSONResponse(personalities.activate(get_settings(), slug).to_dict())
+    except KeyError:
+        return _no_such_personality(slug)
+    except RuntimeError:
+        return JSONResponse(STORE_DOWN, status_code=503)

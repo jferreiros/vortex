@@ -745,6 +745,207 @@ async def write_cancellation_demo(path: Path, *, delay_s: float = 0.0) -> list[s
     return await write_cancellation_pack(path, delay_s=delay_s)
 
 
+# ---------------------------------------------------------------------------
+# The two outcomes the packs above never produce
+# ---------------------------------------------------------------------------
+# ``write_scripted_call`` covers book and no-action, ``write_cancellation_pack``
+# covers cancel and the booking that relocates it. A wall that only ever shows
+# those four reads as if the agent cannot move or hand over a call, so the
+# scripted demo set (``scripts/seed_demo_calls.py``) adds one of each.
+
+
+async def write_reschedule_call(
+    call_id: str,
+    *,
+    name: str = "Bea Torres Nogueira",
+    patient_id: str = "P00081",
+    appointment_id: str = "APT-910",
+    provider_name: str = "Dra. Ortiz",
+    provider_id: str = "PR01",
+    slot: datetime | None = None,
+    delay_s: float = 0.0,
+) -> str:
+    """A caller moving an appointment: identify, list, prepare, submit."""
+    start = slot or (datetime.now(MADRID) + timedelta(days=3)).replace(
+        hour=12, minute=30, second=0, microsecond=0
+    )
+    log = CallLog(call_id)
+    log.event(
+        "call.started",
+        stream_sid=f"MZ-{call_id}",
+        from_number="+34611000011",
+        voice="demo",
+        clinic="fake",
+    )
+    await _turns(
+        log,
+        [
+            ("assistant", "Clínica Arenal, buenos días. ¿En qué puedo ayudarle?"),
+            ("user", f"Tengo cita con {provider_name} y necesito cambiarla de día."),
+            ("assistant", "Claro. ¿Me confirma su nombre completo?"),
+            ("user", name),
+        ],
+        delay_s,
+    )
+    given, *rest = name.split()
+    log.tool_called("find_patient", {"name": name})
+    log.tool_returned(
+        "find_patient",
+        {
+            "status": "found",
+            "patient": {
+                "patient_id": patient_id,
+                "given_name": given,
+                "first_surname": rest[0] if rest else "",
+                "second_surname": rest[1] if len(rest) > 1 else "",
+                "insurer": "sanitas",
+            },
+        },
+        37.0,
+    )
+    log.tool_called("list_appointments", {"patient_id": patient_id, "when": "upcoming"})
+    log.tool_returned(
+        "list_appointments",
+        {
+            "appointments": [
+                {
+                    "appointment_id": appointment_id,
+                    "patient_id": patient_id,
+                    "provider_id": provider_id,
+                    "location_id": "centro",
+                    "appointment_type_id": "review",
+                    "start": start - timedelta(days=1),
+                    "duration_minutes": 15,
+                    "status": "scheduled",
+                    "provider": {"name": provider_name},
+                }
+            ]
+        },
+        43.0,
+    )
+    log.tool_called(
+        "find_slots",
+        {
+            "patient_id": patient_id,
+            "provider_id": provider_id,
+            "date_from": start.date().isoformat(),
+            "date_to": start.date().isoformat(),
+        },
+    )
+    log.tool_returned(
+        "find_slots",
+        {
+            "slots": [
+                {
+                    "start": start.isoformat(),
+                    "provider_id": provider_id,
+                    "location_id": "centro",
+                    "appointment_type_id": "review",
+                    "provider": {"name": provider_name},
+                }
+            ],
+            "blocked": [],
+            "appointment_type": {"appointment_type_id": "review", "name": "Review"},
+        },
+        51.0,
+    )
+    await _turns(
+        log,
+        [
+            (
+                "assistant",
+                f"Le puedo pasar la cita al {start.strftime('%d/%m')} "
+                f"a las {start.strftime('%H:%M')} con {provider_name}. ¿Se la cambio?",
+            ),
+            ("user", "Sí, mucho mejor así."),
+            ("assistant", "Cambiada. Le llegará el recordatorio. Hasta luego."),
+        ],
+        delay_s,
+    )
+    action = {
+        "kind": "reschedule",
+        "appointment_id": appointment_id,
+        "provider_id": provider_id,
+        "location_id": "centro",
+        "appointment_type_id": "review",
+        "slot": start.isoformat(),
+    }
+    log.tool_called("prepare_reschedule", {"appointment_id": appointment_id})
+    log.tool_returned("prepare_reschedule", {"action": action, "rejection": None}, 8.0)
+    log.action_submitted(
+        "/api/v1/submit/reschedule",
+        {"call_id": call_id, **{k: v for k, v in action.items() if k != "kind"}},
+        {"status": "dry_run", "http_status": None, "detail": "demo"},
+    )
+    log.event("call.usage", **BOOK_USAGE)
+    log.event("call.ended", reason="hangup", media_frames_in=0, media_frames_out=0)
+    log.summary(reason="hangup")
+    return call_id
+
+
+async def write_escalate_call(
+    call_id: str,
+    *,
+    name: str = "Julián Peña Abad",
+    patient_id: str = "P00082",
+    reason: str = "medical_emergency",
+    delay_s: float = 0.0,
+) -> str:
+    """A caller the agent hands to a person — the escalate tail of the wall."""
+    log = CallLog(call_id)
+    log.event(
+        "call.started",
+        stream_sid=f"MZ-{call_id}",
+        from_number="+34611000012",
+        voice="demo",
+        clinic="fake",
+    )
+    await _turns(
+        log,
+        [
+            ("assistant", "Clínica Arenal, buenos días. ¿En qué puedo ayudarle?"),
+            ("user", "Mi padre tiene un dolor fuerte en el pecho desde hace media hora."),
+            (
+                "assistant",
+                "Eso no puede esperar a una cita. Cuelgue y llame al 112 ahora mismo; "
+                "le paso también con el mostrador.",
+            ),
+        ],
+        delay_s,
+    )
+    given, *rest = name.split()
+    log.tool_called("triage", {"words": "dolor fuerte en el pecho"})
+    log.tool_returned(
+        "triage",
+        {"kind": "escalate", "reason": reason, "patient": {"patient_id": patient_id}},
+        11.0,
+    )
+    log.tool_called("find_patient", {"name": name})
+    log.tool_returned(
+        "find_patient",
+        {
+            "status": "found",
+            "patient": {
+                "patient_id": patient_id,
+                "given_name": given,
+                "first_surname": rest[0] if rest else "",
+                "second_surname": rest[1] if len(rest) > 1 else "",
+                "insurer": "sanitas",
+            },
+        },
+        35.0,
+    )
+    log.action_submitted(
+        "/api/v1/submit/escalate",
+        {"call_id": call_id, "reason": reason},
+        {"status": "dry_run", "http_status": None, "detail": "demo"},
+    )
+    log.event("call.usage", **REFUSE_USAGE)
+    log.event("call.ended", reason="hangup", media_frames_in=0, media_frames_out=0)
+    log.summary(reason="hangup")
+    return call_id
+
+
 def load_cancellation_pack(pack_path: Path = CANCELLATION_PACK) -> list[list[dict]]:
     """Read the pack file and group its events into whole calls, file order."""
     grouped: dict[str, list[dict]] = {}

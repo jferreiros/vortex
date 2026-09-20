@@ -202,12 +202,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/personalities")
     async def get_personalities() -> dict[str, object]:
-        people = personalities.list_all(settings)
-        return {
-            "items": [person.to_dict() for person in people],
-            "active": next((p.slug for p in people if p.active), None),
-            **personalities.catalog(),
-        }
+        return personalities.listing(settings)
 
     @app.post("/personalities")
     async def post_personality(
