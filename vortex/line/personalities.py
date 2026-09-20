@@ -20,12 +20,10 @@ persona, which ``active()`` already answers from the seeds.
 
 The call reads the active persona once per socket (``pipecat_voice``): its name,
 role and tone become the prompt's PERSONA block, its greeting opens the line,
-and its slug picks the ElevenLabs voice and model the line speaks with, from
-``conversation.language.PERSONA_VOICES``.
-
-``voices`` is the one stored field the call ignores — those are leftover Google
-Chirp names, and a voice id is a tuning decision that belongs in the map, not
-in a form field that can hold a string ElevenLabs has never heard of.
+and the line chooses that persona's own provider voice from two per-persona
+maps: ``elevenlabs_voices`` for stock launched calls and ``voices`` for the
+Google HTTP adapter fallback. The two namespaces stay separate so no provider
+receives the other's name by mistake.
 """
 
 from __future__ import annotations
@@ -49,13 +47,62 @@ LANGUAGES: tuple[str, ...] = ("en", "es", "ca", "gl", "eu")
 #: turn, so a persona's tone has to stay a fragment, not a second prompt.
 TONE_MAX_CHARS = 400
 
-#: A persona carries no voice id in the store: which ElevenLabs voice each
-#: receptionist speaks with is ``conversation.language.PERSONA_VOICES``, a
-#: fixed map in code the team tunes together, not a field a form can set to a
-#: string ElevenLabs has never heard of. These two stay empty so the stored
-#: row says "ask the map": ``conversation.language.persona_voice`` is the ask.
-VOICE_ES = ""
-VOICE_EN = ""
+#: Provider voice identity is per persona, never one global voice for every
+#: agent. Keep the two namespaces explicit:
+#: - ElevenLabs ids (stock launched calls when ELEVENLABS_API_KEY is present)
+#: - Google Chirp names (the local HTTP adapter fallback)
+#: VOICE_ES / VOICE_EN remain the fallbacks for callers that create a persona
+#: before the picker has provider-specific names for it.
+ELEVENLABS_PERSONA_VOICES: dict[str, dict[str, str]] = {
+    "lucia": {
+        "es": "eZxqQzb5CuYo3Kl6EXfZ",
+        "en": "eZxqQzb5CuYo3Kl6EXfZ",
+        "ca": "eZxqQzb5CuYo3Kl6EXfZ",
+        "gl": "eZxqQzb5CuYo3Kl6EXfZ",
+        "eu": "eZxqQzb5CuYo3Kl6EXfZ",
+    },
+    "mateo": {
+        "es": "JngPf0lmRkKhY3qSJz0f",
+        "en": "JngPf0lmRkKhY3qSJz0f",
+        "ca": "JngPf0lmRkKhY3qSJz0f",
+        "gl": "JngPf0lmRkKhY3qSJz0f",
+        "eu": "JngPf0lmRkKhY3qSJz0f",
+    },
+    "carla": {
+        "es": "eZxqQzb5CuYo3Kl6EXfZ",
+        "en": "eZxqQzb5CuYo3Kl6EXfZ",
+        "ca": "eZxqQzb5CuYo3Kl6EXfZ",
+        "gl": "eZxqQzb5CuYo3Kl6EXfZ",
+        "eu": "eZxqQzb5CuYo3Kl6EXfZ",
+    },
+}
+
+GOOGLE_PERSONA_VOICES: dict[str, dict[str, str]] = {
+    "lucia": {
+        "es": "es-ES-Chirp3-HD-Kore",
+        "en": "en-US-Chirp3-HD-Kore",
+        "ca": "es-ES-Chirp3-HD-Kore",
+        "gl": "es-ES-Chirp3-HD-Kore",
+        "eu": "es-ES-Chirp3-HD-Kore",
+    },
+    "mateo": {
+        "es": "es-ES-Chirp3-HD-Charon",
+        "en": "en-US-Chirp3-HD-Charon",
+        "ca": "es-ES-Chirp3-HD-Charon",
+        "gl": "es-ES-Chirp3-HD-Charon",
+        "eu": "es-ES-Chirp3-HD-Charon",
+    },
+    "carla": {
+        "es": "es-ES-Chirp3-HD-Leda",
+        "en": "en-US-Chirp3-HD-Leda",
+        "ca": "es-ES-Chirp3-HD-Leda",
+        "gl": "es-ES-Chirp3-HD-Leda",
+        "eu": "es-ES-Chirp3-HD-Leda",
+    },
+}
+
+VOICE_ES = ELEVENLABS_PERSONA_VOICES["lucia"]["es"]
+VOICE_EN = ELEVENLABS_PERSONA_VOICES["lucia"]["en"]
 
 #: Vorty heads from ``vortex/wall/media``: the bare face plus one accessory
 #: overlay. ``none`` is the face without a hat. The picker stores the stem
@@ -165,10 +212,6 @@ def listing(settings: Any = None) -> dict[str, Any]:
     ``GET /personalities`` and the board's ``GET /api/wall/personalities``.
     They read the same table, so the shape is defined once here rather than
     written out twice and drifting.
-
-    No voice id here: the rail is a picker of faces. Which ElevenLabs voice
-    the active one ends up speaking with is ``voice_config.current_voice``,
-    served at ``/voice-current``.
     """
     people = list_all(settings)
     return {
@@ -192,6 +235,7 @@ _COLUMNS = (
     "tone",
     "greetings_json",
     "voices_json",
+    "elevenlabs_voices_json",
     "avatar",
     "sort_order",
     "active",
@@ -217,6 +261,7 @@ class PersonalityDraft(BaseModel):
     tone: str
     greetings: dict[str, str] = Field(default_factory=dict)
     voices: dict[str, str] = Field(default_factory=dict)
+    elevenlabs_voices: dict[str, str] = Field(default_factory=dict)
     avatar: str
     sort_order: int = 0
 
@@ -241,7 +286,7 @@ class PersonalityDraft(BaseModel):
             )
         return text
 
-    @field_validator("greetings", "voices")
+    @field_validator("greetings", "voices", "elevenlabs_voices")
     @classmethod
     def _known_languages(cls, value: dict[str, str]) -> dict[str, str]:
         unknown = sorted(set(value) - set(LANGUAGES))
@@ -289,7 +334,8 @@ SEEDS: tuple[Personality, ...] = (
         name="Lucía",
         **style_fields("warm"),
         greetings=greetings_for("Lucía"),
-        voices={"es": VOICE_ES, "en": VOICE_EN},
+        voices=GOOGLE_PERSONA_VOICES["lucia"],
+        elevenlabs_voices=ELEVENLABS_PERSONA_VOICES["lucia"],
         avatar="headset.svg",
         sort_order=0,
     ),
@@ -298,7 +344,8 @@ SEEDS: tuple[Personality, ...] = (
         name="Mateo",
         **style_fields("brisk"),
         greetings=greetings_for("Mateo"),
-        voices={"es": VOICE_ES, "en": VOICE_EN},
+        voices=GOOGLE_PERSONA_VOICES["mateo"],
+        elevenlabs_voices=ELEVENLABS_PERSONA_VOICES["mateo"],
         avatar="baseball-cap.svg",
         sort_order=1,
     ),
@@ -307,7 +354,8 @@ SEEDS: tuple[Personality, ...] = (
         name="Carla",
         **style_fields("calm"),
         greetings=greetings_for("Carla"),
-        voices={"es": VOICE_ES, "en": VOICE_EN},
+        voices=GOOGLE_PERSONA_VOICES["carla"],
+        elevenlabs_voices=ELEVENLABS_PERSONA_VOICES["carla"],
         avatar="beanie.svg",
         sort_order=2,
     ),
@@ -338,6 +386,7 @@ def _params(person: Personality) -> dict[str, Any]:
         **{key: data[key] for key in _COLUMNS if key in data},
         "greetings_json": json.dumps(data["greetings"], ensure_ascii=False),
         "voices_json": json.dumps(data["voices"], ensure_ascii=False),
+        "elevenlabs_voices_json": json.dumps(data["elevenlabs_voices"], ensure_ascii=False),
         "active": 1 if person.active else 0,
     }
 
@@ -351,6 +400,7 @@ def _from_row(row: dict[str, Any]) -> Personality:
         tone=row["tone"],
         greetings=json.loads(row.get("greetings_json") or "{}"),
         voices=json.loads(row.get("voices_json") or "{}"),
+        elevenlabs_voices=json.loads(row.get("elevenlabs_voices_json") or "{}"),
         avatar=row["avatar"],
         sort_order=row.get("sort_order") or 0,
         active=bool(row.get("active")),
@@ -499,6 +549,7 @@ def create(settings: Any, payload: dict[str, Any] | None) -> Personality:
         **style_fields(style_id),
         greetings=greetings_for(name),
         voices={"es": VOICE_ES, "en": VOICE_EN},
+        elevenlabs_voices={"es": VOICE_ES, "en": VOICE_EN},
         avatar=normalize_look(str(incoming.get("look") or "headset")),
         sort_order=max((person.sort_order for person in people), default=-1) + 1,
         active=False,
