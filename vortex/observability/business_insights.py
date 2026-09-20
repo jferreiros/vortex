@@ -1,7 +1,7 @@
 """Business-facing insights for the Clinic View's Insights page.
 
 Five questions a clinic manager actually asks, all answered from
-``calls.jsonl`` through ``view.build_calls`` — no synthetic numbers, same
+``public.call_events`` through ``view.build_calls`` — no synthetic numbers, same
 rule as ``insights.py`` next to this file (read that one first; ``Bar`` and
 ``mask_phone`` live there and this module follows the same shape):
 
@@ -1119,7 +1119,7 @@ def _cancel_reason_sort_key(item: tuple[str, int]) -> tuple[int, int]:
 #: a hit wins. "me equivoqué" beats "no puedo" — a mistaken booking gets
 #: cancelled however the caller frames the rest of the sentence.
 #:
-#: ``no_longer_needed`` was added by reading every call in ``logs/calls.jsonl``
+#: ``no_longer_needed`` was added by reading every call in ``public.call_events``
 #: that ``classify_cancel_reason`` put in "Otro motivo": "porque al final no
 #: me hace falta" was the only real phrase there, appearing twice, so it
 #: clears the "at least 2 real cases" bar this file's cancellation panel
