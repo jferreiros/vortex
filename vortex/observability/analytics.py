@@ -220,11 +220,7 @@ def _row(card: CallCard) -> CallRow:
         for e in _events_of(card, "voice.reply_latency")
         if isinstance(e.get("total_secs"), int | float)
     ]
-    tools = [
-        (step.name, step.ms, step.status == "failed")
-        for step in card.tools
-        if step.name
-    ]
+    tools = [(step.name, step.ms, step.status == "failed") for step in card.tools if step.name]
     return CallRow(
         card=card,
         started=_stamp(card.started_at),
@@ -635,9 +631,9 @@ def _kpis(
             "key": "share",
             "label": "Habla el agente",
             "value": f"{convo['agent_share_pct']}%",
-            "caption": f"{convo['words_agent']:,} palabras frente a {convo['words_user']:,}".replace(
-                ",", "."
-            ),
+            "caption": (
+                f"{convo['words_agent']:,} palabras frente a {convo['words_user']:,}"
+            ).replace(",", "."),
         },
         {
             "key": "duration",

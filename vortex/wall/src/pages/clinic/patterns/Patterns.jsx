@@ -4,7 +4,6 @@ import SectionHeader from "../../../components/ui/SectionHeader";
 import Card from "../../../components/ui/Card";
 import Button from "../../../components/ui/Button";
 import Placeholder from "../../../components/ui/Placeholder";
-import patternsSeed from "../../../data/patterns.json";
 import shapeTypesData from "../../../data/shapeTypes.json";
 import patternShapes from "../../../data/patternShapes.json";
 import "../pathways/pathways.css";
@@ -12,7 +11,7 @@ import "./patterns.css";
 
 // Reached from the Sidebar via the "Pathways & Patterns" toggle page, or
 // from the Patient Timeline's "Manage suggestions" button. Configures
-// src/data/patterns.json — each pattern is a sequence of shared catalog nodes
+// GET/PUT /api/wall/patterns — each pattern is a sequence of shared catalog nodes
 // (call / message / visit / condition) plus one suggestion node. Same drag-
 // and-drop editor aesthetic as Pathways; patterns have no `when` fields.
 
@@ -99,7 +98,7 @@ function loadStoredState() {
       return parsed;
     }
   } catch {
-    // corrupt or unavailable storage — fall back to the seed
+    // corrupt or unavailable storage — wait for the server's copy
   }
   return null;
 }
@@ -206,8 +205,14 @@ function DescriptionField({ value, onChange, className = "" }) {
   );
 }
 
-// Some condition nodes stand in for a value that's actually configured
-// elsewhere in patterns.json (e.g. "time gap" means "> specialtyRecallDays"),
+//: The recall intervals that came with the last loaded patterns document.
+//: Module-level because `parameterHint` below is called from deep inside the
+//: node renderers, where threading the whole document down would mean a prop
+//: on every shape.
+let RECALL_DAYS = {};
+
+// Some condition nodes stand in for a value that's configured on the
+// document itself (e.g. "time gap" means "> specialtyRecallDays"),
 // not a fixed number. Hovering the shape shows what that resolves to per
 // specialty, so it doesn't read as an arbitrary/unexplained rule.
 function parameterHint(shape) {
@@ -215,7 +220,7 @@ function parameterHint(shape) {
   // fall back to the "recall interval by specialty" hint; parametrized ones
   // carry their own number and unit, shown inline instead.
   if (shape.family === "condition" && shape.type === "time gap" && shape.param !== "gap") {
-    const days = patternsSeed.specialtyRecallDays || {};
+    const days = RECALL_DAYS;
     const values = Object.entries(days)
       .map(([key, value]) => `${key}: ${value} days`)
       .join(" · ");
@@ -595,7 +600,7 @@ function ShapeTray() {
 export default function Patterns() {
   const location = useLocation();
   const [initial] = useState(
-    () => loadStoredState() ?? { patterns: patternsSeed.patterns, selectedId: patternsSeed.patterns[0].id }
+    () => loadStoredState() ?? { patterns: [], selectedId: null }
   );
   const [patterns, setPatterns] = useState(initial.patterns);
   // A pattern detected on a patient's timeline wins the initial selection —
@@ -604,7 +609,10 @@ export default function Patterns() {
   const detectedId = location.state?.patternId;
   const startingId =
     detectedId && initial.patterns.some((p) => p.id === detectedId) ? detectedId : initial.selectedId;
-  const [selectedId, setSelectedId] = useState(startingId ?? patternsSeed.patterns[0].id);
+  const [selectedId, setSelectedId] = useState(startingId ?? null);
+  // asOf and specialtyRecallDays belong to the document, not to any one
+  // pattern; a Save has to put them back or the next load loses them.
+  const [docMeta, setDocMeta] = useState({ asOf: null, specialtyRecallDays: {} });
   const [renamingId, setRenamingId] = useState(null);
   const [saveStatus, setSaveStatus] = useState(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -615,6 +623,11 @@ export default function Patterns() {
       .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then((json) => {
         if (cancelled) return;
+        RECALL_DAYS = json?.specialtyRecallDays || {};
+        setDocMeta({
+          asOf: json?.asOf ?? null,
+          specialtyRecallDays: json?.specialtyRecallDays || {},
+        });
         applyPatternsDoc(json, setPatterns, setSelectedId, detectedId);
       })
       .catch(() => {});
@@ -759,8 +772,8 @@ export default function Patterns() {
     const payload = {
       patterns,
       selectedId,
-      asOf: patternsSeed.asOf,
-      specialtyRecallDays: patternsSeed.specialtyRecallDays,
+      asOf: docMeta.asOf,
+      specialtyRecallDays: docMeta.specialtyRecallDays,
     };
     try {
       const response = await fetch("/api/wall/patterns", {

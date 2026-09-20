@@ -268,6 +268,7 @@ def _fetch_all_paginated() -> list[dict[str, Any]]:
             break
     return events
 
+
 def enqueue(event: dict[str, Any]) -> None:
     """Queue one event for a background upsert. No-op when unconfigured."""
     if not configured():

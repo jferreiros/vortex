@@ -448,16 +448,14 @@ def catalogue_with_log_roster(catalogue: Catalogue, events: list[dict[str, Any]]
 def load_database_agenda() -> tuple[list[Any], dict[str, str]]:
     """Open appointments and their call ids, or ``([], {})`` if unavailable.
 
-    Late import and broad catch for the same reason ``live.py`` reads
-    ``wall_cancellations`` that way: a missing or unwritable store must never
-    blank the diary.
+    Late import and broad catch for the same reason the wall API reads
+    ``wall_cancellations`` that way: an unreachable store must never blank
+    the diary.
     """
     try:
         from database import db
-        from vortex.settings import get_settings
 
-        with db.connection(get_settings().product_db_path) as conn:
-            return db.list_appointments(conn), db.call_id_by_appointment(conn)
+        return db.list_appointments(), db.call_id_by_appointment()
     except Exception:
         return [], {}
 
