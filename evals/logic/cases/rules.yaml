@@ -45,7 +45,8 @@ cases:
   - id: rules.provider.unknown_doctor_not_found
     problem: 3
     tool: find_provider
-    args: {spoken_name: "doctor Vilar"}
+    # doctor_and_site-570e40a3f718: the public roster's doctor nobody has.
+    args: {spoken_name: "doctor Fuentes"}
     expect: {status: not_found, rejection: {reason: provider_not_found}}
 
   - id: rules.provider.alvaro_cid_is_the_physio_with_his_title

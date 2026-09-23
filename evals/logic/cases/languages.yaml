@@ -1,0 +1,78 @@
+# Problem 11, at the tool level: the language a caller asks for narrows
+# find_slots to the providers who speak it. Everyone speaks Spanish; exactly
+# four speak Catalan (PR01, PR08, PR10, PR12), one per specialty that has one.
+# The call connects on Friday 18 September 2026 at 09:00 Europe/Madrid.
+group: languages
+now: "2026-09-18T09:00:00+02:00"
+
+cases:
+  - id: languages.slots.catalan_paediatrics_is_ocana
+    problem: 11
+    tool: find_slots
+    args: {specialty_id: paediatrics, date_from: "2026-09-21", date_to: "2026-09-25", language: ca}
+    expect:
+      slots: {$all: {provider_id: PR08}}
+      rejection: {$absent: true}
+
+  - id: languages.slots.catalan_orthopaedics_is_pons
+    problem: 11
+    tool: find_slots
+    args: {specialty_id: orthopaedics, date_from: "2026-09-21", date_to: "2026-09-25", language: ca}
+    expect:
+      slots: {$all: {provider_id: PR10}}
+      rejection: {$absent: true}
+
+  - id: languages.slots.catalan_dermatology_is_vilar
+    problem: 11
+    tool: find_slots
+    args: {specialty_id: dermatology, date_from: "2026-09-21", date_to: "2026-09-25", language: ca}
+    expect:
+      slots: {$all: {provider_id: PR12, location_id: norte}}
+      rejection: {$absent: true}
+
+  - id: languages.slots.catalan_at_a_site_with_no_catalan_speaker_is_empty
+    problem: 11
+    # Centro's only dermatologist is Dra. Iglesias, who does not speak Catalan.
+    tool: find_slots
+    args: {specialty_id: dermatology, location_id: centro, date_from: "2026-09-21", date_to: "2026-09-25", language: ca}
+    expect:
+      slots: {$len: 0}
+      rejection: {reason: no_availability}
+
+  - id: languages.slots.no_catalan_physiotherapist_is_no_availability
+    problem: 11
+    # The one physiotherapist speaks Spanish only. The filter must not book him
+    # for a caller who asked for Catalan; nothing free and no rule is no_availability.
+    tool: find_slots
+    args: {specialty_id: physiotherapy, date_from: "2026-09-21", date_to: "2026-09-25", language: ca}
+    expect:
+      slots: {$len: 0}
+      blocked: {$len: 0}
+      rejection: {reason: no_availability}
+
+  - id: languages.slots.spanish_keeps_every_provider
+    problem: 11
+    # "Alguien con quien pueda hablar en español" filters nobody out.
+    tool: find_slots
+    args: {specialty_id: general_practice, date_from: "2026-09-21", date_to: "2026-09-25", language: es}
+    expect:
+      slots: {$all: {provider_id: {$in: [PR01, PR02, PR09]}}}
+      blocked: {$contains: {provider_id: PR07, reason: provider_on_leave}}
+
+  - id: languages.slots.named_catalan_doctor_keeps_the_filter
+    problem: 11
+    # Asking for Dra. Ortiz by name and for Catalan agree: her slots come back.
+    tool: find_slots
+    args: {provider_id: PR01, date_from: "2026-09-21", date_to: "2026-09-25", language: ca}
+    expect:
+      slots: {$all: {provider_id: PR01}}
+      rejection: {$absent: true}
+
+  - id: languages.slots.named_doctor_who_does_not_speak_it_is_empty
+    problem: 11
+    # Dr. Sáez by name plus Catalan: he does not speak it, so nothing is offered.
+    tool: find_slots
+    args: {provider_id: PR02, date_from: "2026-09-21", date_to: "2026-09-25", language: ca}
+    expect:
+      slots: {$len: 0}
+      rejection: {reason: no_availability}

@@ -146,8 +146,8 @@ cases:
     tool: find_slots
     args: {specialty_id: general_practice, date_from: "2026-09-21", date_to: "2026-09-25", language: ca}
     expect:
-      # Dr. Sáez (PR02) is the only Catalan-speaking GP in the fixtures.
-      slots: {$all: {provider_id: {$in: [PR02]}}}
+      # Dra. Ortiz (PR01) is the only Catalan-speaking GP in the fixtures.
+      slots: {$all: {provider_id: {$in: [PR01]}}}
 
   - id: diary.slots.language_filter_empty_when_nobody_speaks_it
     problem: 11

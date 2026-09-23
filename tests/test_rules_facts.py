@@ -62,8 +62,17 @@ def test_a_town_with_no_clinic_answers_nothing(catalogue):
 
 
 def test_which_clinics_see_children(catalogue):
-    """Paediatrics sits at Centro only; a caller sent to Sur cannot book."""
+    """Paediatrics sits at every site: Sáenz at Centro, Ocaña at Norte and Sur."""
     assert [s.location_id for s in facts.sites_for_specialty(catalogue, "paediatrics")] == [
+        "centro",
+        "norte",
+        "sur",
+    ]
+
+
+def test_which_clinics_have_a_gynaecologist(catalogue):
+    """The one gynaecologist sits at Centro; nowhere else sees the specialty."""
+    assert [s.location_id for s in facts.sites_for_specialty(catalogue, "gynaecology")] == [
         "centro"
     ]
 
@@ -143,8 +152,10 @@ def test_which_dermatologist_consults_at_centro(catalogue):
 
 def test_how_many_orthopaedic_surgeons_and_where(catalogue):
     surgeons = facts.providers_in_specialty(catalogue, "orthopaedics")
-    assert len(surgeons) == 1
-    assert surgeons[0].location_ids == ["sur"]
+    assert [(p.name, p.location_ids) for p in surgeons] == [
+        ("Dr. Iglesia", ["sur"]),
+        ("Dr. Pons", ["norte", "sur"]),
+    ]
 
 
 TODAY = date(2026, 9, 18)
