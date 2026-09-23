@@ -35,12 +35,15 @@ services:
       # same Supabase project the line writes, and the wall's Horarios cancel
       # buttons write wall_cancellations rows straight back to it. No volume:
       # the two containers share one database, not a mounted file.
-    # Run as the line's uid (10001, see deploy/Dockerfile): the shared
-    # vortex-logs volume is initialised from the line image, so the queue
-    # file and directory belong to 10001. The board image's own vortex user
-    # is 1001 and could not write the shared queue (test-fire returned 500).
-    # Everything else the board touches is read-only or lives in that volume.
-    user: "10001"
+    # No `user:` override. The image already runs as uid 10001, the same uid
+    # deploy/Dockerfile gives the line, so both containers own the shared
+    # queue file whichever of them creates the volume.
+    #
+    # An override here is what broke this before: it ran the process as 10001
+    # while the image still owned /app as 1001, so the board could write
+    # nothing of its own - the pathway test-fire returned 500 on
+    # /app/logs/confirmation_calls.tmp and the occupancy card read zero
+    # because /app/wall-cache was unwritable too. Fix the uid in the image.
     volumes:
       - vortex-logs:/app/logs
     networks:

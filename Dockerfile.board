@@ -44,9 +44,14 @@ COPY database ./database
 COPY scripts ./scripts
 COPY --from=wall /app/wall/dist ./vortex/wall/dist
 
-# No volume and no local database: the board reads and writes Supabase over
-# PostgREST. /app/logs is scratch the wall cache writes into.
-RUN useradd --create-home --uid 1001 vortex \
+# No local database: the board reads and writes Supabase over PostgREST.
+#
+# uid 10001 is the same uid deploy/Dockerfile gives the line. Both containers
+# mount the shared `vortex-logs` volume at /app/logs, and docker stamps a new
+# named volume with the ownership of whichever image mounts it first. Equal
+# uids make that race harmless: the owner writes either way. Keep the two
+# Dockerfiles in step, or the pathway test-fire returns 500 again.
+RUN useradd --create-home --uid 10001 vortex \
     && mkdir -p /app/logs \
     && chown -R vortex:vortex /app
 USER vortex
